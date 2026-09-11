@@ -42,10 +42,12 @@ export function issuesByName(parsed: ParsedCommandArguments): Map<string, string
         if (item.name === undefined) {
             continue;
         }
+
         const current = issues.get(item.name) ?? [];
         current.push(formatFormIssueMessage(item));
         issues.set(item.name, current);
     }
+
     return issues;
 }
 
@@ -82,7 +84,7 @@ export function createHeadlessFormModel(
     parsed: ParsedCommandArguments,
     mode: FormMode,
 ): HeadlessFormModel {
-    const state: FormState = { ...parsed.values };
+    const state = { ...parsed.values } satisfies FormState;
     for (const name of Object.keys(definitions)) {
         if (!Object.hasOwn(state, name) && Object.hasOwn(Object.prototype, name)) {
             Object.defineProperty(state, name, {
@@ -93,6 +95,7 @@ export function createHeadlessFormModel(
             });
         }
     }
+
     const namedIssues = issuesByName(parsed);
     const fields: FormField[] = [];
     let initialSelection = -1;
@@ -101,17 +104,21 @@ export function createHeadlessFormModel(
         if (mode === "missing" && !shouldPromptArgument(name, definition, mode, parsed)) {
             continue;
         }
+
         if (initialSelection < 0 && shouldPromptArgument(name, definition, "missing", parsed)) {
             initialSelection = fields.length;
         }
+
         let configuredSection = definition.ui?.section;
         if (configuredSection === undefined && definition.ui?.advanced === true) {
             configuredSection = "Advanced";
         }
+
         let groupPath: string | undefined;
         if (name.includes(".")) {
             groupPath = name.slice(0, name.lastIndexOf("."));
         }
+
         const field: FormField = {
             name,
             definition,
@@ -121,6 +128,7 @@ export function createHeadlessFormModel(
         if (section !== undefined) {
             field.section = section;
         }
+
         fields.push(field);
     }
 

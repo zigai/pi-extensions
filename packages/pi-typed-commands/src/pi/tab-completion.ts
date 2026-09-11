@@ -36,6 +36,7 @@ function flagCompletionCandidates(
         if (isPositionalArgument(definition)) {
             continue;
         }
+
         const replacement = formatArgumentFlagName(name, definition);
         const primary = replacement.replace(/^--/, "");
         const searchable = [primary, ...(definition.aliases ?? [])];
@@ -43,10 +44,12 @@ function flagCompletionCandidates(
             if (!item.startsWith(stem) || seen.has(replacement)) {
                 continue;
             }
+
             seen.add(replacement);
             candidates.push({ stem: item, replacement });
         }
     }
+
     return candidates;
 }
 
@@ -55,7 +58,9 @@ function commonStringPrefix(values: readonly string[]): string {
     if (first === undefined) {
         return "";
     }
+
     let prefix = first;
+
     for (const value of values.slice(1)) {
         while (!value.startsWith(prefix)) {
             prefix = prefix.slice(0, -1);
@@ -64,6 +69,7 @@ function commonStringPrefix(values: readonly string[]): string {
             }
         }
     }
+
     return prefix;
 }
 
@@ -77,11 +83,13 @@ function flagCompletionForTab(
     if (exact !== undefined) {
         return { replacement: exact.replacement, addTrailingSpace: true };
     }
+
     if (candidates.length === 1) {
         const candidate = candidates[0];
         if (candidate === undefined) {
             return undefined;
         }
+
         return { replacement: candidate.replacement, addTrailingSpace: true };
     }
 
@@ -89,6 +97,7 @@ function flagCompletionForTab(
     if (sharedPrefix.length > token.length) {
         return { replacement: sharedPrefix, addTrailingSpace: false };
     }
+
     return undefined;
 }
 
@@ -135,6 +144,7 @@ function fixedChoiceCompletionOnTab(
     if (addTrailingSpace && context.replacementEnd === invocation.rawArgs.length) {
         completedLine += " ";
     }
+
     return { handled: true, editorText: `${completedLine}${rest}` };
 }
 
@@ -169,6 +179,7 @@ export function completeTypedCommandOnTab(
             if (candidates.length === 0) {
                 return { handled: false };
             }
+
             let replacement = commonStringPrefix(candidates);
             if (candidates.length === 1) {
                 const onlyCandidate = candidates[0];
@@ -176,16 +187,19 @@ export function completeTypedCommandOnTab(
                     replacement = onlyCandidate;
                 }
             }
+
             if (replacement !== undefined && replacement.length > token.length) {
                 let trailingSpace = "";
                 if (candidates.length === 1) {
                     trailingSpace = " ";
                 }
+
                 return {
                     handled: true,
                     editorText: `/${invocation.command.invocationName ?? invocation.command.name} ${replacement}${trailingSpace}${rest}`,
                 };
             }
+
             if (token.length > 0) {
                 return { handled: true };
             }
@@ -194,6 +208,7 @@ export function completeTypedCommandOnTab(
 
     let completionCommand = invocation.command;
     let completionInvocation = invocation;
+
     if (route.status === "subcommand" && route.subcommand !== undefined) {
         completionCommand =
             invocation.command.subcommands?.[route.subcommand] ?? invocation.command;
@@ -229,5 +244,6 @@ export function completeTypedCommandOnTab(
     if (completion.addTrailingSpace) {
         completedLine += " ";
     }
+
     return { handled: true, editorText: `${completedLine}${rest}` };
 }

@@ -31,6 +31,7 @@ export function parseSlashCommandText(text: string): ParsedSlashCommandText | un
     if (newlineIndex >= 0) {
         firstLine = text.slice(0, newlineIndex);
         trailingBody = text.slice(newlineIndex + 1);
+
         if (firstLine.endsWith("\r")) {
             firstLine = firstLine.slice(0, -1);
         }

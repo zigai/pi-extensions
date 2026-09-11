@@ -40,6 +40,7 @@ export function defineTypedCommand<
             if (grammar === undefined) {
                 throw new TypeError("Selected typed-command grammar is unavailable");
             }
+
             const parsed = toTypedParseResult(grammar, invocation.parsed);
             if (invocation.route.status !== "subcommand") {
                 // SAFETY: root parsing used the root generic grammar compiled from TDefinitions.
@@ -65,14 +66,17 @@ export function defineTypedCommand<
             if (subcommands === undefined || !Object.hasOwn(subcommands, name)) {
                 throw new TypeError(`Unknown subcommand ${name}`);
             }
+
             const subcommand = subcommands[name];
             if (subcommand === undefined) {
                 throw new TypeError(`Unknown subcommand ${name}`);
             }
+
             const serialized = serializeTypedCommandArgs(subcommand, invocation.args);
             if (serialized.length === 0) {
                 return name;
             }
+
             return `${name} ${serialized}`;
         },
         formatUsage() {
@@ -82,5 +86,6 @@ export function defineTypedCommand<
             return formatDetailedHelp(command);
         },
     };
+
     return Object.freeze(defined);
 }

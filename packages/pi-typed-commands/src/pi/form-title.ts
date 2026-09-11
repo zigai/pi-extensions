@@ -11,5 +11,6 @@ export function resolveTypedCommandFormTitle<TDefinitions extends ArgumentDefini
     if (typeof title === "function") {
         return title(ctx);
     }
+
     return title ?? command.name.replace(" ", " › ");
 }

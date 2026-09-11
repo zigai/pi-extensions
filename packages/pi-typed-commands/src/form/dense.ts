@@ -22,12 +22,14 @@ function resolveFormTitle<TDefinitions extends ArgumentDefinitions>(
     if (options.title !== undefined) {
         return options.title;
     }
+
     const title = command.formTitle;
     if (title !== undefined) {
         if (typeof title === "string") {
             return title;
         }
     }
+
     return command.name.replace(" ", " › ");
 }
 
@@ -45,6 +47,7 @@ export async function openDenseArgumentForm<TDefinitions extends ArgumentDefinit
     if (fields.length === 0 && !signalAborted(options.signal)) {
         return state;
     }
+
     if (signalAborted(options.signal)) {
         return undefined;
     }
@@ -64,6 +67,7 @@ export async function openDenseArgumentForm<TDefinitions extends ArgumentDefinit
                     options.signal?.removeEventListener("abort", abort);
                 };
             }
+
             return new ArgumentFormComponent(
                 tui,
                 resolveFormTitle(command, options),

@@ -13,6 +13,7 @@ function valueText(value: unknown): string {
     if (typeof value === "string") {
         return value;
     }
+
     return JSON.stringify(value) ?? "";
 }
 
@@ -32,6 +33,7 @@ function captureRegistration(
         handle.dispose();
         throw new Error("expected Pi registration handler");
     }
+
     return { handler, dispose: () => handle.dispose() };
 }
 
@@ -54,7 +56,7 @@ describe("registered typed command handler", () => {
             mode: "rpc",
             signal: controller.signal,
             ui: {
-                input(_title, _placeholder, options) {
+                async input(_title, _placeholder, options) {
                     promptSignal = options?.signal;
                     return Promise.resolve("from form");
                 },
@@ -89,7 +91,7 @@ describe("registered typed command handler", () => {
         const ctx = createTestExtensionCommandContext({
             mode: "rpc",
             ui: {
-                input() {
+                async input() {
                     return Promise.resolve("2");
                 },
                 notify(message, level) {
@@ -202,11 +204,11 @@ describe("registered typed command handler", () => {
         const ctx = createTestExtensionCommandContext({
             mode: "rpc",
             ui: {
-                select(title, options) {
+                async select(title, options) {
                     selected.push({ title, options });
                     return Promise.resolve("inspect");
                 },
-                input() {
+                async input() {
                     return Promise.resolve("src");
                 },
             },

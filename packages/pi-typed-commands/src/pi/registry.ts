@@ -15,6 +15,7 @@ export function getPiTypedCommandRegistry(): TypedCommandRegistry {
         registry = createTypedCommandRegistry();
         globalObject[PI_REGISTRY_KEY] = registry;
     }
+
     return registry;
 }
 

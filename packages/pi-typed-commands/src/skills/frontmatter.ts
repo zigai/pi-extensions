@@ -15,6 +15,7 @@ function pointerSegments(pointer: string): string[] {
     if (pointer.length === 0) {
         return [];
     }
+
     return pointer
         .slice(1)
         .split("/")
@@ -41,6 +42,7 @@ function frontmatterFieldError(error: TLocalizedValidationError): SkillArgumentD
                 path: ["frontmatter", "metadata", "ghostText"],
             });
         }
+
         return skillArgumentDiagnostic({
             code: "skill.frontmatter.metadata.invalid",
             message: "frontmatter.metadata must be an object",
@@ -79,22 +81,28 @@ function parseFrontmatterFields(
     }
 
     const yaml = parsed;
+
     const frontmatter: SkillFrontmatter = {};
     if (yaml.name !== undefined) {
         frontmatter.name = yaml.name;
     }
+
     if (yaml.description !== undefined) {
         frontmatter.description = yaml.description;
     }
+
     if (yaml.form_title !== undefined) {
         frontmatter.formTitle = yaml.form_title;
     }
+
     if (yaml.metadata !== undefined) {
         frontmatter.metadata = { ...yaml.metadata };
     }
+
     if (yaml.arguments !== undefined) {
         frontmatter.arguments = yaml.arguments;
     }
+
     return { status: "ok", frontmatter };
 }
 
@@ -123,9 +131,11 @@ export function parseSkillMarkdown(content: string): ParseSkillMarkdownResult {
             ],
         };
     }
+
     const frontmatterResult = parseFrontmatterFields(parsed);
     if (frontmatterResult.status === "invalid") {
         return { status: "invalid", body, diagnostics: frontmatterResult.diagnostics };
     }
+
     return { status: "ok", frontmatter: frontmatterResult.frontmatter, body };
 }

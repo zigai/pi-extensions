@@ -48,6 +48,7 @@ function expandRefinementValues<TDefinitions extends ArgumentDefinitions>(
             projected[key] = values[key];
         }
     }
+
     return expandValidatedGroupedValues(projected, definitions);
 }
 
@@ -68,6 +69,7 @@ function refinementContext<TDefinitions extends ArgumentDefinitions>(
             provided.add(path);
         }
     }
+
     return { provided };
 }
 
@@ -79,6 +81,7 @@ export function maybeWrapGroupedRefinement<TDefinitions extends ArgumentDefiniti
     if (refine === undefined) {
         return undefined;
     }
+
     return (args, context) =>
         refine(expandRefinementValues(args, definitions), refinementContext(definitions, context));
 }

@@ -12,6 +12,7 @@ function detailedHelpOptions(
     if (appearance.configured) {
         return appearance;
     }
+
     return undefined;
 }
 

@@ -35,6 +35,7 @@ export function notifyIssues(ctx: ExtensionContext, messages: string[]): void {
     if (messages.length === 0) {
         return;
     }
+
     ctx.ui.notify(messages.join("\n"), "error");
 }
 
@@ -60,11 +61,13 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
     if (rawArgs.length > 0) {
         editorText += ` ${rawArgs}`;
     }
+
     const routed = parseTypedCommandInvocation(command, rawArgs);
     let selectedCommand: RegisteredTypedCommand = command;
     if (routed.route.status === "subcommand" && routed.route.subcommand !== undefined) {
         selectedCommand = command.subcommands?.[routed.route.subcommand] ?? command;
     }
+
     const expandedFormArguments = takeExpandedFormArguments(ctx, invocationName, editorText);
     if (expandedFormArguments !== undefined) {
         return { command: selectedCommand, args: expandedFormArguments };
@@ -76,6 +79,7 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
         if (ctx.signal !== undefined) {
             dialogOptions = { signal: ctx.signal };
         }
+
         const subcommandName = await ctx.ui.select(
             "Select subcommand",
             Object.keys(command.subcommands ?? {}),
@@ -84,9 +88,11 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
         if (subcommandName === undefined) {
             return undefined;
         }
+
         selectedCommand = command.subcommands?.[subcommandName] ?? command;
         parsed = parseTypedCommandInvocation(selectedCommand, "").parsed;
     }
+
     const { resolveTypedCommandSessionOptions } = await import("./session-state.js");
     const options = resolveTypedCommandSessionOptions(ctx);
     if (parsed.mode === "help") {
@@ -101,6 +107,7 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
     if (formPolicy === "always") {
         formMode = "all";
     }
+
     let issueAction = decideArgumentIssueAction(parsed.issues);
     if (formPolicy === "always") {
         issueAction = "open-form";
@@ -126,6 +133,7 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
             notifyIssues(ctx, issueMessages);
             return undefined;
         }
+
         const { openArgumentForm } = await import("../form/open.js");
         let formOptions: OpenArgumentFormOptions = {
             appearance: options.appearance,
@@ -144,6 +152,7 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
                 ),
             };
         }
+
         const collected = await openArgumentForm(
             selectedCommand,
             parsed,
@@ -154,18 +163,21 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
         if (collected === undefined) {
             return undefined;
         }
+
         if (
             selectedCommand.formPresets === true &&
             !recordTypedCommandRecentValues(ctx, selectedCommand, collected)
         ) {
             ctx.ui.notify("Typed command recent values could not be saved.", "warning");
         }
+
         return { command: selectedCommand, args: collected };
     }
 
     if (issueAction === "notify") {
         if (ctx.hasUI) {
             ctx.ui.setEditorText(editorText);
+
             const [
                 { helperInvocationForEditorText },
                 { setHelperWidget },
@@ -184,17 +196,17 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
                     options.appearance.inlineHelp,
                 );
             }
+
             return undefined;
         }
+
         notifyIssues(ctx, issueMessages);
+
         return undefined;
     }
 
     return {
         command: selectedCommand,
-        // SAFETY: the parser has no issues, so the selected compiled grammar established every
-        // required/defaulted leaf consumed by the registered handler.
-        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: zero parser issues prove the handler value contract.
         args: parsed.values,
     };
 }
@@ -225,7 +237,6 @@ export function registerTypedCommand<
 ): TypedCommandHandle<TDefinitions, TSubcommands> {
     const name = definition.name;
     const registry = getPiTypedCommandRegistry();
-
     const command = normalizeRegisteredCommand(definition);
     let invocationName = name;
     const maybeInvocationName: unknown = pi.registerCommand(name, {
@@ -248,13 +259,16 @@ export function registerTypedCommand<
             if (invocation === undefined) {
                 return;
             }
+
             if (invocation.command.target?.kind !== "extension") {
                 ctx.ui.notify(
                     `Typed command /${name} does not have an extension handler.`,
                     "error",
                 );
+
                 return;
             }
+
             await invocation.command.target.run(invocation.args, ctx);
         },
     });
@@ -263,6 +277,7 @@ export function registerTypedCommand<
     if (typeof maybeInvocationName === "string") {
         piInvocationName = maybeInvocationName;
     }
+
     if (piInvocationName === undefined) {
         invocationName = registry.register(command);
     } else {
@@ -270,7 +285,9 @@ export function registerTypedCommand<
             invocationName: piInvocationName,
         });
     }
+
     const definedCommand = defineTypedCommand(definition);
+
     return createCommandHandle(definedCommand, command, invocationName, (registered) => {
         registry.unregister(registered);
     });

@@ -44,12 +44,16 @@ export type TypedCommandConfig<TDefinitions extends ArgumentDefinitions> = {
     refine?: TypedCommandRefinement<TDefinitions>;
     formTitle?: TypedCommandFormTitle;
     formSymbols?: TypedCommandFormSymbols;
+
     /** Decide when command submission opens the form. Defaults to `missing`. */
     formPolicy?: TypedCommandFormPolicy;
+
     /** Enable project-scoped recent values and named form presets. */
     formPresets?: boolean;
+
     /** Control whether the compact live helper is rendered for this command. */
     inlineHelp?: TypedCommandInlineHelp;
+
     /** Opt into dimmed, visual-only text after the exact command invocation. */
     ghostText?: TypedCommandGhostText;
 };
@@ -111,6 +115,7 @@ export type SerializableSubcommandInvocation<
 > = {
     [TName in keyof TSubcommands]: {
         readonly subcommand: TName;
+
         readonly args: SerializableArgumentValues<
             MergeArgumentDefinitions<TShared, TSubcommands[TName]>
         >;
@@ -123,6 +128,7 @@ export type TypedCommandDefinition<
         TypedSubcommandDefinitions<TDefinitions>,
 > = TypedCommandConfig<TDefinitions> & {
     name: string;
+
     /** Root handler used when no subcommand token is present. */
     run?: TypedCommandHandler<TDefinitions>;
     subcommands?: TypedSubcommandsFor<TDefinitions, TSubcommands>;
@@ -135,9 +141,11 @@ export type DefinedTypedCommand<
 > = Readonly<TypedCommandDefinition<TDefinitions, TSubcommands>> & {
     parse(rawArgs: string): TypedCommandParseResult<TDefinitions, TSubcommands>;
     serialize(values: SerializableArgumentValues<TDefinitions>): string;
+
     serializeSubcommand(
         invocation: SerializableSubcommandInvocation<TDefinitions, TSubcommands>,
     ): string;
+
     formatUsage(): string;
     formatHelp(): string;
 };
@@ -183,11 +191,14 @@ export type TypedCommandHandle<
     readonly invocationName: string;
     parse(rawArgs: string): TypedCommandParseResult<TDefinitions, TSubcommands>;
     serialize(values: SerializableArgumentValues<TDefinitions>): string;
+
     serializeSubcommand(
         invocation: SerializableSubcommandInvocation<TDefinitions, TSubcommands>,
     ): string;
+
     formatUsage(): string;
     formatHelp(): string;
+
     /** Remove wrapper-owned metadata and listeners. Safe to call more than once. */
     dispose(): void;
 };

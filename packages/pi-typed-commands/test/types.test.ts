@@ -26,6 +26,7 @@ describe("compile-time API inference", () => {
                 expectType<string>(ctx.cwd);
                 expectType<string>(commandName);
                 expectType<string | undefined>(subcommand);
+
                 return ctx.cwd;
             },
             subcommands: {
@@ -36,6 +37,7 @@ describe("compile-time API inference", () => {
                         expectType<string>(ctx.cwd);
                         expectType<string>(commandName);
                         expectType<string | undefined>(subcommand);
+
                         return "inspect a target";
                     },
                     run() {},
@@ -67,8 +69,8 @@ describe("compile-time API inference", () => {
         });
 
         const parsed = command.parse("--env prod --tags api");
-
         assert.equal(parsed.status, "success");
+
         if (parsed.status === "success") {
             expectType<"dev" | "staging" | "prod">(parsed.value.env);
             expectType<string>(parsed.value.ref);
@@ -95,7 +97,6 @@ describe("compile-time API inference", () => {
             },
         });
         const parsed = command.parse("--env dev --tags api");
-
         assert.equal(parsed.status, "success");
     });
 
@@ -119,8 +120,8 @@ describe("compile-time API inference", () => {
             },
         });
         const parsed = command.parse("--database-host localhost --database-port 5432");
-
         assert.equal(parsed.status, "success");
+
         if (parsed.status === "success") {
             expectType<string>(parsed.value.database.host);
             assert.equal(parsed.value.database.host, "localhost");
@@ -143,6 +144,7 @@ describe("compile-time API inference", () => {
                 expectType<string | undefined>(args.ref);
                 expectType<readonly ("bug" | "feature")[] | undefined>(args.labels);
                 expectType<ReadonlySet<"start" | "end" | "ref" | "labels">>(context.provided);
+
                 return [];
             },
             run(values) {
@@ -158,7 +160,9 @@ describe("compile-time API inference", () => {
         if (invalid.status === "error") {
             expectType<number | undefined>(invalid.partial.start);
         }
+
         assert.equal(parsed.status, "success");
+
         if (parsed.status === "success") {
             expectType<number>(parsed.value.start);
             expectType<readonly ("bug" | "feature")[]>(parsed.value.labels);
@@ -172,14 +176,19 @@ describe("compile-time API inference", () => {
 
             // @ts-expect-error required arguments cannot also define defaults.
             stringArgument({ required: true, default: "main" });
+
             // @ts-expect-error dynamic requiredness cannot be combined with defaults.
             stringArgument({ required: dynamicRequired, default: "main" });
+
             // @ts-expect-error enum factories preserve required/default exclusivity.
             enumArgument(["dev", "prod"], { required: true, default: "dev" });
+
             // @ts-expect-error enum factories reject dynamic requiredness with defaults.
             enumArgument(["dev", "prod"], { required: dynamicRequired, default: "dev" });
+
             // @ts-expect-error multi-enum factories preserve required/default exclusivity.
             multiEnumArgument(["api", "web"], { required: true, default: ["api"] });
+
             // @ts-expect-error multi-enum factories reject dynamic requiredness with defaults.
             multiEnumArgument(["api", "web"], {
                 required: dynamicRequired,
@@ -202,6 +211,7 @@ describe("compile-time API inference", () => {
             const definitions: ArgumentDefinitions = {
                 env: enumArgument(["dev", "prod"], { required: true }),
             };
+
             // @ts-expect-error public definition maps are readonly.
             definitions.ref = stringArgument();
 
@@ -217,12 +227,12 @@ describe("compile-time API inference", () => {
                     { args: compiled.command.args, compiled: compiled.command },
                     "--count 2",
                 );
+
                 // @ts-expect-error conversion cannot select definitions unrelated to its grammar.
                 toTypedParseResult<typeof unrelatedArgs>(compiled.command, parsed);
             }
         };
         void assertPublicContracts;
-
         assert.ok(true);
     });
 });

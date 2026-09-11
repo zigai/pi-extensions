@@ -14,5 +14,4 @@ const typeBoxSchemaModule = loadedTypeBoxSchemaModule as TypeBoxSchemaModule;
 
 /** TypeBox Schema runtime loaded through Node's package export resolver for pi extension compatibility. */
 const TypeBoxSchema: TypeBoxSchemaRuntime = typeBoxSchemaModule.default;
-
 export default TypeBoxSchema;

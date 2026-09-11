@@ -6,14 +6,21 @@ import type { RegisteredTypedCommand } from "../pi/command-types.js";
 import { renderTypedSkillInvocation } from "./prompt.js";
 import type { RenderTypedSkillInvocationOptions, TypedSkillMetadata } from "./types.js";
 
+type TypedSkillFormFields = {
+    formTitle?: string;
+    ghostText?: string;
+};
+
 /** Extract the `SKILL.md` path from a Pi skill command record. */
 export function skillPathFromCommand(command: SlashCommandInfo): string | undefined {
     if (command.source !== "skill") {
         return undefined;
     }
+
     if (!command.name.startsWith("skill:")) {
         return undefined;
     }
+
     return command.sourceInfo.path;
 }
 
@@ -24,6 +31,7 @@ export function typedSkillCommandFromMetadata(
     if (skill.name.length === 0 || /[\s\p{Cc}]/u.test(skill.name) || skill.name.startsWith("-")) {
         throw new TypeError(`Invalid typed skill name ${JSON.stringify(skill.name)}`);
     }
+
     const commandName = `skill:${skill.name}`;
     const compiled = compileTypedCommandDefinition({
         name: commandName,
@@ -38,17 +46,21 @@ export function typedSkillCommandFromMetadata(
             ].join("\n"),
         );
     }
+
     const snapshot: TypedSkillMetadata = Object.freeze({
         ...skill,
         args: compiled.command.args,
     });
-    const formFields: { formTitle?: string; ghostText?: string } = {};
+
+    const formFields: TypedSkillFormFields = {};
     if (snapshot.formTitle !== undefined) {
         formFields.formTitle = snapshot.formTitle;
     }
+
     if (snapshot.ghostText !== undefined) {
         formFields.ghostText = snapshot.ghostText;
     }
+
     const command: RegisteredTypedCommand & { source: "skill"; skill: TypedSkillMetadata } = {
         name: commandName,
         description: snapshot.description,
@@ -64,6 +76,7 @@ export function typedSkillCommandFromMetadata(
                 if (additionalInput !== undefined) {
                     options.additionalInput = additionalInput;
                 }
+
                 return renderTypedSkillInvocation(options);
             },
         },
@@ -72,6 +85,7 @@ export function typedSkillCommandFromMetadata(
         skill: snapshot,
         ...formFields,
     };
+
     return Object.freeze(command);
 }
 
@@ -86,7 +100,9 @@ export function isTypedSkillCommand(
     if (command.source !== "skill" || !("skill" in command) || !isRecord(command.skill)) {
         return false;
     }
+
     const skill = command.skill;
+
     return (
         typeof skill.name === "string" &&
         typeof skill.description === "string" &&

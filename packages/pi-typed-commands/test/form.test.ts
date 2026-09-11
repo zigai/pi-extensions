@@ -34,7 +34,6 @@ describe("dense argument form", () => {
     it("accepts scientific notation while filtering number input", () => {
         const numberDefinition = { type: "number" } as const;
         const positiveInteger = { type: "number", integer: true, min: 0 } as const;
-
         assert.equal(filterNumberInputData(numberDefinition, "", 0, "1e3"), "1e3");
         assert.equal(filterNumberInputData(positiveInteger, "", 0, "1.0e+3"), "1.0e+3");
         assert.equal(filterNumberInputData(positiveInteger, "1e", 2, "-3"), "-3");
@@ -68,13 +67,13 @@ describe("dense argument form", () => {
                         }),
                     );
                     component.handleInput("\r");
+
                     return result;
                 },
             },
         });
 
         const result = await openArgumentForm(command, parsed, "all", ctx, formOptions);
-
         assert.equal(Object.is(result?.amount, -0), true);
     });
 
@@ -105,6 +104,7 @@ describe("dense argument form", () => {
                     );
                     rendered = component.render(80);
                     component.handleInput("\u001b");
+
                     return result;
                 },
             },
@@ -148,6 +148,7 @@ describe("dense argument form", () => {
                         }),
                     );
                     component.handleInput("\r");
+
                     return result;
                 },
             },
@@ -161,7 +162,20 @@ describe("dense argument form", () => {
             formOptions,
         );
 
-        assert.equal(Reflect.get(result ?? {}, "toString"), undefined);
+        if (result === undefined) {
+            assert.fail("expected dense form state");
+        }
+
+        assert.equal(Object.getPrototypeOf(result), Object.prototype);
+        assert.equal(Object.hasOwn(result, "toString"), true);
+        assert.deepEqual(Object.getOwnPropertyDescriptor(result, "toString"), {
+            configurable: true,
+            enumerable: true,
+            value: undefined,
+            writable: true,
+        });
+        assert.deepEqual(Object.keys(result), ["toString"]);
+        assert.deepEqual(Object.entries(result), [["toString", undefined]]);
     });
 
     it("shows field names instead of CLI flags in validation messages", async () => {
@@ -323,7 +337,6 @@ describe("dense argument form", () => {
         });
 
         await openArgumentForm(command, parsed, "all", ctx, formOptions);
-
         assert.ok(renderedLines.some((line) => line.includes("Output path")));
         assert.ok(renderedLines.some((line) => line.includes("source=api")));
     });
@@ -452,6 +465,7 @@ describe("dense argument form", () => {
         const optionLines = renderedLines.filter((line) =>
             ["● separate", "○ current-tab", "○ new-tab"].some((option) => line.includes(option)),
         );
+
         const descriptionColumns = [
             optionLines.find((line) => line.includes("● separate"))?.indexOf("One tab/window"),
             optionLines.find((line) => line.includes("○ current-tab"))?.indexOf("Add panes"),
@@ -539,8 +553,10 @@ describe("dense argument form", () => {
             if (line === undefined) {
                 assert.fail(`expected ${description} in ${JSON.stringify(lines)}`);
             }
+
             return visibleWidth(line.slice(0, line.indexOf(description)));
         };
+
         const descriptionColumns = [
             descriptionColumn(initialLines, "How many panes."),
             descriptionColumn(initialLines, "Reuse current tab."),
@@ -548,7 +564,6 @@ describe("dense argument form", () => {
             descriptionColumn(afterTabLines, "Reuse current tab."),
         ];
         assert.deepEqual(descriptionColumns, Array(4).fill(descriptionColumns[0]));
-
         const border = "─".repeat(80);
         assert.equal(initialLines[0], border);
         assert.equal(initialLines.at(-1), border);
@@ -606,6 +621,7 @@ describe("dense argument form", () => {
         for (const line of [...selectedLines, ...collapsedLines]) {
             assert.doesNotMatch(line, /[\r\n]/);
         }
+
         assert.equal(
             selectedLines.filter((line) => line.includes("Goal request")).length,
             1,
@@ -625,6 +641,7 @@ describe("dense argument form", () => {
                 editorBorderIndexes.push(index);
             }
         }
+
         assert.equal(editorBorderIndexes.length, 2, JSON.stringify(selectedLines));
         assert.equal(editorBorderIndexes[1]! - editorBorderIndexes[0]! - 1, 5);
         assert.ok(
@@ -703,6 +720,7 @@ describe("dense argument form", () => {
                         if (typeof source !== "string") {
                             return undefined;
                         }
+
                         return `${source}.txt`;
                     },
                 },
@@ -734,13 +752,13 @@ describe("dense argument form", () => {
 
                     component.focused = true;
                     component.handleInput("\r");
+
                     return result;
                 },
             },
         });
 
         const result = await openArgumentForm(command, parsed, "all", ctx, formOptions);
-
         assert.equal(result?.output, "api.txt");
     });
 
@@ -830,13 +848,13 @@ describe("dense argument form", () => {
                     );
                     component.focused = true;
                     component.handleInput("\u001b");
+
                     return result;
                 },
             },
         });
 
         const result = await openArgumentForm(command, parsed, "all", ctx, formOptions);
-
         assert.equal(doneCalled, true);
         assert.equal(result, undefined);
     });
@@ -865,6 +883,7 @@ describe("dense argument form", () => {
                         },
                     ];
                 }
+
                 return [];
             },
             formSymbols: symbols,
@@ -896,13 +915,13 @@ describe("dense argument form", () => {
                     component.handleInput("\u007f");
                     component.handleInput("1");
                     component.handleInput("\r");
+
                     return result;
                 },
             },
         });
 
         const result = await openArgumentForm(command, parsed, "all", ctx, formOptions);
-
         assert.ok(issueLines.some((line) => line.includes("start must not exceed end")));
         assert.equal(result?.start, 1);
         assert.equal(result?.end, 5);
@@ -940,13 +959,13 @@ describe("dense argument form", () => {
                     component.focused = true;
                     renderedLines = component.render(80);
                     component.handleInput("\u0013");
+
                     return result;
                 },
             },
         });
 
         const result = await openArgumentForm(command, parsed, "all", ctx, formOptions);
-
         assert.ok(renderedLines.some((line) => line.includes("ctrl+s submit")));
         assert.ok(renderedLines.some((line) => line.includes("ctrl+n next field")));
         assert.ok(renderedLines.some((line) => line.includes("ctrl+x cancel")));
@@ -984,6 +1003,7 @@ describe("dense argument form", () => {
                         customCompletion.resolve(value);
                     });
                     factoryCreated.resolve();
+
                     return customCompletion.promise;
                 },
             },
@@ -997,6 +1017,7 @@ describe("dense argument form", () => {
         createFactory.resolve();
         await factoryCreated.promise;
         const observedDone = doneCalled;
+
         if (!doneCalled) {
             customCompletion.resolve(undefined);
         }
@@ -1030,7 +1051,7 @@ describe("sequential argument form", () => {
         const ctx = createTestExtensionCommandContext({
             mode: "rpc",
             ui: {
-                input(_title, _placeholder, options) {
+                async input(_title, _placeholder, options) {
                     promptStarted.resolve(options?.signal);
                     return promptCompletion.promise;
                 },
@@ -1046,10 +1067,8 @@ describe("sequential argument form", () => {
         });
         const receivedSignal = await promptStarted.promise;
         assert.equal(receivedSignal, controller.signal);
-
         controller.abort();
         promptCompletion.resolve("stale.txt");
-
         assert.equal(await formCompletion, undefined);
         assert.deepEqual(notifications, []);
     });
@@ -1080,7 +1099,7 @@ describe("sequential argument form", () => {
                 notify(message) {
                     notifications.push(message);
                 },
-                select(_title, _options, dialogOptions) {
+                async select(_title, _options, dialogOptions) {
                     promptStarted.resolve(dialogOptions?.signal);
                     return promptCompletion.promise;
                 },
@@ -1093,10 +1112,8 @@ describe("sequential argument form", () => {
         });
         const receivedSignal = await promptStarted.promise;
         assert.equal(receivedSignal, controller.signal);
-
         controller.abort();
         promptCompletion.resolve("true");
-
         assert.equal(await formCompletion, undefined);
         assert.deepEqual(notifications, []);
     });
@@ -1119,6 +1136,7 @@ describe("sequential argument form", () => {
                 ) {
                     return [{ message: "start must not exceed end", path: ["start"] }];
                 }
+
                 return [];
             },
             formSymbols: symbols,
@@ -1143,14 +1161,13 @@ describe("sequential argument form", () => {
                 notify(message: string) {
                     notifications.push(message);
                 },
-                input() {
+                async input() {
                     return Promise.resolve("5");
                 },
             },
         });
 
         const result = await openArgumentForm(command, parsed, "missing", ctx, formOptions);
-
         assert.equal(result, undefined);
         assert.deepEqual(notifications, ["• end is required", "• start must not exceed end"]);
     });
@@ -1192,7 +1209,7 @@ describe("sequential argument form", () => {
                 notify(message: string) {
                     notifications.push(message);
                 },
-                input(title: string) {
+                async input(title: string) {
                     prompts.push(title);
                     return Promise.resolve("api,worker");
                 },
@@ -1200,7 +1217,6 @@ describe("sequential argument form", () => {
         });
 
         const result = await openArgumentForm(command, parsed, "missing", ctx, formOptions);
-
         assert.deepEqual(result?.tags, ["api", "worker"]);
         assert.deepEqual(prompts, ["Set --tags (current: )"]);
         assert.deepEqual(notifications, ["• tags is required"]);

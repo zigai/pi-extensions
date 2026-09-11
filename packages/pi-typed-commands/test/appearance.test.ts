@@ -106,6 +106,7 @@ function firstHandler(
     if (handler === undefined) {
         throw new Error(`missing ${name} handler`);
     }
+
     return handler;
 }
 
@@ -298,6 +299,7 @@ describe("global presentation config", () => {
         writeGlobalConfig(agentDir, {
             appearance: { form: { symbols: { focusedField: "G" } } },
         });
+
         writeProjectConfig(projectDir, {
             appearance: { form: { symbols: { focusedField: "P" } } },
         });
@@ -393,7 +395,6 @@ describe("global presentation config", () => {
         withAgentDir(agentDir, () => {
             const appearance = resolveAppearance();
             const refreshedSchema: unknown = JSON.parse(readFileSync(schemaPath, "utf8"));
-
             assert.equal(appearance.inlineHelp.order, "active-required-available");
             assert.equal(readFileSync(configPath, "utf8"), "{not json");
             assert.deepEqual(refreshedSchema, piTypedCommandsConfigJsonSchema());
@@ -438,7 +439,6 @@ describe("global presentation config", () => {
             const first = resolveTypedCommandSessionOptions(ctx);
             writeGlobalConfig(agentDir, { helperPlacement: "aboveEditor" });
             const second = resolveTypedCommandSessionOptions(ctx);
-
             assert.equal(first, second);
             assert.equal(second.helperPlacement, "belowEditor");
         });
@@ -452,13 +452,13 @@ describe("global presentation config", () => {
                 form: { symbols: { focusedField: "G", selectedCheckbox: "X" } },
             },
         });
+
         writeProjectConfig(projectDir, {
             appearance: { form: { symbols: { focusedField: "P" } } },
         });
 
         withAgentDir(agentDir, () => {
             const appearance = resolveAppearance(projectDir);
-
             assert.equal(appearance.form.symbols.focusedField, "P");
             assert.equal(appearance.form.symbols.selectedCheckbox, "X");
         });
@@ -474,8 +474,7 @@ describe("global presentation config", () => {
 
         assert.equal(
             line,
-            `${" ".repeat("/appearance-helper".length + 2)}` +
-                "[count=1] [--panes]  [--path <path>]",
+            " ".repeat("/appearance-helper".length + 2) + "[count=1] [--panes]  [--path <path>]",
         );
     });
 
@@ -503,9 +502,8 @@ describe("global presentation config", () => {
         );
 
         assert.deepEqual(lines, [
-            `${" ".repeat("/choice-helper".length + 2)}` +
-                "[count=6] [--layout=<value>]  [--panes]",
-            `${" ".repeat("/choice-helper".length + 2)}` + "layout: separate  current-tab  new-tab",
+            " ".repeat("/choice-helper".length + 2) + "[count=6] [--layout=<value>]  [--panes]",
+            " ".repeat("/choice-helper".length + 2) + "layout: separate  current-tab  new-tab",
         ]);
     });
 
@@ -545,7 +543,7 @@ describe("global presentation config", () => {
         );
 
         assert.deepEqual(lines, [
-            `${" ".repeat("/choice-helper".length + 2)}` +
+            " ".repeat("/choice-helper".length + 2) +
                 "[count=6] [--layout=<separate|current-tab|new-tab>]  [--panes]",
         ]);
     });
@@ -619,8 +617,7 @@ describe("global presentation config", () => {
 
         assert.equal(
             line,
-            `${" ".repeat("/appearance-helper".length + 2)}` +
-                "[count -> 1] [--path -> src]  [--panes]",
+            " ".repeat("/appearance-helper".length + 2) + "[count -> 1] [--path -> src]  [--panes]",
         );
     });
 
@@ -732,7 +729,7 @@ describe("global presentation config", () => {
             },
         });
 
-        await withAgentDirAsync(agentDir, () =>
+        await withAgentDirAsync(agentDir, async () =>
             openArgumentForm(command, parsed, "all", ctx, {
                 appearance: resolveAppearance(projectDir),
             }),
@@ -829,6 +826,7 @@ describe("global presentation config", () => {
             if (widgetFactory === undefined) {
                 assert.fail("expected helper widget to be installed");
             }
+
             const widget = widgetFactory(tui, identityTheme);
             const [line] = widget.render(200);
             assert.match(line ?? "", /<--path <path>>/);
@@ -897,6 +895,7 @@ describe("global presentation config", () => {
                 if (registeredHandler === undefined) {
                     assert.fail("expected command handler to be registered");
                 }
+
                 await registeredHandler("--help", ctx);
             });
 

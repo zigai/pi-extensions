@@ -38,6 +38,7 @@ export function registerSubmittedInvalidCommandHandler(
     const state: TypedCommandSessionState = { options, submittedInvalidCommand: handler };
     typedCommandSessions.set(ctx, state);
     fallbackSessionOptions.set(ctx, options);
+
     return () => {
         if (typedCommandSessions.get(ctx) === state) {
             typedCommandSessions.delete(ctx);
@@ -52,7 +53,9 @@ export function markSubmittedInvalidCommand(ctx: ExtensionContext, editorText: s
     if (state === undefined) {
         return false;
     }
+
     state.submittedInvalidCommand(editorText);
+
     return true;
 }
 
@@ -71,34 +74,38 @@ export function resolveTypedCommandSessionOptions(
     if (active !== undefined) {
         return active;
     }
+
     const cached = fallbackSessionOptions.get(ctx);
     if (cached !== undefined) {
         return cached;
     }
+
     const snapshot = resolvePiTypedCommandsConfigSnapshot({
         cwd: ctx.cwd,
         projectTrusted: ctx.isProjectTrusted(),
     });
     const options = resolveTypedCommandUxOptions({}, snapshot);
     fallbackSessionOptions.set(ctx, options);
+
     return options;
 }
 
-function cloneArgumentValues(
-    values: Readonly<Record<string, ArgumentValue>>,
-): Readonly<Record<string, ArgumentValue>> {
+function cloneArgumentValues(values: Readonly<Record<string, ArgumentValue>>) {
     const cloned: Record<string, ArgumentValue> = {};
     for (const [name, value] of Object.entries(values)) {
         if (isMultiArgumentValue(value)) {
             cloned[name] = [...value];
             continue;
         }
+
         if (isKeyValueArgumentValue(value)) {
             cloned[name] = { ...value };
             continue;
         }
+
         cloned[name] = value;
     }
+
     return cloned;
 }
 
@@ -113,11 +120,13 @@ export function stageExpandedFormArguments(
     if (state === undefined) {
         return false;
     }
+
     state.pendingExpandedFormArguments = {
         invocationName,
         editorText,
         values: cloneArgumentValues(values),
     };
+
     return true;
 }
 
@@ -132,9 +141,11 @@ export function takeExpandedFormArguments(
 ): Readonly<Record<string, ArgumentValue>> | undefined {
     const state = typedCommandSessions.get(ctx);
     const pending = state?.pendingExpandedFormArguments;
+
     if (state !== undefined) {
         delete state.pendingExpandedFormArguments;
     }
+
     if (
         pending === undefined ||
         pending.invocationName !== invocationName ||
@@ -142,5 +153,6 @@ export function takeExpandedFormArguments(
     ) {
         return undefined;
     }
+
     return cloneArgumentValues(pending.values);
 }

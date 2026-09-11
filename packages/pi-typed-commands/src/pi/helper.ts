@@ -72,13 +72,15 @@ function helperValueHint(
     appearance: ResolvedInlineHelpAppearance,
 ): string {
     if (isChoiceArgumentDefinition(definition) && definition.placeholder === undefined) {
-        if (appearance.metadata.enumValues === false) {
+        if (!appearance.metadata.enumValues) {
             return argumentTypeHint(definition);
         }
+
         if (appearance.choiceDisplay === "contextual") {
             return "value";
         }
     }
+
     return argumentValueHint(definition, name);
 }
 
@@ -90,9 +92,11 @@ function helperAvailableToken(
     if (isPositionalArgument(definition)) {
         return name;
     }
+
     if (definition.type === "boolean") {
         return formatArgumentFlagName(name, definition);
     }
+
     return `${formatArgumentFlagName(name, definition)} <${helperValueHint(
         name,
         definition,
@@ -115,6 +119,7 @@ function choiceContextForName(
     if (definition === undefined || !isChoiceArgumentDefinition(definition)) {
         return undefined;
     }
+
     const commaIndex = query.lastIndexOf(",");
     const queryAfterComma = query.slice(commaIndex + 1);
     return {
@@ -144,10 +149,12 @@ function namedChoiceContext(
             if (endsWithWhitespace) {
                 return undefined;
             }
+
             const name = findArgumentName(lookup, lastToken.value.slice(0, equalsIndex));
             if (name === undefined) {
                 return undefined;
             }
+
             return choiceContextForName(
                 command,
                 name,
@@ -156,18 +163,21 @@ function namedChoiceContext(
                 lastToken.end,
             );
         }
+
         if (endsWithWhitespace) {
             const name = findArgumentName(lookup, lastToken.value);
             if (name !== undefined) {
                 return choiceContextForName(command, name, "", rawArgs.length, rawArgs.length);
             }
         }
+
         return undefined;
     }
 
     if (endsWithWhitespace) {
         return undefined;
     }
+
     const previousToken = tokens[tokens.length - 2];
     if (
         previousToken === undefined ||
@@ -177,10 +187,12 @@ function namedChoiceContext(
     ) {
         return undefined;
     }
+
     const name = findArgumentName(lookup, previousToken.value);
     if (name === undefined) {
         return undefined;
     }
+
     return choiceContextForName(command, name, lastToken.value, lastToken.start, lastToken.end);
 }
 
@@ -233,6 +245,7 @@ function positionalChoiceContext(
             if (previousName !== undefined) {
                 previousDefinition = command.args[previousName];
             }
+
             if (previousDefinition !== undefined && flagConsumesHelperValue(previousDefinition)) {
                 return undefined;
             }
@@ -245,6 +258,7 @@ function positionalChoiceContext(
         completedTokenCount -= 1;
         query = tokens[tokens.length - 1]?.value ?? "";
     }
+
     let positionalIndex = 0;
     let skipNextFlagValue = false;
     let optionsEnded = false;
@@ -253,25 +267,30 @@ function positionalChoiceContext(
         if (token === undefined) {
             continue;
         }
+
         if (skipNextFlagValue) {
             skipNextFlagValue = false;
             continue;
         }
+
         if (!optionsEnded && token.quote === undefined && token.value === "--") {
             optionsEnded = true;
             continue;
         }
+
         if (!optionsEnded && token.quote === undefined && token.value.startsWith("-")) {
             let flag = token.value;
             const equalsIndex = flag.indexOf("=");
             if (equalsIndex >= 0) {
                 flag = flag.slice(0, equalsIndex);
             }
+
             const name = findArgumentName(lookup, flag);
             let definition: ArgumentDefinition | undefined;
             if (name !== undefined) {
                 definition = command.args[name];
             }
+
             if (
                 definition !== undefined &&
                 flagConsumesHelperValue(definition) &&
@@ -281,6 +300,7 @@ function positionalChoiceContext(
             }
             continue;
         }
+
         positionalIndex += 1;
     }
 
@@ -288,6 +308,7 @@ function positionalChoiceContext(
     if (entry === undefined) {
         return undefined;
     }
+
     let replacementStart = rawArgs.length;
     let replacementEnd = rawArgs.length;
     if (!endsWithWhitespace) {
@@ -297,6 +318,7 @@ function positionalChoiceContext(
             replacementEnd = currentToken.end;
         }
     }
+
     return choiceContextForName(command, entry[0], query, replacementStart, replacementEnd);
 }
 
@@ -318,18 +340,23 @@ function formatHelperValue(value: ArgumentValue): string {
     if (isHelperMultiValue(value)) {
         return value.map((item) => formatHelperValue(item)).join(",");
     }
+
     if (value === undefined) {
         return "?";
     }
+
     if (typeof value === "string") {
         return value;
     }
+
     if (typeof value === "number" && Object.is(value, -0)) {
         return "-0";
     }
+
     if (typeof value === "number" || typeof value === "boolean") {
         return String(value);
     }
+
     return Object.entries(value)
         .map(([key, entryValue]) => `${key}=${entryValue}`)
         .join(",");
@@ -339,6 +366,7 @@ function formatArgumentHelperValue(definition: ArgumentDefinition, value: Argume
     if (definition.type === "string" && definition.sensitive === true && value !== undefined) {
         return "<redacted>";
     }
+
     return formatHelperValue(value);
 }
 
@@ -351,21 +379,24 @@ function providedHelperToken(
     if (isPositionalArgument(definition)) {
         return `${name}${valueSeparator}${formatHelperValue(value)}`;
     }
+
     const flag = formatArgumentFlagName(name, definition);
     if (definition.type === "string" && definition.sensitive === true) {
         return `${flag}${valueSeparator}<redacted>`;
     }
+
     if (definition.type === "boolean") {
         if (value === true) {
             return flag;
         }
+
         return `${flag}${valueSeparator}false`;
     }
+
     return `${flag}${valueSeparator}${formatHelperValue(value)}`;
 }
 
 type InlineHelpDisplayState = "active" | "required" | "available";
-
 type InlineHelpValueSource = "provided" | "default";
 
 type InlineHelpItem = {
@@ -390,12 +421,15 @@ function shouldDisplayDefaultToken(
     if (value === undefined) {
         return false;
     }
+
     if (definition.type === "boolean") {
         return value === true;
     }
+
     if (definition.type === "multi-enum" && Array.isArray(value)) {
         return value.length > 0;
     }
+
     return true;
 }
 
@@ -408,13 +442,16 @@ function defaultHelperToken(
     if (isPositionalArgument(definition)) {
         return `${name}${valueSeparator}${formatHelperValue(value)}`;
     }
+
     const flag = formatArgumentFlagName(name, definition);
     if (definition.type === "string" && definition.sensitive === true) {
         return `${flag}${valueSeparator}<redacted>`;
     }
+
     if (definition.type === "boolean") {
         return `${flag}${valueSeparator}true`;
     }
+
     return `${flag}${valueSeparator}${formatHelperValue(value)}`;
 }
 
@@ -425,16 +462,18 @@ function collectInlineHelperItems(
     const parsed = parseTypedCommandArgs(invocation.command, invocation.rawArgs);
     const hasNamedFlag = helperHasNamedFlag(invocation.rawArgs);
     const items: InlineHelpItem[] = [];
-
     const entries = commandArgumentEntries(invocation.command);
+
     for (let index = 0; index < entries.length; index += 1) {
         const entry = entries[index];
         if (entry === undefined) {
             continue;
         }
+
         const [name, definition] = entry;
         const value = parsed.values[name];
         const source = parsed.sources?.get(name);
+
         if (parsed.provided.has(name)) {
             items.push({
                 name,
@@ -446,6 +485,7 @@ function collectInlineHelperItems(
             });
             continue;
         }
+
         if (
             source === "default" &&
             appearance.metadata.defaults &&
@@ -454,9 +494,11 @@ function collectInlineHelperItems(
             items.push({ name, definition, state: "active", value, valueSource: "default", index });
             continue;
         }
+
         if (hasNamedFlag && isPositionalArgument(definition)) {
             continue;
         }
+
         if (definition.required === true) {
             items.push({ name, definition, state: "required", index });
         } else {
@@ -471,6 +513,7 @@ function inlineHelpLabel(name: string, definition: ArgumentDefinition): string {
     if (isPositionalArgument(definition)) {
         return name;
     }
+
     return formatArgumentFlagName(name, definition);
 }
 
@@ -481,6 +524,7 @@ function helperTypeSuffix(
     if (!appearance.metadata.types) {
         return undefined;
     }
+
     return `${appearance.format.typeSeparator}${argumentTypeHint(definition)}`;
 }
 
@@ -491,6 +535,7 @@ function helperRequiredMarker(
     if (!appearance.metadata.required || definition.required !== true) {
         return "";
     }
+
     return "!";
 }
 
@@ -498,12 +543,14 @@ function helperAliasesMetadata(name: string, definition: ArgumentDefinition): st
     if (isPositionalArgument(definition)) {
         return undefined;
     }
+
     const aliases = argumentFlagNames(name, definition)
         .slice(1)
         .map((alias) => `--${alias}`);
     if (aliases.length === 0) {
         return undefined;
     }
+
     return `aliases ${aliases.join(",")}`;
 }
 
@@ -511,6 +558,7 @@ function helperDefaultMetadata(definition: ArgumentDefinition): string | undefin
     if (definition.default === undefined) {
         return undefined;
     }
+
     return `default ${formatArgumentHelperValue(definition, definition.default)}`;
 }
 
@@ -518,6 +566,7 @@ function renderInlineMetadata(parts: string[]): string {
     if (parts.length === 0) {
         return "";
     }
+
     return ` (${parts.join(", ")})`;
 }
 
@@ -561,6 +610,7 @@ function inlineTokenCoreSegments(
                 ),
             );
         }
+
         const label = `${inlineHelpLabel(item.name, item.definition)}${helperRequiredMarker(
             item.definition,
             appearance,
@@ -570,12 +620,14 @@ function inlineTokenCoreSegments(
             if (item.value === true && !appearance.metadata.types) {
                 return inlineTokenSegments(label, typeSuffix);
             }
+
             return inlineTokenSegments(
                 label,
                 typeSuffix,
                 `${appearance.format.valueSeparator}${formatArgumentHelperValue(item.definition, item.value)}`,
             );
         }
+
         return inlineTokenSegments(
             label,
             typeSuffix,
@@ -594,6 +646,7 @@ function inlineTokenCoreSegments(
                 ),
             );
         }
+
         const label = `${inlineHelpLabel(item.name, item.definition)}${helperRequiredMarker(
             item.definition,
             appearance,
@@ -617,6 +670,7 @@ function inlineTokenCoreSegments(
     if (isPositionalArgument(item.definition) || item.definition.type === "boolean") {
         return inlineTokenSegments(label, typeSuffix);
     }
+
     return inlineTokenSegments(
         label,
         typeSuffix,
@@ -628,6 +682,7 @@ function renderColoredPart(theme: HelperTheme, color: string, text: string): str
     if (text.length === 0) {
         return "";
     }
+
     return theme.fg(color, text);
 }
 
@@ -648,12 +703,14 @@ function renderInlineHelpToken(
             metadataParts.push(defaultMetadata);
         }
     }
+
     if (appearance.metadata.aliases) {
         const aliases = helperAliasesMetadata(item.name, item.definition);
         if (aliases !== undefined) {
             metadataParts.push(aliases);
         }
     }
+
     if (appearance.metadata.descriptions && item.definition.description !== undefined) {
         metadataParts.push(item.definition.description);
     }
@@ -663,8 +720,10 @@ function renderInlineHelpToken(
     if (metadata.length > 0) {
         renderedMetadata = theme.fg(appearance.colors.metadata, metadata);
     }
+
     const segments = inlineTokenCoreSegments(item, appearance, choiceContext);
     const stateColor = appearance.colors[item.state];
+
     return (
         renderColoredPart(theme, stateColor, appearance.format.tokenPrefix + segments.beforeType) +
         renderColoredPart(theme, appearance.colors.type, segments.typeSuffix ?? "") +
@@ -709,6 +768,7 @@ function orderedInlineHelpItems(
             groups.push(group);
         }
     }
+
     return groups;
 }
 
@@ -720,6 +780,7 @@ function lastArgumentToken(rawArgs: string): ArgumentToken | undefined {
     if (token === undefined) {
         return undefined;
     }
+
     return { raw: token.raw, value: token.value };
 }
 
@@ -745,12 +806,15 @@ function shouldShowInlineIssue(
     if (issue.kind === "missing-value") {
         return !issueIsForLastToken;
     }
+
     if (issue.kind === "unterminated-quote") {
         return false;
     }
+
     if (issueIsForLastToken) {
         return /\s$/.test(invocation.rawArgs);
     }
+
     return true;
 }
 
@@ -762,6 +826,7 @@ function bareInlineArgumentLabel(name: string, definition: ArgumentDefinition | 
     if (definition === undefined) {
         return name;
     }
+
     return formatArgumentFlagName(name, definition).replace(/^--/, "");
 }
 
@@ -772,9 +837,11 @@ function uniqueStrings(values: string[]): string[] {
         if (value.length === 0 || seen.has(value)) {
             continue;
         }
+
         seen.add(value);
         result.push(value);
     }
+
     return result;
 }
 
@@ -790,7 +857,9 @@ function formatInlineIssueMessage(
         if (definition !== undefined) {
             candidates.push(formatArgumentFlagName(issue.name, definition));
         }
+
         candidates.push(`--${label}`, label);
+
         const sortedCandidates = uniqueStrings(candidates).sort(
             (left, right) => right.length - left.length,
         );
@@ -820,14 +889,17 @@ function inlineIssueLine(
         if (item.kind === "missing-required") {
             return false;
         }
+
         if (!submitted && choiceContext?.name === item.name) {
             return false;
         }
+
         return shouldShowInlineIssue(invocation, item, state);
     });
     if (issue === undefined) {
         return undefined;
     }
+
     return `✕ ${formatInlineIssueMessage(invocation, issue)}`;
 }
 
@@ -856,18 +928,22 @@ function renderContextualChoiceLines(
         if (values.length > 0) {
             separatorWidth = separator.length;
         }
+
         if (values.length > 0 && rowWidth + separatorWidth + value.length > width) {
             rows.push({ prefix, values });
             prefix = continuationPrefix;
             values = [];
             rowWidth = prefix.length;
         }
+
         if (values.length > 0) {
             rowWidth += separator.length;
         }
+
         values.push(value);
         rowWidth += value.length;
     }
+
     if (values.length > 0) {
         rows.push({ prefix, values });
     }
@@ -879,9 +955,11 @@ function renderContextualChoiceLines(
                 if (context.query.length > 0 && value.startsWith(context.query)) {
                     color = appearance.colors.active;
                 }
+
                 return theme.fg(color, value);
             })
             .join(separator);
+
         return truncateToWidth(
             `${theme.fg(appearance.colors.active, row.prefix)}${renderedValues}`,
             width,
@@ -911,6 +989,7 @@ function renderCompactInlineHelper(
     if (commandLine.trim().length > 0) {
         rendered = wrapTextWithAnsi(commandLine, width);
     }
+
     const formOnlyCount = Object.values(invocation.command.args).filter(
         (definition) => definition.formOnly === true,
     ).length;
@@ -919,6 +998,7 @@ function renderCompactInlineHelper(
         if (formOnlyCount === 1) {
             fieldSuffix = "";
         }
+
         rendered.push(
             truncateToWidth(
                 `${helperIndent}${theme.fg(
@@ -930,6 +1010,7 @@ function renderCompactInlineHelper(
             ),
         );
     }
+
     if (
         appearance.choiceDisplay === "contextual" &&
         appearance.metadata.enumValues &&
@@ -939,6 +1020,7 @@ function renderCompactInlineHelper(
             ...renderContextualChoiceLines(choiceContext, helperIndent, width, theme, appearance),
         );
     }
+
     const issueLine = inlineIssueLine(invocation, state, choiceContext);
     if (issueLine !== undefined) {
         rendered.push(
@@ -949,6 +1031,7 @@ function renderCompactInlineHelper(
             ),
         );
     }
+
     return rendered;
 }
 
@@ -963,6 +1046,7 @@ export function renderInlineHelper(
     if (invocation.command.inlineHelp === "hidden") {
         return [];
     }
+
     const route = resolveTypedCommandRoute(invocation.command, invocation.rawArgs);
     if (route.status === "subcommand" && route.subcommand !== undefined) {
         const selected = invocation.command.subcommands?.[route.subcommand];
@@ -980,6 +1064,7 @@ export function renderInlineHelper(
             );
         }
     }
+
     if (
         invocation.command.subcommands !== undefined &&
         (route.status === "missing" ||
@@ -995,13 +1080,16 @@ export function renderInlineHelper(
                 if ((subcommand.aliases?.length ?? 0) > 0) {
                     aliasMetadata = [`aliases ${subcommand.aliases?.join(",") ?? ""}`];
                 }
+
                 aliases = renderInlineMetadata(aliasMetadata);
             }
+
             return theme.fg(
                 appearance.colors.required,
                 `${appearance.format.tokenPrefix}${name}${aliases}${appearance.format.tokenSuffix}`,
             );
         });
+
         const lines = [
             truncateToWidth(`${indent}${tokens.join(appearance.format.itemSeparator)}`, width, "…"),
         ];
@@ -1017,8 +1105,10 @@ export function renderInlineHelper(
                 ),
             );
         }
+
         return lines;
     }
+
     switch (appearance.layout) {
         case "compact":
             return renderCompactInlineHelper(invocation, width, theme, state, appearance);

@@ -37,14 +37,19 @@ export { quoteSerializedValue };
 export type Token = {
     /** Parsed token value with surrounding quotes removed and supported escapes resolved. */
     readonly value: string;
+
     /** Exact source slice that produced the token. */
     readonly raw: string;
+
     /** Inclusive UTF-16 offset in the input. */
     readonly start: number;
+
     /** Exclusive UTF-16 offset in the input. */
     readonly end: number;
+
     /** Quote character used anywhere in the token, when present. */
     readonly quote?: "'" | '"';
+
     /** Whether at least one escape sequence was consumed. */
     readonly escaped: boolean;
 };
@@ -53,6 +58,7 @@ export type Token = {
 export type TokenizeResult = {
     /** Parsed tokens with quotes removed and escapes resolved. */
     readonly tokens: readonly string[];
+
     /** Whether the input ended before a quoted string was closed. */
     readonly unterminatedQuote: boolean;
 };
@@ -108,6 +114,7 @@ function commandGrammar<TDefinitions extends ArgumentDefinitions>(
         args: command.args,
     });
     grammarCache.set(command, grammar);
+
     return grammar;
 }
 
@@ -138,6 +145,7 @@ export function lexTypedArgumentString(input: string): LexResult {
         if (tokenStarted) {
             return;
         }
+
         tokenStarted = true;
         tokenStart = index;
         current = "";
@@ -149,6 +157,7 @@ export function lexTypedArgumentString(input: string): LexResult {
         if (!tokenStarted) {
             return;
         }
+
         let token: Token = {
             value: current,
             raw: input.slice(tokenStart, end),
@@ -159,6 +168,7 @@ export function lexTypedArgumentString(input: string): LexResult {
         if (tokenQuote !== undefined) {
             token = { ...token, quote: tokenQuote };
         }
+
         tokens.push(token);
         tokenStarted = false;
         current = "";
@@ -182,14 +192,17 @@ export function lexTypedArgumentString(input: string): LexResult {
 
         if (quote !== undefined) {
             beginToken(index);
+
             if (char === "\\") {
                 escaping = true;
                 continue;
             }
+
             if (char === quote) {
                 quote = undefined;
                 continue;
             }
+
             current += char;
             continue;
         }
@@ -209,12 +222,14 @@ export function lexTypedArgumentString(input: string): LexResult {
         if (char === "\\") {
             const next = input[index + 1];
             beginToken(index);
+
             if (next !== undefined && isOutsideEscapeTarget(next)) {
                 current += next;
                 index += 1;
                 escaped = true;
                 continue;
             }
+
             current += char;
             continue;
         }
@@ -227,6 +242,7 @@ export function lexTypedArgumentString(input: string): LexResult {
         beginToken(Math.max(0, input.length - 1));
         current += "\\";
     }
+
     pushToken(input.length);
 
     return {
@@ -238,6 +254,7 @@ export function lexTypedArgumentString(input: string): LexResult {
 /** Tokenize typed-command arguments using the same quote and escape rules as the parser. */
 export function tokenizeTypedArgumentString(input: string): TokenizeResult {
     const result = lexTypedArgumentString(input);
+
     return {
         tokens: result.tokens.map((token) => token.value),
         unterminatedQuote: result.unterminatedQuote,
@@ -248,16 +265,30 @@ function isFlagToken(token: Token): boolean {
     if (token.quote !== undefined && !token.raw.startsWith("-")) {
         return false;
     }
+
     if (token.value === "-") {
         return false;
     }
+
     if (token.value === "--") {
         return false;
     }
+
     return token.value.startsWith("-");
 }
 
-function parseLongFlag(token: string): { flag: string; inlineValue?: string; isNoFlag: boolean } {
+type ParsedLongFlag = {
+    flag: string;
+    inlineValue?: string;
+    isNoFlag: boolean;
+};
+
+type ParsedShortFlag = {
+    flag: string;
+    inlineValue?: string;
+};
+
+function parseLongFlag(token: string): ParsedLongFlag {
     let flag = token.slice(2);
     let inlineValue: string | undefined;
     const equalsIndex = flag.indexOf("=");
@@ -272,14 +303,15 @@ function parseLongFlag(token: string): { flag: string; inlineValue?: string; isN
         flag = flag.slice(3);
     }
 
-    const result: { flag: string; inlineValue?: string; isNoFlag: boolean } = { flag, isNoFlag };
+    const result: ParsedLongFlag = { flag, isNoFlag };
     if (inlineValue !== undefined) {
         result.inlineValue = inlineValue;
     }
+
     return result;
 }
 
-function parseShortFlag(token: string): { flag: string; inlineValue?: string } {
+function parseShortFlag(token: string): ParsedShortFlag {
     const body = token.slice(1);
     const equalsIndex = body.indexOf("=");
     if (equalsIndex < 0) {
@@ -296,6 +328,7 @@ function isNumericToken(token: Token): boolean {
     if (token.value.trim().length === 0) {
         return false;
     }
+
     return Number.isFinite(Number(token.value));
 }
 
@@ -303,6 +336,7 @@ function tokenCanBeValueForDefinition(token: Token, definition: ArgumentDefiniti
     if (!isFlagToken(token)) {
         return true;
     }
+
     return definition.type === "number" && isNumericToken(token);
 }
 
@@ -323,16 +357,22 @@ function cloneDefaultValue(value: ArgumentValue): ArgumentValue {
     if (isStringArrayValue(value)) {
         return [...value];
     }
+
     if (isKeyValueArgumentValue(value)) {
         return { ...value };
     }
+
     return value;
 }
 
-function ownRecordValue(values: Readonly<Record<string, unknown>>, name: string): unknown {
+function ownRecordValue<TValue>(
+    values: Readonly<Record<string, TValue>>,
+    name: string,
+): TValue | undefined {
     if (!Object.hasOwn(values, name)) {
         return undefined;
     }
+
     return values[name];
 }
 
@@ -340,23 +380,29 @@ function serializedArgumentText(value: unknown): string | undefined {
     if (typeof value === "string") {
         return value;
     }
+
     if (typeof value === "number") {
         if (Object.is(value, -0)) {
             return "-0";
         }
+
         return String(value);
     }
+
     if (typeof value === "boolean") {
         return String(value);
     }
+
     if (isStringArrayValue(value)) {
         return value.join(",");
     }
+
     if (isKeyValueArgumentValue(value)) {
         return Object.entries(value)
             .map(([key, entryValue]) => `${key}=${entryValue}`)
             .join(",");
     }
+
     return undefined;
 }
 
@@ -369,19 +415,23 @@ export function getTypedCommandRefinementIssues(
     if (refine === undefined) {
         return [];
     }
+
     const issues = refine(values, { provided });
+
     return issues.map((issue) => {
         const name = issue.path?.[0];
         let parsedIssue: ParseIssue = createParseIssue("invalid-value", issue.message, name);
         if (issue.code !== undefined) {
             parsedIssue = { ...parsedIssue, code: issue.code };
         }
+
         const relatedNames = issue.relatedPaths
             ?.map((path) => path[0])
             .filter((related): related is string => related !== undefined);
         if (relatedNames !== undefined && relatedNames.length > 0) {
             return { ...parsedIssue, relatedNames };
         }
+
         return parsedIssue;
     });
 }
@@ -408,6 +458,7 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
             issues: [],
             mode: "run",
         };
+
         for (const argument of this.grammar.arguments) {
             if (Object.hasOwn(Object.prototype, argument.key)) {
                 Object.defineProperty(this.result.values, argument.key, {
@@ -417,11 +468,13 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
                 });
             }
         }
+
         Object.defineProperty(this.result, "grammar", { value: this.grammar });
     }
 
     parse(): ParsedCommandArguments {
         this.prepareTokens();
+
         if (this.result.mode === "help") {
             this.applyDefaults();
             return this.result;
@@ -432,6 +485,7 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
         this.applyDefaults();
         this.addValidationIssues();
         this.addRefinementIssues();
+
         return this.result;
     }
 
@@ -444,6 +498,7 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
         }
 
         this.tokens = [];
+
         let optionsEnded = false;
         for (const token of tokenized.tokens) {
             if (!optionsEnded && token.quote === undefined && token.value === "--") {
@@ -451,10 +506,12 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
                 this.tokens.push(token);
                 continue;
             }
+
             if (!optionsEnded && isHelpToken(token)) {
                 this.result.mode = "help";
                 continue;
             }
+
             this.tokens.push(token);
         }
     }
@@ -466,10 +523,12 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
         if (name === undefined) {
             return undefined;
         }
+
         const argument = this.grammar.argumentByName.get(name);
         if (argument === undefined) {
             return undefined;
         }
+
         return { name, definition: argument.definition };
     }
 
@@ -497,6 +556,7 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
                     this.index += 1;
                     continue;
                 }
+
                 this.consumeFlagToken(token);
                 continue;
             }
@@ -516,6 +576,7 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
 
     private addOccurrence(name: string, occurrence: RawArgumentOccurrence): void {
         this.markProvided(name);
+
         const current = this.occurrencesByName.get(name) ?? [];
         current.push(occurrence);
         this.occurrencesByName.set(name, current);
@@ -523,6 +584,7 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
 
     private addRestStringOccurrence(name: string, token: Token): void {
         this.markProvided(name);
+
         const current = this.occurrencesByName.get(name) ?? [];
         const existing = current[0];
         if (existing !== undefined) {
@@ -530,6 +592,7 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
             existing.token = `${existing.token ?? ""} ${token.raw}`;
             return;
         }
+
         current.push({ source: "positional", raw: token.value, token: token.raw });
         this.occurrencesByName.set(name, current);
     }
@@ -541,6 +604,7 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
         } else {
             parsed = parseShortFlag(token.value);
         }
+
         const name = this.findArgumentName(parsed.flag);
         if (name === undefined) {
             this.result.issues.push(
@@ -578,6 +642,7 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
             if (parsed.inlineValue !== undefined) {
                 occurrence.raw = parsed.inlineValue;
             }
+
             this.addOccurrence(name, occurrence);
             this.index += 1;
             return;
@@ -627,6 +692,7 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
                 return;
             }
         }
+
         this.addOccurrence(name, { source: "flag" });
         this.index += 1;
     }
@@ -647,6 +713,7 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
                     token.value,
                 ),
             );
+
             return;
         }
 
@@ -661,6 +728,7 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
             raw: token.value,
             token: token.raw,
         });
+
         if (definition.rest !== true) {
             this.positionalIndex += 1;
         }
@@ -681,10 +749,12 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
             if (argument === undefined) {
                 continue;
             }
+
             const decoded = argument.decode(occurrences);
             if (decoded.value !== undefined) {
                 this.setResultValue(name, decoded.value);
             }
+
             if (!decoded.ok) {
                 this.result.issues.push(...decoded.issues);
             }
@@ -700,9 +770,11 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
             ) {
                 continue;
             }
+
             const defaultValue = applyArgumentDefault(argument.definition);
             if (defaultValue !== undefined) {
                 this.setResultValue(name, cloneDefaultValue(defaultValue));
+
                 if (!this.result.provided.has(name)) {
                     this.result.sources?.set(name, "default");
                 }
@@ -722,6 +794,7 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
                 ) {
                     continue;
                 }
+
                 this.result.issues.push(issue);
             }
         }
@@ -731,6 +804,7 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
         if (this.result.issues.length > 0) {
             return;
         }
+
         this.result.issues.push(
             ...getTypedCommandRefinementIssues(
                 this.command,
@@ -751,6 +825,7 @@ export function serializeTypedCommandArgs<TDefinitions extends ArgumentDefinitio
     if (hasArgumentGroups(grammar.definitions)) {
         flatValues = flattenGroupedArgumentValues(values, grammar.definitions);
     }
+
     const parts: string[] = [];
     const restArgument = grammar.arguments.find((argument) => argument.definition.rest === true);
     let serializationOrder = grammar.arguments;
@@ -760,12 +835,14 @@ export function serializeTypedCommandArgs<TDefinitions extends ArgumentDefinitio
             restArgument,
         ];
     }
+
     for (const argument of serializationOrder) {
         const value = ownRecordValue(flatValues, argument.key);
         if (isPositionalArgument(argument.definition)) {
             if (argument.definition.type === "string" && argument.definition.sensitive === true) {
                 continue;
             }
+
             if (value !== undefined) {
                 const issues = argument.validate(value);
                 if (issues.length > 0) {
@@ -774,16 +851,19 @@ export function serializeTypedCommandArgs<TDefinitions extends ArgumentDefinitio
                         throw new TypeError(issue.message);
                     }
                 }
+
                 const text = serializedArgumentText(value);
                 if (text === undefined) {
                     throw new TypeError(`${argument.key} has an unsupported serialized value`);
                 }
+
                 parts.push(quoteSerializedValue(text, text.startsWith("-")));
             }
         } else {
             parts.push(...argument.serialize(value));
         }
     }
+
     return parts.join(" ");
 }
 
@@ -820,6 +900,7 @@ function subcommandRouteIssue<TCommand extends CoreRegisteredTypedCommand>(
             token: route.token ?? "",
         };
     }
+
     const parsed: ParsedCommandArguments = {
         values: {},
         provided: new Set<string>(),
@@ -830,6 +911,7 @@ function subcommandRouteIssue<TCommand extends CoreRegisteredTypedCommand>(
     if (route.root.compiled !== undefined) {
         Object.defineProperty(parsed, "grammar", { value: route.root.compiled });
     }
+
     return parsed;
 }
 
@@ -845,9 +927,11 @@ export function parseTypedCommandInvocation<TCommand extends CoreRegisteredTyped
             return { route, parsed: rootParsed };
         }
     }
+
     if (route.status === "missing" || route.status === "unknown") {
         return { route, parsed: subcommandRouteIssue(route) };
     }
+
     return {
         route,
         parsed: parseTypedCommandArgs(route.command, route.rawArgs),
@@ -874,19 +958,21 @@ function includesIssue(issues: readonly ParseIssue[], candidate: ParseIssue): bo
     );
 }
 
-function validatedParsedValues(
-    grammar: CompiledCommand,
-    parsed: ParsedCommandArguments,
-): {
+type ValidatedParsedValues = {
     values: Record<string, ArgumentValue>;
     issues: ParseIssue[];
     reconstructedDefaults: ReadonlySet<string>;
-} {
+};
+
+function validatedParsedValues(
+    grammar: CompiledCommand,
+    parsed: ParsedCommandArguments,
+): ValidatedParsedValues {
     const values: Record<string, ArgumentValue> = {};
     const issues = [...parsed.issues];
     const reconstructedDefaults = new Set<string>();
     for (const argument of grammar.arguments) {
-        let value: unknown = ownRecordValue(parsed.values, argument.key);
+        let value = ownRecordValue(parsed.values, argument.key);
         if (value === undefined) {
             const defaultValue = applyArgumentDefault(argument.definition);
             if (defaultValue !== undefined) {
@@ -894,6 +980,7 @@ function validatedParsedValues(
                 reconstructedDefaults.add(argument.key);
             }
         }
+
         const argumentIssues = argument.validate(value);
         if (argumentIssues.length === 0 && isArgumentValue(value)) {
             if (value !== undefined) {
@@ -901,12 +988,14 @@ function validatedParsedValues(
             }
             continue;
         }
+
         for (const issue of argumentIssues) {
             if (!includesIssue(issues, issue)) {
                 issues.push(issue);
             }
         }
     }
+
     return { values, issues, reconstructedDefaults };
 }
 
@@ -941,6 +1030,7 @@ function typedProvided<TDefinitions extends ArgumentDefinitions>(
             paths.add(key);
         }
     }
+
     return paths;
 }
 
@@ -955,11 +1045,13 @@ function typedSources<TDefinitions extends ArgumentDefinitions>(
             typed.set(key, source);
         }
     }
+
     for (const key of reconstructedDefaults) {
         if (isArgumentPath(grammar, key) && !typed.has(key)) {
             typed.set(key, "default");
         }
     }
+
     return typed;
 }
 
@@ -971,9 +1063,11 @@ export function toTypedParseResult<TDefinitions extends ArgumentDefinitions>(
     if (parsed.grammar !== grammar) {
         throw new TypeError("Parsed arguments were produced by a different compiled grammar");
     }
+
     if (parsed.mode === "help") {
         return { status: "help" };
     }
+
     const validated = validatedParsedValues(grammar, parsed);
     const partial = typedDraft(grammar, validated.values);
     const provided = typedProvided(grammar, parsed.provided);
@@ -985,6 +1079,7 @@ export function toTypedParseResult<TDefinitions extends ArgumentDefinitions>(
             provided,
         };
     }
+
     return {
         status: "success",
         // SAFETY: every compiled argument validated successfully, which establishes all required
@@ -1006,5 +1101,6 @@ export function hasIssuesOfKind(
             return true;
         }
     }
+
     return false;
 }

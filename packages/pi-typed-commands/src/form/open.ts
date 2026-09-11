@@ -17,10 +17,13 @@ import type { CompletionCapabilities } from "../completions.js";
 export type OpenArgumentFormOptions = {
     readonly appearance: ResolvedPiTypedCommandsAppearance;
     readonly signal?: AbortSignal;
+
     /** Title already adapted from any Pi-specific form-title callback. */
     readonly title?: string;
+
     /** Runtime capabilities used by completion-backed form controls. */
     readonly completionCapabilities?: CompletionCapabilities;
+
     /** Receives the exact submit input after a dense TUI form closes successfully. */
     readonly onTuiSubmitInput?: (data: string) => void;
 };
@@ -43,6 +46,7 @@ export async function openArgumentForm<TDefinitions extends ArgumentDefinitions>
     } else {
         result = await new SequentialArgumentForm(command, parsed, mode, ctx, options.signal).run();
     }
+
     if (result === undefined) {
         return undefined;
     }
@@ -52,5 +56,6 @@ export async function openArgumentForm<TDefinitions extends ArgumentDefinitions>
         ctx.ui.notify(formatIssues(refinementIssues.map(formatFormIssueMessage)), "error");
         return undefined;
     }
+
     return result;
 }

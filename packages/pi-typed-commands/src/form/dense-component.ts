@@ -53,6 +53,7 @@ type TextEditorTheme = {
 export type FormResult = {
     confirmed: boolean;
     state: FormState;
+
     /** Exact semantic input that submitted the form, when submission came from the TUI. */
     submitInput?: string;
 };
@@ -61,17 +62,21 @@ function widgetFor(definition: ArgumentDefinition): string {
     if (definition.type === "string" && definition.sensitive === true) {
         return "secret";
     }
+
     if (definition.ui?.widget !== undefined) {
         return definition.ui.widget;
     }
+
     if (definition.type === "string") {
         if (definition.format !== undefined) {
             return definition.format;
         }
     }
+
     if (definition.type === "number" && definition.step !== undefined) {
         return "stepper";
     }
+
     switch (definition.type) {
         case "string":
         case "number":
@@ -119,6 +124,7 @@ function isTextWidget(definition: ArgumentDefinition): boolean {
 
 function isTextareaWidget(definition: ArgumentDefinition): boolean {
     const widget = widgetFor(definition);
+
     return (
         widget === "textarea" ||
         widget === "command" ||
@@ -142,6 +148,7 @@ function editorRows(definition: ArgumentDefinition): number {
     if (widget === "textarea" || widget === "command" || widget === "code") {
         return definition.ui?.rows ?? 4;
     }
+
     return 1;
 }
 
@@ -157,6 +164,7 @@ function evaluateFormBoolean(
     if (typeof option === "function") {
         return option({ ...state });
     }
+
     return option === true;
 }
 
@@ -164,12 +172,14 @@ function isHiddenField(definition: ArgumentDefinition, state: FormState): boolea
     if (evaluateFormBoolean(definition.ui?.hidden, state)) {
         return true;
     }
+
     const visibleWhen = definition.ui?.visibleWhen;
     return visibleWhen !== undefined && !evaluateFormBoolean(visibleWhen, state);
 }
 
 function isReadOnlyWidget(definition: ArgumentDefinition, state: FormState): boolean {
     const widget = widgetFor(definition);
+
     return (
         widget === "readonly" ||
         widget === "computed" ||
@@ -192,6 +202,7 @@ function validateFormFieldValue(field: FormField, state: FormState): string | un
     ) {
         return `${fieldTitle(field)} is required`;
     }
+
     const validation = validateArgumentValue(
         field.name,
         field.definition,
@@ -201,6 +212,7 @@ function validateFormFieldValue(field: FormField, state: FormState): string | un
     if (!validation.ok) {
         return validation.message;
     }
+
     return undefined;
 }
 
@@ -208,20 +220,25 @@ function formatValue(value: ArgumentValue): string {
     if (value === undefined) {
         return UNSET_OPTION;
     }
+
     if (Array.isArray(value)) {
         if (value.length === 0) {
             return UNSET_OPTION;
         }
+
         return value.join(", ");
     }
+
     if (typeof value === "object") {
         return Object.entries(value)
             .map(([key, entryValue]) => `${key}=${entryValue}`)
             .join(", ");
     }
+
     if (typeof value === "number" && Object.is(value, -0)) {
         return "-0";
     }
+
     return String(value);
 }
 
@@ -229,9 +246,11 @@ function formatFieldValue(definition: ArgumentDefinition, value: ArgumentValue):
     if (definition.type === "string" && definition.sensitive === true && value !== undefined) {
         return "••••••••";
     }
+
     if (definition.type === "number" && value !== undefined && definition.unit !== undefined) {
         return `${formatValue(value)} ${definition.unit}`;
     }
+
     return formatValue(value);
 }
 
@@ -239,6 +258,7 @@ function stringSelections(value: ArgumentValue): readonly string[] {
     if (!Array.isArray(value) || !value.every((item): item is string => typeof item === "string")) {
         return [];
     }
+
     return value;
 }
 
@@ -258,6 +278,7 @@ function calculateValueWidth(
     if (available < layout.minValueWidth) {
         return layout.minValueWidth;
     }
+
     return Math.min(layout.maxValueWidth, available);
 }
 
@@ -266,6 +287,7 @@ function valueIndex(values: ArgumentValue[], current: ArgumentValue): number {
     if (index >= 0) {
         return index;
     }
+
     return 0;
 }
 
@@ -283,18 +305,21 @@ function stepValue(
     return values[nextIndex];
 }
 
-export function formAutocompleteItem(item: TypedCompletionItem): {
+export type FormAutocompleteItem = {
     value: string;
     label: string;
     description?: string;
-} {
-    const mapped: { value: string; label: string; description?: string } = {
+};
+
+export function formAutocompleteItem(item: TypedCompletionItem): FormAutocompleteItem {
+    const mapped: FormAutocompleteItem = {
         value: item.value,
         label: item.label ?? item.value,
     };
     if (item.description !== undefined) {
         mapped.description = item.description;
     }
+
     return mapped;
 }
 
@@ -306,6 +331,7 @@ function createEditorTheme(theme: FormTheme, appearance: ResolvedFormAppearance)
         scrollInfo: (text: string) => theme.fg(appearance.colors.instructions, text),
         noMatch: (text: string) => theme.fg(appearance.colors.issue, text),
     };
+
     return {
         borderColor: (text: string) => theme.fg(appearance.colors.editorBorder, text),
         selectList,
@@ -331,11 +357,11 @@ function resolveComponentSymbols(
 /** Dense TUI component for editing all typed-command arguments in one form. */
 export class ArgumentFormComponent implements Component, Focusable {
     private selectedIndex = 0;
-    private input = new Input();
-    private editor: Editor;
-    private multiCursorByName = new Map<string, number>();
-    private localIssues = new Map<string, string>();
-    private touchedFields = new Set<string>();
+    private readonly input = new Input();
+    private readonly editor: Editor;
+    private readonly multiCursorByName = new Map<string, number>();
+    private readonly localIssues = new Map<string, string>();
+    private readonly touchedFields = new Set<string>();
     private readonly fields: FormField[];
     private readonly state: FormState;
     private readonly initialState: Readonly<FormState>;
@@ -348,11 +374,12 @@ export class ArgumentFormComponent implements Component, Focusable {
     private readonly validateState: (state: FormState) => readonly ParseIssue[];
     private readonly maxRows: number;
     private readonly done: (result: FormResult | undefined) => void;
-
     private _focused = false;
+
     get focused(): boolean {
         return this._focused;
     }
+
     set focused(value: boolean) {
         this._focused = value;
         this.input.focused = value;
@@ -413,6 +440,7 @@ export class ArgumentFormComponent implements Component, Focusable {
             this.done(undefined);
             return;
         }
+
         const field = this.selectedField();
         if (this.matches(data, "tui.input.tab")) {
             if (isTextareaWidget(field.definition) && !isMultilineWidget(field.definition)) {
@@ -420,13 +448,18 @@ export class ArgumentFormComponent implements Component, Focusable {
                 this.commitInput(false);
                 return;
             }
+
             this.moveSelection(1);
+
             return;
         }
+
         this.applyComputedValues();
+
         if (this.handleCustomInput(field, data)) {
             return;
         }
+
         if (isReadOnlyWidget(field.definition, this.state)) {
             if (this.matches(data, "tui.select.up")) {
                 this.moveSelection(-1);
@@ -435,6 +468,7 @@ export class ArgumentFormComponent implements Component, Focusable {
             } else if (this.matches(data, "tui.input.submit")) {
                 this.submit(data);
             }
+
             return;
         }
 
@@ -450,16 +484,20 @@ export class ArgumentFormComponent implements Component, Focusable {
                 this.submit(data);
                 return;
             }
+
             if (!isMultilineWidget(field.definition) && this.matches(data, "tui.select.up")) {
                 this.moveSelection(-1);
                 return;
             }
+
             if (!isMultilineWidget(field.definition) && this.matches(data, "tui.select.down")) {
                 this.moveSelection(1);
                 return;
             }
+
             this.editor.handleInput(data);
             this.commitInput(false);
+
             return;
         }
 
@@ -467,10 +505,12 @@ export class ArgumentFormComponent implements Component, Focusable {
             this.moveSelection(-1);
             return;
         }
+
         if (this.matches(data, "tui.select.down")) {
             this.moveSelection(1);
             return;
         }
+
         if (this.matches(data, "tui.input.submit")) {
             this.submit(data);
             return;
@@ -495,29 +535,36 @@ export class ArgumentFormComponent implements Component, Focusable {
                 if (widgetFor(field.definition) !== "stepper") {
                     return false;
                 }
+
                 let direction = 0;
                 if (this.matches(data, "tui.editor.cursorLeft")) {
                     direction = -1;
                 } else if (this.matches(data, "tui.editor.cursorRight")) {
                     direction = 1;
                 }
+
                 if (direction === 0) {
                     return false;
                 }
+
                 const existing = this.state[field.name];
                 let current = field.definition.default ?? field.definition.min ?? 0;
                 if (typeof existing === "number") {
                     current = existing;
                 }
+
                 const step = field.definition.step ?? 1;
                 let next = current + direction * step;
                 if (field.definition.min !== undefined) {
                     next = Math.max(field.definition.min, next);
                 }
+
                 if (field.definition.max !== undefined) {
                     next = Math.min(field.definition.max, next);
                 }
+
                 this.setCurrentValue(next);
+
                 return true;
             }
             case "boolean":
@@ -526,24 +573,29 @@ export class ArgumentFormComponent implements Component, Focusable {
                     this.setCurrentValue(stepValue(field.definition, this.state[field.name], -1));
                     return true;
                 }
+
                 if (this.matches(data, "tui.editor.cursorRight") || matchesKey(data, "space")) {
                     this.setCurrentValue(stepValue(field.definition, this.state[field.name], 1));
                     return true;
                 }
+
                 return false;
             case "multi-enum":
                 if (this.matches(data, "tui.editor.cursorLeft")) {
                     this.moveMultiCursor(field, -1);
                     return true;
                 }
+
                 if (this.matches(data, "tui.editor.cursorRight")) {
                     this.moveMultiCursor(field, 1);
                     return true;
                 }
+
                 if (matchesKey(data, "space")) {
                     this.toggleMultiValue(field);
                     return true;
                 }
+
                 return false;
             default:
                 return casesHandled(field.definition);
@@ -569,7 +621,9 @@ export class ArgumentFormComponent implements Component, Focusable {
             if (filteredData.length > 0) {
                 this.input.handleInput(filteredData);
             }
+
             this.commitInput(false);
+
             return;
         }
 
@@ -603,6 +657,7 @@ export class ArgumentFormComponent implements Component, Focusable {
                 );
                 previousSection = field.section;
             }
+
             lines.push(...this.renderField(index, width, nameWidth, valueWidth));
         }
 
@@ -617,6 +672,7 @@ export class ArgumentFormComponent implements Component, Focusable {
         }
 
         lines.push(this.renderSeparator(width));
+
         const instructions = this.instructionsText();
         if (instructions !== undefined) {
             lines.push(
@@ -626,6 +682,7 @@ export class ArgumentFormComponent implements Component, Focusable {
                 ),
             );
         }
+
         const viewport = this.applyViewport(lines, Math.max(1, this.maxRows - 2));
         const border = this.renderSeparator(width);
         return [border, ...viewport, border];
@@ -635,6 +692,7 @@ export class ArgumentFormComponent implements Component, Focusable {
         if (lines.length <= maxRows) {
             return lines;
         }
+
         const selectedLine = Math.max(
             2,
             lines.findIndex((line) => line.includes(this.symbols.focusedField)),
@@ -647,11 +705,15 @@ export class ArgumentFormComponent implements Component, Focusable {
         if (start > 2) {
             viewport.push(this.theme.fg(this.appearance.colors.instructions, "  ↑ more"));
         }
+
         viewport.push(...lines.slice(start, end));
+
         if (end < lines.length - 1) {
             viewport.push(this.theme.fg(this.appearance.colors.instructions, "  ↓ more"));
         }
+
         viewport.push(lines[lines.length - 1] ?? "");
+
         return viewport.slice(0, maxRows);
     }
 
@@ -704,6 +766,7 @@ export class ArgumentFormComponent implements Component, Focusable {
         if (field === undefined) {
             return [""];
         }
+
         if (isHiddenField(field.definition, this.state)) {
             return [];
         }
@@ -712,11 +775,13 @@ export class ArgumentFormComponent implements Component, Focusable {
         const marker = this.fieldMarker(selected);
         const rawName = paddedCell(fieldTitle(field), nameWidth);
         let name = rawName;
+
         if (selected) {
             name = this.theme.fg(this.appearance.colors.focusedLabel, rawName);
         } else if (this.fieldHasRefinementIssue(field.name)) {
             name = this.theme.fg(this.appearance.colors.issue, rawName);
         }
+
         const prefix = " ".repeat(this.appearance.layout.leftPadding) + marker + " ";
         if (selected && isMultilineWidget(field.definition)) {
             let heading =
@@ -729,6 +794,7 @@ export class ArgumentFormComponent implements Component, Focusable {
                     "  " +
                     this.theme.fg(this.appearance.colors.description, field.definition.description);
             }
+
             const lines = [this.fitLine(heading, width)];
             const editorWidth = Math.max(20, width - this.appearance.layout.leftPadding - 2);
             for (const line of this.renderMultilineEditor(
@@ -739,6 +805,7 @@ export class ArgumentFormComponent implements Component, Focusable {
                     this.fitLine(" ".repeat(this.appearance.layout.leftPadding + 2) + line, width),
                 );
             }
+
             return lines;
         }
 
@@ -788,6 +855,7 @@ export class ArgumentFormComponent implements Component, Focusable {
                 ...Array.from({ length: missingRows }, () => " ".repeat(width)),
             );
         }
+
         return rendered;
     }
 
@@ -827,6 +895,7 @@ export class ArgumentFormComponent implements Component, Focusable {
         if (selected) {
             return this.theme.fg(this.appearance.colors.focusedLabel, this.symbols.focusedField);
         }
+
         return " ";
     }
 
@@ -844,6 +913,7 @@ export class ArgumentFormComponent implements Component, Focusable {
             if (widgetFor(field.definition) === "secret") {
                 return this.renderSelectedSecretInput(width);
             }
+
             return this.renderSelectedInput(width);
         }
 
@@ -867,9 +937,11 @@ export class ArgumentFormComponent implements Component, Focusable {
                 if (selected) {
                     return this.theme.fg(this.appearance.colors.focusedValue, rawValue);
                 }
+
                 if (this.state[field.name] === undefined) {
                     return this.theme.fg(this.appearance.colors.unsetValue, rawValue);
                 }
+
                 return rawValue;
             }
             default:
@@ -897,6 +969,7 @@ export class ArgumentFormComponent implements Component, Focusable {
             theme: this.theme,
             formatValue,
         });
+
         return paddedCell(rendered, width);
     }
 
@@ -923,9 +996,11 @@ export class ArgumentFormComponent implements Component, Focusable {
                     this.state[name] = value;
                     this.touchedFields.add(name);
                 }
+
                 this.localIssues.clear();
             },
         });
+
         return result === true;
     }
 
@@ -936,6 +1011,7 @@ export class ArgumentFormComponent implements Component, Focusable {
         if (value === true) {
             rendered = this.symbols.selectedCheckbox;
         }
+
         if (confirm) {
             if (value === true) {
                 rendered += " confirmed";
@@ -943,10 +1019,12 @@ export class ArgumentFormComponent implements Component, Focusable {
                 rendered += " not confirmed";
             }
         }
+
         const rawValue = paddedCell(rendered, width);
         if (selected) {
             return this.theme.fg(this.appearance.colors.focusedValue, rawValue);
         }
+
         return rawValue;
     }
 
@@ -963,12 +1041,15 @@ export class ArgumentFormComponent implements Component, Focusable {
             if (selectedValues.has(value)) {
                 checkbox = this.symbols.selectedCheckbox;
             }
+
             const text = `${checkbox} ${value}`;
             if (selected && index === cursor) {
                 return this.theme.fg(this.appearance.colors.selectedOption, text);
             }
+
             return text;
         });
+
         return paddedCell(parts.join(" "), width);
     }
 
@@ -998,6 +1079,7 @@ export class ArgumentFormComponent implements Component, Focusable {
         for (const part of parts) {
             lines.push(this.fitLine(optionPrefix + part, width));
         }
+
         return lines;
     }
 
@@ -1030,17 +1112,21 @@ export class ArgumentFormComponent implements Component, Focusable {
             if (this.state[field.name] === value) {
                 radio = this.symbols.selectedRadio;
             }
+
             let text = `${radio} ${value}`;
             if (selected && this.state[field.name] === value) {
                 text = this.theme.fg(this.appearance.colors.selectedOption, text);
             }
+
             const description = definition.optionDescriptions?.[value];
             if (description !== undefined) {
                 const labelPadding = " ".repeat(optionLabelWidth - visibleWidth(value));
                 text += `${labelPadding}  ${this.theme.fg(this.appearance.colors.description, description)}`;
             }
+
             return text;
         });
+
         return parts;
     }
 
@@ -1057,12 +1143,15 @@ export class ArgumentFormComponent implements Component, Focusable {
             if (selectedValues.has(value)) {
                 checkbox = this.symbols.selectedCheckbox;
             }
+
             let text = `${checkbox} ${value}`;
             if (selected && index === cursor) {
                 text = this.theme.fg(this.appearance.colors.selectedOption, text);
             }
+
             return text;
         });
+
         return parts;
     }
 
@@ -1076,6 +1165,7 @@ export class ArgumentFormComponent implements Component, Focusable {
             ) {
                 this.state[field.name] = this.state[copyFrom];
             }
+
             const compute = field.definition.ui?.compute;
             if (compute !== undefined) {
                 this.state[field.name] = compute({ ...this.state });
@@ -1095,6 +1185,7 @@ export class ArgumentFormComponent implements Component, Focusable {
             cell += CURSOR_MARKER;
         }
         cell = truncateToWidth(cell, width, "");
+
         const padding = Math.max(0, width - visibleWidth(cell));
         return this.theme.fg(this.appearance.colors.focusedValue, cell + " ".repeat(padding));
     }
@@ -1116,13 +1207,16 @@ export class ArgumentFormComponent implements Component, Focusable {
         if (localIssue !== undefined) {
             return localIssue;
         }
+
         if (widgetFor(field.definition) === "confirm" && this.state[field.name] !== true) {
             return `${fieldTitle(field)} must be confirmed`;
         }
+
         const validationMessage = validateFormFieldValue(field, this.state);
         if (validationMessage !== undefined) {
             return validationMessage;
         }
+
         const refinement = this.validateState({ ...this.state }).find(
             (issue) =>
                 issue.name === field.name || issue.relatedNames?.includes(field.name) === true,
@@ -1130,9 +1224,11 @@ export class ArgumentFormComponent implements Component, Focusable {
         if (refinement !== undefined) {
             return refinement.message;
         }
+
         if (this.touchedFields.has(field.name)) {
             return undefined;
         }
+
         return field.issueMessages[0];
     }
 
@@ -1147,10 +1243,12 @@ export class ArgumentFormComponent implements Component, Focusable {
         if (field !== undefined) {
             return field;
         }
+
         const first = this.fields[0];
         if (first === undefined) {
             throw new Error("Argument form has no fields");
         }
+
         return first;
     }
 
@@ -1158,15 +1256,18 @@ export class ArgumentFormComponent implements Component, Focusable {
         if (!this.commitInput(true)) {
             return;
         }
+
         let nextIndex = this.selectedIndex;
         for (let visited = 0; visited < this.fields.length; visited += 1) {
             nextIndex = (nextIndex + delta + this.fields.length) % this.fields.length;
+
             const next = this.fields[nextIndex];
             if (next !== undefined && !isHiddenField(next.definition, this.state)) {
                 this.selectedIndex = nextIndex;
                 break;
             }
         }
+
         this.syncInputFromState();
     }
 
@@ -1179,6 +1280,7 @@ export class ArgumentFormComponent implements Component, Focusable {
         if (keys.length === 0) {
             return action;
         }
+
         return keys.join("/");
     }
 
@@ -1224,6 +1326,7 @@ export class ArgumentFormComponent implements Component, Focusable {
         if (isTextareaWidget(field.definition)) {
             rawValue = this.editor.getText();
         }
+
         let value = normalizeTextArgumentInput(field.definition, rawValue);
         if (field.definition.type === "enum" && rawValue.trim().length > 0) {
             const coerced = coerceArgumentValue(
@@ -1236,8 +1339,10 @@ export class ArgumentFormComponent implements Component, Focusable {
                 this.localIssues.set(field.name, coerced.issue.message);
                 return !strict;
             }
+
             value = coerced.value;
         }
+
         const validation = validateArgumentValue(
             field.name,
             field.definition,
@@ -1248,12 +1353,14 @@ export class ArgumentFormComponent implements Component, Focusable {
             if (validation.message !== undefined) {
                 this.localIssues.set(field.name, validation.message);
             }
+
             return !strict;
         }
 
         this.state[field.name] = value;
         this.touchedFields.add(field.name);
         this.localIssues.clear();
+
         return true;
     }
 
@@ -1261,6 +1368,7 @@ export class ArgumentFormComponent implements Component, Focusable {
         if (field.definition.type !== "multi-enum") {
             return;
         }
+
         const current = this.multiCursorByName.get(field.name) ?? 0;
         const next =
             (current + delta + field.definition.values.length) % field.definition.values.length;
@@ -1271,11 +1379,13 @@ export class ArgumentFormComponent implements Component, Focusable {
         if (field.definition.type !== "multi-enum") {
             return;
         }
+
         const cursor = this.multiCursorByName.get(field.name) ?? 0;
         const value = field.definition.values[cursor];
         if (value === undefined) {
             return;
         }
+
         const current = [...stringSelections(this.state[field.name])];
         const existingIndex = current.indexOf(value);
         if (existingIndex >= 0) {
@@ -1283,6 +1393,7 @@ export class ArgumentFormComponent implements Component, Focusable {
         } else {
             current.push(value);
         }
+
         this.state[field.name] = current;
         this.touchedFields.add(field.name);
         this.localIssues.delete(field.name);
@@ -1291,6 +1402,7 @@ export class ArgumentFormComponent implements Component, Focusable {
     private syncInputFromState(): void {
         const field = this.selectedField();
         this.configureEditorAutocomplete();
+
         if (!isTextWidget(field.definition)) {
             setInputValueAtEnd(this.input, "");
             this.editor.setText("");
@@ -1302,11 +1414,13 @@ export class ArgumentFormComponent implements Component, Focusable {
         if (value !== undefined) {
             text = formatValue(value);
         }
+
         if (isTextareaWidget(field.definition)) {
             this.editor.setText(text);
             setInputValueAtEnd(this.input, "");
             return;
         }
+
         setInputValueAtEnd(this.input, text);
         this.editor.setText("");
     }
@@ -1316,6 +1430,7 @@ export class ArgumentFormComponent implements Component, Focusable {
         if (capabilities === undefined || this.fields.length === 0) {
             return;
         }
+
         const provider: AutocompleteProvider = {
             getSuggestions: async (lines, cursorLine, cursorCol) => {
                 const field = this.selectedField();
@@ -1327,6 +1442,7 @@ export class ArgumentFormComponent implements Component, Focusable {
                         query = query.slice(commaIndex + 1).trimStart();
                     }
                 }
+
                 const provided = new Set(
                     Object.entries(this.state)
                         .filter(([, value]) => value !== undefined)
@@ -1341,6 +1457,7 @@ export class ArgumentFormComponent implements Component, Focusable {
                 if (items.length === 0) {
                     return null;
                 }
+
                 return {
                     prefix: query,
                     items: items.map(formAutocompleteItem),
@@ -1351,6 +1468,7 @@ export class ArgumentFormComponent implements Component, Focusable {
                 const line = next[cursorLine] ?? "";
                 next[cursorLine] =
                     `${line.slice(0, cursorCol - prefix.length)}${item.value}${line.slice(cursorCol)}`;
+
                 return {
                     lines: next,
                     cursorLine,
@@ -1358,11 +1476,13 @@ export class ArgumentFormComponent implements Component, Focusable {
                 };
             },
         };
+
         this.editor.setAutocompleteProvider(provider);
     }
 
     private submit(submitInput?: string): void {
         this.applyComputedValues();
+
         if (!this.commitInput(true)) {
             return;
         }
@@ -1375,10 +1495,12 @@ export class ArgumentFormComponent implements Component, Focusable {
                 this.localIssues.set(field.name, message);
                 continue;
             }
+
             const validationMessage = validateFormFieldValue(field, this.state);
             if (validationMessage === undefined) {
                 continue;
             }
+
             messages.push(validationMessage);
             this.localIssues.set(field.name, validationMessage);
         }
@@ -1391,6 +1513,7 @@ export class ArgumentFormComponent implements Component, Focusable {
                 this.selectedIndex = firstInvalidIndex;
                 this.syncInputFromState();
             }
+
             return;
         }
 
@@ -1401,6 +1524,7 @@ export class ArgumentFormComponent implements Component, Focusable {
                     this.localIssues.set(issue.name, issue.message);
                 }
             }
+
             const firstIssue = refinementIssues[0];
             const firstInvalidIndex = this.fields.findIndex(
                 (field) =>
@@ -1411,6 +1535,7 @@ export class ArgumentFormComponent implements Component, Focusable {
                 this.selectedIndex = firstInvalidIndex;
                 this.syncInputFromState();
             }
+
             return;
         }
 
@@ -1418,6 +1543,7 @@ export class ArgumentFormComponent implements Component, Focusable {
         if (submitInput !== undefined) {
             result.submitInput = submitInput;
         }
+
         this.done(result);
     }
 }

@@ -33,25 +33,31 @@ export type TestUiOverrides = {
     readonly custom?: (factory: Parameters<ExtensionUIContext["custom"]>[0]) => Promise<unknown>;
     readonly getEditorComponent?: ExtensionUIContext["getEditorComponent"];
     readonly getEditorText?: () => string;
+
     readonly input?: (
         title: string,
         placeholder?: string,
         options?: { readonly signal?: AbortSignal; readonly timeout?: number },
     ) => Promise<string | undefined>;
+
     readonly notify?: (message: string, level?: "info" | "warning" | "error") => void;
+
     readonly onTerminalInput?: (
         handler: (
             data: string,
         ) => { readonly consume?: boolean; readonly data?: string } | undefined,
     ) => () => void;
+
     readonly setEditorText?: (text: string) => void;
     readonly setEditorComponent?: ExtensionUIContext["setEditorComponent"];
     readonly select?: ExtensionUIContext["select"];
+
     readonly setWidget?: (
         key: string,
         content: string[] | TestWidgetFactory | undefined,
         options?: { readonly placement?: "aboveEditor" | "belowEditor" },
     ) => void;
+
     readonly theme?: Theme;
 };
 
@@ -77,12 +83,14 @@ type ExternalPiContract =
     | Theme
     | TUI;
 
-function externalPiContract<TContract extends ExternalPiContract>(value: object): TContract {
+function externalPiContract<TContract extends ExternalPiContract, TValue extends object = object>(
+    value: TValue,
+): TContract {
     // SAFETY: Every value crossing this test-only boundary is assembled from the checked adapter
     // option types above, and tests exercise only those installed capabilities. Pi's framework
     // contracts require large runtime-owned objects/classes that cannot be constructed publicly.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion
-    return value as TContract;
+    return value as TContract & TValue;
 }
 
 export function createTestExtensionApi(overrides: TestExtensionApiOverrides = {}): ExtensionAPI {
@@ -102,7 +110,7 @@ export function createTestTheme(overrides: TestThemeOverrides = {}): Theme {
     });
 }
 
-function createTestContextValue(overrides: TestContextOverrides): object {
+function createTestContextValue(overrides: TestContextOverrides) {
     return {
         cwd: overrides.cwd ?? process.cwd(),
         hasUI: overrides.hasUI ?? true,
@@ -160,6 +168,7 @@ export function requireFocusableComponent(component: Component): Component & Foc
     if (!isFocusable(component)) {
         throw new TypeError("expected a focusable component");
     }
+
     return component;
 }
 
@@ -172,6 +181,7 @@ export function requireInteractiveComponent(component: Component): InteractiveTe
     if (!hasInputHandler(focusable)) {
         throw new TypeError("expected a callable component input handler");
     }
+
     return focusable;
 }
 
@@ -183,6 +193,7 @@ export function requireTestWidgetFactory(value: unknown): TestWidgetFactory {
     if (!isTestWidgetFactory(value)) {
         throw new TypeError("expected a widget factory");
     }
+
     return value;
 }
 
@@ -206,12 +217,14 @@ export function createTestSignal<T>(): TestSignal<T> {
     const promise = new Promise<T>((resolve) => {
         settle = resolve;
     });
+
     return {
         promise,
         resolve(value) {
             if (settle === undefined) {
                 throw new Error("test signal was not initialized");
             }
+
             settle(value);
         },
     };

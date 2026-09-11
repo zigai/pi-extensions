@@ -25,6 +25,7 @@ function getTypedCommandUxInstallations(): WeakMap<object, SharedTypedCommandUxI
         installations = new WeakMap();
         globalObject[PI_UX_INSTALLATIONS_KEY] = installations;
     }
+
     return installations;
 }
 
@@ -32,6 +33,7 @@ function installationKey(pi: ExtensionAPI): object {
     if (typeof pi.events === "object" && pi.events !== null) {
         return pi.events;
     }
+
     return pi;
 }
 
@@ -57,6 +59,7 @@ export function installTypedCommandUx(pi: ExtensionAPI, options: TypedCommandUxO
             session.mergeConfiguredOptions(nextOptions);
         },
     };
+
     installations.set(key, installation);
 
     pi.on("session_start", async (_event, ctx) => {
@@ -66,9 +69,11 @@ export function installTypedCommandUx(pi: ExtensionAPI, options: TypedCommandUxO
 
     pi.on("input", async (event, ctx) => {
         session.clearWidget(ctx);
+
         if (notifySkillDiagnosticsForText(event.text, ctx, registry)) {
             return { action: "handled" } as const;
         }
+
         const typedSkillResult = await transformTypedSkillInput(
             event.text,
             ctx,
@@ -80,6 +85,7 @@ export function installTypedCommandUx(pi: ExtensionAPI, options: TypedCommandUxO
         if (typedSkillResult?.action === "handled") {
             return { action: "handled" } as const;
         }
+
         if (typedSkillResult?.action === "transform") {
             if (event.images !== undefined) {
                 return {
@@ -88,14 +94,17 @@ export function installTypedCommandUx(pi: ExtensionAPI, options: TypedCommandUxO
                     images: event.images,
                 } as const;
             }
+
             return { action: "transform", text: typedSkillResult.text } as const;
         }
+
         return { action: "continue" } as const;
     });
 
     pi.on("session_shutdown", async (event, ctx) => {
         await session.stop();
         session.clearWidget(ctx);
+
         if (event.reason === "reload" && installations.get(key) === installation) {
             installations.delete(key);
         }

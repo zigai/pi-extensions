@@ -149,6 +149,7 @@ function groupedKey(prefix: string, name: string): string {
     if (prefix.length === 0) {
         return name;
     }
+
     return `${prefix}.${name}`;
 }
 
@@ -174,8 +175,10 @@ export function collectUnknownGroupedArgumentDefinitions(
             );
             continue;
         }
+
         entries.push({ key, definition, sourcePath });
     }
+
     return entries;
 }
 
@@ -187,6 +190,7 @@ function assignUniqueDefinition(
     if (Object.hasOwn(flattened, key)) {
         throw new TypeError(`Duplicate canonical argument path ${key}`);
     }
+
     Object.defineProperty(flattened, key, {
         configurable: true,
         enumerable: true,
@@ -209,9 +213,11 @@ function flattenGroupedArgumentDefinitionsInto(
             if (section !== undefined) {
                 nextSection = `${section} › ${ownSection}`;
             }
+
             flattenGroupedArgumentDefinitionsInto(flattened, definition.args, key, nextSection);
             continue;
         }
+
         if (section !== undefined && definition.ui?.section === undefined) {
             assignUniqueDefinition(flattened, key, {
                 ...definition,
@@ -219,6 +225,7 @@ function flattenGroupedArgumentDefinitionsInto(
             });
             continue;
         }
+
         assignUniqueDefinition(flattened, key, definition);
     }
 }
@@ -260,10 +267,12 @@ function flattenGroupedArgumentValuesUnchecked(
             }
             continue;
         }
+
         let value: unknown;
         if (Object.hasOwn(values, name)) {
             value = values[name];
         }
+
         Object.defineProperty(flattened, key, {
             configurable: true,
             enumerable: true,
@@ -271,6 +280,7 @@ function flattenGroupedArgumentValuesUnchecked(
             writable: true,
         });
     }
+
     return flattened;
 }
 
@@ -296,9 +306,11 @@ function expandGroupedArgumentValuesUnchecked(
         if (Object.hasOwn(values, key)) {
             value = values[key];
         }
+
         if (isArgumentGroupDefinition(definition)) {
             value = expandGroupedArgumentValuesUnchecked(values, definition.args, key);
         }
+
         Object.defineProperty(expanded, name, {
             configurable: true,
             enumerable: true,
@@ -306,6 +318,7 @@ function expandGroupedArgumentValuesUnchecked(
             writable: true,
         });
     }
+
     return expanded;
 }
 

@@ -65,6 +65,7 @@ export class TypedCommandRegistry implements TypedCommandLookup, TypedCommandSub
         if (record === undefined) {
             return;
         }
+
         this.deleteRecord(record);
         this.notifyListeners();
     }
@@ -78,13 +79,17 @@ export class TypedCommandRegistry implements TypedCommandLookup, TypedCommandSub
                 this.deleteRecord(record);
             }
         }
+
         this.#skillDiagnostics.clear();
+
         for (const command of commands) {
             this.registerWithoutNotification(command, {});
         }
+
         for (const diagnostic of diagnostics) {
             this.#skillDiagnostics.set(`skill:${diagnostic.name}`, diagnostic);
         }
+
         this.notifyListeners();
     }
 
@@ -93,6 +98,7 @@ export class TypedCommandRegistry implements TypedCommandLookup, TypedCommandSub
         if (record === undefined) {
             return undefined;
         }
+
         return commandWithRegistration(record);
     }
 
@@ -112,6 +118,7 @@ export class TypedCommandRegistry implements TypedCommandLookup, TypedCommandSub
 
     onChanged(listener: TypedCommandRegistryListener): () => void {
         this.#listeners.add(listener);
+
         return () => {
             this.#listeners.delete(listener);
         };
@@ -134,12 +141,14 @@ export class TypedCommandRegistry implements TypedCommandLookup, TypedCommandSub
         if (recordWithId !== undefined) {
             this.deleteRecord(recordWithId);
         }
+
         const ownerId = options.ownerId ?? DEFAULT_OWNER_ID;
         const invocationName = options.invocationName ?? this.nextInvocationName(command.name);
         const recordWithInvocationName = this.#commands.get(invocationName);
         if (recordWithInvocationName !== undefined) {
             this.deleteRecord(recordWithInvocationName);
         }
+
         const record: RegistrationRecord = {
             id,
             ownerId,
@@ -151,6 +160,7 @@ export class TypedCommandRegistry implements TypedCommandLookup, TypedCommandSub
 
         this.#records.set(id, record);
         this.#commands.set(invocationName, record);
+
         return invocationName;
     }
 
@@ -158,10 +168,12 @@ export class TypedCommandRegistry implements TypedCommandLookup, TypedCommandSub
         if (!this.#commands.has(localName)) {
             return localName;
         }
+
         let suffix = 1;
         while (this.#commands.has(`${localName}:${suffix}`)) {
             suffix += 1;
         }
+
         return `${localName}:${suffix}`;
     }
 
@@ -169,11 +181,13 @@ export class TypedCommandRegistry implements TypedCommandLookup, TypedCommandSub
         if (command.registrationId !== undefined) {
             return this.#records.get(command.registrationId);
         }
+
         for (const record of this.#records.values()) {
             if (record.command === command) {
                 return record;
             }
         }
+
         return undefined;
     }
 
@@ -188,6 +202,7 @@ export class TypedCommandRegistry implements TypedCommandLookup, TypedCommandSub
         if (this.#commands.get(record.invocationName) === record) {
             this.#commands.delete(record.invocationName);
         }
+
         this.#records.delete(record.id);
     }
 }

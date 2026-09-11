@@ -23,10 +23,12 @@ class PiCompletionScheduler implements CompletionScheduler {
         if (this.parentSignal?.aborted === true) {
             return undefined;
         }
+
         const controller = new AbortController();
         const abort = (): void => {
             controller.abort(this.parentSignal?.reason);
         };
+
         this.parentSignal?.addEventListener("abort", abort, { once: true });
 
         let timer: NodeJS.Timeout | undefined;
@@ -35,12 +37,14 @@ class PiCompletionScheduler implements CompletionScheduler {
                 controller.abort();
             }, timeoutMs);
         }
+
         try {
             const aborted = new Promise<undefined>((resolve) => {
                 controller.signal.addEventListener("abort", () => resolve(undefined), {
                     once: true,
                 });
             });
+
             return await Promise.race([work(controller.signal), aborted]);
         } catch {
             return undefined;
@@ -48,6 +52,7 @@ class PiCompletionScheduler implements CompletionScheduler {
             if (timer !== undefined) {
                 clearTimeout(timer);
             }
+
             this.parentSignal?.removeEventListener("abort", abort);
         }
     }
@@ -77,10 +82,12 @@ async function completePathItems(query: string, cwd: string): Promise<TypedCompl
         directoryPart = raw;
         filePrefix = "";
     }
+
     let lookupDirectory = join(cwd, directoryPart);
     if (isAbsolute(directoryPart)) {
         lookupDirectory = directoryPart;
     }
+
     let valuePrefix = "";
     if (raw.endsWith("/")) {
         valuePrefix = raw;
@@ -92,6 +99,7 @@ async function completePathItems(query: string, cwd: string): Promise<TypedCompl
     const matchingEntries = entries
         .filter((entry) => entry.name.startsWith(filePrefix) && !/\p{Cc}/u.test(entry.name))
         .sort((left, right) => left.name.localeCompare(right.name));
+
     return Promise.all(
         matchingEntries.map(async (entry) => {
             let isDirectory = entry.isDirectory();
@@ -102,12 +110,14 @@ async function completePathItems(query: string, cwd: string): Promise<TypedCompl
                     // Keep broken or inaccessible symbolic links as ordinary path candidates.
                 }
             }
+
             let suffix = "";
             let description = "file";
             if (isDirectory) {
                 suffix = "/";
                 description = "directory";
             }
+
             return {
                 value: `${valuePrefix}${entry.name}${suffix}`,
                 label: `${entry.name}${suffix}`,
@@ -142,6 +152,7 @@ function toAutocompleteItem(item: TypedCompletionItem): AutocompleteItem {
     if (item.description !== undefined) {
         result.description = item.description;
     }
+
     return result;
 }
 
@@ -162,6 +173,7 @@ export async function getTypedArgumentCompletions<TDefinitions extends ArgumentD
     if (items === null) {
         return null;
     }
+
     return items.map(toAutocompleteItem);
 }
 
@@ -181,5 +193,6 @@ export async function getTypedAutocompleteSuggestions(
     if (decision === undefined) {
         return undefined;
     }
+
     return toAutocompleteSuggestions(decision);
 }

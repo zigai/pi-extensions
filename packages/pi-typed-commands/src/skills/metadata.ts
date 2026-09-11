@@ -25,6 +25,7 @@ function validateSkillPlaceholders(
         if (path === undefined) {
             continue;
         }
+
         const valid =
             Object.hasOwn(args, path) || names.some((name) => name.startsWith(`${path}.`));
         if (!valid) {
@@ -37,6 +38,7 @@ function validateSkillPlaceholders(
             );
         }
     }
+
     return diagnostics;
 }
 
@@ -48,6 +50,7 @@ function fileReadErrorCode(cause: unknown): string | undefined {
     if (typeof cause.code === "string") {
         return cause.code;
     }
+
     return undefined;
 }
 
@@ -56,6 +59,7 @@ function fileReadErrorMessage(cause: unknown): string {
     if (code !== undefined) {
         return `failed to read typed arguments (${code})`;
     }
+
     return "failed to read typed arguments";
 }
 
@@ -79,6 +83,7 @@ export function readTypedSkillMetadataResult(
             ]),
         };
     }
+
     const parsedSkill = parseSkillMarkdown(content);
     if (parsedSkill.status === "invalid") {
         const diagnosticName = options.fallbackName ?? "unknown";
@@ -87,6 +92,7 @@ export function readTypedSkillMetadataResult(
             diagnostics: typedSkillDiagnostics(diagnosticName, filePath, parsedSkill.diagnostics),
         };
     }
+
     const { frontmatter, body } = parsedSkill;
     if (frontmatter.name === undefined || frontmatter.description === undefined) {
         return { status: "absent" };
@@ -105,6 +111,7 @@ export function readTypedSkillMetadataResult(
             diagnostics: typedSkillDiagnostics(frontmatter.name, filePath, allDiagnostics),
         };
     }
+
     if (Object.keys(args).length === 0) {
         return {
             status: "invalid",
@@ -142,8 +149,10 @@ export function readTypedSkillMetadataResult(
     if (formTitle !== undefined) {
         metadata.formTitle = formTitle;
     }
+
     if (frontmatter.metadata?.ghostText !== undefined) {
         metadata.ghostText = frontmatter.metadata.ghostText;
     }
+
     return { status: "ok", metadata };
 }

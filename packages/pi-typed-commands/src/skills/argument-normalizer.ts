@@ -39,6 +39,7 @@ import type {
 } from "./types.js";
 
 type SupportedSkillArgumentType = ArgumentDefinition["type"];
+
 type SkillArgumentSchema =
     | typeof StringSkillArgumentYamlSchema
     | typeof NumberSkillArgumentYamlSchema
@@ -86,6 +87,7 @@ type SkillDiagnosticSink = {
 
 function createSkillDiagnosticSink(): SkillDiagnosticSink {
     const diagnostics: SkillArgumentDiagnostic[] = [];
+
     return {
         diagnostics,
         push(...items) {
@@ -109,6 +111,7 @@ function pointerSegments(pointer: string): string[] {
     if (pointer.length === 0) {
         return [];
     }
+
     return pointer
         .slice(1)
         .split("/")
@@ -119,17 +122,21 @@ function pathLabel(name: string, segments: readonly string[]): string {
     if (segments.length === 0) {
         return name;
     }
+
     return `${name}.${segments.join(".")}`;
 }
 
 function valueAtPath(value: unknown, segments: readonly string[]): unknown {
     let current = value;
+
     for (const segment of segments) {
         if (!Schema.Check(UnknownRecordYamlSchema, current)) {
             return undefined;
         }
+
         current = current[segment];
     }
+
     return current;
 }
 
@@ -137,15 +144,19 @@ function normalizeArgumentType(type: unknown): SupportedSkillArgumentType | unde
     if (type === "string" || type === "number" || type === "boolean" || type === "enum") {
         return type;
     }
+
     if (type === "multi_enum" || type === "multi-enum") {
         return "multi-enum";
     }
+
     if (type === "string_list" || type === "string-list") {
         return "string-list";
     }
+
     if (type === "key_value" || type === "key-value") {
         return "key-value";
     }
+
     return undefined;
 }
 
@@ -178,9 +189,11 @@ function unsupportedFieldMessage(name: string, segments: readonly string[]): str
     if (field === "aliases") {
         return `${label} is not supported`;
     }
+
     if (field === "ui.custom") {
         return `${label} is not supported in skill YAML`;
     }
+
     return `${label} is not a supported typed skill argument field`;
 }
 
@@ -197,73 +210,96 @@ function fieldTypeMessage(
     if (field === "type") {
         return `${name}.type must be one of: string, number, boolean, enum, multi_enum`;
     }
+
     if (field === "description" || field === "title" || field === "placeholder") {
         return `${label} must be a string`;
     }
+
     if (field === "required" || field === "integer" || field === "rest") {
         if (field === "rest" && value === true && type !== "string" && type !== "multi-enum") {
             return `${label} is only valid for string or multi-enum arguments`;
         }
+
         return `${label} must be a boolean`;
     }
+
     if (field === "position" || field === "min_length" || field === "max_length") {
         return `${label} must be a non-negative integer`;
     }
+
     if (field === "min_items" || field === "max_items") {
         return `${label} must be a non-negative integer`;
     }
+
     if (field === "min" || field === "max") {
         return `${label} must be a finite number`;
     }
+
     if (field === "occurrence") {
         if (value === "append" && type !== "multi-enum") {
             return `${label} append is only valid for multi-enum arguments`;
         }
+
         return `${label} must be one of: error, first, last, append`;
     }
+
     if (field === "ui") {
         return `${label} must be an object`;
     }
+
     if (field === "ui.widget") {
         if (value === "custom") {
             return `${label} custom is not supported in skill YAML`;
         }
+
         return `${label} must be one of: ${[...SUPPORTED_WIDGETS].join(", ")}`;
     }
+
     if (field === "ui.rows") {
         return `${label} must be a positive integer`;
     }
+
     if (field === "ui.title") {
         return `${label} must be a string`;
     }
+
     if (field === "values") {
         return `${label} must be a non-empty list of strings`;
     }
+
     if (field.startsWith("values.")) {
         return `${name}.values must be a non-empty list of strings`;
     }
+
     if (field === "option_descriptions") {
         return `${label} must be an object of enum values to non-empty descriptions`;
     }
+
     if (field.startsWith("option_descriptions.")) {
         return `${name}.option_descriptions values must be non-empty strings`;
     }
+
     if (field === "default") {
         if (type === "number") {
             return `${label} must be a finite number`;
         }
+
         if (type === "boolean") {
             return `${label} must be a boolean`;
         }
+
         if (type === "multi-enum") {
             return `${label} must be a list of strings`;
         }
+
         return `${label} must be a string`;
     }
+
     if (field.startsWith("default.")) {
         if (type === "multi-enum") {
             return `${name}.default must be a list of strings`;
         }
+
         return `${name}.default must be a string`;
     }
 
@@ -277,14 +313,17 @@ function schemaErrorMessages(
     error: TLocalizedValidationError,
 ): string[] {
     const baseSegments = pointerSegments(error.instancePath);
+
     if (error.keyword === "additionalProperties") {
         return error.params.additionalProperties.map((property) =>
             unsupportedFieldMessage(name, [...baseSegments, property]),
         );
     }
+
     if (error.keyword === "not") {
         return [`${name}: required arguments may not define a default`];
     }
+
     return [fieldTypeMessage(name, type, raw, baseSegments)];
 }
 
@@ -308,6 +347,7 @@ function parseSkillArgumentYaml(
     for (const error of errors) {
         warnings.push(...schemaErrorMessages(name, type, raw, error));
     }
+
     return undefined;
 }
 
@@ -320,30 +360,39 @@ function normalizeUi(raw: SkillArgumentUiYaml | undefined): ArgumentUi | undefin
     if (raw.widget !== undefined) {
         ui.widget = raw.widget;
     }
+
     if (raw.rows !== undefined) {
         ui.rows = raw.rows;
     }
+
     if (raw.title !== undefined) {
         ui.title = raw.title;
     }
+
     if (raw.disabled !== undefined) {
         ui.disabled = raw.disabled;
     }
+
     if (raw.visible_when !== undefined) {
         ui.visibleWhen = raw.visible_when;
     }
+
     if (raw.enabled_when !== undefined) {
         ui.enabledWhen = raw.enabled_when;
     }
+
     if (raw.required_when !== undefined) {
         ui.requiredWhen = raw.required_when;
     }
+
     if (raw.section !== undefined) {
         ui.section = raw.section;
     }
+
     if (raw.advanced !== undefined) {
         ui.advanced = raw.advanced;
     }
+
     if (raw.copy_from !== undefined) {
         ui.copyFrom = raw.copy_from;
     }
@@ -351,6 +400,7 @@ function normalizeUi(raw: SkillArgumentUiYaml | undefined): ArgumentUi | undefin
     if (Object.keys(ui).length > 0) {
         return ui;
     }
+
     return undefined;
 }
 
@@ -361,24 +411,31 @@ function applySharedFields<TDefinition extends ArgumentDefinition>(
     if (raw.description !== undefined) {
         definition.description = raw.description;
     }
+
     if (raw.examples !== undefined) {
         definition.examples = raw.examples;
     }
+
     if (raw.title !== undefined) {
         definition.title = raw.title;
     }
+
     if (raw.required !== undefined) {
         definition.required = raw.required;
     }
+
     if (raw.placeholder !== undefined) {
         definition.placeholder = raw.placeholder;
     }
+
     if (raw.occurrence !== undefined) {
         definition.occurrence = raw.occurrence;
     }
+
     if (raw.position !== undefined) {
         definition.position = raw.position;
     }
+
     if (raw.rest !== undefined) {
         definition.rest = raw.rest;
     }
@@ -387,6 +444,7 @@ function applySharedFields<TDefinition extends ArgumentDefinition>(
     if (ui !== undefined) {
         definition.ui = ui;
     }
+
     return definition;
 }
 
@@ -398,6 +456,7 @@ function validateDefault(
     if (definition.default === undefined) {
         return;
     }
+
     const validation = validateArgumentValue(name, definition, definition.default);
     if (!validation.ok) {
         warnings.push(`${name}.default ${validation.message}`);
@@ -413,9 +472,11 @@ function assignStringConstraints(
     if (raw.min_length !== undefined) {
         definition.minLength = raw.min_length;
     }
+
     if (raw.max_length !== undefined) {
         definition.maxLength = raw.max_length;
     }
+
     if (
         definition.minLength !== undefined &&
         definition.maxLength !== undefined &&
@@ -423,6 +484,7 @@ function assignStringConstraints(
     ) {
         warnings.push(`${name}.min_length must be less than or equal to max_length`);
     }
+
     if (raw.pattern !== undefined) {
         try {
             new RegExp(raw.pattern);
@@ -431,9 +493,11 @@ function assignStringConstraints(
             warnings.push(`${name}.pattern must be a valid regular expression`);
         }
     }
+
     if (raw.format !== undefined) {
         definition.format = raw.format;
     }
+
     if (raw.sensitive !== undefined) {
         definition.sensitive = raw.sensitive;
     }
@@ -448,9 +512,11 @@ function assignMultiEnumConstraints(
     if (raw.min_items !== undefined) {
         definition.minItems = raw.min_items;
     }
+
     if (raw.max_items !== undefined) {
         definition.maxItems = raw.max_items;
     }
+
     if (
         definition.minItems !== undefined &&
         definition.maxItems !== undefined &&
@@ -467,10 +533,13 @@ function normalizeStringArgument(
 ): StringArgumentDefinition {
     const definition: StringArgumentDefinition = applySharedFields({ type: "string" }, raw);
     assignStringConstraints(name, definition, raw, warnings);
+
     if (raw.default !== undefined) {
         definition.default = raw.default;
     }
+
     validateDefault(name, definition, warnings);
+
     return definition;
 }
 
@@ -483,7 +552,9 @@ function normalizeBooleanArgument(
     if (raw.default !== undefined) {
         definition.default = raw.default;
     }
+
     validateDefault(name, definition, warnings);
+
     return definition;
 }
 
@@ -496,18 +567,23 @@ function normalizeNumberArgument(
     if (raw.integer !== undefined) {
         definition.integer = raw.integer;
     }
+
     if (raw.min !== undefined) {
         definition.min = raw.min;
     }
+
     if (raw.max !== undefined) {
         definition.max = raw.max;
     }
+
     if (raw.step !== undefined) {
         definition.step = raw.step;
     }
+
     if (raw.unit !== undefined) {
         definition.unit = raw.unit;
     }
+
     if (
         definition.min !== undefined &&
         definition.max !== undefined &&
@@ -515,10 +591,13 @@ function normalizeNumberArgument(
     ) {
         warnings.push(`${name}.min must be less than or equal to max`);
     }
+
     if (raw.default !== undefined) {
         definition.default = raw.default;
     }
+
     validateDefault(name, definition, warnings);
+
     return definition;
 }
 
@@ -534,10 +613,13 @@ function normalizeEnumArgument(
     if (raw.option_descriptions !== undefined) {
         definition.optionDescriptions = raw.option_descriptions;
     }
+
     if (raw.default !== undefined) {
         definition.default = raw.default;
     }
+
     validateDefault(name, definition, warnings);
+
     return definition;
 }
 
@@ -551,10 +633,13 @@ function normalizeMultiEnumArgument(
         raw,
     );
     assignMultiEnumConstraints(name, definition, raw, warnings);
+
     if (raw.default !== undefined) {
         definition.default = raw.default;
     }
+
     validateDefault(name, definition, warnings);
+
     return definition;
 }
 
@@ -571,6 +656,7 @@ function normalizeStringListArgument(
     if (raw.max_items !== undefined) definition.maxItems = raw.max_items;
     if (raw.default !== undefined) definition.default = raw.default;
     validateDefault(name, definition, warnings);
+
     return definition;
 }
 
@@ -584,6 +670,7 @@ function normalizeKeyValueArgument(
     if (raw.max_items !== undefined) definition.maxItems = raw.max_items;
     if (raw.default !== undefined) definition.default = raw.default;
     validateDefault(name, definition, warnings);
+
     return definition;
 }
 
@@ -624,16 +711,20 @@ function flattenRawArguments(
         if (prefix.length > 0) {
             name = `${prefix}.${key}`;
         }
+
         if (!Schema.Check(UnknownRecordYamlSchema, value)) {
             warnings.push(`${name}: argument definition must be an object`);
             continue;
         }
+
         if (hasTypeKey(value)) {
             entries.push([name, value]);
             continue;
         }
+
         entries.push(...flattenRawArguments(value, warnings, name));
     }
+
     return entries;
 }
 
@@ -645,8 +736,10 @@ function flattenRawArguments(
  */
 export function normalizeSkillArguments(rawArguments: unknown): SkillArgumentNormalizationResult {
     const warnings = createSkillDiagnosticSink();
+
     if (!Schema.Check(UnknownRecordYamlSchema, rawArguments)) {
         const messages = ["arguments must be an object"];
+
         return {
             args: createSafeRecord<ArgumentDefinition>(),
             diagnostics: messages.map((message) =>
@@ -661,6 +754,7 @@ export function normalizeSkillArguments(rawArguments: unknown): SkillArgumentNor
         if (parsed === undefined) {
             continue;
         }
+
         normalizedEntries.push([name, normalizeParsedArgument(name, parsed, warnings)]);
     }
 
@@ -670,5 +764,6 @@ export function normalizeSkillArguments(rawArguments: unknown): SkillArgumentNor
     }
 
     warnings.push(...validateArgumentDefinitions(args));
+
     return { args, diagnostics: warnings.diagnostics };
 }

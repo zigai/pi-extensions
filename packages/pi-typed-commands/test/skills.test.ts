@@ -291,6 +291,7 @@ Use {args.path}.
 `);
 
         assert.equal(parsed.status, "ok");
+
         if (parsed.status === "ok") {
             assert.equal(parsed.frontmatter.name, "demo");
             assert.equal(parsed.frontmatter.description, "Demo skill");
@@ -313,6 +314,7 @@ Body
 `);
 
         assert.equal(parsed.status, "invalid");
+
         if (parsed.status === "invalid") {
             assert.equal(diagnosticMessages(parsed), "frontmatter: invalid YAML");
         }
@@ -327,6 +329,7 @@ Body
 `);
 
         assert.equal(parsed.status, "invalid");
+
         if (parsed.status === "invalid") {
             assert.equal(diagnosticMessages(parsed), "frontmatter: invalid YAML");
             assert.doesNotMatch(JSON.stringify(parsed.diagnostics), /private-source-value/);
@@ -336,8 +339,8 @@ Body
     it("rejects scalar and array YAML document roots", () => {
         for (const yamlRoot of ["private scalar", "- private\n- values"]) {
             const parsed = parseSkillMarkdown(`---\n${yamlRoot}\n---\n\nBody\n`);
-
             assert.equal(parsed.status, "invalid");
+
             if (parsed.status === "invalid") {
                 assert.equal(diagnosticMessages(parsed), "frontmatter must be an object");
                 assert.doesNotMatch(JSON.stringify(parsed.diagnostics), /private/);
@@ -362,6 +365,7 @@ Body
 `);
 
         assert.equal(parsed.status, "invalid");
+
         if (parsed.status === "invalid") {
             const messages = diagnosticMessages(parsed);
             assert.match(messages, /frontmatter\.name must be a string/);
@@ -385,6 +389,7 @@ Body
 `);
 
         assert.equal(parsed.status, "invalid");
+
         if (parsed.status === "invalid") {
             assert.match(diagnosticMessages(parsed), /frontmatter\.metadata must be an object/);
         }
@@ -448,7 +453,6 @@ Body
 
         const result = normalizeSkillArguments(raw);
         const messages = diagnosticMessages(result);
-
         assert.match(messages, /__proto__: argument path segment __proto__ is reserved/);
         assert.match(messages, /config\.prototype: argument path segment prototype is reserved/);
         assert.match(
@@ -467,6 +471,7 @@ describe("readTypedSkillMetadataResult", () => {
         });
 
         assert.equal(result.status, "invalid");
+
         if (result.status === "invalid") {
             assert.equal(result.diagnostics.name, "missing-demo");
             assert.match(diagnosticMessages(result.diagnostics), /failed to read typed arguments/);
@@ -491,8 +496,8 @@ Use {args.path}.
         );
 
         const result = readTypedSkillMetadataResult(skillPath, { fallbackName: "demo" });
-
         assert.equal(result.status, "invalid");
+
         if (result.status === "invalid") {
             assert.equal(result.diagnostics.name, "demo");
             assert.match(
@@ -508,7 +513,6 @@ Use {args.path}.
         const invalidPath = join(dir, "invalid.md");
         writeFileSync(absentPath, "---\nname: demo\ndescription: Demo\n---\n\nBody\n");
         writeFileSync(invalidPath, "---\nprivate scalar\n---\n\nBody\n");
-
         assert.deepEqual(readTypedSkillMetadataResult(absentPath), { status: "absent" });
         const invalid = readTypedSkillMetadataResult(invalidPath, { fallbackName: "demo" });
         assert.equal(invalid.status, "invalid");
@@ -522,8 +526,8 @@ Use {args.path}.
 
         try {
             const result = readTypedSkillMetadataResult(skillPath, { fallbackName: "demo" });
-
             assert.equal(result.status, "invalid");
+
             if (result.status === "invalid") {
                 assert.equal(
                     diagnosticMessages(result.diagnostics),
@@ -564,8 +568,8 @@ Use {args.path}.
         );
 
         const result = readTypedSkillMetadataResult(skillPath);
-
         assert.equal(result.status, "ok");
+
         if (result.status === "ok") {
             assert.equal(result.metadata.name, "demo");
             assert.equal(result.metadata.formTitle, "Demo Form");
@@ -599,7 +603,6 @@ Use {args.missing} and {args.path}.
         );
 
         const result = readTypedSkillMetadataResult(skillPath);
-
         assert.equal(result.status, "invalid");
         assert.ok(result.status === "invalid");
         assert.match(
@@ -693,14 +696,14 @@ describe("renderTypedSkillInvocation", () => {
             "__proto__.polluted": "yes",
             "config.path": "report.txt",
         });
-        const protoSection = expanded["__proto__"];
-        const pollutedOnPlainObject: unknown = Reflect.get({}, "polluted");
-
-        assert.equal(pollutedOnPlainObject, undefined);
+        const protoSection = expanded.__proto__;
+        assert.equal("polluted" in {}, false);
         assert.equal(Object.hasOwn(expanded, "__proto__"), true);
+
         if (!isPrototypeSection(protoSection)) {
             assert.fail("expected the __proto__ section to remain a data record");
         }
+
         assert.equal(protoSection.polluted, "yes");
     });
 
@@ -740,7 +743,6 @@ describe("renderTypedSkillInvocation", () => {
         const command = typedSkillCommandFromMetadata(mutableSkill);
         mutableSkill.body = "Mutated environment: {args.environment}.";
         values.push("qa");
-
         assert.equal(command.name, "skill:fix-ruff-errors");
         assert.equal(command.source, "skill");
         assert.equal(command.target?.kind, "skill");
@@ -748,10 +750,13 @@ describe("renderTypedSkillInvocation", () => {
         assert.equal(command.skill.filePath, skill.filePath);
         const environment = command.args.environment;
         assert.equal(environment?.type, "enum");
+
         if (environment?.type === "enum") {
             assert.deepEqual(environment.values, ["dev", "prod"]);
         }
+
         assert.equal(command.target?.kind, "skill");
+
         if (command.target?.kind === "skill") {
             assert.match(command.target.render({ environment: "dev" }), /Original environment/);
             assert.doesNotMatch(command.target.render({ environment: "dev" }), /Mutated/);

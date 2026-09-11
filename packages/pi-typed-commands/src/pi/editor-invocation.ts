@@ -51,7 +51,6 @@ export function helperInvocationForEditorText(
     }
 
     const { command } = invocation;
-
     if (Object.keys(command.args).length === 0 && command.subcommands === undefined) {
         return undefined;
     }
@@ -65,8 +64,10 @@ export function editorTextForInvocation(invocation: EditorTypedCommandInvocation
     if (invocation.rawArgs.length > 0) {
         text += ` ${invocation.rawArgs}`;
     }
+
     if (invocation.trailingBody.length > 0) {
         text += `\n${invocation.trailingBody}`;
     }
+
     return text;
 }

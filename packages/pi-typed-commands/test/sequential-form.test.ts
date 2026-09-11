@@ -17,17 +17,24 @@ type PromptRecorder = {
         title: string;
         placeholder: string | undefined;
     }>;
+
     readonly selects: Array<{
         title: string;
         options: readonly string[];
     }>;
+
     readonly notifications: Array<{ message: string; level: string | undefined }>;
+};
+
+type PromptContext = {
+    ctx: ReturnType<typeof createTestExtensionCommandContext>;
+    recorder: PromptRecorder;
 };
 
 function createPromptContext(
     inputResponses: Array<string | undefined> = [],
     selectResponses: Array<string | undefined> = [],
-): { ctx: ReturnType<typeof createTestExtensionCommandContext>; recorder: PromptRecorder } {
+): PromptContext {
     const recorder: PromptRecorder = {
         inputs: [],
         selects: [],
@@ -36,11 +43,11 @@ function createPromptContext(
     const ctx = createTestExtensionCommandContext({
         mode: "rpc",
         ui: {
-            input(title, placeholder) {
+            async input(title, placeholder) {
                 recorder.inputs.push({ title, placeholder });
                 return Promise.resolve(inputResponses.shift());
             },
-            select(title, options) {
+            async select(title, options) {
                 recorder.selects.push({ title, options });
                 return Promise.resolve(selectResponses.shift());
             },
@@ -49,6 +56,7 @@ function createPromptContext(
             },
         },
     });
+
     return { ctx, recorder };
 }
 
@@ -65,6 +73,7 @@ function valueText(value: unknown): string {
     if (typeof value === "string") {
         return value;
     }
+
     return JSON.stringify(value) ?? "";
 }
 
@@ -86,6 +95,7 @@ function command<TDefinitions extends FlatArgumentDefinitions>(
     if (refine === undefined) {
         return base;
     }
+
     return { ...base, refine };
 }
 
@@ -123,7 +133,21 @@ describe("sequential argument form", () => {
         );
 
         assert.equal(recorder.inputs[0]?.placeholder, "");
-        assert.equal(Reflect.get(result ?? {}, "toString"), undefined);
+
+        if (result === undefined) {
+            assert.fail("expected sequential form state");
+        }
+
+        assert.equal(Object.getPrototypeOf(result), Object.prototype);
+        assert.equal(Object.hasOwn(result, "toString"), true);
+        assert.deepEqual(Object.getOwnPropertyDescriptor(result, "toString"), {
+            configurable: true,
+            enumerable: true,
+            value: undefined,
+            writable: true,
+        });
+        assert.deepEqual(Object.keys(result), ["toString"]);
+        assert.deepEqual(Object.entries(result), [["toString", undefined]]);
     });
 
     it("collects string, number, list, key-value, boolean, enum, and multi-enum values", async () => {

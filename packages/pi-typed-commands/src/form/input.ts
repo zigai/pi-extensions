@@ -7,6 +7,7 @@ export function inputCursor(input: Input): number {
     if (typeof cursor === "number") {
         return cursor;
     }
+
     return input.getValue().length;
 }
 
@@ -24,6 +25,7 @@ function numberInputPrefixIsValid(definition: ArgumentDefinition, value: string)
     if (definition.type !== "number") {
         return true;
     }
+
     if (value.length === 0) {
         return true;
     }
@@ -32,6 +34,7 @@ function numberInputPrefixIsValid(definition: ArgumentDefinition, value: string)
     if (numberAllowsNegative(definition)) {
         signPattern = "[+-]?";
     }
+
     return new RegExp(
         `^${signPattern}(?:\\d+(?:\\.\\d*)?(?:[eE][+-]?\\d*)?|\\.\\d+(?:[eE][+-]?\\d*)?|\\.)?$`,
     ).test(value);
@@ -51,9 +54,11 @@ function printableInputText(data: string): string | undefined {
             break;
         }
     }
+
     if (hasControlChars) {
         return undefined;
     }
+
     return data;
 }
 
@@ -81,10 +86,12 @@ export function filterNumberInputData(
         if (!numberInputPrefixIsValid(definition, candidate)) {
             continue;
         }
+
         accepted += char;
         nextValue = candidate;
         nextCursor += char.length;
     }
+
     return accepted;
 }
 
@@ -98,6 +105,7 @@ export function restoreNumberInputIfInvalid(
     if (numberInputPrefixIsValid(definition, input.getValue())) {
         return;
     }
+
     input.setValue(previousValue);
     setInputCursor(input, previousCursor);
 }

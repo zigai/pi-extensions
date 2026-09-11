@@ -2,7 +2,6 @@ import Type, { type Static } from "typebox";
 
 const ARGUMENT_NAME_PATTERN = "^[A-Za-z0-9_.-]+$";
 const RESERVED_ARGUMENT_NAME_SEGMENT_PATTERN = "(^|\\.)(__proto__|constructor|prototype)(\\.|$)";
-
 const OCCURRENCE_VALUES = ["error", "first", "last", "append"] as const;
 const SCALAR_OCCURRENCE_VALUES = ["error", "first", "last"] as const;
 const SKILL_WIDGET_VALUES = [

@@ -26,6 +26,7 @@ import type { RegisteredTypedCommand } from "../src/pi/command-types.js";
 import { createTestSignal } from "./pi-test-adapter.js";
 
 const completionRegistry = createTypedCommandRegistry();
+
 function completionCapabilities() {
     return createPiCompletionCapabilities(process.cwd(), completionRegistry);
 }
@@ -55,7 +56,7 @@ async function withRegisteredCommandAsync<T>(
     }
 }
 
-function getTypedArgumentCompletions(
+async function getTypedArgumentCompletions(
     command: RegisteredTypedCommand,
     argumentPrefix: string,
     capabilities: CompletionCapabilities = completionCapabilities(),
@@ -171,6 +172,7 @@ describe("parseTypedCommandArgs", () => {
         if (!first.ok || !second.ok) {
             assert.fail("expected both proof grammars to compile");
         }
+
         const parsed = parseTypedCommandArgs(
             { args: first.command.args, compiled: first.command },
             "--count 2",
@@ -193,6 +195,7 @@ describe("parseTypedCommandArgs", () => {
         if (!compiled.ok) {
             assert.fail("expected grouped proof grammar to compile");
         }
+
         const parsed = parseTypedCommandArgs(
             { args: compiled.command.args, compiled: compiled.command },
             "--database-port 5432",
@@ -204,8 +207,8 @@ describe("parseTypedCommandArgs", () => {
         };
 
         const result = toTypedParseResult(compiled.command, tampered);
-
         assert.equal(result.status, "error");
+
         if (result.status === "error") {
             assert.equal(result.issues[0]?.kind, "invalid-value");
             assert.deepEqual(result.partial, { database: { port: undefined } });
@@ -221,6 +224,7 @@ describe("parseTypedCommandArgs", () => {
         if (!compiled.ok) {
             assert.fail("expected default-presence grammar to compile");
         }
+
         const parsed = parseTypedCommandArgs(
             { args: compiled.command.args, compiled: compiled.command },
             "",
@@ -233,8 +237,8 @@ describe("parseTypedCommandArgs", () => {
         };
 
         const result = toTypedParseResult(compiled.command, withoutDefault);
-
         assert.equal(result.status, "success");
+
         if (result.status === "success") {
             assert.deepEqual(result.value, { ref: "main" });
             assert.equal(result.sources.get("ref"), "default");
@@ -274,7 +278,6 @@ describe("parseTypedCommandArgs", () => {
 
     it("applies defaults and reports missing required args", () => {
         const parsed = parseTypedCommandArgs(command, "");
-
         assert.equal(parsed.values.ref, "main");
         assert.equal(parsed.issues.length, 1);
         assert.equal(parsed.issues[0]?.kind, "missing-required");
@@ -283,7 +286,6 @@ describe("parseTypedCommandArgs", () => {
 
     it("supports no-boolean flags", () => {
         const parsed = parseTypedCommandArgs(command, "--env dev --no-dry-run");
-
         assert.deepEqual(parsed.issues, []);
         assert.equal(parsed.values.dryRun, false);
     });
@@ -315,7 +317,6 @@ describe("parseTypedCommandArgs", () => {
 
     it("parses multi-enum comma lists and repeated flags", () => {
         const parsed = parseTypedCommandArgs(command, "--env dev --tags api,web --tags worker");
-
         assert.deepEqual(parsed.issues, []);
         assert.deepEqual(parsed.values.tags, ["api", "web", "worker"]);
     });
@@ -333,14 +334,12 @@ describe("parseTypedCommandArgs", () => {
         };
 
         const parsed = parseTypedCommandArgs(nonAppending, "--tags api,api");
-
         assert.deepEqual(parsed.issues, []);
         assert.deepEqual(parsed.values.tags, ["api"]);
     });
 
     it("accepts negative numeric flag values", () => {
         const parsed = parseTypedCommandArgs(command, "--env dev --count -1");
-
         assert.equal(parsed.values.count, undefined);
         assert.equal(parsed.issues[0]?.message, "--count must be at least 1");
     });
@@ -353,7 +352,6 @@ describe("parseTypedCommandArgs", () => {
 
         const raw = serializeTypedCommandArgs(numberCommand, { count: -0 });
         const parsed = parseTypedCommandArgs(numberCommand, raw);
-
         assert.equal(raw, "--count=-0");
         assert.equal(Object.is(parsed.values.count, -0), true);
 
@@ -383,18 +381,29 @@ describe("parseTypedCommandArgs", () => {
         };
 
         const parsed = parseTypedCommandArgs(inheritedNameCommand, "");
-
         assert.deepEqual(parsed.issues, []);
-        assert.equal(Reflect.get(parsed.values, "toString"), "safe");
-        assert.equal(Reflect.get(parsed.values, "valueOf"), undefined);
-        assert.equal(Object.keys(parsed.values).includes("toString"), true);
-        assert.equal(Object.keys(parsed.values).includes("valueOf"), false);
+        assert.equal(Object.getPrototypeOf(parsed.values), Object.prototype);
+        assert.equal(Object.hasOwn(parsed.values, "toString"), true);
+        assert.equal(Object.hasOwn(parsed.values, "valueOf"), true);
+        assert.deepEqual(Object.getOwnPropertyDescriptor(parsed.values, "toString"), {
+            configurable: true,
+            enumerable: true,
+            value: "safe",
+            writable: true,
+        });
+        assert.deepEqual(Object.getOwnPropertyDescriptor(parsed.values, "valueOf"), {
+            configurable: true,
+            enumerable: false,
+            value: undefined,
+            writable: true,
+        });
+        assert.deepEqual(Object.keys(parsed.values), ["toString"]);
+        assert.deepEqual(Object.entries(parsed.values), [["toString", "safe"]]);
         assert.equal(serializeTypedCommandArgs(inheritedNameCommand, {}), "");
     });
 
     it("supports -- as an end-of-options marker", () => {
         const parsed = parseTypedCommandArgs(branchCommand, "create -- --literal-branch");
-
         assert.deepEqual(parsed.issues, []);
         assert.equal(parsed.values.action, "create");
         assert.equal(parsed.values.name, "--literal-branch");
@@ -402,7 +411,6 @@ describe("parseTypedCommandArgs", () => {
 
     it("does not treat --help after -- as help mode", () => {
         const parsed = parseTypedCommandArgs(branchCommand, "create -- --help");
-
         assert.equal(parsed.mode, "run");
         assert.deepEqual(parsed.issues, []);
         assert.equal(parsed.values.name, "--help");
@@ -420,14 +428,12 @@ describe("parseTypedCommandArgs", () => {
             },
         };
         const parsed = parseTypedCommandArgs(numericCommand, "-1");
-
         assert.deepEqual(parsed.issues, []);
         assert.equal(parsed.values.offset, -1);
     });
 
     it("parses positional args before named flags", () => {
         const parsed = parseTypedCommandArgs(branchCommand, "create feature/foo --base main");
-
         assert.deepEqual(parsed.issues, []);
         assert.equal(parsed.values.action, "create");
         assert.equal(parsed.values.name, "feature/foo");
@@ -449,7 +455,6 @@ describe("parseTypedCommandArgs", () => {
         };
 
         const parsed = parseTypedCommandArgs(positionedCommand, "create feature/foo");
-
         assert.deepEqual(parsed.issues, []);
         assert.equal(parsed.values.action, "create");
         assert.equal(parsed.values.name, "feature/foo");
@@ -465,7 +470,6 @@ describe("parseTypedCommandArgs", () => {
         };
 
         const parsed = parseTypedCommandArgs(restCommand, "note this is the body --literal");
-
         assert.deepEqual(parsed.issues, []);
         assert.equal(parsed.values.title, "note");
         assert.equal(parsed.values.body, "this is the body --literal");
@@ -481,7 +485,6 @@ describe("parseTypedCommandArgs", () => {
         };
 
         const parsed = parseTypedCommandArgs(restCommand, "-r Build --literal output");
-
         assert.deepEqual(parsed.issues, []);
         assert.equal(parsed.values.raw, true);
         assert.equal(parsed.values.task, "Build --literal output");
@@ -501,7 +504,6 @@ describe("parseTypedCommandArgs", () => {
             raw: true,
         });
         const parsed = parseTypedCommandArgs(restCommand, serialized);
-
         assert.equal(serialized, '--raw "Build and verify"');
         assert.deepEqual(parsed.issues, []);
         assert.equal(parsed.values.raw, true);
@@ -532,7 +534,6 @@ describe("parseTypedCommandArgs", () => {
             maximumTimeMinutes: 15,
         });
         const usage = formatCommandUsage(formOnlyCommand);
-
         assert.equal(parsed.issues[0]?.kind, "unknown-argument");
         assert.equal(serialized, '"Build and verify"');
         assert.doesNotMatch(usage, /maximum-time-minutes/);
@@ -541,7 +542,6 @@ describe("parseTypedCommandArgs", () => {
     it("recognizes --help and -h", () => {
         const longHelp = parseTypedCommandArgs(command, "--help");
         const shortHelp = parseTypedCommandArgs(command, "-h");
-
         assert.equal(longHelp.mode, "help");
         assert.equal(shortHelp.mode, "help");
     });
@@ -559,7 +559,6 @@ describe("parseTypedCommandArgs", () => {
 
     it("reports unterminated quotes without discarding parsed values", () => {
         const parsed = parseTypedCommandArgs(command, '--env dev --ref "feature');
-
         assert.equal(parsed.values.env, "dev");
         assert.equal(parsed.values.ref, "feature");
         assert.equal(parsed.issues[0]?.kind, "unterminated-quote");
@@ -567,7 +566,6 @@ describe("parseTypedCommandArgs", () => {
 
     it("parses inline flag values and explicit booleans", () => {
         const parsed = parseTypedCommandArgs(command, "--env=prod --dry-run=false");
-
         assert.deepEqual(parsed.issues, []);
         assert.equal(parsed.values.env, "prod");
         assert.equal(parsed.values.dryRun, false);
@@ -575,7 +573,6 @@ describe("parseTypedCommandArgs", () => {
 
     it("rejects empty inline number values instead of coercing them to zero", () => {
         const parsed = parseTypedCommandArgs(command, "--env dev --count=");
-
         assert.equal(parsed.values.count, undefined);
         assert.deepEqual(
             parsed.issues.map((issue) => [issue.kind, issue.name, issue.message]),
@@ -600,7 +597,6 @@ describe("parseTypedCommandArgs", () => {
         first.values.tags.push("web");
 
         const second = parseTypedCommandArgs(defaultedCommand, "");
-
         assert.deepEqual(second.values.tags, ["api"]);
         assert.deepEqual(defaultedCommand.args.tags?.default, ["api"]);
     });
@@ -624,7 +620,6 @@ describe("parseTypedCommandArgs", () => {
         };
 
         const windowsPath = parseTypedCommandArgs(pathCommand, String.raw`C:\Users\me\file.txt ""`);
-
         assert.deepEqual(windowsPath.issues, []);
         assert.equal(windowsPath.values.path, String.raw`C:\Users\me\file.txt`);
         assert.equal(windowsPath.values.label, "");
@@ -639,7 +634,6 @@ describe("parseTypedCommandArgs", () => {
         };
 
         const parsed = parseTypedCommandArgs(pathCommand, '"--help"');
-
         assert.equal(parsed.mode, "run");
         assert.deepEqual(parsed.issues, []);
         assert.equal(parsed.values.path, "--help");
@@ -672,7 +666,6 @@ describe("parseTypedCommandArgs", () => {
 
     it("rejects inline values on no-boolean flags", () => {
         const parsed = parseTypedCommandArgs(command, "--env dev --no-dry-run=true");
-
         assert.equal(parsed.values.dryRun, undefined);
         assert.deepEqual(
             parsed.issues.map((issue) => [issue.kind, issue.name]),
@@ -694,7 +687,6 @@ describe("parseTypedCommandArgs", () => {
         };
 
         const parsed = parseTypedCommandArgs(databaseCommand, "--database-host localhost");
-
         assert.deepEqual(parsed.issues, []);
         assert.equal(parsed.values.databaseHost, "localhost");
     });
@@ -714,6 +706,7 @@ describe("parseTypedCommandArgs", () => {
                 ) {
                     return [{ message: "start must not exceed end", path: ["start"] }];
                 }
+
                 return [];
             },
         };
@@ -735,7 +728,6 @@ describe("parseTypedCommandArgs", () => {
             },
         };
         const lastWins = parseTypedCommandArgs(lastWinsCommand, "--env dev --env prod");
-
         assert.equal(defaultDuplicate.issues[0]?.kind, "duplicate-argument");
         assert.deepEqual(lastWins.issues, []);
         assert.equal(lastWins.values.env, "prod");
@@ -759,7 +751,6 @@ describe("parseTypedCommandArgs", () => {
             tags: ["api", "web"],
         });
         const parsed = parseTypedCommandArgs(pathCommand, raw);
-
         assert.equal(raw, 'prod --ref="feature with spaces" --no-dry-run --tags=api,web');
         assert.deepEqual(parsed.issues, []);
         assert.equal(parsed.values.env, "prod");
@@ -776,7 +767,6 @@ describe("parseTypedCommandArgs", () => {
 
         const raw = serializeTypedCommandArgs(listCommand, { item: ["alpha", "alpha", "beta"] });
         const parsed = parseTypedCommandArgs(listCommand, raw);
-
         assert.deepEqual(parsed.issues, []);
         assert.deepEqual(parsed.values.item, ["alpha", "alpha", "beta"]);
     });
@@ -793,12 +783,12 @@ describe("parseTypedCommandArgs", () => {
 
         const raw = serializeTypedCommandArgs(keyValueCommand, { setting });
         const parsed = parseTypedCommandArgs(keyValueCommand, raw);
-
         assert.deepEqual(parsed.issues, []);
         const parsedSetting = parsed.values.setting;
         if (typeof parsedSetting !== "object" || parsedSetting === null) {
             assert.fail("expected parsed key-value entries");
         }
+
         assert.equal(Object.hasOwn(parsedSetting, "__proto__"), true);
         assert.deepEqual(parsedSetting, setting);
     });
@@ -862,6 +852,7 @@ describe("parseTypedCommandArgs", () => {
         if (!compiled.ok) {
             assert.fail("expected grouped serialization grammar to compile");
         }
+
         const groupedCommand = {
             args: compiled.command.args,
             compiled: compiled.command,
@@ -872,9 +863,9 @@ describe("parseTypedCommandArgs", () => {
         });
         const parsed = parseTypedCommandArgs(groupedCommand, raw);
         const typed = toTypedParseResult(compiled.command, parsed);
-
         assert.equal(raw, "--database-host=localhost --database-port=5432");
         assert.equal(typed.status, "success");
+
         if (typed.status === "success") {
             assert.deepEqual(typed.value, {
                 database: { host: "localhost", port: 5432 },
@@ -954,7 +945,6 @@ describe("getTypedAutocompleteSuggestions", () => {
         const right = createTypedCommandRegistry();
 
         left.register(command);
-
         assert.equal(left.get(command.name)?.name, command.name);
         assert.equal(right.get(command.name), undefined);
         assert.deepEqual(right.list(), []);
@@ -968,7 +958,6 @@ describe("getTypedAutocompleteSuggestions", () => {
 
         registry.register(first, { id });
         registry.register(second, { id });
-
         assert.equal(registry.get("first-registration"), undefined);
         assert.equal(registry.get("second-registration")?.name, "second-registration");
         assert.deepEqual(
@@ -1036,12 +1025,9 @@ describe("getTypedAutocompleteSuggestions", () => {
 
         registry.register(extensionCommand);
         registry.replaceSkills([skillCommand]);
-
         assert.equal(registry.get("shared-name")?.source, "extension");
         assert.equal(registry.get("shared-name:1")?.source, "skill");
-
         registry.replaceSkills([]);
-
         assert.equal(registry.get("shared-name")?.source, "extension");
         assert.equal(registry.get("shared-name:1"), undefined);
     });
@@ -1065,7 +1051,6 @@ describe("getTypedAutocompleteSuggestions", () => {
         await withRegisteredCommandAsync(asyncCommand, async () => {
             const line = "/async-editor-proof --ref f";
             const editor = getTypedAutocompleteSuggestions([line], 0, line.length);
-
             assert.equal(editor, undefined);
             assert.equal(calls, 0);
             await getTypedArgumentCompletions(asyncCommand, "--ref f");
@@ -1078,7 +1063,7 @@ describe("getTypedAutocompleteSuggestions", () => {
         const ref = { type: "string" as const };
         assert.equal(
             Reflect.defineProperty(ref, "complete", {
-                value: () => Promise.reject(rejection),
+                value: async () => Promise.reject(rejection),
             }),
             true,
         );
@@ -1158,6 +1143,7 @@ describe("getTypedAutocompleteSuggestions", () => {
                 undefined,
             );
         });
+
         assert.equal(asyncCalls, 0);
         assert.equal(observedTasks.length, 1);
         await Promise.all(observedTasks);
@@ -1191,7 +1177,6 @@ describe("getTypedAutocompleteSuggestions", () => {
     it("suggests flags for typed commands", () => {
         withRegisteredCommand(command, () => {
             const suggestions = getTypedAutocompleteSuggestions(["/deploy --e"], 0, 11);
-
             assert.equal(suggestions?.prefix, "--e");
             assert.deepEqual(
                 suggestions?.items.map((item) => item.label),
@@ -1203,7 +1188,6 @@ describe("getTypedAutocompleteSuggestions", () => {
     it("completes inline enum values", () => {
         withRegisteredCommand(command, () => {
             const suggestions = getTypedAutocompleteSuggestions(["/deploy --env=d"], 0, 15);
-
             assert.equal(suggestions?.prefix, "--env=d");
             assert.deepEqual(
                 suggestions?.items.map((item) => item.value),
@@ -1311,7 +1295,6 @@ describe("getTypedAutocompleteSuggestions", () => {
         withRegisteredCommand(refCommand, () => {
             const line = "/replacement-demo --ref feature";
             const editorSuggestions = getTypedAutocompleteSuggestions([line], 0, line.length);
-
             assert.equal(editorSuggestions?.prefix, "feature");
             assert.deepEqual(
                 editorSuggestions?.items.map((item) => ({
@@ -1434,8 +1417,9 @@ describe("getTypedAutocompleteSuggestions", () => {
                 ref: {
                     type: "string",
                     completionTimeoutMs: 1,
-                    completeAsync() {
+                    async completeAsync() {
                         providerCalls += 1;
+
                         return new Promise<readonly []>(() => {});
                     },
                 },
@@ -1467,13 +1451,14 @@ describe("getTypedAutocompleteSuggestions", () => {
                 ref: {
                     type: "string",
                     completionTimeoutMs: 1,
-                    completeAsync(_query, context) {
+                    async completeAsync(_query, context) {
                         sawSignal = context.signal !== undefined;
                         const completion = createTestSignal<[]>();
                         context.signal?.addEventListener("abort", () => {
                             aborted = true;
                             completion.resolve([]);
                         });
+
                         return completion.promise;
                     },
                 },
@@ -1488,6 +1473,7 @@ describe("getTypedAutocompleteSuggestions", () => {
                     const workCompletion = work(controller.signal);
                     controller.abort();
                     await workCompletion;
+
                     return undefined;
                 },
             },
@@ -1600,7 +1586,6 @@ describe("getTypedAutocompleteSuggestions", () => {
     it("completes multi-enum values", () => {
         withRegisteredCommand(command, () => {
             const suggestions = getTypedAutocompleteSuggestions(["/deploy --tags w"], 0, 16);
-
             assert.equal(suggestions?.prefix, "w");
             assert.deepEqual(
                 suggestions?.items.map((item) => item.value),
@@ -1628,7 +1613,6 @@ describe("getTypedAutocompleteSuggestions", () => {
             const quoted = getTypedAutocompleteSuggestions([quotedLine], 0, quotedLine.length);
             const inlineLine = '/quote-complete --ref="pa';
             const inline = getTypedAutocompleteSuggestions([inlineLine], 0, inlineLine.length);
-
             assert.equal(quoted?.prefix, '"fea');
             assert.deepEqual(
                 quoted?.items.map((item) => item.value),

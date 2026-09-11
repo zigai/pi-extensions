@@ -17,6 +17,7 @@ export function createCommandHandle<
     unregister: (command: RegisteredTypedCommand<TDefinitions>) => void,
 ): TypedCommandHandle<TDefinitions, TSubcommands> {
     let disposed = false;
+
     return Object.freeze({
         definition,
         invocationName,
@@ -39,6 +40,7 @@ export function createCommandHandle<
             if (disposed) {
                 return;
             }
+
             disposed = true;
             unregister(command);
         },

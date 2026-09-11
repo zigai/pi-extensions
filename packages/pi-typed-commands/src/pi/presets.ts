@@ -50,6 +50,11 @@ export type TypedCommandPresetContext = {
     isProjectTrusted(): boolean;
 };
 
+type MutableTypedCommandPresetCollection = {
+    recent?: Readonly<Record<string, ArgumentValue>>;
+    presets: Readonly<Record<string, Readonly<Record<string, ArgumentValue>>>>;
+};
+
 type PresetStoreRead =
     | { readonly status: "ok"; readonly path: string; readonly store: PresetStore }
     | { readonly status: "malformed"; readonly path: string };
@@ -58,6 +63,7 @@ function presetStorePath(context: TypedCommandPresetContext): string {
     if (context.isProjectTrusted()) {
         return join(context.cwd, CONFIG_DIR_NAME, "pi-typed-args", "presets.json");
     }
+
     return join(getAgentDir(), "pi-typed-args", "presets.json");
 }
 
@@ -70,23 +76,28 @@ function readPresetStore(context: TypedCommandPresetContext): PresetStoreRead {
     if (!existsSync(path)) {
         return { status: "ok", path, store: emptyStore() };
     }
+
     let parsed: unknown;
     try {
         parsed = JSON.parse(readFileSync(path, "utf8"));
     } catch {
         return { status: "malformed", path };
     }
+
     if (!Schema.Check(PresetStoreSchema, parsed)) {
         return { status: "malformed", path };
     }
+
     return { status: "ok", path, store: Schema.Parse(PresetStoreSchema, parsed) };
 }
 
 function writePresetStore(path: string, store: PresetStore): void {
     mkdirSync(dirname(path), { recursive: true });
+
     const temporaryPath = `${path}.${randomUUID()}.tmp`;
     let replaced = false;
     let temporaryCreated = false;
+
     try {
         writeFileSync(temporaryPath, `${JSON.stringify(store, null, 2)}\n`, {
             flag: "wx",
@@ -113,20 +124,23 @@ function isStringArray(value: ArgumentValue): value is readonly string[] {
 function safePresetValues(
     command: RegisteredTypedCommand,
     values: Readonly<Record<string, ArgumentValue>>,
-): Record<string, StoredArgumentValue> {
+) {
     const safe: Record<string, StoredArgumentValue> = {};
     for (const [name, definition] of Object.entries(command.args)) {
         if (definition.type === "string" && definition.sensitive === true) {
             continue;
         }
+
         const value = values[name];
         if (value === undefined) {
             continue;
         }
+
         const validation = validateArgumentValue(name, definition, value);
         if (!validation.ok) {
             continue;
         }
+
         if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
             safe[name] = value;
         } else if (isStringArray(value)) {
@@ -135,6 +149,7 @@ function safePresetValues(
             safe[name] = { ...value };
         }
     }
+
     return safe;
 }
 
@@ -151,58 +166,57 @@ export function loadTypedCommandPresets(
     if (read.status === "malformed") {
         return undefined;
     }
+
     const key = commandPresetKey(command);
     let stored: PresetStore["commands"][string] | undefined;
     if (Object.hasOwn(read.store.commands, key)) {
         stored = read.store.commands[key];
     }
+
     if (stored === undefined) {
         return { presets: {} };
     }
+
     const presets: Record<string, Readonly<Record<string, ArgumentValue>>> = Object.fromEntries(
         Object.entries(stored.presets).map(([name, values]) => [
             name,
             safePresetValues(command, values),
         ]),
     );
-    const collection: {
-        recent?: Readonly<Record<string, ArgumentValue>>;
-        presets: Readonly<Record<string, Readonly<Record<string, ArgumentValue>>>>;
-    } = { presets };
+    const collection: MutableTypedCommandPresetCollection = { presets };
     if (stored.recent !== undefined) {
         collection.recent = safePresetValues(command, stored.recent);
     }
+
     return collection;
 }
 
 function updateTypedCommandPresets(
     context: TypedCommandPresetContext,
     command: RegisteredTypedCommand,
-    update: (entry: {
-        recent?: Record<string, StoredArgumentValue>;
-        presets: Record<string, Record<string, StoredArgumentValue>>;
-    }) => void,
+    update: (entry: PresetStore["commands"][string]) => void,
 ): boolean {
     const read = readPresetStore(context);
     if (read.status === "malformed") {
         return false;
     }
+
     const key = commandPresetKey(command);
     let existing: PresetStore["commands"][string] | undefined;
     if (Object.hasOwn(read.store.commands, key)) {
         existing = read.store.commands[key];
     }
-    const entry: {
-        recent?: Record<string, StoredArgumentValue>;
-        presets: Record<string, Record<string, StoredArgumentValue>>;
-    } = {
+
+    const entry: PresetStore["commands"][string] = {
         presets: { ...existing?.presets },
     };
     if (existing?.recent !== undefined) {
         entry.recent = { ...existing.recent };
     }
+
     update(entry);
     read.store.commands = { ...read.store.commands, [key]: entry };
+
     try {
         writePresetStore(read.path, read.store);
         return true;
@@ -218,6 +232,7 @@ export function recordTypedCommandRecentValues(
     values: Readonly<Record<string, ArgumentValue>>,
 ): boolean {
     const safe = safePresetValues(command, values);
+
     return updateTypedCommandPresets(context, command, (entry) => {
         entry.recent = safe;
     });
@@ -234,7 +249,9 @@ export function saveTypedCommandPreset(
     if (trimmedName.length === 0) {
         return false;
     }
+
     const safe = safePresetValues(command, values);
+
     return updateTypedCommandPresets(context, command, (entry) => {
         entry.presets = { ...entry.presets, [trimmedName]: safe };
     });

@@ -24,6 +24,7 @@ function occurrencePolicy(definition: ArgumentDefinition): "error" | "first" | "
     if (definition.occurrence !== undefined) {
         return definition.occurrence;
     }
+
     switch (definition.type) {
         case "string":
         case "number":
@@ -104,24 +105,30 @@ function appendValues(
         if (isKeyValueArgumentValue(current)) {
             previous = current;
         }
+
         return { ...previous, ...next };
     }
+
     if (!isStringArrayValue(next)) {
         return next;
     }
+
     let values: string[] = [];
     if (isStringArrayValue(current)) {
         values = current;
     }
+
     if (definition.type === "string-list") {
         return [...values, ...next];
     }
+
     const combined = [...values];
     for (const item of next) {
         if (!combined.includes(item)) {
             combined.push(item);
         }
     }
+
     return combined;
 }
 
@@ -148,6 +155,7 @@ function decodeOccurrences(
                 );
                 continue;
             }
+
             if (acceptsImplicitBooleanValue(definition)) {
                 next = false;
             } else {
@@ -179,6 +187,7 @@ function decodeOccurrences(
                 issues.push(coerced.issue);
                 continue;
             }
+
             next = coerced.value;
         }
 
@@ -187,6 +196,7 @@ function decodeOccurrences(
                 issues.push(duplicateIssue(name, definition));
                 continue;
             }
+
             if (policy === "first") {
                 continue;
             }
@@ -202,6 +212,7 @@ function decodeOccurrences(
     if (issues.length > 0) {
         return { ok: false, issues, value };
     }
+
     return { ok: true, value };
 }
 
@@ -216,6 +227,7 @@ export function quoteSerializedValue(value: string, force = false): string {
     ) {
         return value;
     }
+
     return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
 }
 
@@ -223,27 +235,33 @@ function serializeValue(definition: ArgumentDefinition, name: string, value: unk
     if (value === undefined) {
         return [];
     }
+
     const validation = validateArgumentValue(name, definition, value);
     if (!validation.ok) {
         throw new TypeError(validation.message);
     }
+
     switch (definition.type) {
         case "boolean": {
             if (value === true) {
                 return [formatArgumentFlagName(name, definition)];
             }
+
             if (value === false) {
                 return [`--no-${formatArgumentFlagName(name, definition).slice(2)}`];
             }
+
             return [];
         }
         case "multi-enum": {
             if (!Array.isArray(value)) {
                 return [];
             }
+
             if (value.length === 0) {
                 return [`${formatArgumentFlagName(name, definition)}=""`];
             }
+
             return [
                 `${formatArgumentFlagName(name, definition)}=${quoteSerializedValue(value.join(","))}`,
             ];
@@ -252,9 +270,11 @@ function serializeValue(definition: ArgumentDefinition, name: string, value: unk
             if (!Array.isArray(value)) {
                 return [];
             }
+
             if (value.length === 0) {
                 return [`${formatArgumentFlagName(name, definition)}=""`];
             }
+
             return [
                 `${formatArgumentFlagName(name, definition)}=${quoteSerializedValue(value.join(","))}`,
             ];
@@ -263,10 +283,12 @@ function serializeValue(definition: ArgumentDefinition, name: string, value: unk
             if (typeof value !== "object" || value === null || Array.isArray(value)) {
                 return [];
             }
+
             const entries = Object.entries(value);
             if (entries.length === 0) {
                 return [`${formatArgumentFlagName(name, definition)}=""`];
             }
+
             return entries.map(
                 ([key, entryValue]) =>
                     `${formatArgumentFlagName(name, definition)}=${quoteSerializedValue(`${key}=${entryValue}`)}`,
@@ -277,18 +299,22 @@ function serializeValue(definition: ArgumentDefinition, name: string, value: unk
             if (typeof value !== "string") {
                 return [];
             }
+
             if (definition.type === "string" && definition.sensitive === true) {
                 return [];
             }
+
             return [`${formatArgumentFlagName(name, definition)}=${quoteSerializedValue(value)}`];
         case "number": {
             if (typeof value !== "number") {
                 return [];
             }
+
             let text = String(value);
             if (Object.is(value, -0)) {
                 text = "-0";
             }
+
             return [`${formatArgumentFlagName(name, definition)}=${quoteSerializedValue(text)}`];
         }
         default:
@@ -313,10 +339,12 @@ export function compileArgumentBehavior(
     let flag: string | undefined;
     let aliases: string[] = [];
     const formOnly = isFormOnlyArgument(definition);
+
     if (!positional && !formOnly) {
         flag = formatArgumentFlagName(key, definition).slice(2);
         aliases = [...(definition.aliases ?? [])];
     }
+
     const compiled: Omit<CompiledArgument, "flag" | "position"> & {
         flag?: string;
         position?: number;
@@ -332,10 +360,12 @@ export function compileArgumentBehavior(
             if (validation.ok) {
                 return [];
             }
+
             let kind: ParseIssue["kind"] = "invalid-value";
             if (definition.required === true && value === undefined) {
                 kind = "missing-required";
             }
+
             return [
                 {
                     kind,
@@ -352,8 +382,10 @@ export function compileArgumentBehavior(
                         throw new TypeError(validation.message);
                     }
                 }
+
                 return [];
             }
+
             return serializeValue(definition, key, value);
         },
         describe(): ArgumentDescription {
@@ -366,40 +398,49 @@ export function compileArgumentBehavior(
             if (flag !== undefined) {
                 description.flag = flag;
             }
+
             const position = positionFor(definition);
             if (position !== undefined) {
                 description.position = position;
             }
+
             if (definition.default !== undefined) {
                 description.defaultValue = definition.default;
             }
+
             const title = definition.title ?? definition.ui?.title;
             if (title !== undefined) {
                 description.title = title;
             }
+
             if (definition.description !== undefined) {
                 description.description = definition.description;
             }
+
             return description;
         },
     };
     if (flag !== undefined) {
         compiled.flag = flag;
     }
+
     const position = positionFor(definition);
     if (position !== undefined) {
         compiled.position = position;
     }
+
     if (definition.complete !== undefined) {
         compiled.complete = (query: string, context: TypedCompletionContext) =>
             definition.complete?.(query, context) ?? [];
     } else if (completionValuesForArgument(definition).length > 0) {
         compiled.complete = (query: string) => staticCompletionItems(definition, query);
     }
+
     const completeAsync = definition.completeAsync;
     if (completeAsync !== undefined) {
-        compiled.completeAsync = (query: string, context: TypedCompletionContext) =>
+        compiled.completeAsync = async (query: string, context: TypedCompletionContext) =>
             completeAsync(query, context);
     }
+
     return Object.freeze(compiled);
 }

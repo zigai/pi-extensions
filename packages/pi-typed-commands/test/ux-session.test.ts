@@ -39,7 +39,7 @@ function createSessionHarness(
         mode: "rpc",
         ui: {
             getEditorText: () => editorText,
-            input(title) {
+            async input(title) {
                 inputTitles.push(title);
                 return Promise.resolve(inputs.shift());
             },
@@ -48,11 +48,12 @@ function createSessionHarness(
             },
             onTerminalInput(handler) {
                 terminalInput = handler;
+
                 return () => {
                     terminalInput = undefined;
                 };
             },
-            select(title, options) {
+            async select(title, options) {
                 selectedOptions.push({ title, options });
                 return Promise.resolve(selections.shift());
             },
@@ -62,6 +63,7 @@ function createSessionHarness(
             },
         },
     });
+
     return {
         ctx,
         editorUpdates,
@@ -152,6 +154,7 @@ describe("typed command UX session", () => {
                     if (!isAutocompleteProviderFactory(factory)) {
                         assert.fail("expected an autocomplete provider factory");
                     }
+
                     providerFactory = factory;
                 },
                 getEditorText() {
@@ -159,6 +162,7 @@ describe("typed command UX session", () => {
                 },
                 onTerminalInput(handler) {
                     terminalInput = handler;
+
                     return () => {
                         terminalInput = undefined;
                     };
@@ -190,7 +194,6 @@ describe("typed command UX session", () => {
             );
             assert.ok(terminalInput);
             assert.equal(terminalInput("\t"), undefined);
-
             const request = new AbortController();
             request.abort();
             const remoteText = "/bridge-completion --remote x";
@@ -233,14 +236,15 @@ describe("typed command UX session", () => {
             assert.ok(terminalInput);
             assert.deepEqual(terminalInput("\t"), { consume: true });
             await session.waitForFormCompletion();
-
             assert.deepEqual(harness.inputTitles, ["Set --path (current: )"]);
             assert.deepEqual(harness.editorUpdates, [""]);
             assert.equal(messages.length, 1);
             assert.equal(typeof messages[0], "string");
+
             if (typeof messages[0] !== "string") {
                 assert.fail("expected a rendered skill message");
             }
+
             assert.match(messages[0], /<skill name="inspect-files"/);
             assert.match(messages[0], /Inspect "src"\./);
         } finally {
@@ -272,7 +276,6 @@ describe("typed command UX session", () => {
             assert.ok(terminalInput);
             assert.deepEqual(terminalInput("\t"), { consume: true });
             await session.waitForFormCompletion();
-
             assert.deepEqual(harness.editorUpdates, []);
             assert.deepEqual(harness.notifications, [
                 { message: "• path is required", level: "warning" },

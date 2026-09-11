@@ -65,6 +65,7 @@ export type TypedSkillMetadata = {
     body: string;
     args: FlatArgumentDefinitions;
     formTitle?: string;
+
     /** Static ghost text loaded from `frontmatter.metadata.ghostText`. */
     ghostText?: string;
 };
@@ -83,6 +84,7 @@ export type TypedSkillDiagnostics = {
 export type SkillArgumentNormalizationResult = {
     /** Successfully normalized argument definitions keyed by argument path. */
     args: FlatArgumentDefinitions;
+
     /** Structured authoring diagnostics that should be shown before using the typed skill. */
     diagnostics: readonly SkillArgumentDiagnostic[];
 };

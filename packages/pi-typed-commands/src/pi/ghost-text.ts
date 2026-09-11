@@ -35,14 +35,20 @@ type EditorCursor = {
     readonly col: number;
 };
 
+type GhostTextSubcommandFields = {
+    subcommand?: string;
+};
+
 function normalizedGhostText(value: string | undefined): string | undefined {
     if (value === undefined) {
         return undefined;
     }
+
     const normalized = value.replaceAll(/\p{Cc}+/gu, " ").trim();
     if (normalized.length === 0) {
         return undefined;
     }
+
     return normalized;
 }
 
@@ -53,6 +59,7 @@ function resolveConfiguredGhostText(
     if (typeof configured === "string") {
         return normalizedGhostText(configured);
     }
+
     try {
         return normalizedGhostText(configured(context));
     } catch {
@@ -69,11 +76,13 @@ export function resolveGhostText(
     if (/[\r\n]/.test(editorText)) {
         return undefined;
     }
+
     const match = EXACT_INVOCATION_PATTERN.exec(editorText);
     const commandName = match?.[1];
     if (commandName === undefined) {
         return undefined;
     }
+
     const root = registry.get(commandName);
     if (root === undefined) {
         return undefined;
@@ -87,10 +96,12 @@ export function resolveGhostText(
         if (route.status !== "subcommand" || route.subcommand === undefined) {
             return undefined;
         }
+
         const selected = root.subcommands?.[route.subcommand];
         if (selected === undefined) {
             return undefined;
         }
+
         subcommand = route.subcommand;
         command = selected;
     }
@@ -99,10 +110,12 @@ export function resolveGhostText(
     if (configured === undefined) {
         return undefined;
     }
-    const subcommandFields: { subcommand?: string } = {};
+
+    const subcommandFields: GhostTextSubcommandFields = {};
     if (subcommand !== undefined) {
         subcommandFields.subcommand = subcommand;
     }
+
     const context: TypedCommandGhostTextContext = {
         ctx,
         commandName: commandDisplayName(root),
@@ -112,6 +125,7 @@ export function resolveGhostText(
     if (text === undefined) {
         return undefined;
     }
+
     return {
         text,
         command,
@@ -136,14 +150,17 @@ function readEditorCursor(component: CursorAwareEditor): EditorCursor | undefine
     } catch {
         return undefined;
     }
+
     if (typeof value !== "object" || value === null) {
         return undefined;
     }
+
     const line: unknown = Reflect.get(value, "line");
     const col: unknown = Reflect.get(value, "col");
     if (!Number.isInteger(line) || !Number.isInteger(col)) {
         return undefined;
     }
+
     return { line: Number(line), col: Number(col) };
 }
 
@@ -159,16 +176,19 @@ export function renderGhostTextOnEditorLines(
     if (cursorLine < 0) {
         return result;
     }
+
     const line = result[cursorLine];
     if (line === undefined) {
         return result;
     }
+
     const insertion = line.indexOf(END_CURSOR) + END_CURSOR.length;
     result[cursorLine] = truncateToWidth(
         `${line.slice(0, insertion)}${style(ghostText)}${line.slice(insertion)}`,
         width,
         "",
     );
+
     return result;
 }
 
@@ -242,10 +262,12 @@ class GhostTextEditor implements EditorComponent, Focusable {
         if (cursor?.line !== 0 || cursor.col !== editorText.length) {
             return lines;
         }
+
         const ghostText = this.getGhostText();
         if (ghostText === undefined) {
             return lines;
         }
+
         return renderGhostTextOnEditorLines(lines, width, ghostText, this.style);
     }
 
@@ -278,6 +300,7 @@ class GhostTextEditor implements EditorComponent, Focusable {
             this.base.insertTextAtCursor(text);
             return;
         }
+
         this.base.setText(`${this.base.getText()}${text}`);
     }
 
@@ -314,5 +337,6 @@ export function withGhostText(
     if (!isCursorAwareEditor(base)) {
         return base;
     }
+
     return new GhostTextEditor(base, getGhostText, style);
 }

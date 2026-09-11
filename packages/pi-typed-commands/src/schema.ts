@@ -17,11 +17,13 @@ import type {
 } from "./types.js";
 
 const ARGUMENT_NAME_PATTERN = /^[A-Za-z0-9_.-]+$/;
+
 const RESERVED_ARGUMENT_NAME_SEGMENTS: ReadonlySet<string> = new Set([
     "__proto__",
     "constructor",
     "prototype",
 ]);
+
 const ARGUMENT_TYPES: ReadonlySet<string> = new Set([
     "string",
     "number",
@@ -62,9 +64,11 @@ export function createParseIssue(
     if (name !== undefined) {
         result.name = name;
     }
+
     if (token !== undefined) {
         result.token = token;
     }
+
     return result;
 }
 
@@ -74,9 +78,11 @@ export function booleanFromString(value: string): boolean | undefined {
     if (["1", "true", "yes", "y", "on"].includes(normalized)) {
         return true;
     }
+
     if (["0", "false", "no", "n", "off"].includes(normalized)) {
         return false;
     }
+
     return undefined;
 }
 
@@ -101,6 +107,7 @@ export function argumentFlagNames(name: string, definition: ArgumentDefinition):
     for (const alias of definition.aliases ?? []) {
         names.push(normalizeFlagName(alias));
     }
+
     return names;
 }
 
@@ -117,9 +124,11 @@ function formatArgumentMessageName(
     if (options?.nameStyle === "field") {
         return toKebabCase(name);
     }
+
     if (definition !== undefined) {
         return formatArgumentFlagName(name, definition);
     }
+
     return formatFlagName(name);
 }
 
@@ -128,6 +137,7 @@ export function orderedArgumentEntries(
     definitions: ArgumentDefinitions,
 ): Array<[string, ArgumentDefinition]> {
     const flatDefinitions = flattenGroupedArgumentDefinitions(definitions);
+
     return Object.entries(flatDefinitions)
         .map(([name, definition], index) => ({ name, definition, index }))
         .sort((left, right) => {
@@ -137,6 +147,7 @@ export function orderedArgumentEntries(
                 if (leftIsPositional) {
                     return -1;
                 }
+
                 return 1;
             }
 
@@ -144,10 +155,12 @@ export function orderedArgumentEntries(
             if (typeof left.definition.position === "number") {
                 leftPosition = left.definition.position;
             }
+
             let rightPosition = right.index;
             if (typeof right.definition.position === "number") {
                 rightPosition = right.definition.position;
             }
+
             return leftPosition - rightPosition;
         })
         .map((entry) => [entry.name, entry.definition]);
@@ -177,10 +190,12 @@ function reservedArgumentNameSegment(name: string): string | undefined {
             return segment;
         }
     }
+
     return undefined;
 }
 
 const FLAG_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9-]*$/;
+
 const SUPPORTED_WIDGETS: ReadonlySet<string> = new Set([
     "text",
     "textarea",
@@ -219,6 +234,7 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
     if (!isRecord(value)) {
         return false;
     }
+
     const prototype: unknown = Object.getPrototypeOf(value);
     return prototype === Object.prototype || prototype === null;
 }
@@ -271,9 +287,11 @@ function validateOptionalStringField(
     if (!Object.hasOwn(raw, field) || raw[field] === undefined) {
         return true;
     }
+
     if (typeof raw[field] === "string") {
         return true;
     }
+
     addArgumentDiagnostic(
         diagnostics,
         name,
@@ -281,6 +299,7 @@ function validateOptionalStringField(
         `argument.${field}.invalid`,
         `${name}.${field} must be a string`,
     );
+
     return false;
 }
 
@@ -293,9 +312,11 @@ function validateOptionalBooleanField(
     if (!Object.hasOwn(raw, field) || raw[field] === undefined) {
         return true;
     }
+
     if (typeof raw[field] === "boolean") {
         return true;
     }
+
     addArgumentDiagnostic(
         diagnostics,
         name,
@@ -303,10 +324,11 @@ function validateOptionalBooleanField(
         `argument.${field}.invalid`,
         `${name}.${field} must be a boolean`,
     );
+
     return false;
 }
 
-function validateAliasesShape(
+function validateAliases(
     name: string,
     raw: Record<string, unknown>,
     diagnostics: DefinitionDiagnostic[],
@@ -314,6 +336,7 @@ function validateAliasesShape(
     if (!Object.hasOwn(raw, "aliases") || raw.aliases === undefined) {
         return true;
     }
+
     if (!Array.isArray(raw.aliases)) {
         addArgumentDiagnostic(
             diagnostics,
@@ -330,6 +353,7 @@ function validateAliasesShape(
         if (typeof alias === "string") {
             continue;
         }
+
         addDefinitionDiagnostic(
             diagnostics,
             "argument.aliases.item.invalid",
@@ -338,10 +362,11 @@ function validateAliasesShape(
         );
         valid = false;
     }
+
     return valid;
 }
 
-function validateValuesShape(
+function validateEnumValues(
     name: string,
     raw: Record<string, unknown>,
     diagnostics: DefinitionDiagnostic[],
@@ -362,6 +387,7 @@ function validateValuesShape(
         if (typeof value === "string") {
             continue;
         }
+
         addDefinitionDiagnostic(
             diagnostics,
             "argument.values.item.invalid",
@@ -370,10 +396,11 @@ function validateValuesShape(
         );
         valid = false;
     }
+
     return valid;
 }
 
-function validateEnumOptionDescriptionsShape(
+function validateEnumOptionDescriptions(
     name: string,
     raw: Record<string, unknown>,
     diagnostics: DefinitionDiagnostic[],
@@ -398,6 +425,7 @@ function validateEnumOptionDescriptionsShape(
     if (isStringArrayValue(raw.values)) {
         values = new Set(raw.values);
     }
+
     let valid = true;
     for (const [value, description] of Object.entries(optionDescriptions)) {
         if (values === undefined || !values.has(value)) {
@@ -409,6 +437,7 @@ function validateEnumOptionDescriptionsShape(
             );
             valid = false;
         }
+
         if (typeof description !== "string" || description.length === 0) {
             addDefinitionDiagnostic(
                 diagnostics,
@@ -419,10 +448,11 @@ function validateEnumOptionDescriptionsShape(
             valid = false;
         }
     }
+
     return valid;
 }
 
-function validateCustomWidgetShape(
+function validateCustomWidget(
     name: string,
     custom: unknown,
     diagnostics: DefinitionDiagnostic[],
@@ -430,6 +460,7 @@ function validateCustomWidgetShape(
     if (custom === undefined) {
         return true;
     }
+
     if (!isRecord(custom)) {
         addArgumentDiagnostic(
             diagnostics,
@@ -440,6 +471,7 @@ function validateCustomWidgetShape(
         );
         return false;
     }
+
     if (!isPlainRecord(custom)) {
         addArgumentDiagnostic(
             diagnostics,
@@ -457,6 +489,7 @@ function validateCustomWidgetShape(
         if (value === undefined || typeof value === "function") {
             continue;
         }
+
         addArgumentDiagnostic(
             diagnostics,
             name,
@@ -466,13 +499,19 @@ function validateCustomWidgetShape(
         );
         valid = false;
     }
+
     return valid;
 }
 
-function validateUiShape(name: string, ui: unknown, diagnostics: DefinitionDiagnostic[]): boolean {
+function validateUiOptions(
+    name: string,
+    ui: unknown,
+    diagnostics: DefinitionDiagnostic[],
+): boolean {
     if (ui === undefined) {
         return true;
     }
+
     if (!isRecord(ui)) {
         addArgumentDiagnostic(
             diagnostics,
@@ -483,6 +522,7 @@ function validateUiShape(name: string, ui: unknown, diagnostics: DefinitionDiagn
         );
         return false;
     }
+
     if (!isPlainRecord(ui)) {
         addArgumentDiagnostic(
             diagnostics,
@@ -505,6 +545,7 @@ function validateUiShape(name: string, ui: unknown, diagnostics: DefinitionDiagn
         );
         valid = false;
     }
+
     for (const field of [
         "readOnly",
         "hidden",
@@ -517,6 +558,7 @@ function validateUiShape(name: string, ui: unknown, diagnostics: DefinitionDiagn
         if (value === undefined || typeof value === "boolean" || typeof value === "function") {
             continue;
         }
+
         addArgumentDiagnostic(
             diagnostics,
             name,
@@ -526,11 +568,13 @@ function validateUiShape(name: string, ui: unknown, diagnostics: DefinitionDiagn
         );
         valid = false;
     }
+
     for (const field of ["section", "copyFrom"] as const) {
         const value = ui[field];
         if (value === undefined || typeof value === "string") {
             continue;
         }
+
         addArgumentDiagnostic(
             diagnostics,
             name,
@@ -540,6 +584,7 @@ function validateUiShape(name: string, ui: unknown, diagnostics: DefinitionDiagn
         );
         valid = false;
     }
+
     if (ui.advanced !== undefined && typeof ui.advanced !== "boolean") {
         addArgumentDiagnostic(
             diagnostics,
@@ -550,6 +595,7 @@ function validateUiShape(name: string, ui: unknown, diagnostics: DefinitionDiagn
         );
         valid = false;
     }
+
     if (ui.compute !== undefined && typeof ui.compute !== "function") {
         addArgumentDiagnostic(
             diagnostics,
@@ -560,10 +606,11 @@ function validateUiShape(name: string, ui: unknown, diagnostics: DefinitionDiagn
         );
         valid = false;
     }
-    return validateCustomWidgetShape(name, ui.custom, diagnostics) && valid;
+
+    return validateCustomWidget(name, ui.custom, diagnostics) && valid;
 }
 
-function validateArgumentDefinitionShape(
+function validateArgumentDefinition(
     name: string,
     definition: unknown,
     diagnostics: DefinitionDiagnostic[],
@@ -577,6 +624,7 @@ function validateArgumentDefinitionShape(
         );
         return false;
     }
+
     if (!isPlainRecord(definition)) {
         addDefinitionDiagnostic(
             diagnostics,
@@ -602,6 +650,7 @@ function validateArgumentDefinitionShape(
     for (const field of ["description", "flag", "title", "placeholder"] as const) {
         valid = validateOptionalStringField(name, definition, field, diagnostics) && valid;
     }
+
     if (
         definition.examples !== undefined &&
         (!Array.isArray(definition.examples) ||
@@ -616,11 +665,13 @@ function validateArgumentDefinitionShape(
         );
         valid = false;
     }
+
     for (const field of ["required", "rest", "formOnly"] as const) {
         valid = validateOptionalBooleanField(name, definition, field, diagnostics) && valid;
     }
-    valid = validateAliasesShape(name, definition, diagnostics) && valid;
-    valid = validateUiShape(name, definition.ui, diagnostics) && valid;
+
+    valid = validateAliases(name, definition, diagnostics) && valid;
+    valid = validateUiOptions(name, definition.ui, diagnostics) && valid;
 
     if (definition.complete !== undefined && typeof definition.complete !== "function") {
         addArgumentDiagnostic(
@@ -645,6 +696,7 @@ function validateArgumentDefinitionShape(
             );
             valid = false;
         }
+
         if (
             definition.format !== undefined &&
             (typeof definition.format !== "string" ||
@@ -661,6 +713,7 @@ function validateArgumentDefinitionShape(
             );
             valid = false;
         }
+
         if (definition.sensitive !== undefined && typeof definition.sensitive !== "boolean") {
             addArgumentDiagnostic(
                 diagnostics,
@@ -672,14 +725,17 @@ function validateArgumentDefinitionShape(
             valid = false;
         }
     }
+
     if (definition.type === "number" && definition.integer !== undefined) {
         valid = validateOptionalBooleanField(name, definition, "integer", diagnostics) && valid;
     }
+
     if (definition.type === "enum" || definition.type === "multi-enum") {
-        valid = validateValuesShape(name, definition, diagnostics) && valid;
+        valid = validateEnumValues(name, definition, diagnostics) && valid;
     }
+
     if (definition.type === "enum") {
-        valid = validateEnumOptionDescriptionsShape(name, definition, diagnostics) && valid;
+        valid = validateEnumOptionDescriptions(name, definition, diagnostics) && valid;
     }
 
     return valid;
@@ -699,8 +755,10 @@ function validateFlagName(
             `${owner}: flag --${flag} must contain only letters, numbers, and hyphens`,
             path,
         );
+
         return;
     }
+
     if (flag === "help") {
         addDefinitionDiagnostic(
             diagnostics,
@@ -709,6 +767,7 @@ function validateFlagName(
             path,
         );
     }
+
     if (flag.startsWith("no-")) {
         addDefinitionDiagnostic(
             diagnostics,
@@ -717,6 +776,7 @@ function validateFlagName(
             path,
         );
     }
+
     const existing = flags.get(flag);
     if (existing === owner) {
         addDefinitionDiagnostic(
@@ -725,8 +785,10 @@ function validateFlagName(
             `${owner}: flag --${flag} is defined more than once`,
             path,
         );
+
         return;
     }
+
     if (existing !== undefined) {
         addDefinitionDiagnostic(
             diagnostics,
@@ -734,8 +796,10 @@ function validateFlagName(
             `${owner}: flag --${flag} collides with ${existing}`,
             path,
         );
+
         return;
     }
+
     flags.set(flag, owner);
 }
 
@@ -776,11 +840,13 @@ function isValidCalendarDate(value: string): boolean {
     if (match === null) {
         return false;
     }
+
     const year = Number(match[1]);
     const month = Number(match[2]);
     const day = Number(match[3]);
     const date = new Date(0);
     date.setUTCFullYear(year, month - 1, day);
+
     return (
         date.getUTCFullYear() === year &&
         date.getUTCMonth() === month - 1 &&
@@ -806,6 +872,7 @@ function validateStringFormat(
             if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
                 return "expects an email address";
             }
+
             return undefined;
         case "url": {
             try {
@@ -819,21 +886,25 @@ function validateStringFormat(
             if (!isValidCalendarDate(value)) {
                 return "expects a date in YYYY-MM-DD form";
             }
+
             return undefined;
         case "time":
             if (!/^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(value)) {
                 return "expects a time in HH:MM or HH:MM:SS form";
             }
+
             return undefined;
         case "datetime":
             if (!isValidIsoDateTime(value)) {
                 return "expects an ISO date-time";
             }
+
             return undefined;
         case "duration":
             if (!/^(?:\d+(?:\.\d+)?(?:ms|s|m|h|d|w))+$/.test(value)) {
                 return "expects a duration such as 30s, 5m, or 2h";
             }
+
             return undefined;
         case "json":
             try {
@@ -869,18 +940,21 @@ export function validateArgumentValue(
             if (typeof value !== "string") {
                 return { ok: false, message: `${displayName} expects text` };
             }
+
             if (definition.minLength !== undefined && value.length < definition.minLength) {
                 return {
                     ok: false,
                     message: `${displayName} must be at least ${definition.minLength} characters`,
                 };
             }
+
             if (definition.maxLength !== undefined && value.length > definition.maxLength) {
                 return {
                     ok: false,
                     message: `${displayName} must be at most ${definition.maxLength} characters`,
                 };
             }
+
             if (definition.pattern !== undefined) {
                 let pattern: RegExp;
                 try {
@@ -895,6 +969,7 @@ export function validateArgumentValue(
                         message: `${displayName} has an invalid pattern`,
                     };
                 }
+
                 if (!pattern.test(value)) {
                     return {
                         ok: false,
@@ -902,39 +977,47 @@ export function validateArgumentValue(
                     };
                 }
             }
+
             if (definition.format !== undefined) {
                 const formatIssue = validateStringFormat(definition.format, value);
                 if (formatIssue !== undefined) {
                     return { ok: false, message: `${displayName} ${formatIssue}` };
                 }
             }
+
             return { ok: true };
         }
         case "number": {
             if (typeof value !== "number" || !Number.isFinite(value)) {
                 return { ok: false, message: `${displayName} expects a number` };
             }
+
             if (definition.integer === true && !Number.isInteger(value)) {
                 return { ok: false, message: `${displayName} expects an integer` };
             }
+
             if (definition.min !== undefined && value < definition.min) {
                 return { ok: false, message: `${displayName} must be at least ${definition.min}` };
             }
+
             if (definition.max !== undefined && value > definition.max) {
                 return { ok: false, message: `${displayName} must be at most ${definition.max}` };
             }
+
             return { ok: true };
         }
         case "boolean": {
             if (typeof value === "boolean") {
                 return { ok: true };
             }
+
             return { ok: false, message: `${displayName} expects true or false` };
         }
         case "enum": {
             if (typeof value === "string" && definition.values.includes(value)) {
                 return { ok: true };
             }
+
             return {
                 ok: false,
                 message: `${displayName} must be one of: ${definition.values.join(", ")}`,
@@ -950,60 +1033,72 @@ export function validateArgumentValue(
                     message: `${displayName} must use values from: ${definition.values.join(", ")}`,
                 };
             }
+
             if (new Set(value).size !== value.length) {
                 return {
                     ok: false,
                     message: `${displayName} may not contain duplicate values`,
                 };
             }
+
             if (definition.required === true && value.length === 0) {
                 return { ok: false, message: `${displayName} is required` };
             }
+
             if (definition.minItems !== undefined && value.length < definition.minItems) {
                 return {
                     ok: false,
                     message: `${displayName} must include at least ${definition.minItems} item(s)`,
                 };
             }
+
             if (definition.maxItems !== undefined && value.length > definition.maxItems) {
                 return {
                     ok: false,
                     message: `${displayName} must include at most ${definition.maxItems} item(s)`,
                 };
             }
+
             return { ok: true };
         }
         case "string-list": {
             if (!isStringArrayValue(value)) {
                 return { ok: false, message: `${displayName} expects a list of text values` };
             }
+
             if (value.some((item) => item.length === 0)) {
                 return { ok: false, message: `${displayName} items must not be empty` };
             }
+
             if (value.some((item) => item.trim() !== item)) {
                 return {
                     ok: false,
                     message: `${displayName} items may not start or end with whitespace`,
                 };
             }
+
             if (value.some((item) => item.includes(","))) {
                 return { ok: false, message: `${displayName} items may not contain commas` };
             }
+
             if (definition.required === true && value.length === 0) {
                 return { ok: false, message: `${displayName} is required` };
             }
+
             if (definition.minItems !== undefined && value.length < definition.minItems) {
                 return {
                     ok: false,
                     message: `${displayName} must include at least ${definition.minItems} item(s)`,
                 };
             }
+
             if (definition.maxItems !== undefined && value.length > definition.maxItems) {
                 return {
                     ok: false,
                     message: `${displayName} must include at most ${definition.maxItems} item(s)`,
                 };
             }
+
             return { ok: true };
         }
         case "key-value": {
@@ -1014,22 +1109,26 @@ export function validateArgumentValue(
             ) {
                 return { ok: false, message: `${displayName} expects key=value entries` };
             }
+
             const entries = Object.entries(value);
             if (entries.some(([key]) => key.length === 0)) {
                 return { ok: false, message: `${displayName} keys must not be empty` };
             }
+
             if (entries.some(([key]) => key.trim() !== key)) {
                 return {
                     ok: false,
                     message: `${displayName} keys may not start or end with whitespace`,
                 };
             }
+
             if (entries.some(([key]) => key.includes(",") || key.includes("="))) {
                 return {
                     ok: false,
                     message: `${displayName} keys may not contain commas or equals signs`,
                 };
             }
+
             if (
                 entries.some(
                     ([, entryValue]) => typeof entryValue === "string" && entryValue.includes(","),
@@ -1037,22 +1136,26 @@ export function validateArgumentValue(
             ) {
                 return { ok: false, message: `${displayName} values may not contain commas` };
             }
+
             const size = entries.length;
             if (definition.required === true && size === 0) {
                 return { ok: false, message: `${displayName} is required` };
             }
+
             if (definition.minItems !== undefined && size < definition.minItems) {
                 return {
                     ok: false,
                     message: `${displayName} must include at least ${definition.minItems} entry(s)`,
                 };
             }
+
             if (definition.maxItems !== undefined && size > definition.maxItems) {
                 return {
                     ok: false,
                     message: `${displayName} must include at most ${definition.maxItems} entry(s)`,
                 };
             }
+
             return { ok: true };
         }
         default:
@@ -1068,6 +1171,7 @@ function validateDefault(
     if (definition.default === undefined) {
         return;
     }
+
     const validation = validateArgumentValue(name, definition, definition.default);
     if (!validation.ok) {
         addArgumentDiagnostic(
@@ -1089,6 +1193,7 @@ function validateUi(
     if (ui === undefined) {
         return;
     }
+
     if (ui.widget !== undefined) {
         if (!SUPPORTED_WIDGETS.has(ui.widget)) {
             addArgumentDiagnostic(
@@ -1099,6 +1204,7 @@ function validateUi(
                 `${name}.ui.widget must be one of: ${[...SUPPORTED_WIDGETS].join(", ")}`,
             );
         }
+
         if ((ui.widget === "number" || ui.widget === "stepper") && definition.type !== "number") {
             addArgumentDiagnostic(
                 diagnostics,
@@ -1108,6 +1214,7 @@ function validateUi(
                 `${name}.ui.widget ${ui.widget} requires a number argument`,
             );
         }
+
         if ((ui.widget === "toggle" || ui.widget === "confirm") && definition.type !== "boolean") {
             addArgumentDiagnostic(
                 diagnostics,
@@ -1117,6 +1224,7 @@ function validateUi(
                 `${name}.ui.widget ${ui.widget} requires a boolean argument`,
             );
         }
+
         if ((ui.widget === "select" || ui.widget === "radio") && definition.type !== "enum") {
             addArgumentDiagnostic(
                 diagnostics,
@@ -1126,6 +1234,7 @@ function validateUi(
                 `${name}.ui.widget ${ui.widget} requires an enum argument`,
             );
         }
+
         if (ui.widget === "multiselect" && definition.type !== "multi-enum") {
             addArgumentDiagnostic(
                 diagnostics,
@@ -1135,6 +1244,7 @@ function validateUi(
                 `${name}.ui.widget multiselect requires a multi-enum argument`,
             );
         }
+
         if (ui.widget === "list" && definition.type !== "string-list") {
             addArgumentDiagnostic(
                 diagnostics,
@@ -1144,6 +1254,7 @@ function validateUi(
                 `${name}.ui.widget list requires a string-list argument`,
             );
         }
+
         if (ui.widget === "key-value" && definition.type !== "key-value") {
             addArgumentDiagnostic(
                 diagnostics,
@@ -1153,6 +1264,7 @@ function validateUi(
                 `${name}.ui.widget key-value requires a key-value argument`,
             );
         }
+
         const pathLikeWidget = ["path", "file", "directory"].includes(ui.widget);
         const stringWidget = [
             "text",
@@ -1176,6 +1288,7 @@ function validateUi(
             if (pathLikeWidget) {
                 expectedType = "string or string-list";
             }
+
             addArgumentDiagnostic(
                 diagnostics,
                 name,
@@ -1185,6 +1298,7 @@ function validateUi(
             );
         }
     }
+
     if (ui.rows !== undefined && !isPositiveInteger(ui.rows)) {
         addArgumentDiagnostic(
             diagnostics,
@@ -1210,6 +1324,7 @@ function validateTypeSpecificRules(
             `${name}.complete must be synchronous; use completeAsync for async completion providers`,
         );
     }
+
     if (definition.title !== undefined && typeof definition.title !== "string") {
         addArgumentDiagnostic(
             diagnostics,
@@ -1219,6 +1334,7 @@ function validateTypeSpecificRules(
             `${name}.title must be a string`,
         );
     }
+
     if (
         definition.occurrence !== undefined &&
         !["error", "first", "last", "append"].includes(definition.occurrence)
@@ -1231,6 +1347,7 @@ function validateTypeSpecificRules(
             `${name}.occurrence must be one of: error, first, last, append`,
         );
     }
+
     if (definition.occurrence === "append" && !supportsAppendOccurrence(definition)) {
         addArgumentDiagnostic(
             diagnostics,
@@ -1240,6 +1357,7 @@ function validateTypeSpecificRules(
             `${name}.occurrence append is only valid for collection arguments`,
         );
     }
+
     if (
         definition.completionTimeoutMs !== undefined &&
         !isNonNegativeInteger(definition.completionTimeoutMs)
@@ -1272,6 +1390,7 @@ function validateTypeSpecificRules(
                 `${name}: form-only arguments must be optional`,
             );
         }
+
         if (definition.default !== undefined) {
             addArgumentDiagnostic(
                 diagnostics,
@@ -1281,11 +1400,13 @@ function validateTypeSpecificRules(
                 `${name}: form-only arguments may not define a default`,
             );
         }
+
         for (const field of ["flag", "aliases", "position", "rest"] as const) {
             const value = definition[field];
             if (value === undefined || value === false) {
                 continue;
             }
+
             addArgumentDiagnostic(
                 diagnostics,
                 name,
@@ -1305,6 +1426,7 @@ function validateTypeSpecificRules(
             `${name}.position must be a non-negative integer`,
         );
     }
+
     if (definition.rest === true) {
         if (!isPositionalArgument(definition)) {
             addArgumentDiagnostic(
@@ -1315,6 +1437,7 @@ function validateTypeSpecificRules(
                 `${name}.rest requires a positional argument`,
             );
         }
+
         if (!supportsRestPosition(definition)) {
             addArgumentDiagnostic(
                 diagnostics,
@@ -1325,6 +1448,7 @@ function validateTypeSpecificRules(
             );
         }
     }
+
     switch (definition.type) {
         case "string": {
             if (definition.minLength !== undefined && !isNonNegativeInteger(definition.minLength)) {
@@ -1336,6 +1460,7 @@ function validateTypeSpecificRules(
                     `${name}.minLength must be a non-negative integer`,
                 );
             }
+
             if (definition.maxLength !== undefined && !isNonNegativeInteger(definition.maxLength)) {
                 addArgumentDiagnostic(
                     diagnostics,
@@ -1345,6 +1470,7 @@ function validateTypeSpecificRules(
                     `${name}.maxLength must be a non-negative integer`,
                 );
             }
+
             if (
                 definition.minLength !== undefined &&
                 definition.maxLength !== undefined &&
@@ -1358,6 +1484,7 @@ function validateTypeSpecificRules(
                     `${name}.minLength must be less than or equal to maxLength`,
                 );
             }
+
             if (definition.pattern !== undefined) {
                 try {
                     if (typeof definition.pattern === "string") {
@@ -1385,6 +1512,7 @@ function validateTypeSpecificRules(
                     `${name}.min must be a finite number`,
                 );
             }
+
             if (definition.max !== undefined && !Number.isFinite(definition.max)) {
                 addArgumentDiagnostic(
                     diagnostics,
@@ -1394,6 +1522,7 @@ function validateTypeSpecificRules(
                     `${name}.max must be a finite number`,
                 );
             }
+
             if (
                 definition.min !== undefined &&
                 definition.max !== undefined &&
@@ -1407,6 +1536,7 @@ function validateTypeSpecificRules(
                     `${name}.min must be less than or equal to max`,
                 );
             }
+
             if (
                 definition.step !== undefined &&
                 (!Number.isFinite(definition.step) || definition.step <= 0)
@@ -1419,6 +1549,7 @@ function validateTypeSpecificRules(
                     `${name}.step must be a positive finite number`,
                 );
             }
+
             if (definition.unit?.length === 0) {
                 addArgumentDiagnostic(
                     diagnostics,
@@ -1443,6 +1574,7 @@ function validateTypeSpecificRules(
                     `${name}.minItems must be a non-negative integer`,
                 );
             }
+
             if (definition.maxItems !== undefined && !isNonNegativeInteger(definition.maxItems)) {
                 addArgumentDiagnostic(
                     diagnostics,
@@ -1452,6 +1584,7 @@ function validateTypeSpecificRules(
                     `${name}.maxItems must be a non-negative integer`,
                 );
             }
+
             if (
                 definition.minItems !== undefined &&
                 definition.maxItems !== undefined &&
@@ -1478,6 +1611,7 @@ function validateTypeSpecificRules(
                     `${name}.values must be a non-empty list of strings`,
                 );
             }
+
             const seen = new Set<string>();
             for (const value of definition.values) {
                 if (value.length === 0) {
@@ -1489,6 +1623,7 @@ function validateTypeSpecificRules(
                         `${name}.values may not contain empty strings`,
                     );
                 }
+
                 if (definition.type === "multi-enum" && value.includes(",")) {
                     addArgumentDiagnostic(
                         diagnostics,
@@ -1498,6 +1633,7 @@ function validateTypeSpecificRules(
                         `${name}.values may not contain commas`,
                     );
                 }
+
                 if (seen.has(value)) {
                     addArgumentDiagnostic(
                         diagnostics,
@@ -1507,8 +1643,10 @@ function validateTypeSpecificRules(
                         `${name}.values contains duplicate value ${value}`,
                     );
                 }
+
                 seen.add(value);
             }
+
             if (definition.type === "multi-enum") {
                 if (
                     definition.minItems !== undefined &&
@@ -1522,6 +1660,7 @@ function validateTypeSpecificRules(
                         `${name}.minItems must be a non-negative integer`,
                     );
                 }
+
                 if (
                     definition.maxItems !== undefined &&
                     !isNonNegativeInteger(definition.maxItems)
@@ -1534,6 +1673,7 @@ function validateTypeSpecificRules(
                         `${name}.maxItems must be a non-negative integer`,
                     );
                 }
+
                 if (
                     definition.minItems !== undefined &&
                     definition.maxItems !== undefined &&
@@ -1567,9 +1707,11 @@ function validatePositionals(
     for (const [name, definition] of Object.entries(flatDefinitions)) {
         const position = definition.position;
         const label = "position";
+
         if (position === undefined || !isNonNegativeInteger(position)) {
             continue;
         }
+
         const existing = positions.get(position);
         if (existing !== undefined) {
             addArgumentDiagnostic(
@@ -1581,6 +1723,7 @@ function validatePositionals(
             );
             continue;
         }
+
         positions.set(position, name);
     }
 
@@ -1595,14 +1738,17 @@ function validatePositionals(
                 [name, "position"],
             );
         }
+
         if (definition.rest === true) {
             restArgument = name;
         }
+
         const required = definition.required === true && definition.default === undefined;
         if (!required) {
             optionalBeforeRequired = name;
             continue;
         }
+
         if (optionalBeforeRequired !== undefined) {
             addDefinitionDiagnostic(
                 diagnostics,
@@ -1632,6 +1778,7 @@ export function validateArgumentDefinitions(definitions: unknown): DefinitionDia
     }
 
     const entries = collectUnknownGroupedArgumentDefinitions(definitions);
+
     const flatDefinitions: Record<string, unknown> = {};
     const sourcePaths = new Map<string, readonly string[]>();
     for (const entry of entries) {
@@ -1645,6 +1792,7 @@ export function validateArgumentDefinitions(definitions: unknown): DefinitionDia
             );
             continue;
         }
+
         sourcePaths.set(entry.key, entry.sourcePath);
         Object.defineProperty(flatDefinitions, entry.key, {
             value: entry.definition,
@@ -1653,6 +1801,7 @@ export function validateArgumentDefinitions(definitions: unknown): DefinitionDia
             writable: true,
         });
     }
+
     const validDefinitions: Record<string, ArgumentDefinition> = {};
     const names = Object.keys(flatDefinitions);
     const flags = new Map<string, string>();
@@ -1690,9 +1839,10 @@ export function validateArgumentDefinitions(definitions: unknown): DefinitionDia
         }
 
         const definition = flatDefinitions[name];
-        if (!validateArgumentDefinitionShape(name, definition, diagnostics)) {
+        if (!validateArgumentDefinition(name, definition, diagnostics)) {
             continue;
         }
+
         Object.defineProperty(validDefinitions, name, {
             value: definition,
             enumerable: true,
@@ -1701,6 +1851,7 @@ export function validateArgumentDefinitions(definitions: unknown): DefinitionDia
         });
 
         validateTypeSpecificRules(name, definition, diagnostics);
+
         if (isPositionalArgument(definition) || isFormOnlyArgument(definition)) {
             continue;
         }
@@ -1709,6 +1860,7 @@ export function validateArgumentDefinitions(definitions: unknown): DefinitionDia
             name,
             "flag",
         ]);
+
         for (const [index, alias] of (definition.aliases ?? []).entries()) {
             validateFlagName(name, normalizeFlagName(alias), flags, diagnostics, [
                 name,
@@ -1719,6 +1871,7 @@ export function validateArgumentDefinitions(definitions: unknown): DefinitionDia
     }
 
     validatePositionals(validDefinitions, diagnostics);
+
     return diagnostics;
 }
 
@@ -1731,6 +1884,7 @@ export function createArgumentLookup(definitions: ArgumentDefinitions): Argument
         if (isPositionalArgument(definition) || isFormOnlyArgument(definition)) {
             continue;
         }
+
         for (const flag of argumentFlagNames(name, definition)) {
             byFlag.set(flag, name);
         }
@@ -1750,11 +1904,14 @@ export function applyArgumentDefault(definition: ArgumentDefinition): ArgumentVa
         if (isStringArrayValue(definition.default)) {
             return [...definition.default];
         }
+
         if (typeof definition.default === "object") {
             return { ...definition.default };
         }
+
         return definition.default;
     }
+
     return undefined;
 }
 
@@ -1774,9 +1931,11 @@ export function applyArgumentDefaults(
                 writable: true,
             });
         }
+
         if (Object.hasOwn(next, name) && next[name] !== undefined) {
             continue;
         }
+
         const defaultValue = applyArgumentDefault(definition);
         if (defaultValue !== undefined) {
             Object.defineProperty(next, name, {
@@ -1787,6 +1946,7 @@ export function applyArgumentDefaults(
             });
         }
     }
+
     return next;
 }
 
@@ -1819,6 +1979,7 @@ export function coerceArgumentValue(
                     ),
                 };
             }
+
             const parsed = Number(raw);
             if (!Number.isFinite(parsed)) {
                 return {
@@ -1831,6 +1992,7 @@ export function coerceArgumentValue(
                     ),
                 };
             }
+
             if (definition.integer === true && !Number.isInteger(parsed)) {
                 return {
                     ok: false,
@@ -1842,6 +2004,7 @@ export function coerceArgumentValue(
                     ),
                 };
             }
+
             if (definition.min !== undefined && parsed < definition.min) {
                 return {
                     ok: false,
@@ -1853,6 +2016,7 @@ export function coerceArgumentValue(
                     ),
                 };
             }
+
             if (definition.max !== undefined && parsed > definition.max) {
                 return {
                     ok: false,
@@ -1864,6 +2028,7 @@ export function coerceArgumentValue(
                     ),
                 };
             }
+
             return { ok: true, value: parsed };
         }
         case "boolean": {
@@ -1879,6 +2044,7 @@ export function coerceArgumentValue(
                     ),
                 };
             }
+
             return { ok: true, value: parsed };
         }
         case "enum": {
@@ -1893,6 +2059,7 @@ export function coerceArgumentValue(
                     ),
                 };
             }
+
             return { ok: true, value: raw };
         }
         case "multi-enum": {
@@ -1912,6 +2079,7 @@ export function coerceArgumentValue(
                     ),
                 };
             }
+
             return { ok: true, value: [...new Set(values)] };
         }
         case "string-list": {
@@ -1926,6 +2094,7 @@ export function coerceArgumentValue(
             if (raw.length === 0) {
                 return { ok: true, value: Object.fromEntries(entries) };
             }
+
             for (const item of raw.split(",")) {
                 const equalsIndex = item.indexOf("=");
                 if (equalsIndex <= 0) {
@@ -1939,6 +2108,7 @@ export function coerceArgumentValue(
                         ),
                     };
                 }
+
                 const key = item.slice(0, equalsIndex).trim();
                 if (key.length === 0) {
                     return {
@@ -1951,8 +2121,10 @@ export function coerceArgumentValue(
                         ),
                     };
                 }
+
                 entries.push([key, item.slice(equalsIndex + 1)]);
             }
+
             return { ok: true, value: Object.fromEntries(entries) };
         }
         default:
@@ -1973,6 +2145,7 @@ export function selectableArgumentValues(definition: ArgumentDefinition): Argume
             if (definition.required !== true && definition.default === undefined) {
                 values.push(undefined);
             }
+
             return values;
         }
         case "enum": {
@@ -1980,6 +2153,7 @@ export function selectableArgumentValues(definition: ArgumentDefinition): Argume
             if (definition.required !== true && definition.default === undefined) {
                 values.push(undefined);
             }
+
             return values;
         }
         case "multi-enum":
@@ -2017,6 +2191,7 @@ export function normalizeTextArgumentInput(
     if (trimmed.length === 0) {
         return applyArgumentDefault(definition);
     }
+
     switch (definition.type) {
         case "string":
             return input;
@@ -2034,8 +2209,10 @@ export function normalizeTextArgumentInput(
                 if (equalsIndex <= 0) {
                     return undefined;
                 }
+
                 entries.push([item.slice(0, equalsIndex).trim(), item.slice(equalsIndex + 1)]);
             }
+
             return Object.fromEntries(entries);
         }
         case "boolean":
@@ -2061,6 +2238,7 @@ export function argumentTypeHint(definition: ArgumentDefinition): string {
             if (definition.integer === true) {
                 return "int";
             }
+
             return definition.type;
         default:
             return casesHandled(definition);
@@ -2078,6 +2256,7 @@ export function argumentValueHint(definition: ArgumentDefinition, name?: string)
             if (name === undefined) {
                 return "string";
             }
+
             return toKebabCase(name);
         case "number":
             return argumentTypeHint(definition);
@@ -2101,19 +2280,24 @@ export function formatArgumentDefault(definition: ArgumentDefinition): string {
     if (definition.default === undefined) {
         return "";
     }
+
     if (definition.type === "string" && definition.sensitive === true) {
         return "";
     }
+
     if (Array.isArray(definition.default)) {
         return `=${definition.default.join(",")}`;
     }
+
     if (typeof definition.default === "object") {
         return `=${Object.entries(definition.default)
             .map(([key, value]) => `${key}=${value}`)
             .join(",")}`;
     }
+
     if (typeof definition.default === "number" && Object.is(definition.default, -0)) {
         return "=-0";
     }
+
     return `=${String(definition.default)}`;
 }

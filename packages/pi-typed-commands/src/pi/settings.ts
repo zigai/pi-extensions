@@ -35,6 +35,7 @@ export type PiTypedCommandsConfigDiagnostic = {
         | "config.read.failed"
         | "config.schema.invalid"
         | "config.write.failed";
+
     readonly operation: "create" | "parse" | "read" | "refresh" | "validate" | "write";
     readonly fileRole: PiTypedCommandsConfigFileRole;
     readonly errorCode?: string;
@@ -76,6 +77,7 @@ export type ResolvedPiTypedCommandsConfigSnapshot = {
         readonly helperPlacement: WidgetPlacement;
         readonly appearance: ResolvedPiTypedCommandsAppearance;
     };
+
     readonly global: PiTypedCommandsConfigSourceOutcome;
     readonly project: PiTypedCommandsConfigSourceOutcome;
     readonly fileOutcomes: readonly PiTypedCommandsConfigWriteOutcome[];
@@ -100,14 +102,21 @@ function getProjectConfigPath(cwd: string): string {
     return join(cwd, CONFIG_DIR_NAME, EXTENSION_ID, CONFIG_BASENAME);
 }
 
+function hasErrorCode(cause: unknown): cause is { readonly code: string } {
+    return (
+        typeof cause === "object" &&
+        cause !== null &&
+        "code" in cause &&
+        typeof cause.code === "string"
+    );
+}
+
 function errorCode(cause: unknown): string | undefined {
-    if (typeof cause !== "object" || cause === null || !("code" in cause)) {
+    if (!hasErrorCode(cause)) {
         return undefined;
     }
-    if (typeof cause.code === "string") {
-        return cause.code;
-    }
-    return undefined;
+
+    return cause.code;
 }
 
 function diagnosticMessage(
@@ -119,6 +128,7 @@ function diagnosticMessage(
     if (code !== undefined) {
         suffix = ` (${code})`;
     }
+
     return `pi-typed-args configuration ${operation} failed for ${fileRole}${suffix}`;
 }
 
@@ -140,6 +150,7 @@ function failureDiagnostic(
     if (causeCode === undefined) {
         return configDiagnostic({ code, operation, fileRole });
     }
+
     return configDiagnostic({ code, operation, fileRole, errorCode: causeCode });
 }
 
@@ -155,6 +166,7 @@ function readConfigFile(
         if (code === "ENOENT") {
             return { status: "absent", fileRole };
         }
+
         return {
             status: "read-failed",
             fileRole,
@@ -200,13 +212,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function serializeJson(value: unknown): string {
+function serializeJson<const TValue>(value: TValue): string {
     return `${JSON.stringify(value, null, 2)}\n`;
 }
 
-function writeJsonFileIfMissing(
+function writeJsonFileIfMissing<const TValue>(
     filePath: string,
-    value: unknown,
+    value: TValue,
 ): PiTypedCommandsConfigWriteOutcome {
     if (existsSync(filePath)) return { status: "unchanged", fileRole: "global-config" };
 
@@ -222,6 +234,7 @@ function writeJsonFileIfMissing(
         if (code === "EEXIST") {
             return { status: "unchanged", fileRole: "global-config" };
         }
+
         return {
             status: "write-failed",
             fileRole: "global-config",
@@ -230,13 +243,12 @@ function writeJsonFileIfMissing(
     }
 }
 
-function writeJsonFileIfChanged(
+function writeJsonFileIfChanged<const TValue>(
     filePath: string,
-    value: unknown,
+    value: TValue,
 ): PiTypedCommandsConfigWriteOutcome {
     const nextContent = serializeJson(value);
     const existed = existsSync(filePath);
-
     if (existed) {
         try {
             if (readFileSync(filePath, "utf8") === nextContent) {
@@ -255,9 +267,11 @@ function writeJsonFileIfChanged(
     try {
         mkdirSync(dirname(filePath), { recursive: true });
         writeFileSync(filePath, nextContent, "utf8");
+
         if (existed) {
             return { status: "refreshed", fileRole: "global-schema" };
         }
+
         return { status: "created", fileRole: "global-schema" };
     } catch (cause: unknown) {
         const code = errorCode(cause);
@@ -290,6 +304,7 @@ function projectConfigOutcome(
     if (!context.projectTrusted) {
         return { status: "skipped-untrusted", fileRole: "project-config" };
     }
+
     return readConfigFile(getProjectConfigPath(context.cwd), "project-config");
 }
 
@@ -301,6 +316,7 @@ function mergeConfig(base: unknown, override: unknown): unknown {
     for (const [key, value] of Object.entries(override)) {
         entries.set(key, mergeConfig(entries.get(key), value));
     }
+
     return Object.fromEntries(entries);
 }
 
@@ -308,6 +324,7 @@ function loadedConfig(outcome: PiTypedCommandsConfigSourceOutcome): PiTypedComma
     if (outcome.status === "loaded") {
         return outcome.config;
     }
+
     return {};
 }
 
@@ -355,6 +372,7 @@ function diagnosticFromSource(
     ) {
         return outcome.diagnostic;
     }
+
     return undefined;
 }
 
@@ -364,6 +382,7 @@ function diagnosticFromWrite(
     if (outcome.status === "read-failed" || outcome.status === "write-failed") {
         return outcome.diagnostic;
     }
+
     return undefined;
 }
 
@@ -384,11 +403,13 @@ export function resolvePiTypedCommandsConfigSnapshot(
     ) {
         global = schemaInvalidOutcome("global-config");
     }
+
     let config = parseMergedConfig(global, project);
     if (!hasValidLayoutRanges(config) && project.status === "loaded") {
         project = schemaInvalidOutcome("project-config");
         config = parseMergedConfig(global, project);
     }
+
     const diagnostics: PiTypedCommandsConfigDiagnostic[] = [];
     for (const outcome of fileOutcomes) {
         const diagnostic = diagnosticFromWrite(outcome);
@@ -396,6 +417,7 @@ export function resolvePiTypedCommandsConfigSnapshot(
             diagnostics.push(diagnostic);
         }
     }
+
     for (const outcome of [global, project]) {
         const diagnostic = diagnosticFromSource(outcome);
         if (diagnostic !== undefined) {
@@ -436,6 +458,7 @@ export function resolveTypedCommandUxOptions(
         appearance = snapshot.settings.appearance;
         diagnostics = snapshot.diagnostics;
     }
+
     return {
         helperPlacement:
             options.helperPlacement ?? settingsHelperPlacement ?? DEFAULT_HELPER_PLACEMENT,

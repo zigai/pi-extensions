@@ -24,52 +24,68 @@ function cloneArgumentUi(ui: ArgumentUi): ArgumentUi {
     if (ui.widget !== undefined) {
         cloned.widget = ui.widget;
     }
+
     if (ui.rows !== undefined) {
         cloned.rows = ui.rows;
     }
+
     if (ui.title !== undefined) {
         cloned.title = ui.title;
     }
+
     if (ui.readOnly !== undefined) {
         cloned.readOnly = ui.readOnly;
     }
+
     if (ui.hidden !== undefined) {
         cloned.hidden = ui.hidden;
     }
+
     if (ui.visibleWhen !== undefined) {
         cloned.visibleWhen = ui.visibleWhen;
     }
+
     if (ui.enabledWhen !== undefined) {
         cloned.enabledWhen = ui.enabledWhen;
     }
+
     if (ui.requiredWhen !== undefined) {
         cloned.requiredWhen = ui.requiredWhen;
     }
+
     if (ui.compute !== undefined) {
         cloned.compute = ui.compute;
     }
+
     if (ui.disabled !== undefined) {
         cloned.disabled = ui.disabled;
     }
+
     if (ui.section !== undefined) {
         cloned.section = ui.section;
     }
+
     if (ui.advanced !== undefined) {
         cloned.advanced = ui.advanced;
     }
+
     if (ui.copyFrom !== undefined) {
         cloned.copyFrom = ui.copyFrom;
     }
+
     if (ui.custom !== undefined) {
         const custom: CustomArgumentWidget = {};
         if (ui.custom.renderValue !== undefined) {
             custom.renderValue = ui.custom.renderValue;
         }
+
         if (ui.custom.handleInput !== undefined) {
             custom.handleInput = ui.custom.handleInput;
         }
+
         cloned.custom = custom;
     }
+
     return cloned;
 }
 
@@ -78,18 +94,23 @@ function cloneArgumentDefinition(definition: ArgumentDefinition): ArgumentDefini
     if (definition.aliases !== undefined) {
         cloned.aliases = [...definition.aliases];
     }
+
     if (definition.examples !== undefined) {
         cloned.examples = [...definition.examples];
     }
+
     if (definition.ui !== undefined) {
         cloned.ui = cloneArgumentUi(definition.ui);
     }
+
     if (definition.complete !== undefined) {
         cloned.complete = definition.complete;
     }
+
     if (definition.completeAsync !== undefined) {
         cloned.completeAsync = definition.completeAsync;
     }
+
     if (
         cloned.type === "string" &&
         definition.type === "string" &&
@@ -97,6 +118,7 @@ function cloneArgumentDefinition(definition: ArgumentDefinition): ArgumentDefini
     ) {
         cloned.pattern = new RegExp(definition.pattern.source, definition.pattern.flags);
     }
+
     if (
         cloned.type === "multi-enum" &&
         definition.type === "multi-enum" &&
@@ -104,6 +126,7 @@ function cloneArgumentDefinition(definition: ArgumentDefinition): ArgumentDefini
     ) {
         cloned.default = [...definition.default];
     }
+
     if (
         cloned.type === "string-list" &&
         definition.type === "string-list" &&
@@ -111,6 +134,7 @@ function cloneArgumentDefinition(definition: ArgumentDefinition): ArgumentDefini
     ) {
         cloned.default = [...definition.default];
     }
+
     if (
         cloned.type === "key-value" &&
         definition.type === "key-value" &&
@@ -118,39 +142,52 @@ function cloneArgumentDefinition(definition: ArgumentDefinition): ArgumentDefini
     ) {
         cloned.default = { ...definition.default };
     }
+
     if (cloned.type === "enum" && definition.type === "enum") {
         cloned.values = [...definition.values];
         if (definition.optionDescriptions !== undefined) {
             cloned.optionDescriptions = { ...definition.optionDescriptions };
         }
     }
+
     if (cloned.type === "multi-enum" && definition.type === "multi-enum") {
         cloned.values = [...definition.values];
     }
+
     return cloned;
 }
+
+type ArgumentGroupMetadata = {
+    description?: string;
+    title?: string;
+};
 
 function cloneDefinitionGraph(definitions: ArgumentDefinitions): ArgumentDefinitions {
     const cloned: Record<string, ArgumentDefinition | ArgumentGroupDefinition> = {};
     for (const [name, definition] of Object.entries(definitions)) {
         if (isArgumentGroupDefinition(definition)) {
             const args = cloneDefinitionGraph(definition.args);
-            const metadata: { description?: string; title?: string } = {};
+            const metadata: ArgumentGroupMetadata = {};
             if (definition.title !== undefined) {
                 metadata.title = definition.title;
             }
+
             if (definition.description !== undefined) {
                 metadata.description = definition.description;
             }
+
             cloned[name] = {
                 ...metadata,
                 args,
                 [ARGUMENT_GROUP]: args,
             };
+
             continue;
         }
+
         cloned[name] = cloneArgumentDefinition(definition);
     }
+
     return cloned;
 }
 
@@ -158,33 +195,42 @@ function freezeArgumentDefinition(definition: ArgumentDefinition): void {
     if (definition.aliases !== undefined) {
         Object.freeze(definition.aliases);
     }
+
     if (definition.examples !== undefined) {
         Object.freeze(definition.examples);
     }
+
     if (definition.type === "multi-enum" && definition.default !== undefined) {
         Object.freeze(definition.default);
     }
+
     if (
         (definition.type === "string-list" || definition.type === "key-value") &&
         definition.default !== undefined
     ) {
         Object.freeze(definition.default);
     }
+
     if (definition.type === "enum" || definition.type === "multi-enum") {
         Object.freeze(definition.values);
     }
+
     if (definition.type === "enum" && definition.optionDescriptions !== undefined) {
         Object.freeze(definition.optionDescriptions);
     }
+
     if (definition.ui?.custom !== undefined) {
         Object.freeze(definition.ui.custom);
     }
+
     if (definition.ui !== undefined) {
         Object.freeze(definition.ui);
     }
+
     if (definition.type === "string" && definition.pattern instanceof RegExp) {
         Object.freeze(definition.pattern);
     }
+
     Object.freeze(definition);
 }
 
@@ -195,8 +241,10 @@ function freezeDefinitionGraph(definitions: ArgumentDefinitions): void {
             Object.freeze(definition);
             continue;
         }
+
         freezeArgumentDefinition(definition);
     }
+
     Object.freeze(definitions);
 }
 
@@ -266,6 +314,7 @@ export function compileTypedCommandGrammar<const TDefinitions extends ArgumentDe
             compileArgumentBehavior(name, argumentDefinition),
         ),
     );
+
     return Object.freeze({
         name: definition.name,
         description: definition.description,
@@ -302,5 +351,6 @@ export function assertCompiles<const TDefinitions extends ArgumentDefinitions>(
     if (result.ok) {
         return result.command;
     }
+
     throw new Error(diagnosticMessages(result.diagnostics).join("\n"));
 }

@@ -96,7 +96,6 @@ describe("Pi form-only arguments", () => {
                 true,
             );
             assert.ok(commandHandler);
-
             await commandHandler('"Build and verify"', ctx);
             await commandHandler('"Build and verify"', ctx);
 
@@ -191,22 +190,26 @@ describe("Pi form-only arguments", () => {
                     );
                     formComponent = requireInteractiveComponent(component);
                     formReady.resolve();
+
                     return formResult;
                 },
                 getEditorComponent: () => currentEditorFactory,
                 getEditorText: () => editorText,
                 onTerminalInput(handler) {
                     terminalInput = handler;
+
                     return () => {
                         terminalInput = undefined;
                     };
                 },
                 setEditorComponent(factory) {
                     currentEditorFactory = factory;
+
                     if (factory === undefined) {
                         activeEditor = undefined;
                         return;
                     }
+
                     const editor = factory(createTestTui(), editorTheme, createTestKeybindings());
                     editor.onChange = (text) => {
                         editorText = text;
@@ -236,11 +239,9 @@ describe("Pi form-only arguments", () => {
             assert.ok(terminalInput);
             assert.deepEqual(terminalInput("\t"), { consume: true });
             await formReady.promise;
-
             assert.ok(formComponent);
             formComponent.handleInput("\r");
             await session.waitForFormCompletion();
-
             assert.ok(submittedCommand);
             await submittedCommand;
             assert.deepEqual(received, [{ task: "Build" }]);
@@ -289,6 +290,7 @@ describe("Pi form-only arguments", () => {
                 notify() {},
                 onTerminalInput(handler: (data: string) => { consume?: boolean } | undefined) {
                     terminalInput = handler;
+
                     return () => {
                         terminalInput = undefined;
                     };
@@ -304,14 +306,11 @@ describe("Pi form-only arguments", () => {
         try {
             await session.start(ctx);
             assert.ok(terminalInput);
-
             assert.deepEqual(terminalInput("\t"), { consume: true });
             assert.equal(customCalls, 0);
-
             terminalInput("x");
             assert.deepEqual(terminalInput("\t"), { consume: true });
             assert.equal(customCalls, 0);
-
             assert.deepEqual(terminalInput("\t"), { consume: true });
             await session.waitForFormCompletion();
             assert.equal(customCalls, 1);
@@ -364,6 +363,7 @@ describe("Pi form-only arguments", () => {
                                 abortObserved.resolve();
                                 return;
                             }
+
                             formCompletion.resolve(value);
                         };
                         await factory(
@@ -376,6 +376,7 @@ describe("Pi form-only arguments", () => {
                             done(undefined);
                         };
                         formStarted.resolve();
+
                         return formCompletion.promise;
                     },
                     getEditorText() {
@@ -383,6 +384,7 @@ describe("Pi form-only arguments", () => {
                     },
                     onTerminalInput(handler) {
                         terminalInput = handler;
+
                         return () => {
                             terminalInput = undefined;
                         };
@@ -468,12 +470,13 @@ describe("Pi form-only arguments", () => {
                                 abortObserved.resolve();
                                 return;
                             }
+
                             formCompletion.resolve(value);
                         },
                     );
-                    completionCapabilitiesSeen =
-                        Reflect.get(component, "completionCapabilities") !== undefined;
+                    completionCapabilitiesSeen = "completionCapabilities" in component;
                     formStarted.resolve();
+
                     return formCompletion.promise;
                 },
                 getEditorText() {
@@ -481,6 +484,7 @@ describe("Pi form-only arguments", () => {
                 },
                 onTerminalInput(handler) {
                     terminalInput = handler;
+
                     return () => {
                         terminalInput = undefined;
                     };
@@ -498,12 +502,10 @@ describe("Pi form-only arguments", () => {
             assert.deepEqual(terminalInput("\t"), { consume: true });
             await formStarted.promise;
             assert.equal(completionCapabilitiesSeen, true);
-
             const restart = session.start(ctx);
             await abortObserved.promise;
             formCompletion.resolve({ confirmed: true, state: { path: "stale.txt" } });
             await restart;
-
             assert.deepEqual(editorUpdates, []);
             assert.equal(sentMessageCount, 0);
         } finally {
@@ -542,7 +544,6 @@ describe("Pi form-only arguments", () => {
         assert.ok(shutdown);
         await shutdown({ reason: "reload" }, ctx);
         installTypedCommandUx(secondPi);
-
         assert.equal(secondHandlers.get("session_start")?.length, 1);
         assert.equal(secondHandlers.get("input")?.length, 1);
         assert.equal(secondHandlers.get("session_shutdown")?.length, 1);
@@ -607,6 +608,7 @@ describe("Pi form-only arguments", () => {
                 notify() {},
                 onTerminalInput(handler: (data: string) => { consume?: boolean } | undefined) {
                     terminalInput = handler;
+
                     return () => {
                         terminalInput = undefined;
                     };
@@ -624,12 +626,10 @@ describe("Pi form-only arguments", () => {
             assert.equal(firstHandlers.get("input")?.length, 1);
             assert.equal(firstHandlers.get("session_shutdown")?.length, 1);
             assert.equal(secondHandlers.size, 0);
-
             const start = firstHandlers.get("session_start")?.[0];
             assert.ok(start);
             await start({}, ctx);
             assert.ok(terminalInput);
-
             assert.deepEqual(terminalInput("\t"), { consume: true });
             assert.equal(customCalls, 0);
             assert.deepEqual(terminalInput("\t"), { consume: true });
@@ -640,6 +640,7 @@ describe("Pi form-only arguments", () => {
             if (shutdown !== undefined) {
                 await shutdown({}, ctx);
             }
+
             registry.unregister(command);
         }
     });

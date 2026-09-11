@@ -72,7 +72,6 @@ describe("inline ghost text resolution", () => {
         const registry = createTypedCommandRegistry();
         registry.register(ghostCommand());
         const ctx = createTestExtensionContext({ cwd: "/workspace" });
-
         assert.equal(resolveGhostText("/deploy", registry, ctx)?.text, "deploy:root:/workspace");
         assert.deepEqual(resolveGhostText("/deploy service", registry, ctx), {
             text: "service:/workspace",
@@ -145,7 +144,6 @@ describe("inline ghost text resolution", () => {
             }),
         );
         const ctx = createTestExtensionContext();
-
         assert.equal(resolveGhostText("/empty-hint", registry, ctx), undefined);
         assert.equal(resolveGhostText("/failed-hint", registry, ctx), undefined);
         assert.equal(resolveGhostText("/single-line-hint", registry, ctx)?.text, "first second");
@@ -165,7 +163,6 @@ describe("inline ghost text resolution", () => {
             }),
         );
         const ctx = createTestExtensionContext();
-
         assert.equal(resolveGhostText("/skill:lint", registry, ctx)?.text, "choose files to lint");
         assert.equal(resolveGhostText("/skill:lint ", registry, ctx)?.text, "choose files to lint");
         assert.equal(resolveGhostText("/skill:lint  ", registry, ctx), undefined);
@@ -183,7 +180,6 @@ describe("inline ghost text editor", () => {
         );
         requireFocusableComponent(wrapped).focused = true;
         wrapped.setText("/deploy");
-
         const lines = wrapped.render(24);
         assert.match(lines.join("\n"), /ghost 🛰️/);
         assert.equal(
@@ -194,11 +190,9 @@ describe("inline ghost text editor", () => {
         assert.equal(lines.join("\n").includes("\x1b[2mghost"), true);
         const actionHandlers: unknown = Reflect.get(wrapped, "actionHandlers");
         assert.equal(actionHandlers, editor.actionHandlers);
-
         styleCode = "90";
         wrapped.invalidate();
         assert.equal(wrapped.render(24).join("\n").includes("\x1b[90mghost"), true);
-
         let submitted: string | undefined;
         wrapped.onSubmit = (text) => {
             submitted = text;
@@ -213,20 +207,19 @@ describe("inline ghost text editor", () => {
             if (/^\/deploy\s*$/.test(editor.getText())) {
                 return "ghost text";
             }
+
             return undefined;
         };
+
         const wrapped = withGhostText(editor, getGhostText, identity);
         requireFocusableComponent(wrapped).focused = true;
         wrapped.setText("/deploy");
-
         wrapped.handleInput("\x1b[D");
         assert.doesNotMatch(wrapped.render(40).join("\n"), /ghost text/);
-
         wrapped.setText("/deploy");
         wrapped.handleInput(" ");
         assert.equal(wrapped.getText(), "/deploy ");
         assert.match(wrapped.render(40).join("\n"), /ghost text/);
-
         wrapped.handleInput("a");
         assert.equal(wrapped.getText(), "/deploy a");
         assert.doesNotMatch(wrapped.render(40).join("\n"), /ghost text/);
@@ -260,6 +253,7 @@ describe("inline ghost text editor", () => {
     it("delegates optional editor capabilities through the decorator", () => {
         const records: string[] = [];
         let value = "/deploy";
+
         const provider: AutocompleteProvider = {
             async getSuggestions() {
                 return null;
@@ -312,7 +306,6 @@ describe("inline ghost text editor", () => {
         wrapped.setAutocompleteMaxVisible?.(5);
         wrapped.handleInput("key");
         wrapped.invalidate();
-
         assert.equal(wrapped.getText(), "/deploy service");
         assert.equal(wrapped.getExpandedText?.(), "expanded:/deploy service");
         assert.deepEqual(records, [
@@ -327,11 +320,13 @@ describe("inline ghost text editor", () => {
 
     it("preserves and restores an existing editor factory for the session lifecycle", async () => {
         type EditorFactory = NonNullable<ReturnType<ExtensionUIContext["getEditorComponent"]>>;
+
         const registry = createTypedCommandRegistry();
         registry.register(ghostCommand());
         const pi = createTestExtensionApi();
         const previous: EditorFactory = (tui, theme, keybindings) =>
             new CustomEditor(tui, theme, keybindings);
+
         let current: EditorFactory | undefined = previous;
         let activeComponent: EditorComponent | undefined;
         let editorText = "/deploy";
@@ -365,6 +360,7 @@ describe("inline ghost text editor", () => {
         if (component === undefined) {
             assert.fail("expected the installed editor factory to return a component");
         }
+
         requireFocusableComponent(component).focused = true;
         component.setText(editorText);
         assert.match(component.render(50).join("\n"), /deploy:root:\/workspace/);
@@ -373,13 +369,13 @@ describe("inline ghost text editor", () => {
         component.setText("/deploy  ");
         assert.doesNotMatch(component.render(50).join("\n"), /deploy:root:\/workspace/);
         assert.equal(widgetContent.length, 1);
-
         await session.stop();
         assert.equal(current, previous);
     });
 
     it("does not replace the editor until ghost text is configured", async () => {
         type EditorFactory = NonNullable<ReturnType<ExtensionUIContext["getEditorComponent"]>>;
+
         const registry = createTypedCommandRegistry();
         registry.register(
             normalizeRegisteredCommand({
@@ -391,6 +387,7 @@ describe("inline ghost text editor", () => {
         );
         const previous: EditorFactory = (tui, theme, keybindings) =>
             new CustomEditor(tui, theme, keybindings);
+
         let current: EditorFactory | undefined = previous;
         let replacements = 0;
         const ctx = createTestExtensionContext({
@@ -425,21 +422,21 @@ describe("inline ghost text editor", () => {
         registry.register(hinted);
         assert.notEqual(current, previous);
         assert.equal(replacements, 1);
-
         registry.unregister(hinted);
         assert.equal(current, previous);
         assert.equal(replacements, 2);
-
         await session.stop();
         assert.equal(replacements, 2);
     });
 
     it("restarts the session editor integration without stacking decorators", async () => {
         type EditorFactory = NonNullable<ReturnType<ExtensionUIContext["getEditorComponent"]>>;
+
         const registry = createTypedCommandRegistry();
         registry.register(ghostCommand());
         const previous: EditorFactory = (tui, theme, keybindings) =>
             new CustomEditor(tui, theme, keybindings);
+
         let current: EditorFactory | undefined = previous;
         let replacements = 0;
         const ctx = createTestExtensionContext({
@@ -457,12 +454,10 @@ describe("inline ghost text editor", () => {
         await session.start(ctx);
         const first = current;
         assert.notEqual(first, previous);
-
         await session.start(ctx);
         assert.notEqual(current, previous);
         assert.notEqual(current, first);
         assert.equal(replacements, 3);
-
         await session.stop();
         assert.equal(current, previous);
         assert.equal(replacements, 4);
@@ -470,6 +465,7 @@ describe("inline ghost text editor", () => {
 
     it("keeps the live helper when an existing editor is incompatible", async () => {
         type EditorFactory = NonNullable<ReturnType<ExtensionUIContext["getEditorComponent"]>>;
+
         const registry = createTypedCommandRegistry();
         registry.register(ghostCommand());
         const incompatible: EditorComponent = {
@@ -505,12 +501,15 @@ describe("inline ghost text editor", () => {
 
     it("does not overwrite an editor installed later by another extension", async () => {
         type EditorFactory = NonNullable<ReturnType<ExtensionUIContext["getEditorComponent"]>>;
+
         const registry = createTypedCommandRegistry();
         registry.register(ghostCommand());
         const previous: EditorFactory = (tui, theme, keybindings) =>
             new CustomEditor(tui, theme, keybindings);
+
         const later: EditorFactory = (tui, theme, keybindings) =>
             new CustomEditor(tui, theme, keybindings);
+
         let current: EditorFactory | undefined = previous;
         const ctx = createTestExtensionContext({
             ui: {

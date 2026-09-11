@@ -65,7 +65,6 @@ describe("typed command schema", () => {
 
     it("centralizes flag lookup and positional exclusion", () => {
         const lookup = createArgumentLookup(definitions);
-
         assert.equal(findArgumentName(lookup, "--dry-run"), "dryRun");
         assert.equal(findArgumentName(lookup, "--action"), undefined);
     });
@@ -77,7 +76,6 @@ describe("typed command schema", () => {
         } satisfies FlatArgumentDefinitions;
         const diagnostics = validateArgumentDefinitions(formDefinitions);
         const lookup = createArgumentLookup(formDefinitions);
-
         assert.deepEqual(diagnostics, []);
         assert.equal(findArgumentName(lookup, "--maximum-time-minutes"), undefined);
     });
@@ -92,7 +90,6 @@ describe("typed command schema", () => {
             restValue: { type: "string", formOnly: true, rest: true },
         });
         const codes = diagnostics.map((diagnostic) => diagnostic.code);
-
         assert.ok(codes.includes("argument.form-only.required"));
         assert.ok(codes.includes("argument.form-only.default"));
         assert.equal(codes.filter((code) => code === "argument.form-only.cli-metadata").length, 4);
@@ -101,6 +98,7 @@ describe("typed command schema", () => {
     it("coerces and validates values consistently", () => {
         const count = definitions.count;
         assert.equal(count?.type, "number");
+
         if (count === undefined) {
             throw new Error("count definition missing");
         }
@@ -158,6 +156,7 @@ describe("typed command schema", () => {
         });
 
         assert.equal(compiled.ok, true);
+
         if (compiled.ok) {
             const action = compiled.command.argumentByName.get("action");
             assert.equal(action?.describe().position, 0);
@@ -199,7 +198,6 @@ describe("typed command schema", () => {
             afterRest: { type: "string", position: 3 },
         });
         const text = diagnostics.map((diagnostic) => diagnostic.message).join("\n");
-
         assert.match(text, /range\.min must be less than or equal to max/);
         assert.match(text, /text\.minLength must be less than or equal to maxLength/);
         assert.match(text, /text\.pattern must be a valid regular expression/);
@@ -258,11 +256,23 @@ describe("typed command schema", () => {
             valueOf: { type: "string" as const },
         } satisfies ArgumentDefinitions;
         const defaulted = applyArgumentDefaults(inheritedNameDefinitions, {});
-
+        assert.equal(Object.getPrototypeOf(defaulted), Object.prototype);
         assert.equal(Object.hasOwn(defaulted, "toString"), true);
-        assert.equal(Reflect.get(defaulted, "toString"), "safe");
-        assert.equal(Reflect.get(defaulted, "valueOf"), undefined);
-        assert.equal(Object.keys(defaulted).includes("valueOf"), false);
+        assert.equal(Object.hasOwn(defaulted, "valueOf"), true);
+        assert.deepEqual(Object.getOwnPropertyDescriptor(defaulted, "toString"), {
+            configurable: true,
+            enumerable: true,
+            value: "safe",
+            writable: true,
+        });
+        assert.deepEqual(Object.getOwnPropertyDescriptor(defaulted, "valueOf"), {
+            configurable: true,
+            enumerable: false,
+            value: undefined,
+            writable: true,
+        });
+        assert.deepEqual(Object.keys(defaulted), ["toString"]);
+        assert.deepEqual(Object.entries(defaulted), [["toString", "safe"]]);
     });
 
     it("preserves prototype-like keys in direct grouping utility results", () => {
@@ -272,13 +282,12 @@ describe("typed command schema", () => {
         const flattenedDefinitions = flattenGroupedArgumentDefinitions(runtimeDefinitions);
         const flattenedValues = flattenGroupedArgumentValues(runtimeValues, runtimeDefinitions);
         const expandedValues = expandGroupedArgumentValues(flattenedValues, runtimeDefinitions);
-
         assert.equal(Object.hasOwn(flattenedDefinitions, "__proto__"), true);
         assert.equal(Object.hasOwn(flattenedValues, "__proto__"), true);
         assert.equal(Object.hasOwn(expandedValues, "__proto__"), true);
-        assert.equal(flattenedValues["__proto__"], "safe");
-        assert.equal(expandedValues["__proto__"], "safe");
-        assert.equal(Reflect.get({}, "safe"), undefined);
+        assert.equal(flattenedValues.__proto__, "safe");
+        assert.equal(expandedValues.__proto__, "safe");
+        assert.equal("safe" in {}, false);
     });
 
     it("rejects colliding grouped and literal canonical paths in either insertion order", () => {
@@ -290,6 +299,7 @@ describe("typed command schema", () => {
         });
         const literalRequired = { type: "string", required: true } as const;
         const literalOptional = { type: "string" } as const;
+
         const cases = [
             { database: nestedRequired, "database.port": literalRequired },
             { "database.port": literalRequired, database: nestedRequired },
@@ -340,7 +350,6 @@ describe("typed command schema", () => {
             behaviorBearing: new BehaviorBearingDefinition(),
         });
         const text = diagnostics.map((diagnostic) => diagnostic.message).join("\n");
-
         assert.match(text, /stringValues\.values must be a list of strings/);
         assert.match(text, /numericValues\.values\[0\] must be a string/);
         assert.match(text, /numericFlag\.flag must be a string/);

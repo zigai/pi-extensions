@@ -32,10 +32,8 @@ describe("typed command presets", () => {
         const cwd = mkdtempSync(join(tmpdir(), "pi-typed-presets-"));
         const context = { cwd, isProjectTrusted: () => true };
         const values = { path: "demo", token: "private", tags: ["api", "worker"] };
-
         assert.equal(recordTypedCommandRecentValues(context, command, values), true);
         assert.equal(saveTypedCommandPreset(context, command, "default", values), true);
-
         const loaded = loadTypedCommandPresets(context, command);
         assert.deepEqual(loaded?.recent, { path: "demo", tags: ["api", "worker"] });
         assert.deepEqual(loaded?.presets.default, {
@@ -66,7 +64,7 @@ describe("typed command presets", () => {
         const loaded = loadTypedCommandPresets(context, prototypeCommand);
         assert.deepEqual(loaded?.recent, { path: "recent" });
         assert.equal(Object.hasOwn(loaded?.presets ?? {}, "__proto__"), true);
-        assert.deepEqual(loaded?.presets["__proto__"], { path: "saved" });
+        assert.deepEqual(loaded?.presets.__proto__, { path: "saved" });
     });
 
     it("returns false when preset storage cannot be created", () => {
@@ -87,7 +85,6 @@ describe("typed command presets", () => {
         mkdirSync(dirname(path), { recursive: true });
         writeFileSync(path, "{malformed");
         const context = { cwd, isProjectTrusted: () => true };
-
         assert.equal(saveTypedCommandPreset(context, command, "default", { path: "demo" }), false);
         assert.equal(readFileSync(path, "utf8"), "{malformed");
     });

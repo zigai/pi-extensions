@@ -34,6 +34,7 @@ export function resolveTypedCommandRoute<TCommand extends CoreRegisteredTypedCom
                 };
             }
         }
+
         return {
             root: command,
             command,
@@ -46,6 +47,7 @@ export function resolveTypedCommandRoute<TCommand extends CoreRegisteredTypedCom
     if (command.hasRootHandler === true) {
         return { root: command, command, rawArgs, status: "root" };
     }
+
     return { root: command, command, rawArgs, status: "missing" };
 }
 
@@ -59,5 +61,6 @@ export function findTypedSubcommand(
             return [name, subcommand];
         }
     }
+
     return undefined;
 }

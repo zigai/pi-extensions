@@ -67,7 +67,6 @@ type ValueCompletionItem = TypedCompletionItem & {
 };
 
 const DEFAULT_COMPLETION_TIMEOUT_MS = 1000;
-
 const UnknownCompletionItemsSchema = Type.Array(Type.Unknown());
 const CompletionReplacementRangeSchema = Type.Object(
     {
@@ -76,6 +75,7 @@ const CompletionReplacementRangeSchema = Type.Object(
     },
     { additionalProperties: false },
 );
+
 const ProviderCompletionItemSchema = Type.Object(
     {
         value: Type.String(),
@@ -88,6 +88,7 @@ const ProviderCompletionItemSchema = Type.Object(
 );
 
 type ProviderCompletionItemBoundary = Static<typeof ProviderCompletionItemSchema>;
+
 type ProviderCompletionItem = {
     value: string;
     label?: string;
@@ -117,6 +118,7 @@ function providedArgumentNames<TDefinitions extends ArgumentDefinitions>(
             optionsEnded = true;
             continue;
         }
+
         if (optionsEnded || token.quote !== undefined || !token.value.startsWith("-")) {
             continue;
         }
@@ -126,6 +128,7 @@ function providedArgumentNames<TDefinitions extends ArgumentDefinitions>(
         if (equalsIndex >= 0) {
             flag = flag.slice(0, equalsIndex);
         }
+
         if (flag.startsWith("--no-")) {
             flag = `--${flag.slice(5)}`;
         }
@@ -180,6 +183,7 @@ function mapValueItemsForInsertion(items: ValueCompletionItem[]): TypedCompletio
         if (item.replacementReady === true) {
             return item;
         }
+
         return {
             ...item,
             value: completionInsertionValue(item.value),
@@ -194,7 +198,6 @@ function flagItem(name: string, definition: ArgumentDefinition): TypedCompletion
     }
 
     const description = definition.description ?? definition.type;
-
     return {
         value,
         label: formatArgumentFlagName(name, definition),
@@ -206,6 +209,7 @@ function hasCallableThen(value: unknown): boolean {
     if ((typeof value !== "object" || value === null) && typeof value !== "function") {
         return false;
     }
+
     return "then" in value && typeof value.then === "function";
 }
 
@@ -218,6 +222,7 @@ function normalizedCompletionTimeoutMs(definition: ArgumentDefinition): number |
     if (timeoutMs <= 0) {
         return undefined;
     }
+
     return timeoutMs;
 }
 
@@ -225,22 +230,27 @@ function normalizeProviderCompletionItems(value: unknown): ProviderCompletionIte
     if (!Schema.Check(UnknownCompletionItemsSchema, value)) {
         return [];
     }
+
     const items: ProviderCompletionItem[] = [];
     for (const item of value) {
         if (!Schema.Check(ProviderCompletionItemSchema, item)) {
             continue;
         }
+
         const boundaryItem: ProviderCompletionItemBoundary = item;
         const normalized: ProviderCompletionItem = { value: boundaryItem.value };
         if (typeof boundaryItem.label === "string") {
             normalized.label = boundaryItem.label;
         }
+
         if (typeof boundaryItem.description === "string") {
             normalized.description = boundaryItem.description;
         }
+
         if (typeof boundaryItem.replacement === "string") {
             normalized.replacement = boundaryItem.replacement;
         }
+
         if (
             Schema.Check(CompletionReplacementRangeSchema, boundaryItem.replaceRange) &&
             boundaryItem.replaceRange.start <= boundaryItem.replaceRange.end
@@ -250,8 +260,10 @@ function normalizeProviderCompletionItems(value: unknown): ProviderCompletionIte
                 boundaryItem.replaceRange,
             );
         }
+
         items.push(normalized);
     }
+
     return items;
 }
 
@@ -265,9 +277,11 @@ function mapProviderCompletionItems(value: unknown): ValueCompletionItem[] {
         if (item.description !== undefined) {
             mapped.description = item.description;
         }
+
         if (item.replaceRange !== undefined) {
             mapped.replaceRange = item.replaceRange;
         }
+
         return mapped;
     });
 }
@@ -284,6 +298,7 @@ function completionContext(
             cwd: context.capabilities.cwd,
         };
     }
+
     return {
         values: parsed.values,
         provided: parsed.provided,
@@ -307,6 +322,7 @@ function syncProviderArgumentValueItems(
             context.capabilities.completionTasks.own(Promise.resolve(completed));
             return [];
         }
+
         return mapProviderCompletionItems(completed);
     } catch {
         return [];
@@ -322,8 +338,9 @@ async function asyncProviderArgumentValueItems(
     if (completeAsync === undefined) {
         return syncProviderArgumentValueItems(definition, query, context);
     }
+
     const completed = await context.capabilities.scheduler.run(
-        (signal) => completeAsync(query, completionContext(context, signal)),
+        async (signal) => completeAsync(query, completionContext(context, signal)),
         normalizedCompletionTimeoutMs(definition),
     );
     return mapProviderCompletionItems(completed);
@@ -340,6 +357,7 @@ function staticArgumentValueItems(
             if (definition.description !== undefined) {
                 item.description = definition.description;
             }
+
             return item;
         });
 }
@@ -378,15 +396,18 @@ export async function getTypedFormValueCompletions(
         provided: form.provided,
         cwd: capabilities.cwd,
     };
+
     if (definition.completeAsync !== undefined) {
         const completed = await capabilities.scheduler.run(
-            (signal) =>
+            async (signal) =>
                 definition.completeAsync?.(query, { ...providerContext, signal }) ??
                 Promise.resolve([]),
             normalizedCompletionTimeoutMs(definition),
         );
+
         return normalizeProviderCompletionItems(completed);
     }
+
     if (definition.complete !== undefined) {
         try {
             const completed: unknown = definition.complete(query, providerContext);
@@ -394,11 +415,13 @@ export async function getTypedFormValueCompletions(
                 capabilities.completionTasks.own(Promise.resolve(completed));
                 return [];
             }
+
             return normalizeProviderCompletionItems(completed);
         } catch {
             return [];
         }
     }
+
     if (
         definition.ui?.widget === "path" ||
         definition.ui?.widget === "file" ||
@@ -406,9 +429,11 @@ export async function getTypedFormValueCompletions(
     ) {
         return pathCompletionItems(query, capabilities);
     }
+
     if (definition.ui?.widget === "command") {
         return commandCompletionItems(query, capabilities.commands);
     }
+
     return staticArgumentValueItems(definition, query);
 }
 
@@ -420,9 +445,11 @@ function syncArgumentValueItems(
     if (definition.complete !== undefined) {
         return syncProviderArgumentValueItems(definition, query, context);
     }
+
     if (definition.ui?.widget === "command") {
         return commandCompletionItems(query, context.capabilities.commands);
     }
+
     return staticArgumentValueItems(definition, query);
 }
 
@@ -434,6 +461,7 @@ async function asyncArgumentValueItems(
     if (definition.completeAsync !== undefined) {
         return asyncProviderArgumentValueItems(definition, query, context);
     }
+
     if (
         definition.ui?.widget === "path" ||
         definition.ui?.widget === "file" ||
@@ -441,6 +469,7 @@ async function asyncArgumentValueItems(
     ) {
         return pathCompletionItems(query, context.capabilities);
     }
+
     return syncArgumentValueItems(definition, query, context);
 }
 
@@ -453,6 +482,7 @@ function argumentValueItemsForMode(
     if (mode === "async") {
         return asyncArgumentValueItems(definition, query, context);
     }
+
     return syncArgumentValueItems(definition, query, context);
 }
 
@@ -489,6 +519,7 @@ function inlineFlagValueCompletion(
     if (definition === undefined || !flagConsumesValue(definition)) {
         return undefined;
     }
+
     if (!supportsRepeatedCompletion(definition) && commaIndex >= 0) {
         return undefined;
     }
@@ -501,12 +532,15 @@ function inlineFlagValueCompletion(
         if (mapped.length === 0) {
             return undefined;
         }
+
         return mapped;
     };
+
     const items = argumentValueItemsForMode(definition, query, context, mode);
     if (isPromiseLike(items)) {
         return items.then(mapItems);
     }
+
     return mapItems(items);
 }
 
@@ -517,9 +551,11 @@ function valueCompletionForPreviousFlag(
     if (context.previousToken === undefined) {
         return undefined;
     }
+
     if (context.previousToken.quote !== undefined || !context.previousToken.value.startsWith("-")) {
         return undefined;
     }
+
     if (context.previousToken.value.includes("=")) {
         return undefined;
     }
@@ -543,12 +579,15 @@ function valueCompletionForPreviousFlag(
         if (items.length === 0) {
             return undefined;
         }
+
         return mapValueItemsForInsertion(items);
     };
+
     const items = argumentValueItemsForMode(definition, context.currentPrefix, context, mode);
     if (isPromiseLike(items)) {
         return items.then(mapItems);
     }
+
     return mapItems(items);
 }
 
@@ -563,15 +602,18 @@ function flagDefinitionForToken(
     if (token === undefined || token.quote !== undefined || !token.value.startsWith("-")) {
         return undefined;
     }
+
     let flagToken = token.value;
     if (flagToken.includes("=")) {
         flagToken = flagToken.slice(0, flagToken.indexOf("="));
     }
+
     const lookup = createArgumentLookup(command.args);
     const name = findArgumentName(lookup, flagToken);
     if (name === undefined) {
         return undefined;
     }
+
     return command.args[name];
 }
 
@@ -592,6 +634,7 @@ function nextPositionalValueCompletion(
     if (currentTokenIsFlagValue(context)) {
         return undefined;
     }
+
     const optionsEnded = hasEndOfOptions(tokens);
     if (!optionsEnded && context.currentPrefix.startsWith("-")) {
         return undefined;
@@ -606,6 +649,7 @@ function nextPositionalValueCompletion(
     if (endsWithWhitespace(context.argsBeforeCursor)) {
         completedTokenCount = tokens.length;
     }
+
     let positionalIndex = 0;
     let skipNextValue = false;
     let afterEndOfOptions = false;
@@ -615,18 +659,22 @@ function nextPositionalValueCompletion(
         if (token === undefined) {
             continue;
         }
+
         if (skipNextValue) {
             skipNextValue = false;
             continue;
         }
+
         if (!afterEndOfOptions && token.quote === undefined && token.value === "--") {
             afterEndOfOptions = true;
             continue;
         }
+
         let flagDefinition: ArgumentDefinition | undefined;
         if (!afterEndOfOptions) {
             flagDefinition = flagDefinitionForToken(context.command, token);
         }
+
         if (flagDefinition !== undefined) {
             if (flagConsumesValue(flagDefinition) && !token.value.includes("=")) {
                 skipNextValue = true;
@@ -650,16 +698,20 @@ function nextPositionalValueCompletion(
     if (endsWithWhitespace(context.argsBeforeCursor)) {
         query = "";
     }
+
     const mapItems = (items: TypedCompletionItem[]): TypedCompletionItem[] | undefined => {
         if (items.length === 0) {
             return undefined;
         }
+
         return mapValueItemsForInsertion(items);
     };
+
     const items = argumentValueItemsForMode(definition, query, context, mode);
     if (isPromiseLike(items)) {
         return items.then(mapItems);
     }
+
     return mapItems(items);
 }
 
@@ -671,6 +723,7 @@ function shouldSuggestFlag(
     if (isPositionalArgument(definition)) {
         return false;
     }
+
     return !provided.has(name) || supportsRepeatedCompletion(definition);
 }
 
@@ -712,6 +765,7 @@ function flagCompletionDecision(
     if (items.length === 0) {
         return undefined;
     }
+
     return { items, prefix: context.replacementPrefix };
 }
 
@@ -725,6 +779,7 @@ async function resolveCompletionDecisionAsync(
             return { items, prefix: context.replacementPrefix };
         }
     }
+
     return flagCompletionDecision(context, tokens);
 }
 
@@ -738,6 +793,7 @@ function resolveCompletionDecisionSync(
             return { items, prefix: context.replacementPrefix };
         }
     }
+
     return flagCompletionDecision(context, tokens);
 }
 
@@ -757,6 +813,7 @@ function subcommandItems(
             }
         }
     }
+
     return items;
 }
 
@@ -764,17 +821,21 @@ function subcommandCompletionDecision(context: CommandLineContext): CompletionDe
     if (context.command.subcommands === undefined) {
         return undefined;
     }
+
     const tokens = lexTypedArgumentString(context.argsBeforeCursor).tokens;
     const first = tokens[0];
     if (first === undefined) {
         return { items: subcommandItems(context.command, ""), prefix: "" };
     }
+
     if (first.quote !== undefined || first.value.startsWith("-")) {
         if (context.command.hasRootHandler === true) {
             return undefined;
         }
+
         return { items: [], prefix: context.replacementPrefix };
     }
+
     const selected = Object.entries(context.command.subcommands).find(
         ([name, subcommand]) =>
             name === first.value || subcommand.aliases?.includes(first.value) === true,
@@ -782,12 +843,14 @@ function subcommandCompletionDecision(context: CommandLineContext): CompletionDe
     if (selected !== undefined) {
         return undefined;
     }
+
     if (tokens.length === 1 && !endsWithWhitespace(context.argsBeforeCursor)) {
         return {
             items: subcommandItems(context.command, first.value),
             prefix: first.raw,
         };
     }
+
     return { items: [], prefix: context.replacementPrefix };
 }
 
@@ -799,6 +862,7 @@ function projectCommandHookItems(
     const contextOffset = argumentPrefix.length - context.argsBeforeCursor.length;
     const replacementOffset = context.argsBeforeCursor.length - decision.prefix.length;
     const retainedPrefix = argumentPrefix.slice(0, contextOffset + replacementOffset);
+
     return decision.items.map((item) => ({ ...item, value: `${retainedPrefix}${item.value}` }));
 }
 
@@ -807,10 +871,12 @@ function selectedSubcommandContext(context: CommandLineContext): CommandLineCont
     if (subcommands === undefined) {
         return context;
     }
+
     const first = lexTypedArgumentString(context.argsBeforeCursor).tokens[0];
     if (first === undefined || first.quote !== undefined) {
         return context;
     }
+
     const selected = Object.entries(subcommands).find(
         ([name, subcommand]) =>
             name === first.value || subcommand.aliases?.includes(first.value) === true,
@@ -818,6 +884,7 @@ function selectedSubcommandContext(context: CommandLineContext): CommandLineCont
     if (selected === undefined) {
         return context;
     }
+
     const argsBeforeCursor = context.argsBeforeCursor.slice(first.end).trimStart();
     const tokens = lexTypedArgumentString(argsBeforeCursor).tokens;
     const last = tokens[tokens.length - 1];
@@ -825,11 +892,13 @@ function selectedSubcommandContext(context: CommandLineContext): CommandLineCont
     let currentPrefix = last?.value ?? "";
     let replacementPrefix = last?.raw ?? "";
     let previousToken = tokens[tokens.length - 2];
+
     if (trailingSpace) {
         currentPrefix = "";
         replacementPrefix = "";
         previousToken = last;
     }
+
     const selectedContext: CommandLineContext = {
         command: selected[1],
         argsBeforeCursor,
@@ -840,6 +909,7 @@ function selectedSubcommandContext(context: CommandLineContext): CommandLineCont
     if (previousToken !== undefined) {
         selectedContext.previousToken = previousToken;
     }
+
     return selectedContext;
 }
 
@@ -848,7 +918,7 @@ function selectedSubcommandContext(context: CommandLineContext): CommandLineCont
  *
  * Returns `null` when typed completions have no suggestion so Pi can continue its normal behavior.
  */
-export function getTypedArgumentCompletions<TDefinitions extends ArgumentDefinitions>(
+export async function getTypedArgumentCompletions<TDefinitions extends ArgumentDefinitions>(
     command: CoreRegisteredTypedCommand<TDefinitions>,
     argumentPrefix: string,
     capabilities: CompletionCapabilities,
@@ -871,6 +941,7 @@ export function getTypedArgumentCompletions<TDefinitions extends ArgumentDefinit
     if (endsWithWhitespace(argumentPrefix)) {
         previousToken = tokens[tokens.length - 1];
     }
+
     const context: CommandLineContext = {
         command,
         argsBeforeCursor: argumentPrefix,
@@ -888,7 +959,9 @@ export function getTypedArgumentCompletions<TDefinitions extends ArgumentDefinit
             projectCommandHookItems(argumentPrefix, context, subcommandDecision),
         );
     }
+
     const selectedContext = selectedSubcommandContext(context);
+
     return resolveCompletionDecisionAsync(
         selectedContext,
         tokenizeLoose(selectedContext.argsBeforeCursor),
@@ -907,6 +980,7 @@ function commandLineContext(
     if (cursorLine !== 0) {
         return undefined;
     }
+
     const line = lines[cursorLine];
     if (line === undefined) {
         return undefined;
@@ -961,6 +1035,7 @@ function commandLineContext(
     if (previousToken !== undefined) {
         context.previousToken = previousToken;
     }
+
     return context;
 }
 
@@ -984,12 +1059,14 @@ export function getTypedAutocompleteSuggestions(
     if (subcommandDecision !== undefined) {
         return subcommandDecision;
     }
+
     const selectedContext = selectedSubcommandContext(context);
     const tokens = tokenizeLoose(selectedContext.argsBeforeCursor);
     const decision = resolveCompletionDecisionSync(selectedContext, tokens);
     if (decision === undefined) {
         return undefined;
     }
+
     return decision;
 }
 
@@ -1004,10 +1081,12 @@ export async function getTypedAutocompleteSuggestionsAsync(
     if (context === undefined) {
         return undefined;
     }
+
     const subcommandDecision = subcommandCompletionDecision(context);
     if (subcommandDecision !== undefined) {
         return subcommandDecision;
     }
+
     const selectedContext = selectedSubcommandContext(context);
     return resolveCompletionDecisionAsync(
         selectedContext,

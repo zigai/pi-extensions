@@ -33,8 +33,10 @@ function configurationJsonBlock(path: string): unknown {
 describe("package subpath exports", () => {
     it("loads the public core, pi, skills, and pi-tui subpaths", () => {
         const mode: FormMode = "all";
+
         const ghostContextLabel = (context: TypedCommandGhostTextContext): string =>
             context.commandName;
+
         const skillMetadata: SkillFrontmatterMetadata = { ghostText: "Choose a target" };
         const command = defineTypedCommand({
             name: "subpath-demo",
@@ -95,7 +97,6 @@ describe("package subpath exports", () => {
 
     it("keeps the published config JSON schema aligned with the TypeBox source", () => {
         const schema: unknown = JSON.parse(readFileSync("config.schema.json", "utf8"));
-
         assert.deepEqual(schema, piTypedCommandsConfigJsonSchema());
     });
 });

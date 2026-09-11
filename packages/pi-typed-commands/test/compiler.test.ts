@@ -71,7 +71,6 @@ describe("typed command compiler", () => {
         } satisfies ArgumentDefinitions;
 
         const cloned = cloneAndFreezeDefinitions(definitions);
-
         assert.notEqual(cloned, definitions);
         assert.notEqual(cloned.text, definitions.text);
         assert.notEqual(cloned.text.aliases, aliases);
@@ -87,7 +86,6 @@ describe("typed command compiler", () => {
         assert.notEqual(cloned.database, definitions.database);
         assert.notEqual(cloned.database?.args, definitions.database.args);
         assert.equal(cloned.database?.[ARGUMENT_GROUP], cloned.database?.args);
-
         assert.equal(Object.isFrozen(cloned), true);
         assert.equal(Object.isFrozen(cloned.text), true);
         assert.equal(Object.isFrozen(cloned.text.aliases), true);
@@ -102,13 +100,11 @@ describe("typed command compiler", () => {
         assert.equal(Object.isFrozen(cloned.choice?.optionDescriptions), true);
         assert.equal(Object.isFrozen(cloned.database), true);
         assert.equal(Object.isFrozen(cloned.database?.args), true);
-
         aliases.push("alias");
         examples.push("world");
         multiDefault.push("web");
         listDefault.push("two");
         keyValueDefault.MODE = "unsafe";
-
         assert.deepEqual(cloned.text.aliases, ["t"]);
         assert.deepEqual(cloned.text.examples, ["hello"]);
         assert.deepEqual(cloned.tags?.default, ["api"]);
@@ -143,6 +139,7 @@ describe("typed command compiler", () => {
         compiled.argumentByName.forEach((argument, name, map) => {
             visited.push(`${name}:${argument.key}:${map === compiled.argumentByName}`);
         });
+
         assert.deepEqual(visited, ["environment:environment:true", "dryRun:dryRun:true"]);
         assert.deepEqual(
             [...compiled.argumentByName].map(([key, argument]) => `${key}:${argument.key}`),
@@ -165,9 +162,11 @@ describe("typed command compiler", () => {
         });
 
         assert.equal(result.ok, false);
+
         if (result.ok) {
             assert.fail("expected invalid definition diagnostics");
         }
+
         assert.match(result.diagnostics[0]?.message ?? "", /min must be less than or equal to max/);
         assert.throws(
             () =>

@@ -56,6 +56,7 @@ export type ArgumentValue = ConcreteArgumentValue | undefined;
 export type ArgumentWidgetTheme = {
     /** Render text with terminal bold styling. */
     bold(text: string): string;
+
     /** Render text with a named Pi TUI colour such as `accent`, `muted`, or `warning`. */
     fg(color: string, text: string): string;
 };
@@ -64,18 +65,25 @@ export type ArgumentWidgetTheme = {
 export type ArgumentWidgetRenderContext = {
     /** Argument key from the command's `args` map. */
     name: string;
+
     /** Normalized argument definition for this field. */
     definition: ArgumentDefinition;
+
     /** Current field value. */
     value: ArgumentValue;
+
     /** Read-only snapshot of the whole form's current values. */
     values: Readonly<Record<string, ArgumentValue>>;
+
     /** Whether this field currently has focus in the dense form. */
     selected: boolean;
+
     /** Available display width for the value cell. */
     width: number;
+
     /** Theme helpers matching the active Pi TUI theme. */
     theme: ArgumentWidgetTheme;
+
     /** Format an argument value the same way built-in widgets do. */
     formatValue(value: ArgumentValue): string;
 };
@@ -84,18 +92,25 @@ export type ArgumentWidgetRenderContext = {
 export type ArgumentWidgetInputContext = {
     /** Argument key from the command's `args` map. */
     name: string;
+
     /** Normalized argument definition for this field. */
     definition: ArgumentDefinition;
+
     /** Current field value before the input is applied. */
     value: ArgumentValue;
+
     /** Read-only snapshot of the whole form's current values. */
     values: Readonly<Record<string, ArgumentValue>>;
+
     /** Raw terminal input sequence. */
     data: string;
+
     /** Test whether the input matches one of Pi's active, user-configurable keybindings. */
     matchesKeybinding(action: ArgumentFormKeybinding): boolean;
+
     /** Update this field's value from the custom handler. */
     setValue(value: ArgumentValue): void;
+
     /** Update one or more form values from the custom handler. */
     setValues(values: Readonly<Record<string, ArgumentValue>>): void;
 };
@@ -116,6 +131,7 @@ export type ArgumentFormKeybinding =
 export type CustomArgumentWidget = {
     /** Render the value cell. Return unpadded terminal text. */
     renderValue?: (ctx: ArgumentWidgetRenderContext) => string;
+
     /**
      * Handle terminal input for this field.
      *
@@ -129,30 +145,43 @@ export type CustomArgumentWidget = {
 export type ArgumentUi = {
     /** Widget override. Omit to choose a widget from the argument type. */
     widget?: ArgumentWidget;
+
     /** Preferred row count for multiline widgets such as `textarea` and `command`. */
     rows?: number;
+
     /** Optional field title shown by form renderers. */
     title?: string;
+
     /** Whether this field should be immutable in forms. */
     readOnly?: boolean | ((values: Readonly<Record<string, ArgumentValue>>) => boolean);
+
     /** Whether this field should be hidden in forms. */
     hidden?: boolean | ((values: Readonly<Record<string, ArgumentValue>>) => boolean);
+
     /** Show this field only when the condition is true. */
     visibleWhen?: boolean | ((values: Readonly<Record<string, ArgumentValue>>) => boolean);
+
     /** Allow editing only when the condition is true. */
     enabledWhen?: boolean | ((values: Readonly<Record<string, ArgumentValue>>) => boolean);
+
     /** Require a value in forms only when the condition is true. */
     requiredWhen?: boolean | ((values: Readonly<Record<string, ArgumentValue>>) => boolean);
+
     /** Compute this field's form value from the current whole-form state. */
     compute?: (values: Readonly<Record<string, ArgumentValue>>) => ArgumentValue;
+
     /** Disable editing while keeping the field visible. */
     disabled?: boolean | ((values: Readonly<Record<string, ArgumentValue>>) => boolean);
+
     /** Visual section used by grouped and advanced form layouts. */
     section?: string;
+
     /** Mark a field as advanced so forms may collapse it by default. */
     advanced?: boolean;
+
     /** Copy the current value from another field when this field is initially unset. */
     copyFrom?: string;
+
     /** Function-backed renderer/input hooks for TypeScript command definitions. */
     custom?: CustomArgumentWidget;
 };
@@ -170,8 +199,10 @@ export type TypedCompletionItem = {
     value: string;
     label?: string;
     description?: string;
+
     /** Optional text to insert instead of `value` when the provider already computed quoting. */
     replacement?: string;
+
     /** Optional source span, relative to the raw argument string, that `replacement` should cover. */
     replaceRange?: TypedCompletionReplacementRange;
 };
@@ -202,18 +233,21 @@ type ArgumentPresence<TValue extends ConcreteArgumentValue> =
     | {
           /** Require the caller to explicitly provide a value. Mutually exclusive with `default`. */
           required: true;
+
           /** Required arguments may not define a default. */
           default?: never;
       }
     | {
           /** Omit or set false when the value may come from a default or remain unset. */
           required?: false;
+
           /** Value used when the user leaves the argument unset. Mutually exclusive with `required: true`. */
           default?: TValue;
       }
     | {
           /** Dynamic requiredness is allowed only when no default is present. */
           required?: boolean;
+
           /** Requiredness decided at runtime may not define a default. */
           default?: never;
       };
@@ -222,28 +256,40 @@ export type BaseArgumentDefinition<TValue extends ConcreteArgumentValue> =
     ArgumentPresence<TValue> & {
         /** Text shown in detailed help, completions, and forms. */
         description?: string;
+
         /** Example values shown by detailed and focused help. */
         examples?: readonly string[];
+
         /** Explicit CLI flag name without leading dashes. Defaults to the kebab-cased object key. */
         flag?: string;
+
         /** Additional CLI flag aliases without leading dashes. */
         aliases?: readonly string[];
+
         /** Human-readable field title shown in forms and help; defaults to the argument key. */
         title?: string;
+
         /** Value hint shown in usage text and forms. */
         placeholder?: string;
+
         /** How repeated occurrences of this argument are handled. Defaults to error for scalars and append for multi-enum. */
         occurrence?: ArgumentOccurrencePolicy;
+
         /** Optional synchronous completion provider for editor and command completion paths. */
         complete?: TypedCompletionProvider;
+
         /** Optional asynchronous provider used only by Pi's async command-completion hook. */
         completeAsync?: TypedAsyncCompletionProvider;
+
         /** Maximum milliseconds to wait for async completions. Defaults to 1000; set to 0 to disable. */
         completionTimeoutMs?: number;
+
         /** Explicit positional index. */
         position?: number;
+
         /** Consume all remaining positional tokens into this positional argument. */
         rest?: boolean;
+
         /**
          * Collect this optional value only through Pi's expanded argument form.
          *
@@ -258,14 +304,19 @@ export type BaseArgumentDefinition<TValue extends ConcreteArgumentValue> =
 /** Text argument definition, optionally constrained by length or regular expression. */
 export type StringArgumentDefinition = BaseArgumentDefinition<string> & {
     type: "string";
+
     /** Minimum string length, inclusive. */
     minLength?: number;
+
     /** Maximum string length, inclusive. */
     maxLength?: number;
+
     /** Regular expression constraint. Strings must match the pattern. */
     pattern?: string | RegExp;
+
     /** Semantic string format validated consistently by parser and forms. */
     format?: "email" | "url" | "date" | "time" | "datetime" | "duration" | "json";
+
     /** Prevent this value from appearing in helper text or ordinary form summaries. */
     sensitive?: boolean;
 };
@@ -273,14 +324,19 @@ export type StringArgumentDefinition = BaseArgumentDefinition<string> & {
 /** Numeric argument definition, optionally constrained to integers or a range. */
 export type NumberArgumentDefinition = BaseArgumentDefinition<number> & {
     type: "number";
+
     /** Require `Number.isInteger(value)`. */
     integer?: boolean;
+
     /** Minimum allowed value, inclusive. */
     min?: number;
+
     /** Maximum allowed value, inclusive. */
     max?: number;
+
     /** Increment used by stepper controls. */
     step?: number;
+
     /** Display-only unit suffix such as `ms`, `MiB`, or `%`. */
     unit?: string;
 };
@@ -298,8 +354,10 @@ export type EnumOptionDescriptions<TValues extends readonly string[] = readonly 
 export type EnumArgumentDefinition<TValues extends readonly string[] = readonly string[]> =
     BaseArgumentDefinition<TValues[number]> & {
         type: "enum";
+
         /** Allowed string values. Use `as const` to preserve literal inference. */
         values: TValues;
+
         /** Optional descriptions rendered beside their matching values in expanded radio forms. */
         optionDescriptions?: EnumOptionDescriptions<TValues>;
     };
@@ -308,10 +366,13 @@ export type EnumArgumentDefinition<TValues extends readonly string[] = readonly 
 export type MultiEnumArgumentDefinition<TValues extends readonly string[] = readonly string[]> =
     BaseArgumentDefinition<readonly TValues[number][]> & {
         type: "multi-enum";
+
         /** Allowed string values. Use `as const` to preserve literal inference. */
         values: TValues;
+
         /** Minimum selected item count, inclusive. */
         minItems?: number;
+
         /** Maximum selected item count, inclusive. */
         maxItems?: number;
     };
@@ -361,6 +422,7 @@ export type FlatArgumentDefinitions = Readonly<Record<string, ArgumentDefinition
 type HasDefault<TDefinition> = TDefinition extends { default: ConcreteArgumentValue }
     ? true
     : false;
+
 type IsRequired<TDefinition> = TDefinition extends { required: true } ? true : false;
 
 type BaseValue<TDefinition> = TDefinition extends StringArgumentDefinition
@@ -420,10 +482,13 @@ export type SerializableArgumentValues<TDefinitions extends ArgumentDefinitions>
 export type TypedCommandFormSymbols = {
     /** Marker used for selected checkbox and multiselect values. */
     selectedCheckbox?: string;
+
     /** Marker used for unselected checkbox and multiselect values. */
     unselectedCheckbox?: string;
+
     /** Marker used for the selected radio option. */
     selectedRadio?: string;
+
     /** Marker used for unselected radio options. */
     unselectedRadio?: string;
 };
@@ -435,6 +500,7 @@ export type TypedCommandWidgetPlacement = "aboveEditor" | "belowEditor";
 export type TypedCommandUxOptions = {
     /** Where the compact live helper is rendered. Defaults to `"aboveEditor"`. */
     helperPlacement?: TypedCommandWidgetPlacement;
+
     /** Keystroke sequence that opens the expanded argument form. Defaults to `"tab"`. */
     formTrigger?: TypedCommandFormTrigger;
 };
@@ -443,10 +509,13 @@ export type TypedCommandUxOptions = {
 export type TypedCommandRefinementIssue = {
     /** Stable issue code for command-level validation. */
     code?: string;
+
     /** Human-readable message suitable for UI display. */
     message: string;
+
     /** Argument path most directly responsible for the issue. */
     path?: readonly string[];
+
     /** Other argument paths involved in the issue. */
     relatedPaths?: readonly (readonly string[])[];
 };
@@ -473,6 +542,7 @@ export type CoreRegisteredTypedCommand<
     readonly invocationName?: string;
     readonly aliases?: readonly string[];
     readonly subcommands?: Readonly<Record<string, CoreRegisteredTypedCommand>>;
+
     /** Whether raw arguments without a subcommand select the root grammar. */
     readonly hasRootHandler?: boolean;
 };
@@ -535,10 +605,12 @@ export type CompiledArgument<TValue extends ArgumentValue = ArgumentValue> = {
     serialize(value: unknown): readonly string[];
     describe(): ArgumentDescription;
     complete?(query: string, context: TypedCompletionContext): readonly TypedCompletionItem[];
+
     completeAsync?(
         query: string,
         context: TypedCompletionContext,
     ): Promise<readonly TypedCompletionItem[]>;
+
     editor?: FieldEditor<TValue>;
 };
 
@@ -553,6 +625,7 @@ export type CoreCommandDefinition<TDefinitions extends ArgumentDefinitions> = {
 export type CompiledCommand<TDefinitions extends ArgumentDefinitions = ArgumentDefinitions> = {
     readonly name: string;
     readonly description: string;
+
     /** Immutable source definition tree whose type evidence this grammar was compiled from. */
     readonly definitions: TDefinitions;
     readonly args: FlatArgumentDefinitions;
@@ -580,14 +653,19 @@ export type ParseIssueKind =
 export type ParseIssue = {
     /** Stable issue category for programmatic handling. */
     kind: ParseIssueKind;
+
     /** Human-readable error message suitable for UI display. */
     message: string;
+
     /** Argument name when the issue can be attributed to a definition. */
     name?: string;
+
     /** Raw token that caused a syntax-level issue, when available. */
     token?: string;
+
     /** Stable command-refinement code when the issue originated in `refine`. */
     code?: string;
+
     /** Additional fields involved in a cross-field refinement issue. */
     relatedNames?: readonly string[];
 };
@@ -596,14 +674,19 @@ export type ParseIssue = {
 export type ParsedCommandArguments = {
     /** Exact compiled grammar that parsed this snapshot. */
     readonly grammar?: CompiledCommand;
+
     /** Parsed values plus defaults that could be applied without prompting. */
     readonly values: Readonly<Record<string, ArgumentValue>>;
+
     /** Argument names explicitly provided by the user, even when their value failed to parse. */
     readonly provided: ReadonlySet<string>;
+
     /** Value provenance when it is available. */
     readonly sources?: ReadonlyMap<string, "explicit" | "default">;
+
     /** Syntax, coercion, and validation issues found while parsing. */
     readonly issues: readonly ParseIssue[];
+
     /** Requested action: run handler or show help. */
     readonly mode: "run" | "help";
 };

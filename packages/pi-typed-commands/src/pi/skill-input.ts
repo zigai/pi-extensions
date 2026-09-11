@@ -37,15 +37,18 @@ export function refreshTypedSkills(pi: ExtensionAPI, registry: TypedCommandRegis
         if (skillPath === undefined) {
             continue;
         }
+
         const fallbackName = command.name.replace(/^skill:/, "");
         const result = readTypedSkillMetadataResult(skillPath, { fallbackName });
         if (result.status === "ok") {
             commands.push(typedSkillCommandFromMetadata(result.metadata));
         }
+
         if (result.status === "invalid") {
             diagnostics.push(result.diagnostics);
         }
     }
+
     registry.replaceSkills(commands, diagnostics);
 }
 
@@ -59,11 +62,14 @@ export function notifySkillDiagnosticsForText(
     if (match === undefined) {
         return false;
     }
+
     const diagnostics = registry.getSkillDiagnostics(match.commandName);
     if (diagnostics === undefined) {
         return false;
     }
+
     ctx.ui.notify(formatTypedSkillDiagnostics(diagnostics), "error");
+
     return true;
 }
 
@@ -81,9 +87,12 @@ function parseSkillArguments(
         if (!canPreserveAsAdditionalInput || issue.token === undefined) {
             return true;
         }
+
         additionalTokens.push(issue.token);
+
         return false;
     });
+
     return {
         parsed: { ...parsedResult, issues },
         additionalInput: combineSkillAdditionalInput(additionalTokens.join(" "), trailingBody),
@@ -123,6 +132,7 @@ export async function renderTypedSkillInput(
             notifyIssues(ctx, issueMessages);
             return undefined;
         }
+
         let formOptions: OpenArgumentFormOptions = {
             appearance,
             title: resolveTypedCommandFormTitle(command, ctx),
@@ -131,10 +141,12 @@ export async function renderTypedSkillInput(
         if (signal !== undefined) {
             formOptions = { ...formOptions, signal };
         }
+
         const collected = await openArgumentForm(command, parsed, formMode, ctx, formOptions);
         if (collected === undefined) {
             return undefined;
         }
+
         values = collected;
     } else if (issueAction === "notify") {
         notifyIssues(ctx, issueMessages);
@@ -175,5 +187,6 @@ export async function transformTypedSkillInput(
     if (transformed === undefined) {
         return { action: "handled" };
     }
+
     return { action: "transform", text: transformed };
 }

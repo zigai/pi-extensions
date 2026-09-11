@@ -6,7 +6,6 @@ import {
 } from "./presentation-config.js";
 
 export const PI_TYPED_COMMANDS_CONFIG_SCHEMA_REFERENCE = "./config.schema.json";
-
 const JSON_SCHEMA_DRAFT_URI = "https://json-schema.org/draft/2020-12/schema";
 const PI_TYPED_COMMANDS_CONFIG_SCHEMA_ID =
     "https://github.com/zigai/pi-typed-commands/config.schema.json";
@@ -70,10 +69,6 @@ const HelpMetadataSchema = Type.Object(
     },
     { additionalProperties: true },
 );
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 export const PiTypedCommandsConfigSchema = Type.Object(
     {
@@ -240,12 +235,16 @@ export const PiTypedCommandsConfigSchema = Type.Object(
 export type PiTypedCommandsConfig = Static<typeof PiTypedCommandsConfigSchema>;
 export type PiTypedCommandsAppearanceConfig = NonNullable<PiTypedCommandsConfig["appearance"]>;
 
-export function piTypedCommandsConfigJsonSchema(): unknown {
-    const schema = structuredClone(PiTypedCommandsConfigSchema);
-    if (!isRecord(schema)) return schema;
+/** JSON Schema document published for persisted pi-typed-args configuration. */
+export type PiTypedCommandsConfigJsonSchema = typeof PiTypedCommandsConfigSchema & {
+    readonly $schema: typeof JSON_SCHEMA_DRAFT_URI;
+    readonly $id: typeof PI_TYPED_COMMANDS_CONFIG_SCHEMA_ID;
+};
+
+export function piTypedCommandsConfigJsonSchema(): PiTypedCommandsConfigJsonSchema {
     return {
         $schema: JSON_SCHEMA_DRAFT_URI,
         $id: PI_TYPED_COMMANDS_CONFIG_SCHEMA_ID,
-        ...schema,
+        ...structuredClone(PiTypedCommandsConfigSchema),
     };
 }

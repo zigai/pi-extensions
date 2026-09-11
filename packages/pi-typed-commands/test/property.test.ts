@@ -63,9 +63,11 @@ const roundTripCommand = defineTypedCommand(roundTripCommandDefinition);
 const compiledRoundTripCommand = (() => {
     const compiled = compileTypedCommandDefinition(roundTripCommandDefinition);
     assert.equal(compiled.ok, true);
+
     if (!compiled.ok) {
         throw new Error("property command did not compile");
     }
+
     return { ...roundTripCommandDefinition, compiled: compiled.command };
 })();
 
@@ -102,7 +104,6 @@ const collectionValues = fc.record({
 });
 
 const finiteNumber = fc.double({ noNaN: true, noDefaultInfinity: true });
-
 const boundedString = fc.string({ maxLength: 120 });
 const nonEmptyBoundedString = boundedString.map((value) => `x${value}`);
 
@@ -112,11 +113,12 @@ describe("parser and serializer properties", () => {
             fc.property(roundTripValues, (values) => {
                 const raw = roundTripCommand.serialize(values);
                 const parsed = roundTripCommand.parse(raw);
-
                 assert.equal(parsed.status, "success");
+
                 if (parsed.status !== "success") {
                     return;
                 }
+
                 assert.deepEqual(parsed.value, { ...values });
             }),
             { numRuns: PROPERTY_RUNS },
@@ -128,9 +130,9 @@ describe("parser and serializer properties", () => {
             fc.property(collectionValues, (values) => {
                 const raw = collectionCommand.serialize(values);
                 const parsed = collectionCommand.parse(raw);
-
                 assert.equal(parsed.status, "success");
                 if (parsed.status !== "success") return;
+
                 assert.deepEqual(parsed.value, {
                     item: values.item,
                     setting: { ...values.setting },
@@ -151,9 +153,9 @@ describe("parser and serializer properties", () => {
             fc.property(finiteNumber, (value) => {
                 const raw = numberCommand.serialize({ value });
                 const parsed = numberCommand.parse(raw);
-
                 assert.equal(parsed.status, "success");
                 if (parsed.status !== "success") return;
+
                 assert.equal(Object.is(parsed.value.value, value), true);
             }),
             { numRuns: PROPERTY_RUNS },
@@ -205,7 +207,6 @@ describe("typed skill prompt escaping properties", () => {
 
                 const closingTags = rendered.match(/<\/skill>/g) ?? [];
                 const codeFences = rendered.match(/```/g) ?? [];
-
                 assert.equal(closingTags.length, 1);
                 assert.equal(codeFences.length, 4);
             }),

@@ -23,6 +23,14 @@ import { completeTypedCommandOnTab } from "../src/pi/tab-completion.js";
 import { typedSkillCommandFromMetadata } from "../src/skills.js";
 import type { ParseIssue } from "../src/types.js";
 import type { RegisteredTypedCommand } from "../src/pi/command-types.js";
+
+type DefectiveSkillSourceInfo = {
+    readonly path: string;
+    readonly source: string;
+    readonly scope: "temporary";
+    readonly origin: "top-level";
+};
+
 import {
     createTestExtensionApi,
     createTestExtensionCommandContext,
@@ -183,6 +191,7 @@ describe("registerTypedCommand", () => {
         const parsed = deploy.parse("--env dev");
         assert.equal(serialized, '--env=dev --ref="feature branch"');
         assert.equal(parsed.status, "success");
+
         if (parsed.status === "success") {
             assert.equal(parsed.value.env, "dev");
             assert.equal(parsed.value.ref, "main");
@@ -197,6 +206,7 @@ describe("registerTypedCommand", () => {
             handle.dispose();
             handle.dispose();
         }
+
         assert.equal(getTypedCommand("typed-deploy-test"), undefined);
     });
 
@@ -219,11 +229,12 @@ describe("registerTypedCommand", () => {
 
         const parsed = command.parse("--database-host localhost --database-port 5432");
         const serialized = command.serialize({ database: { host: "localhost", port: 5432 } });
-
         assert.equal(parsed.status, "success");
+
         if (parsed.status === "success") {
             assert.deepEqual(parsed.value.database, { host: "localhost", port: 5432 });
         }
+
         assert.equal(serialized, "--database-host=localhost --database-port=5432");
     });
 
@@ -265,6 +276,7 @@ describe("registerTypedCommand", () => {
 
         const root = command.parse("--verbose");
         assert.equal(root.status, "success");
+
         if (root.status === "success" && !("subcommand" in root)) {
             assert.equal(root.value.verbose, true);
         }
@@ -272,10 +284,13 @@ describe("registerTypedCommand", () => {
         const create = command.parse("create --path demo --verbose");
         assert.equal(create.status, "success");
         assert.ok("subcommand" in create);
+
         if (!("subcommand" in create)) {
             assert.fail("expected a subcommand parse result");
         }
+
         assert.equal(create.subcommand, "create");
+
         if (
             create.status === "success" &&
             "subcommand" in create &&
@@ -289,9 +304,11 @@ describe("registerTypedCommand", () => {
         const alias = command.parse("new --path alias-demo");
         assert.equal(alias.status, "success");
         assert.ok("subcommand" in alias);
+
         if (!("subcommand" in alias)) {
             assert.fail("expected an aliased subcommand parse result");
         }
+
         assert.equal(alias.subcommand, "create");
         assert.equal(
             command.serializeSubcommand({
@@ -301,7 +318,6 @@ describe("registerTypedCommand", () => {
             'create --verbose --path="feature branch" --count=2',
         );
         assert.equal(command.formatUsage(), "/workspace-test [<subcommand>] [--verbose]");
-
         const help = command.formatHelp();
         assert.match(help, /Subcommands:/);
         assert.match(help, /create, aliases new/);
@@ -320,6 +336,7 @@ describe("registerTypedCommand", () => {
                 if (args.start === undefined || args.end === undefined || args.start <= args.end) {
                     return [];
                 }
+
                 return [{ code: "range.invalid", message: "start must not exceed end" }];
             },
             subcommands: {
@@ -328,6 +345,7 @@ describe("registerTypedCommand", () => {
                     args: { force: { type: "boolean" } },
                     refine(args) {
                         if (args.force !== true || args.start !== args.end) return [];
+
                         return [
                             {
                                 code: "forced-empty-range",
@@ -342,6 +360,7 @@ describe("registerTypedCommand", () => {
 
         const sharedFailure = command.parse("run --start 2 --end 1");
         assert.equal(sharedFailure.status, "error");
+
         if (sharedFailure.status === "error") {
             assert.deepEqual(
                 sharedFailure.issues.map((issue) => issue.code),
@@ -351,6 +370,7 @@ describe("registerTypedCommand", () => {
 
         const branchFailure = command.parse("run --start 1 --end 1 --force");
         assert.equal(branchFailure.status, "error");
+
         if (branchFailure.status === "error") {
             assert.deepEqual(
                 branchFailure.issues.map((issue) => issue.code),
@@ -375,6 +395,7 @@ describe("registerTypedCommand", () => {
                 if (!sharedSawGroup) {
                     return [{ message: "shared group was not projected" }];
                 }
+
                 return [];
             },
             subcommands: {
@@ -386,6 +407,7 @@ describe("registerTypedCommand", () => {
                         if (!branchSawGroup) {
                             return [{ message: "branch group was not projected" }];
                         }
+
                         return [];
                     },
                     run() {},
@@ -394,7 +416,6 @@ describe("registerTypedCommand", () => {
         });
 
         const parsed = command.parse("run --database.host primary");
-
         assert.equal(parsed.status, "success");
         assert.equal(sharedSawGroup, true);
         assert.equal(branchSawGroup, true);
@@ -444,9 +465,11 @@ describe("registerTypedCommand", () => {
         const parsed = command.parse("__proto__");
         assert.equal(parsed.status, "success");
         assert.ok("subcommand" in parsed);
+
         if ("subcommand" in parsed) {
             assert.equal(parsed.subcommand, "__proto__");
         }
+
         assert.match(command.formatHelp(), /^  __proto__$/m);
     });
 
@@ -485,9 +508,11 @@ describe("registerTypedCommand", () => {
 
         const parsed = command.parse("");
         assert.equal(parsed.status, "error");
+
         if (parsed.status === "error") {
             assert.equal(parsed.issues[0]?.kind, "missing-subcommand");
         }
+
         assert.equal(command.parse("--help").status, "help");
         assert.match(command.formatHelp(), /inspect/);
     });
@@ -565,10 +590,12 @@ describe("registerTypedCommand", () => {
             "--email dev@example.com --timeout 5m --tags api,web --tags worker --env A=1 --env B=two --token secret",
         );
         assert.equal(parsed.status, "success");
+
         if (parsed.status === "success") {
             assert.deepEqual(parsed.value.tags, ["api", "web", "worker"]);
             assert.deepEqual(parsed.value.env, { A: "1", B: "two" });
         }
+
         assert.equal(command.parse("--email invalid").status, "error");
         assert.equal(
             command.serialize({
@@ -706,6 +733,7 @@ function firstHandler(
     if (handler === undefined) {
         throw new Error(`missing ${name} handler`);
     }
+
     return handler;
 }
 
@@ -824,7 +852,6 @@ Body
 
         try {
             refreshTypedSkills(pi, registry);
-
             assert.equal(getTypedSkillDiagnostics("skill:unknown"), undefined);
             assert.notEqual(getTypedSkillDiagnostics("skill:demo"), undefined);
             assert.equal(notifySkillDiagnosticsForText("/skill:demo", ctx, registry), true);
@@ -835,12 +862,7 @@ Body
     });
 
     it("lets unexpected skill refresh defects reach the framework error boundary", () => {
-        const sourceInfo: {
-            readonly path: string;
-            readonly source: string;
-            readonly scope: "temporary";
-            readonly origin: "top-level";
-        } = {
+        const sourceInfo: DefectiveSkillSourceInfo = {
             get path(): string {
                 throw new Error("unexpected source metadata defect");
             },
@@ -916,6 +938,7 @@ describe("typed command live helper", () => {
                     } else {
                         widgetFactory = requireTestWidgetFactory(value);
                     }
+
                     if (value !== undefined) {
                         widgetPlacement = options?.placement;
                     }
@@ -935,13 +958,13 @@ describe("typed command live helper", () => {
             if (widgetFactory === undefined) {
                 assert.fail("expected helper widget to be installed");
             }
+
             const widget = widgetFactory(createTestTui(), createTestTheme());
             const [line] = widget.render(200);
-
             assert.equal(widgetPlacement, "belowEditor");
             assert.equal(
                 line,
-                `${" ".repeat(`/${commandName}`.length + 2)}` +
+                " ".repeat(`/${commandName}`.length + 2) +
                     "[count=1] [--panes]  [--pane-window] [--keep-open] [--worktree] [--prompt <prompt>]",
             );
             assert.equal(line.includes(`/${commandName}`), false);
@@ -978,13 +1001,15 @@ describe("typed command live helper", () => {
         let editorText = "plain text";
         let terminalInput: ((data: string) => { consume?: boolean } | undefined) | undefined;
         let editorReadSignal: (() => void) | undefined;
-        const waitForEditorRead = (): Promise<void> => {
+        const waitForEditorRead = async (): Promise<void> => {
             const signal = createTestSignal<void>();
             editorReadSignal = () => {
                 signal.resolve();
             };
+
             return signal.promise;
         };
+
         const pi = createTestExtensionApi({
             on(name, handler) {
                 const current = handlers.get(name) ?? [];
@@ -1009,6 +1034,7 @@ describe("typed command live helper", () => {
                 },
                 onTerminalInput(handler: (data: string) => { consume?: boolean } | undefined) {
                     terminalInput = handler;
+
                     return () => {
                         terminalInput = undefined;
                     };
@@ -1023,7 +1049,6 @@ describe("typed command live helper", () => {
             await firstHandler(handlers, "session_start")({}, ctx);
             assert.equal(widgetUpdates.length, 0);
             assert.notEqual(terminalInput, undefined);
-
             editorText = `/${commandName}`;
             const firstRefresh = waitForEditorRead();
             terminalInput?.("a");
@@ -1031,26 +1056,22 @@ describe("typed command live helper", () => {
             assert.equal(widgetUpdates.length, 1);
             assert.notEqual(widgetUpdates[0]?.value, undefined);
             assert.equal(widgetUpdates[0]?.placement, "belowEditor");
-
             const unchangedRefresh = waitForEditorRead();
             terminalInput?.("b");
             await unchangedRefresh;
             assert.equal(widgetUpdates.length, 1);
-
             editorText = `/${commandName} --panes`;
             const changedRefresh = waitForEditorRead();
             terminalInput?.("c");
             await changedRefresh;
             assert.equal(widgetUpdates.length, 2);
             assert.notEqual(widgetUpdates[1]?.value, undefined);
-
             editorText = "plain text";
             const clearRefresh = waitForEditorRead();
             terminalInput?.("d");
             await clearRefresh;
             assert.equal(widgetUpdates.length, 3);
             assert.equal(widgetUpdates[2]?.value, undefined);
-
             const emptyRefresh = waitForEditorRead();
             terminalInput?.("e");
             await emptyRefresh;
@@ -1125,6 +1146,7 @@ describe("typed command live helper", () => {
             if (widgetFactory === undefined) {
                 assert.fail("expected helper widget to be installed");
             }
+
             const widget = widgetFactory(createTestTui(), createTestTheme());
             const lines = widget.render(200);
             const indent = " ".repeat(`/${commandName}`.length + 2);
@@ -1200,10 +1222,10 @@ describe("typed command live helper", () => {
             if (widgetFactory === undefined) {
                 assert.fail("expected helper widget to be installed");
             }
+
             const widget = widgetFactory(createTestTui(), createTestTheme());
             const lines = widget.render(200);
             const indent = " ".repeat(`/${commandName}`.length + 2);
-
             assert.equal(lines[1], `${indent}✕ 'count' expects a number`);
         } finally {
             await firstHandler(handlers, "session_shutdown")({}, ctx);
@@ -1259,6 +1281,7 @@ describe("typed command live helper", () => {
                 setWidget() {},
                 onTerminalInput(handler: (data: string) => { consume?: boolean } | undefined) {
                     terminalInput = handler;
+
                     return () => {};
                 },
                 addAutocompleteProvider() {},
@@ -1276,7 +1299,6 @@ describe("typed command live helper", () => {
 
             assert.deepEqual(terminalInput("\t"), { consume: true });
             assert.equal(editorText, `/${commandName} --pane`);
-
             assert.deepEqual(terminalInput("\t"), { consume: true });
             assert.equal(editorText, `/${commandName} --pane`);
         } finally {
@@ -1316,6 +1338,7 @@ describe("typed command live helper", () => {
                 if (name === command.name) {
                     return command;
                 }
+
                 return undefined;
             },
             list() {
@@ -1419,6 +1442,7 @@ describe("typed command live helper", () => {
                 setWidget() {},
                 onTerminalInput(handler: (data: string) => { consume?: boolean } | undefined) {
                     terminalInput = handler;
+
                     return () => {};
                 },
                 addAutocompleteProvider() {},
@@ -1442,7 +1466,6 @@ describe("typed command live helper", () => {
 
             assert.deepEqual(terminalInput("\t"), { consume: true });
             await notification.promise;
-
             assert.deepEqual(notifications, ["Typed command form failed."]);
         } finally {
             await firstHandler(handlers, "session_shutdown")({}, ctx);
@@ -1487,6 +1510,7 @@ describe("typed command live helper", () => {
                 },
                 onTerminalInput(handler) {
                     terminalInput = handler;
+
                     return () => {
                         terminalInput = undefined;
                     };
@@ -1502,6 +1526,7 @@ describe("typed command live helper", () => {
                         },
                     );
                     formStarted.resolve();
+
                     return completion.promise;
                 },
             },
@@ -1511,6 +1536,7 @@ describe("typed command live helper", () => {
             installTypedCommandUx(pi);
             await firstHandler(handlers, "session_start")({}, ctx);
             registerTypedCommandMetadata(command);
+
             if (terminalInput === undefined) {
                 assert.fail("expected terminal input handler to be registered");
             }
@@ -1518,7 +1544,6 @@ describe("typed command live helper", () => {
             assert.deepEqual(terminalInput("\t"), { consume: true });
             await formStarted.promise;
             await firstHandler(handlers, "session_shutdown")({}, ctx);
-
             assert.deepEqual(editorUpdates, []);
             assert.deepEqual(sentMessages, []);
         } finally {
@@ -1568,12 +1593,14 @@ describe("typed command live helper", () => {
                     } else {
                         widgetFactory = requireTestWidgetFactory(value);
                     }
+
                     if (value !== undefined) {
                         widgetPlacement = options?.placement;
                     }
                 },
                 onTerminalInput(handler: (data: string) => { consume?: boolean } | undefined) {
                     terminalInput = handler;
+
                     return () => {};
                 },
                 addAutocompleteProvider() {},
@@ -1599,6 +1626,7 @@ describe("typed command live helper", () => {
             if (terminalInput === undefined) {
                 assert.fail("expected terminal input handler to be registered");
             }
+
             if (registeredHandler === undefined) {
                 assert.fail("expected command handler to be registered");
             }
@@ -1609,10 +1637,10 @@ describe("typed command live helper", () => {
             if (widgetFactory === undefined) {
                 assert.fail("expected helper widget to be installed");
             }
+
             const widget = widgetFactory(createTestTui(), createTestTheme());
             const lines = widget.render(200);
             const indent = " ".repeat(`/${commandName}`.length + 2);
-
             assert.equal(widgetPlacement, "belowEditor");
             assert.equal(lines[1], `${indent}✕ 'count' expects a number`);
         } finally {
@@ -1678,11 +1706,11 @@ describe("typed command live helper", () => {
         try {
             installTypedCommandUx(pi);
             await firstHandler(handlers, "session_start")({}, ctx);
-
             assert.equal(widgetPlacement, "aboveEditor");
         } finally {
             await firstHandler(handlers, "session_shutdown")({}, ctx);
             unregisterTypedCommandMetadata(command);
+
             if (previousAgentDir === undefined) {
                 delete process.env.PI_CODING_AGENT_DIR;
             } else {
@@ -1755,7 +1783,6 @@ describe("typed command live helper", () => {
         try {
             installTypedCommandUx(pi);
             await firstHandler(handlers, "session_start")({}, ctx);
-
             assert.equal(widgetPlacement, "belowEditor");
         } finally {
             await firstHandler(handlers, "session_shutdown")({}, ctx);
