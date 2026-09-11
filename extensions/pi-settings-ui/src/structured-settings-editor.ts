@@ -1,7 +1,14 @@
 import {
-    formatSettingLabel,
+    isJsonArray,
+    isJsonBoolean,
+    isJsonNumber,
+    isJsonObject,
+    isJsonString,
     type JsonObject,
     type JsonValue,
+} from "./json-value.ts";
+import {
+    formatSettingLabel,
     materializeSettingsValue,
     parseSettingsValue,
     type SettingsValueNode,
@@ -59,25 +66,22 @@ export type ParseStructuredInputOutcome =
     | { readonly _tag: "StructuredInputParsed"; readonly value: JsonValue }
     | { readonly _tag: "StructuredInputRejected"; readonly message: string };
 
-function isJsonArray(value: JsonValue | undefined): value is readonly JsonValue[] {
-    return Array.isArray(value);
-}
-
-function isJsonObject(value: JsonValue | undefined): value is JsonObject {
-    return value !== null && typeof value === "object" && !isJsonArray(value);
+function isPathIndex(segment: number | string): segment is number {
+    return typeof segment === "number";
 }
 
 function primitiveSummary(value: JsonValue | undefined): string | undefined {
     if (value === undefined) return "<unset>";
     if (value === null) return "<none>";
-    if (typeof value === "string") return value === "" ? '""' : value.replaceAll(/\s*\n\s*/g, " ");
-    if (typeof value === "boolean" || typeof value === "number") return String(value);
+    if (isJsonString(value)) return value === "" ? '""' : value.replaceAll(/\s*\n\s*/g, " ");
+    if (isJsonBoolean(value) || isJsonNumber(value)) return String(value);
     return undefined;
 }
 
 export function structuredValueSummary(value: JsonValue | undefined): string {
     const primitive = primitiveSummary(value);
     if (primitive !== undefined) return primitive;
+
     const count = isJsonArray(value)
         ? value.length
         : isJsonObject(value)
@@ -88,12 +92,15 @@ export function structuredValueSummary(value: JsonValue | undefined): string {
 
 function recordLabel(value: JsonValue | undefined, index: number): string {
     if (!isJsonObject(value)) return `Entry ${index + 1}`;
+
     const id = primitiveSummary(value.id);
     if (id !== undefined && value.id !== undefined) return id;
+
     const providerValue = value.provider;
     const modelValue = value.model ?? value.modelId;
     const provider = primitiveSummary(providerValue);
     const model = primitiveSummary(modelValue);
+
     if (
         providerValue !== undefined &&
         modelValue !== undefined &&
@@ -102,12 +109,14 @@ function recordLabel(value: JsonValue | undefined, index: number): string {
     ) {
         return `${provider}/${model}`;
     }
+
     const target = value.target;
     if (isJsonObject(target)) {
         const kindValue = target.kind;
         const nameValue = target.name;
         const kind = primitiveSummary(kindValue);
         const name = primitiveSummary(nameValue);
+
         if (
             kindValue !== undefined &&
             nameValue !== undefined &&
@@ -117,19 +126,22 @@ function recordLabel(value: JsonValue | undefined, index: number): string {
             return `${kind}/${name}`;
         }
     }
+
     for (const key of ["key", "provider", "name", "label", "title", "alias"]) {
         const child = value[key];
         const label = primitiveSummary(child);
         if (child !== undefined && label !== undefined) return label;
     }
+
     return `Entry ${index + 1}`;
 }
 
 function valueMatchesNode(node: SettingsValueNode, value: JsonValue | undefined): boolean {
     if (value === undefined) return false;
+
     switch (node.control._tag) {
         case "BooleanControl":
-            return typeof value === "boolean";
+            return isJsonBoolean(value);
         case "ChoiceControl":
             return node.control.choices.some((choice) => Object.is(choice, value));
         case "JsonControl":
@@ -142,7 +154,7 @@ function valueMatchesNode(node: SettingsValueNode, value: JsonValue | undefined)
             return value === null;
         case "NumberControl":
             return (
-                typeof value === "number" &&
+                isJsonNumber(value) &&
                 Number.isFinite(value) &&
                 (!node.control.integer || Number.isInteger(value))
             );
@@ -160,7 +172,7 @@ function valueMatchesNode(node: SettingsValueNode, value: JsonValue | undefined)
                 ? true
                 : Object.is(node.control.fixedValue, value);
         case "TextControl":
-            return typeof value === "string";
+            return isJsonString(value);
         case "UnionControl":
             return node.control.variants.some((variant) => valueMatchesNode(variant.node, value));
     }
@@ -168,6 +180,7 @@ function valueMatchesNode(node: SettingsValueNode, value: JsonValue | undefined)
 
 function activeVariantIndex(node: SettingsValueNode, value: JsonValue | undefined): number {
     if (node.control._tag !== "UnionControl") return 0;
+
     const index = node.control.variants.findIndex((variant) =>
         valueMatchesNode(variant.node, value),
     );
@@ -210,8 +223,10 @@ function appendNodeContent(
                         remove,
                         value: item,
                     });
+
                     continue;
                 }
+
                 rows.push({
                     _tag: "GroupRow",
                     depth,
@@ -223,6 +238,7 @@ function appendNodeContent(
                 });
                 appendNodeContent(rows, node.control.item, item, itemPath, depth + 1);
             }
+
             rows.push({
                 _tag: "AddRow",
                 containerPath: path,
@@ -230,12 +246,14 @@ function appendNodeContent(
                 label: "Add entry",
                 node,
             });
+
             return;
         }
         case "MapControl": {
             const entries = isJsonObject(value) ? Object.entries(value) : [];
             for (const [key, child] of entries) {
                 const childPath = [...path, key];
+
                 rows.push({
                     _tag: "GroupRow",
                     depth,
@@ -245,6 +263,7 @@ function appendNodeContent(
                     renameable: true,
                     value: child,
                 });
+
                 const childControl = node.control.value.control;
                 if (
                     childControl._tag === "BooleanControl" ||
@@ -268,6 +287,7 @@ function appendNodeContent(
                     appendNodeContent(rows, node.control.value, child, childPath, depth + 1);
                 }
             }
+
             rows.push({
                 _tag: "AddRow",
                 containerPath: path,
@@ -275,6 +295,7 @@ function appendNodeContent(
                 label: "Add entry",
                 node,
             });
+
             return;
         }
         case "ObjectControl": {
@@ -301,8 +322,10 @@ function appendNodeContent(
                         remove: undefined,
                         value: child,
                     });
+
                     continue;
                 }
+
                 rows.push({
                     _tag: "GroupRow",
                     depth,
@@ -314,6 +337,7 @@ function appendNodeContent(
                 });
                 appendNodeContent(rows, property.node, child, childPath, depth + 1);
             }
+
             return;
         }
         case "UnionControl": {
@@ -328,7 +352,9 @@ function appendNodeContent(
                 value,
                 variantIndex,
             });
+
             if (variant === undefined) return;
+
             const variantControl = variant.node.control;
             if (
                 variantControl._tag === "BooleanControl" ||
@@ -351,6 +377,7 @@ function appendNodeContent(
             } else {
                 appendNodeContent(rows, variant.node, value, path, depth + 1);
             }
+
             return;
         }
         case "BooleanControl":
@@ -387,15 +414,20 @@ export function structuredValueAtPath(
     path: StructuredValuePath,
 ): JsonValue | undefined {
     let current = value;
+
     for (const segment of path) {
-        if (typeof segment === "number") {
+        if (isPathIndex(segment)) {
             if (!isJsonArray(current)) return undefined;
+
             current = current[segment];
             continue;
         }
+
         if (!isJsonObject(current)) return undefined;
+
         current = current[segment];
     }
+
     return current;
 }
 
@@ -405,12 +437,15 @@ export function setStructuredValueAtPath(
     child: JsonValue,
 ): JsonValue {
     const [segment, ...remaining] = path;
+
     if (segment === undefined) return structuredClone(child);
-    if (typeof segment === "number") {
+
+    if (isPathIndex(segment)) {
         const values: JsonValue[] = isJsonArray(value) ? [...value] : [];
         values[segment] = setStructuredValueAtPath(values[segment], remaining, child);
         return values;
     }
+
     const object: Record<string, JsonValue> = isJsonObject(value) ? { ...value } : {};
     object[segment] = setStructuredValueAtPath(object[segment], remaining, child);
     return object;
@@ -424,6 +459,7 @@ function withContainerValue(
     const current = structuredValueAtPath(root, path);
     const result = update(current);
     if (result._tag === "StructuredValueRejected") return result;
+
     return {
         _tag: "StructuredValueChanged",
         value: setStructuredValueAtPath(root, path, result.value),
@@ -439,10 +475,12 @@ function nextMapKey(value: JsonObject, pattern: string | undefined): string | un
             return undefined;
         }
     }
+
     for (let index = 1; index <= 10_000; index += 1) {
         const key = `entry_${index}`;
         if (!(key in value) && (expression === undefined || expression.test(key))) return key;
     }
+
     return undefined;
 }
 
@@ -463,6 +501,7 @@ export function addStructuredEntry(
                         message: `This list allows at most ${row.node.control.maxItems} entries.`,
                     };
                 }
+
                 const item = materializeSettingsValue(row.node.control.item);
                 if (item === undefined) {
                     return {
@@ -471,7 +510,9 @@ export function addStructuredEntry(
                             "This schema cannot create a safe entry automatically; use the JSON fallback for this nested value.",
                     };
                 }
+
                 values.push(item);
+
                 return { _tag: "StructuredValueChanged", value: values };
             }
             case "MapControl": {
@@ -484,6 +525,7 @@ export function addStructuredEntry(
                         message: "This schema cannot create a safe map entry automatically.",
                     };
                 }
+
                 return {
                     _tag: "StructuredValueChanged",
                     value: { ...object, [key]: child },
@@ -514,27 +556,33 @@ export function removeStructuredEntry(
     if (remove === undefined) {
         return { _tag: "StructuredValueRejected", message: "The selected row is not removable." };
     }
+
     return withContainerValue(root, remove.containerPath, (current) => {
-        if (typeof remove.key === "number") {
+        if (isPathIndex(remove.key)) {
             if (!isJsonArray(current)) {
                 return { _tag: "StructuredValueRejected", message: "The list no longer exists." };
             }
+
             if (current.length <= remove.minimumItems) {
                 return {
                     _tag: "StructuredValueRejected",
                     message: `This list requires at least ${remove.minimumItems} entries.`,
                 };
             }
+
             return {
                 _tag: "StructuredValueChanged",
                 value: current.filter((_, index) => index !== remove.key),
             };
         }
+
         if (!isJsonObject(current) || !(remove.key in current)) {
             return { _tag: "StructuredValueRejected", message: "The map entry no longer exists." };
         }
-        const next: Record<string, JsonValue> = { ...current };
+
+        const next = { ...current };
         delete next[remove.key];
+
         return { _tag: "StructuredValueChanged", value: next };
     });
 }
@@ -545,24 +593,29 @@ export function renameStructuredMapEntry(
     nextKeyInput: string,
 ): StructuredValueOutcome {
     const remove = row.remove;
-    if (!row.renameable || remove === undefined || typeof remove.key !== "string") {
+    if (!row.renameable || remove === undefined || isPathIndex(remove.key)) {
         return { _tag: "StructuredValueRejected", message: "The selected row is not renameable." };
     }
+
     const nextKey = nextKeyInput.trim();
     if (nextKey === "") {
         return { _tag: "StructuredValueRejected", message: "Enter a non-empty map key." };
     }
+
     return withContainerValue(root, remove.containerPath, (current) => {
         if (!isJsonObject(current) || !(remove.key in current)) {
             return { _tag: "StructuredValueRejected", message: "The map entry no longer exists." };
         }
+
         if (nextKey !== remove.key && nextKey in current) {
             return { _tag: "StructuredValueRejected", message: "That map key already exists." };
         }
+
         const next: Record<string, JsonValue> = {};
         for (const [key, value] of Object.entries(current)) {
             next[key === remove.key ? nextKey : key] = value;
         }
+
         return { _tag: "StructuredValueChanged", value: next };
     });
 }
@@ -575,6 +628,7 @@ export function cycleStructuredVariant(
     if (row.node.control._tag !== "UnionControl" || row.node.control.variants.length === 0) {
         return { _tag: "StructuredValueRejected", message: "This setting has no variants." };
     }
+
     const index =
         (row.variantIndex + offset + row.node.control.variants.length) %
         row.node.control.variants.length;
@@ -586,6 +640,7 @@ export function cycleStructuredVariant(
             message: "This schema variant cannot be initialized safely.",
         };
     }
+
     return {
         _tag: "StructuredValueChanged",
         value: setStructuredValueAtPath(root, row.path, value),
@@ -603,13 +658,16 @@ export function parseStructuredInput(
             if (text.trim() === "") {
                 return { _tag: "StructuredInputRejected", message: "Enter a finite number." };
             }
+
             const value = Number(text);
             if (!Number.isFinite(value)) {
                 return { _tag: "StructuredInputRejected", message: "Enter a finite number." };
             }
+
             if (node.control.integer && !Number.isInteger(value)) {
                 return { _tag: "StructuredInputRejected", message: "Enter a whole number." };
             }
+
             return { _tag: "StructuredInputParsed", value };
         }
         case "JsonControl": {
@@ -636,11 +694,12 @@ export function parseStructuredInput(
 export function initialStructuredInput(row: StructuredEditorRow): string {
     if (row._tag === "GroupRow") return row.label;
     if (row._tag !== "ValueRow" || row.value === undefined) return "";
+
     switch (row.node.control._tag) {
         case "TextControl":
-            return typeof row.value === "string" ? row.value : "";
+            return isJsonString(row.value) ? row.value : "";
         case "NumberControl":
-            return typeof row.value === "number" ? String(row.value) : "";
+            return isJsonNumber(row.value) ? String(row.value) : "";
         case "JsonControl":
             return JSON.stringify(row.value, null, 2);
         case "BooleanControl":
@@ -662,22 +721,24 @@ export function structuredRowLabel(row: StructuredEditorRow): string {
 
 export function structuredRowValue(row: StructuredEditorRow): string {
     if (row._tag === "AddRow") return "";
+
     if (row._tag === "VariantRow" && row.node.control._tag === "UnionControl") {
         return row.node.control.variants[row.variantIndex]?.label ?? "Unknown";
     }
+
     if (row._tag === "GroupRow") {
         if (row.renameable) return "";
         return structuredValueSummary(row.value);
     }
+
     if (row.node.control._tag === "ChoiceControl") {
         const value = primitiveSummary(row.value);
         return value === undefined ? "<unset>" : formatSettingLabel(value);
     }
-    if (
-        row.node.control._tag === "ReadOnlyControl" &&
-        typeof row.node.control.fixedValue === "string"
-    ) {
+
+    if (row.node.control._tag === "ReadOnlyControl" && isJsonString(row.node.control.fixedValue)) {
         return formatSettingLabel(row.node.control.fixedValue);
     }
+
     return structuredValueSummary(row.value);
 }

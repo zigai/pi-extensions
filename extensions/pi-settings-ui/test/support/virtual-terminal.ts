@@ -3,7 +3,6 @@ import { Terminal as HeadlessTerminal } from "@xterm/headless";
 
 export class VirtualTerminal implements PiTerminal {
     readonly writes: string[] = [];
-
     private readonly terminal: HeadlessTerminal;
     private input: ((data: string) => void) | undefined;
     private resized: (() => void) | undefined;
@@ -52,6 +51,7 @@ export class VirtualTerminal implements PiTerminal {
 
     feed(data: string): void {
         if (this.input === undefined) throw new Error("Virtual terminal is not started.");
+
         this.input(data);
     }
 
@@ -72,12 +72,14 @@ export class VirtualTerminal implements PiTerminal {
         for (let row = 0; row < this._rows; row += 1) {
             rows.push(buffer.getLine(buffer.viewportY + row)?.translateToString(true) ?? "");
         }
+
         return rows;
     }
 
     screenText(): string {
         const rows = this.screenRows();
         while (rows.at(-1) === "") rows.pop();
+
         return rows.join("\n");
     }
 
@@ -87,6 +89,7 @@ export class VirtualTerminal implements PiTerminal {
         for (let row = 0; row < this._rows; row += 1) {
             if (buffer.getLine(buffer.viewportY + row)?.isWrapped === true) rows.push(row);
         }
+
         return rows;
     }
 
@@ -102,11 +105,13 @@ export class VirtualTerminal implements PiTerminal {
                     break;
                 }
             }
+
             for (let column = finalContentColumn + 1; column < this._columns; column += 1) {
                 const cell = line?.getCell(column);
                 if (cell !== undefined && !cell.isAttributeDefault()) cells.push({ column, row });
             }
         }
+
         return cells;
     }
 

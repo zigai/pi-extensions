@@ -8,9 +8,9 @@ import {
     withFileMutationQueue,
 } from "@earendil-works/pi-coding-agent";
 
+import { type JsonObject } from "./json-value.ts";
 import {
     type ExtensionSettingsSchema,
-    type JsonObject,
     parseExtensionSettingsSchema,
     parseSettingsDocument,
 } from "./settings-schema.ts";
@@ -96,11 +96,12 @@ export type SaveSettingsLayerOutcome =
           readonly changed: boolean;
       };
 
+function hasStringCode(cause: unknown): cause is Error & { readonly code: string } {
+    return cause instanceof Error && "code" in cause && typeof cause.code === "string";
+}
+
 function errorCode(cause: unknown): string | undefined {
-    if (cause instanceof Error && "code" in cause && typeof cause.code === "string") {
-        return cause.code;
-    }
-    return undefined;
+    return hasStringCode(cause) ? cause.code : undefined;
 }
 
 async function readTextIfPresent(path: string): Promise<string | undefined> {
@@ -135,6 +136,7 @@ async function loadSettingsLayer(
             issues: [],
         };
     }
+
     if (sourceText === undefined) {
         return {
             _tag: "ReadyLayer",
@@ -153,6 +155,7 @@ async function loadSettingsLayer(
             issues: parsed.issues,
         };
     }
+
     return {
         _tag: "ReadyLayer",
         path,
@@ -165,6 +168,7 @@ async function loadSettingsLayer(
 export function createPiSettingsLocation(cwd: string): SettingsLocation {
     const settingsDirectory = join(getAgentDir(), EXTENSION_SETTINGS_DIRECTORY);
     const projectSettingsDirectory = join(cwd, CONFIG_DIR_NAME, EXTENSION_SETTINGS_DIRECTORY);
+
     return {
         globalConfigPath: (id) => join(settingsDirectory, `${id}.json`),
         projectConfigPath: (id) => join(projectSettingsDirectory, `${id}.json`),
@@ -184,6 +188,7 @@ export async function loadSettingsCatalog(
             .sort();
     } catch (cause: unknown) {
         if (errorCode(cause) === "ENOENT") return { extensions: [], diagnostics: [] };
+
         return {
             extensions: [],
             diagnostics: [
@@ -229,10 +234,12 @@ export async function loadSettingsCatalog(
                       message: "Project settings are unavailable until this project is trusted.",
                   }),
         ]);
+
         extensions.push({ schema: parsedSchema.schema, global, project });
     }
 
     extensions.sort((left, right) => left.schema.title.localeCompare(right.schema.title));
+
     return { extensions, diagnostics };
 }
 
@@ -249,8 +256,10 @@ async function existingMode(path: string): Promise<number> {
 async function writeAtomically(path: string, content: string): Promise<void> {
     const directory = dirname(path);
     const temporaryPath = join(directory, `.${basename(path)}.${randomUUID()}.tmp`);
+
     try {
         await mkdir(directory, { recursive: true });
+
         const mode = await existingMode(path);
         await writeFile(temporaryPath, content, {
             encoding: "utf8",
@@ -294,6 +303,7 @@ async function saveSettingsLayer(
                         "The settings file changed while the editor was open. Reopen /settings.",
                 };
             }
+
             if (currentConfigText === request.content) {
                 return {
                     _tag: "SavedLayer",
@@ -305,6 +315,7 @@ async function saveSettingsLayer(
             }
 
             await writeAtomically(request.configPath, request.content);
+
             return {
                 _tag: "SavedLayer",
                 extensionId: request.extensionId,

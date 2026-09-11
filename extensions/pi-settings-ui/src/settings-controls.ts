@@ -21,11 +21,9 @@ function numberStep(control: NumberControl): number {
     return control.integer ? 1 : 0.1;
 }
 
-function numberBounds(control: NumberControl): {
-    readonly minimum: number | undefined;
-    readonly maximum: number | undefined;
-} {
+function numberBounds(control: NumberControl) {
     const step = numberStep(control);
+
     return {
         minimum:
             control.minimum ??
@@ -48,10 +46,12 @@ export function stepSettingsNumber(
 ): number {
     const bounds = numberBounds(control);
     if (current === undefined) return normalizeNumber(bounds.minimum ?? 0);
+
     let value = current;
     value = normalizeNumber(value + numberStep(control) * direction);
     if (bounds.minimum !== undefined) value = Math.max(bounds.minimum, value);
     if (bounds.maximum !== undefined) value = Math.min(bounds.maximum, value);
+
     return normalizeNumber(value);
 }
 
@@ -59,6 +59,7 @@ export function stepSettingsNumber(
 export function formatSliderValue(control: NumberControl, value: number): string {
     const bounds = numberBounds(control);
     if (bounds.minimum === undefined || bounds.maximum === undefined) return String(value);
+
     const range = bounds.maximum - bounds.minimum;
     const ratio = range <= 0 ? 0 : (value - bounds.minimum) / range;
     const segmentCount = 8;
@@ -76,7 +77,9 @@ export function colorSwatch(value: string): string | undefined {
     } else if (full !== null) {
         channels = full.slice(1, 4);
     }
+
     if (channels === undefined) return undefined;
+
     const [red, green, blue] = channels.map((channel) => Number.parseInt(channel, 16));
     if (red === undefined || green === undefined || blue === undefined) return undefined;
     return `\u001b[48;2;${red};${green};${blue}m  \u001b[0m`;
@@ -87,21 +90,16 @@ function commonPrefix(values: readonly string[]): string {
     let length = first.length;
     for (const value of values.slice(1)) {
         length = Math.min(length, value.length);
+
         let index = 0;
         while (index < length && first[index] === value[index]) index += 1;
         length = index;
     }
+
     return first.slice(0, length);
 }
 
-function pathDirectory(
-    input: string,
-    cwd: string,
-): {
-    readonly displayDirectory: string;
-    readonly entryPrefix: string;
-    readonly resolvedDirectory: string;
-} {
+function pathDirectory(input: string, cwd: string) {
     const separator = input.lastIndexOf("/");
     const displayDirectory = separator === -1 ? "" : input.slice(0, separator + 1);
     const entryPrefix = separator === -1 ? input : input.slice(separator + 1);
@@ -113,14 +111,16 @@ function pathDirectory(
     } else {
         resolvedDirectory = resolve(cwd, displayDirectory || ".");
     }
+
     return { displayDirectory, entryPrefix, resolvedDirectory };
 }
 
 /** Complete a path relative to the active Pi working directory. */
 export function completeSettingsPath(input: string, cwd: string): PathCompletionOutcome {
     if (input === "~") return { _tag: "PathCompleted", value: "~/" };
+
     const directory = pathDirectory(input, cwd);
-    let entries: Dirent<string>[];
+    let entries: Dirent[];
     try {
         entries = readdirSync(directory.resolvedDirectory, { withFileTypes: true });
     } catch {
@@ -129,6 +129,7 @@ export function completeSettingsPath(input: string, cwd: string): PathCompletion
             message: "That path cannot be read or does not exist.",
         };
     }
+
     const matches = entries
         .filter(
             (entry) =>
@@ -140,13 +141,16 @@ export function completeSettingsPath(input: string, cwd: string): PathCompletion
     if (matches.length === 0) {
         return { _tag: "PathUnavailable", message: "No matching paths." };
     }
+
     if (matches.length === 1) {
         return {
             _tag: "PathCompleted",
             value: `${directory.displayDirectory}${matches[0] ?? ""}`,
         };
     }
+
     const prefix = commonPrefix(matches);
+
     return {
         _tag: "PathMatches",
         value: `${directory.displayDirectory}${prefix}`,

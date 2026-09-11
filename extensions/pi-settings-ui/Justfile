@@ -11,8 +11,12 @@ setup:
     pre-commit install
     npm run check
 
+
+# Install the extension into Pi
+install:
+    pi install .
 # Format code
-fmt:
+format:
     npm run format
 
 # Generate config schema and README settings documentation
@@ -31,6 +35,10 @@ lint:
 test:
     npm test
 
+# Static type check with TypeScript
+typecheck:
+    npm run typecheck
+
 # Run all non-mutating quality checks
 check:
     npm run check
@@ -44,4 +52,10 @@ fix:
     npm run lint:fix
     npm run format
 
+# Remove coverage and temporary output
+clean:
+    rm -rf coverage dist
+
 alias cov := coverage
+alias fmt := format
+alias tsc := typecheck

@@ -1,51 +1,33 @@
 # AGENTS.md
 
-## Pi Extension Workflow
+## Work and verification
 
-- This repository is a Pi package. Keep resources declared explicitly in `package.json` under the `pi` manifest.
-- The extension entrypoint is `src/index.ts` and should export a default factory that receives Pi's `ExtensionAPI`.
-- Do not edit Pi's installed source code to implement package behavior. Use Pi's extension API instead.
-- Keep Pi-bundled imports (`@earendil-works/pi-ai`, `@earendil-works/pi-agent-core`, `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`, and `typebox`) in `peerDependencies` with `"*"` and in `devDependencies` only for local typechecking.
-- Put the package description in the top-level `package.json` `description` field. Pi does not have extension-level description metadata.
+This Pi package declares resources in `package.json`; `src/index.ts` exports its default `ExtensionAPI` factory. Use Pi's extension APIs without modifying installed Pi source. Put package descriptions in `package.json`, not invented extension metadata.
 
-## Extension Settings
+Run `just setup` after cloning and `just check` before handing off changes (`just coverage` for coverage output). Preserve pre-commit's first `config:check` hook. Verify visual changes in a real tmux/TTY session.
 
-This scaffold includes extension-owned settings. Keep the generated settings artifacts current as options are added or changed.
+Keep Pi-host packages (`pi-ai`, `pi-agent-core`, `pi-coding-agent`, `pi-tui` under `@earendil-works`, and `typebox`) as `"*"` peers and development dependencies for local checking. Extension-owned libraries belong in runtime dependencies.
 
-- Use `@zigai/pi-extension-settings` for extension-owned JSON settings. The template bundles it so published extensions remain independently installable.
-- Keep the TypeBox source of truth and runtime settings boundary together in a flat `src/settings.ts` module using `defineExtensionSettings`.
-- Use “settings” for the extension capability and source module; reserve “config” for concrete persisted-file concepts such as config paths and `config.schema.json`. Do not create a one-file `src/config/` directory or a parallel `config.ts`; split `settings.ts` only when a substantial domain capability earns its own specifically named module.
-- Register `src/settings.ts`, `config.schema.json`, and the README in the package's `piExtensionSettings` manifest field.
-- Expose the package-facing loader as `load<ExtensionName>Settings`, such as `loadExampleSettings`. This function owns the shared loader call and returns the extension's typed, resolved settings; ordinary extension code should call it rather than the definition or shared adapter directly.
-- Implement that loader with `loadPiExtensionSettings`. It uses `getAgentDir()` and `CONFIG_DIR_NAME`; never hardcode `~/.pi/agent` or `.pi` in runtime code.
-- Global settings live at `getAgentDir()/extension-settings/pi-settings-ui.json`; editor schemas live at `getAgentDir()/extension-settings/schemas/pi-settings-ui.schema.json`.
-- Trusted project overrides live at `ctx.cwd/CONFIG_DIR_NAME/extension-settings/pi-settings-ui.json`. Never read project settings for an untrusted project or create project settings automatically.
-- Parse settings at the boundary: `JSON.parse` to `unknown`, validate/decode with TypeBox, then pass typed settings inward. Never cast `JSON.parse` output to settings types or scatter hand-written shape checks.
-- Run the shared generator after changing the TypeBox definition. Check in `config.schema.json` and the generated README region; pre-commit and CI must run the shared artifact check.
-- The shared loader may scaffold default global settings only when missing, never overwrite existing or malformed user settings, and refresh missing or stale installed schemas from the checked-in bundled schema.
-- Use environment variables only for secrets, CI/session overrides, or explicit settings-path overrides, not normal persisted options.
-- Keep secrets out of ordinary JSON settings unless the extension deliberately designs secure storage and permissions.
-- Keep lifecycle, trust, and malformed-file policy in `AGENTS.md` and tests, not in generated README documentation.
+## Settings integration
 
-## README Settings Documentation
+Keep `@zigai/pi-extension-settings` a normal runtime dependency and distinguish this extension's own settings from the catalogs it edits.
 
-Keep the declared `piExtensionSettings` artifacts and generated README region synchronized with the settings definition.
+- **Author:** `src/settings-input.ts` owns the generation-safe TypeBox schema, defaults, and descriptions. No feature initialization or generated-artifact imports belong there. Derive decoded types with `StaticDecode`; validate external data at its boundary rather than casting it.
+- **Load:** `src/settings.ts` owns hydration, the `load<ExtensionName>Settings` loader, and semantic validation. Use the package root for authoring, `/runtime` for `definePrevalidatedExtensionSettings`, and `/pi` for loading/updates. Feature code calls the local loader. Keep this capability flat and named “settings”, without a parallel `config.ts` or one-file config directory.
+- **Generate:** declare and publish the input, prevalidation, schema, and README in `piExtensionSettings`. Run `npm run config:generate` after definition changes. Never hand-edit prevalidation, JSON Schema, or the single README settings region. Put wording on schema properties; give complex object items PascalCase titles and use valid non-secret partial examples only when helpful.
+- **Respect persistence:** defaults are overlaid by global and trusted-project settings; objects merge and arrays/scalars replace. The library owns Pi paths, missing-global scaffolding, and schema refresh. Loading never overwrites existing settings or creates project files. Invalid layers remain untouched and are reported without their values. Do not duplicate readers or hardcode paths.
+- **Write typed settings:** load first, then use `updatePiExtensionSettings()` from `/pi` with a synchronous callback over the latest encoded layer. Handle every typed outcome. Pass `expectedRevision` for snapshot edits and omit it for semantic updates. Project writes require trust. Do not add ad hoc writers, locks, or another mutation queue around this API.
 
-- Put `<!-- pi-extension-settings:start -->` and `<!-- pi-extension-settings:end -->` in the README exactly once.
-- Do not hand-edit content between those markers. The shared generator owns the settings path, option table, and complete default JSON document.
-- Put user-facing descriptions on TypeBox properties in `src/settings.ts`; wording changes flow into README documentation through generation.
-- Do not document alternate paths, layering, TypeBox mechanics, schema refresh, trust, user-owned terminology, or malformed-file policy in the generated region.
+The schema-discovered catalog editor in `src/settings-store.ts` has its own persistence boundary. Preserve its validation, conflict checks, project trust, and malformed-file protection. Pi's core settings use separate adapters; do not replace these boundaries with a typed-definition API that cannot represent them.
 
-## Implementation Notes
+Use environment variables only for secrets, CI/session overrides, or explicit path overrides. Keep secrets out of ordinary JSON unless secure storage is deliberately designed. Keep implementation policy outside generated user documentation. Consult the installed settings package's `docs/manual-setup.md`, `docs/runtime.md`, and `docs/generation.md` when changing the integration.
 
-- Keep user/LLM-facing descriptions on registered tools, commands, flags, and shortcuts.
-- Tool `promptGuidelines` are appended flat to Pi's system prompt; every guideline must name the exact tool it refers to.
-- If an extension starts timers, intervals, file watchers, sockets, or subprocesses after `session_start`, clean them up in `session_shutdown` and during reload.
-- If a custom tool mutates files, use Pi's file mutation queue around the whole read-modify-write window.
-- Custom tools must truncate large output and tell the model where any full output was saved.
-- Use `StringEnum` from `@earendil-works/pi-ai` for model-facing string enums instead of `Type.Union` of literals.
-- Use `ctx.mode === "tui"` before terminal-only UI work and `ctx.hasUI` before dialogs/notifications.
-- Run `just setup` after cloning to install dependencies and Git hooks and verify the project.
-- Keep pre-commit enabled. Its first hook must run `config:check` so stale `config.schema.json` or generated README documentation cannot be committed.
-- Validate later changes with `just check` before handing off; use `just coverage` when coverage output is needed.
-- For visual/TUI changes, verify in a real tmux/TTY session instead of only relying on snapshots or non-interactive output.
+## Lifecycle and UI
+
+Keep settings I/O out of imports and the factory. Load own settings when installing the session editor and when opening the settings catalog. Preserve fresh reads for explicit editing and dispose the editor on shutdown. Ordinary cached loads must retain disabled/invalid results and deduplicate diagnostics; do not turn explicit editing into a reload-only workflow.
+
+Renderers receive `ToolRenderContext`, not `ExtensionContext`. Render from arguments, results, and renderer state without settings I/O or retained execution contexts. Return a component even before execution/activation and for history. Guard dialogs with `ctx.hasUI` and terminal-only work with `ctx.mode === "tui"`.
+
+Dispose owned timers, watchers, sockets, and subprocesses on reload and shutdown. Deferred loading moves work to first use; `pi config` prevents import and registration entirely.
+
+Give tools, commands, flags, and shortcuts useful descriptions. Tool `promptGuidelines` entries must name their exact tool; Pi appends them flat to the system prompt. Use Pi's `StringEnum` for model-facing enums. Truncate large output with the full-output path. Ordinary file tools use Pi's mutation queue around the complete read-modify-write operation; settings transactions use their owning persistence boundary above.

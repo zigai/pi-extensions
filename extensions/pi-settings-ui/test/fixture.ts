@@ -1,3 +1,4 @@
+import type { JsonValue } from "../src/json-value.ts";
 import type { CatalogExtensionSettings, SettingsCatalog } from "../src/settings-store.ts";
 import {
     type ExtensionSettingsSchema,
@@ -6,12 +7,12 @@ import {
 
 export function generatedSchemaText(
     id: string,
-    properties: Readonly<Record<string, unknown>>,
+    properties: Readonly<Record<string, JsonValue>>,
     title = "Fixture Extension settings",
     required: readonly string[] = [],
 ): string {
-    const requiredProperties: Record<string, unknown> = {};
-    if (required.length > 0) requiredProperties.required = required;
+    const requiredProperties = required.length > 0 ? { required } : {};
+
     return `${JSON.stringify(
         {
             $schema: "https://json-schema.org/draft/2020-12/schema",

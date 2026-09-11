@@ -50,7 +50,6 @@ describe("reserved settings command editor", () => {
             () => {},
         );
         editor.setText("/settings");
-
         editor.handleInput("\r");
         await Promise.resolve();
 
@@ -68,7 +67,6 @@ describe("reserved settings command editor", () => {
             () => {},
         );
         editor.setText("/settings later");
-
         editor.handleInput("\r");
 
         expect(base.inputs).toEqual(["\r"]);

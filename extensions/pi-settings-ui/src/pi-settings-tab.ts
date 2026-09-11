@@ -16,6 +16,7 @@ import {
     type TerminalColorScheme,
 } from "@earendil-works/pi-tui";
 
+import { type JsonObject, type JsonValue } from "./json-value.ts";
 import { savePiProjectSetting, type PiProjectSettingsSnapshot } from "./pi-project-settings.ts";
 
 const ALL_THINKING_LEVELS: readonly ThinkingLevel[] = [
@@ -27,10 +28,10 @@ const ALL_THINKING_LEVELS: readonly ThinkingLevel[] = [
     "xhigh",
     "max",
 ];
+
 const SCROLL_COUNTER_PATTERN = /\(\d+\/\d+\)/u;
 
 type PiSettingsScope = "global" | "project";
-
 type PiSettingsUi = Pick<ExtensionUIContext, "getAllThemes" | "notify" | "setTheme">;
 
 type PiSettingsRuntime = {
@@ -64,7 +65,8 @@ export type PiSettingsTabOptions = {
 
 function activeThemeName(setting: string, terminalTheme: TerminalColorScheme): string {
     const separator = setting.indexOf("/");
-    if (separator === -1 || setting.indexOf("/", separator + 1) !== -1) return setting;
+    if (separator === -1 || setting.includes("/", separator + 1)) return setting;
+
     const lightTheme = setting.slice(0, separator).trim();
     const darkTheme = setting.slice(separator + 1).trim();
     if (lightTheme === "" || darkTheme === "") return setting;
@@ -74,10 +76,17 @@ function activeThemeName(setting: string, terminalTheme: TerminalColorScheme): s
 function rightAlignedLine(left: string, right: string, width: number): string {
     const rightWidth = visibleWidth(right);
     if (rightWidth >= width) return truncateToWidth(right, width, "");
+
     const leftLimit = Math.max(0, width - rightWidth - 1);
     const baseLine = truncateToWidth(left.replace(/ +$/u, ""), leftLimit, "");
     const gap = Math.max(1, width - visibleWidth(baseLine) - rightWidth);
     return `${baseLine}${" ".repeat(gap)}${right}`;
+}
+
+function warningSettingsValue(warnings: SettingsConfig["warnings"]): JsonObject {
+    return warnings.anthropicExtraUsage === undefined
+        ? {}
+        : { anthropicExtraUsage: warnings.anthropicExtraUsage };
 }
 
 function moveCounterToSearchLine(lines: readonly string[], width: number): string[] {
@@ -87,6 +96,7 @@ function moveCounterToSearchLine(lines: readonly string[], width: number): strin
         return counter !== undefined && visibleWidth(line) <= counter.length + 4;
     });
     if (counterIndex === -1) return rendered;
+
     const counterLine = rendered[counterIndex];
     const counter =
         counterLine === undefined ? undefined : SCROLL_COUNTER_PATTERN.exec(counterLine)?.[0];
@@ -96,6 +106,7 @@ function moveCounterToSearchLine(lines: readonly string[], width: number): strin
     if (counter === undefined || searchIndex === -1 || rendered[searchIndex] === undefined) {
         return rendered;
     }
+
     rendered.splice(counterIndex, 1);
     rendered[searchIndex] = rightAlignedLine(rendered[searchIndex], counter, width);
     return rendered;
@@ -139,6 +150,7 @@ export class PiSettingsTab implements PiSettingsPane {
 
     leave(): void {
         if (!this.previewActive) return;
+
         this.previewActive = false;
         this.switchTheme(this.savedThemes[this.activeScopeValue]);
     }
@@ -156,10 +168,12 @@ export class PiSettingsTab implements PiSettingsPane {
 
     selectScope(scope: PiSettingsScope): boolean {
         if (!this.scopeAvailable(scope)) return false;
+
         this.leave();
         this.activeScopeValue = scope;
         this.selector = this.createSelector();
         this.options.requestRender();
+
         return true;
     }
 
@@ -188,6 +202,7 @@ export class PiSettingsTab implements PiSettingsPane {
             this.activeScopeValue === "global"
                 ? pi.getThinkingLevel()
                 : (settings.getDefaultThinkingLevel() ?? pi.getThinkingLevel());
+
         return {
             autoCompact: settings.getCompactionEnabled(),
             showImages: settings.getShowImages(),
@@ -230,6 +245,7 @@ export class PiSettingsTab implements PiSettingsPane {
 
     private createCallbacks(): SettingsCallbacks {
         const { globalSettings: settings, pi, runtime, onCancel } = this.options;
+
         return {
             onAutoCompactChange: (enabled) =>
                 this.persist(["compaction", "enabled"], enabled, () =>
@@ -339,6 +355,7 @@ export class PiSettingsTab implements PiSettingsPane {
                 ),
             onTuiModeChange: (mode) => {
                 this.persist(["tuiMode"], mode, () => settings.setTuiMode(mode));
+
                 if (mode !== runtime.mode) {
                     this.options.ui.notify(
                         `TUI mode will change to ${mode} in the next Pi session.`,
@@ -350,22 +367,26 @@ export class PiSettingsTab implements PiSettingsPane {
                 this.persist(["fullscreenScrollbar"], mode, () =>
                     settings.setFullscreenScrollbar(mode),
                 );
+
                 this.options.ui.notify(
                     "Fullscreen scrollbar changes apply in the next Pi session.",
                     "info",
                 );
             },
             onWarningsChange: (warnings) =>
-                this.persist(["warnings"], warnings, () => settings.setWarnings(warnings)),
+                this.persist(["warnings"], warningSettingsValue(warnings), () =>
+                    settings.setWarnings(warnings),
+                ),
             onCancel,
         };
     }
 
-    private persist(path: readonly string[], value: unknown, globalChange: () => void): void {
+    private persist(path: readonly string[], value: JsonValue, globalChange: () => void): void {
         if (this.activeScopeValue === "project") {
             this.persistProject(path, value);
             return;
         }
+
         try {
             globalChange();
         } catch (error) {
@@ -373,23 +394,29 @@ export class PiSettingsTab implements PiSettingsPane {
                 `Pi settings could not be updated: ${error instanceof Error ? error.message : String(error)}`,
                 "error",
             );
+
             return;
         }
-        this.writeTail = this.writeTail.then(() => this.flushGlobalSettings());
+
+        this.writeTail = this.writeTail.then(async () => this.flushGlobalSettings());
     }
 
-    private persistProject(path: readonly string[], value: unknown): void {
+    private persistProject(path: readonly string[], value: JsonValue): void {
         this.writeTail = this.writeTail.then(async () => {
             const outcome = await savePiProjectSetting(this.projectSnapshot, path, value);
             if (outcome._tag === "ProjectSettingSaveFailed") {
                 this.options.ui.notify(outcome.message, "error");
+
                 if (this.activeScopeValue === "project") {
                     this.selector = this.createSelector();
                     this.options.requestRender();
                 }
+
                 return;
             }
+
             this.projectSnapshot = outcome.snapshot;
+
             try {
                 await this.options.projectSettings.reload();
             } catch (error) {
@@ -410,6 +437,7 @@ export class PiSettingsTab implements PiSettingsPane {
                 "error",
             );
         }
+
         this.reportSettingsErrors();
     }
 

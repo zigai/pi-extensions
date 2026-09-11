@@ -23,17 +23,20 @@ async function openSettingsEditor(pi: ExtensionAPI, ctx: ExtensionContext): Prom
     for (const diagnostic of ownSettings.diagnostics) {
         ctx.ui.notify(diagnostic.message, diagnostic.severity);
     }
+
     const catalog = await loadSettingsCatalog(createPiSettingsLocation(ctx.cwd), {
         projectTrusted: ctx.isProjectTrusted(),
     });
     for (const diagnostic of catalog.diagnostics) {
         ctx.ui.notify(`${diagnostic.message} (${diagnostic.path})`, "warning");
     }
+
     const model = new SettingsEditorModel(
         catalog,
         ownSettings.settings.projectOverrides && ctx.isProjectTrusted(),
     );
     let piSettings: PiSettingsTab | undefined;
+
     await ctx.ui.custom<void>(async (tui, theme, keybindings, done) => {
         const terminalTheme = (await tui.queryTerminalColorScheme({ timeoutMs: 100 })) ?? "dark";
         const globalSettings = SettingsManager.create(ctx.cwd, getAgentDir(), {
@@ -44,6 +47,7 @@ async function openSettingsEditor(pi: ExtensionAPI, ctx: ExtensionContext): Prom
         });
         const projectSnapshot = await loadPiProjectSettings(ctx.cwd, ctx.isProjectTrusted());
         let editor: SettingsEditorComponent | undefined;
+
         piSettings = new PiSettingsTab({
             globalSettings,
             projectSettings,
@@ -66,6 +70,7 @@ async function openSettingsEditor(pi: ExtensionAPI, ctx: ExtensionContext): Prom
             save: saveSettingsLayers,
             close: () => done(undefined),
         });
+
         return editor;
     });
     await piSettings?.flush();
@@ -82,6 +87,7 @@ export default function extension(pi: ExtensionAPI): void {
                 ctx.ui.notify(diagnostic.message, diagnostic.severity);
             }
         }
+
         if (ctx.mode !== "tui") return;
 
         const previousFactory = ctx.ui.getEditorComponent();
@@ -93,13 +99,15 @@ export default function extension(pi: ExtensionAPI): void {
             const base =
                 previousFactory?.(tui, theme, keybindings) ??
                 new CustomEditor(tui, theme, keybindings);
+
             return new SettingsCommandEditor(
                 base,
                 keybindings,
-                () => openSettingsEditor(pi, ctx),
+                async () => openSettingsEditor(pi, ctx),
                 () => ctx.ui.notify("Settings could not be opened", "error"),
             );
         };
+
         ctx.ui.setEditorComponent(settingsFactory);
         restoreEditor = () => {
             if (ctx.ui.getEditorComponent() === settingsFactory) {

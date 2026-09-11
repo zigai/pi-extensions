@@ -1,6 +1,23 @@
 import { IsSchema, Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
 
+import {
+    isJsonArray,
+    isJsonBoolean,
+    isJsonNumber,
+    isJsonObject,
+    isJsonObjectBoundary,
+    isJsonPrimitive,
+    isJsonString,
+    isJsonValue,
+    parseJsonText,
+    type JsonObject,
+    type JsonPrimitive,
+    type JsonValue,
+} from "./json-value.ts";
+
+export type { JsonObject, JsonPrimitive, JsonValue } from "./json-value.ts";
+
 const SETTINGS_ID_PATTERN = /^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$/;
 const SETTINGS_SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema";
 const NO_DEFAULT = Symbol("no-default");
@@ -18,7 +35,6 @@ const SETTINGS_CONTROL_HINTS = [
     "json-editor",
 ] as const;
 
-const schemaObjectBoundary = Type.Record(Type.String(), Type.Unknown());
 const schemaDocumentBoundary = Type.Object(
     {
         $schema: Type.Literal(SETTINGS_SCHEMA_DIALECT),
@@ -32,13 +48,12 @@ const schemaDocumentBoundary = Type.Object(
     { additionalProperties: true },
 );
 
-type SchemaObject = Static<typeof schemaObjectBoundary>;
-type SchemaDocument = Static<typeof schemaDocumentBoundary>;
-type SettingsControlHint = (typeof SETTINGS_CONTROL_HINTS)[number];
+type SchemaObject = JsonObject;
 
-export type JsonPrimitive = boolean | null | number | string;
-export type JsonValue = JsonPrimitive | readonly JsonValue[] | JsonObject;
-export type JsonObject = { readonly [key: string]: JsonValue };
+type SchemaDocument = JsonObject &
+    Static<typeof schemaDocumentBoundary> & { readonly properties: JsonObject };
+
+type SettingsControlHint = (typeof SETTINGS_CONTROL_HINTS)[number];
 
 export type SettingsValueNode = {
     readonly label: string;
@@ -60,6 +75,7 @@ export type SettingsControl =
     | {
           readonly _tag: "ListControl";
           readonly expected: string;
+
           readonly presentation:
               | { readonly _tag: "GenericListPresentation" }
               | {
@@ -68,6 +84,7 @@ export type SettingsControl =
                     readonly valuesKey: string;
                 }
               | { readonly _tag: "StringListPresentation" };
+
           readonly item: SettingsValueNode;
           readonly minItems: number;
           readonly maxItems: number | undefined;
@@ -90,6 +107,7 @@ export type SettingsControl =
       }
     | {
           readonly _tag: "ObjectControl";
+
           readonly properties: readonly {
               readonly key: string;
               readonly node: SettingsValueNode;
@@ -109,6 +127,7 @@ export type SettingsControl =
       }
     | {
           readonly _tag: "UnionControl";
+
           readonly variants: readonly {
               readonly label: string;
               readonly node: SettingsValueNode;
@@ -122,6 +141,7 @@ export type SettingsField = {
     readonly constraints: string;
     readonly required: boolean;
     readonly control: SettingsControl;
+
     readonly choiceDefaults: readonly {
         readonly choice: JsonPrimitive;
         readonly siblingValues: JsonObject;
@@ -156,84 +176,56 @@ export type ParseSettingsValueOutcome =
     | { readonly _tag: "InvalidValue"; readonly message: string }
     | { readonly _tag: "ParsedValue"; readonly value: JsonValue };
 
-function parseSchemaObject(value: unknown): SchemaObject | undefined {
-    if (!Value.Check(schemaObjectBoundary, value)) return undefined;
-    return Value.Decode(schemaObjectBoundary, value);
+function parseSchemaObject(value: JsonValue | undefined): SchemaObject | undefined {
+    return isJsonObject(value) ? value : undefined;
 }
 
-function isJsonValue(value: unknown): value is JsonValue {
-    if (value === null || typeof value === "boolean" || typeof value === "string") {
-        return true;
-    }
-    if (typeof value === "number") return Number.isFinite(value);
-    if (Array.isArray(value)) return value.every(isJsonValue);
-    if (value === null || typeof value !== "object") return false;
-    return Object.values(value).every(isJsonValue);
-}
-
-function isJsonObjectValue(value: unknown): value is JsonObject {
-    return (
-        isJsonValue(value) && value !== null && typeof value === "object" && !Array.isArray(value)
-    );
-}
-
-function parseJsonObject(value: unknown): JsonObject | undefined {
-    if (!Value.Check(schemaObjectBoundary, value)) return undefined;
-    const decoded: unknown = Value.Decode(schemaObjectBoundary, value);
-    return isJsonObjectValue(decoded) ? decoded : undefined;
-}
-
-function isJsonPrimitive(value: unknown): value is JsonPrimitive {
-    return (
-        value === null ||
-        typeof value === "boolean" ||
-        typeof value === "string" ||
-        (typeof value === "number" && Number.isFinite(value))
-    );
-}
-
-function parseJsonText(text: string): unknown {
+function parseSchemaDocument(value: JsonValue): SchemaDocument | undefined {
+    if (!isJsonObject(value)) return undefined;
     try {
-        const parsed: unknown = JSON.parse(text);
-        return parsed;
+        const decoded = Value.Parse(schemaDocumentBoundary, value);
+        const properties = parseSchemaObject(value.properties);
+        if (properties === undefined) return undefined;
+
+        return { ...value, ...decoded, properties };
     } catch {
         return undefined;
     }
 }
 
 function schemaDescription(schema: SchemaObject, fallback: string): string {
-    return typeof schema.description === "string" && schema.description.trim() !== ""
+    return isJsonString(schema.description) && schema.description.trim() !== ""
         ? schema.description
         : fallback;
 }
 
-const SETTING_LABEL_ACRONYMS: Readonly<Record<string, string>> = {
-    api: "API",
-    cpu: "CPU",
-    cwd: "CWD",
-    gpu: "GPU",
-    html: "HTML",
-    http: "HTTP",
-    https: "HTTPS",
-    id: "ID",
-    ids: "IDs",
-    json: "JSON",
-    llm: "LLM",
-    mcp: "MCP",
-    npm: "npm",
-    oauth: "OAuth",
-    rgb: "RGB",
-    sdk: "SDK",
-    ssh: "SSH",
-    ssl: "SSL",
-    tls: "TLS",
-    tui: "TUI",
-    ui: "UI",
-    uri: "URI",
-    url: "URL",
-    urls: "URLs",
-    yaml: "YAML",
-};
+const SETTING_LABEL_ACRONYMS = new Map([
+    ["api", "API"],
+    ["cpu", "CPU"],
+    ["cwd", "CWD"],
+    ["gpu", "GPU"],
+    ["html", "HTML"],
+    ["http", "HTTP"],
+    ["https", "HTTPS"],
+    ["id", "ID"],
+    ["ids", "IDs"],
+    ["json", "JSON"],
+    ["llm", "LLM"],
+    ["mcp", "MCP"],
+    ["npm", "npm"],
+    ["oauth", "OAuth"],
+    ["rgb", "RGB"],
+    ["sdk", "SDK"],
+    ["ssh", "SSH"],
+    ["ssl", "SSL"],
+    ["tls", "TLS"],
+    ["tui", "TUI"],
+    ["ui", "UI"],
+    ["uri", "URI"],
+    ["url", "URL"],
+    ["urls", "URLs"],
+    ["yaml", "YAML"],
+]);
 
 /** Turn a JSON property name into the sentence-style labels used by Pi settings. */
 export function formatSettingLabel(value: string): string {
@@ -244,10 +236,11 @@ export function formatSettingLabel(value: string): string {
         .replaceAll(/[-_.]+/g, " ")
         .split(/\s+/)
         .filter((word) => word !== "");
+
     return words
         .map((word, index) => {
             const lower = word.toLowerCase();
-            const acronym = SETTING_LABEL_ACRONYMS[lower];
+            const acronym = SETTING_LABEL_ACRONYMS.get(lower);
             if (acronym !== undefined) return acronym;
             return index === 0 ? `${lower.charAt(0).toUpperCase()}${lower.slice(1)}` : lower;
         })
@@ -255,50 +248,61 @@ export function formatSettingLabel(value: string): string {
 }
 
 function schemaTitle(schema: SchemaObject, key: string): string {
-    if (typeof schema.title === "string" && schema.title.trim() !== "") {
+    if (isJsonString(schema.title) && schema.title.trim() !== "") {
         const title = schema.title.trim();
         return title === key || !title.includes(" ") ? formatSettingLabel(title) : title;
     }
+
     return formatSettingLabel(key);
 }
 
-function schemaArray(schema: SchemaObject, key: string): readonly unknown[] | undefined {
+function schemaArray(schema: SchemaObject, key: string): readonly JsonValue[] | undefined {
     const value = schema[key];
-    return Array.isArray(value) ? value : undefined;
+    return isJsonArray(value) ? value : undefined;
 }
 
-function resolveJsonPointer(root: SchemaObject, reference: string): unknown {
+function resolveJsonPointer(root: SchemaObject, reference: string): JsonValue | undefined {
     if (!reference.startsWith("#/")) return undefined;
-    let current: unknown = root;
+
+    let current: JsonValue = root;
+
     for (const encodedSegment of reference.slice(2).split("/")) {
         const segment = encodedSegment.replaceAll("~1", "/").replaceAll("~0", "~");
         const object = parseSchemaObject(current);
-        if (object === undefined || !(segment in object)) return undefined;
-        current = object[segment];
+        const next = object?.[segment];
+        if (next === undefined) return undefined;
+
+        current = next;
     }
+
     return current;
 }
 
-function findSchemaById(value: unknown, id: string, depth = 0): unknown {
+function findSchemaById(value: JsonValue, id: string, depth = 0): JsonValue | undefined {
     if (depth > 64) return undefined;
-    if (Array.isArray(value)) {
+
+    if (isJsonArray(value)) {
         for (const child of value) {
             const match = findSchemaById(child, id, depth + 1);
             if (match !== undefined) return match;
         }
+
         return undefined;
     }
+
     const object = parseSchemaObject(value);
     if (object === undefined) return undefined;
     if (object.$id === id) return object;
+
     for (const child of Object.values(object)) {
         const match = findSchemaById(child, id, depth + 1);
         if (match !== undefined) return match;
     }
+
     return undefined;
 }
 
-function resolveSchemaReference(root: SchemaObject, reference: string): unknown {
+function resolveSchemaReference(root: SchemaObject, reference: string): JsonValue | undefined {
     return reference.startsWith("#/")
         ? resolveJsonPointer(root, reference)
         : findSchemaById(root, reference);
@@ -306,19 +310,23 @@ function resolveSchemaReference(root: SchemaObject, reference: string): unknown 
 
 function resolveSchemaNode(
     root: SchemaObject,
-    value: unknown,
+    value: JsonValue | undefined,
     references: ReadonlySet<string> = new Set(),
-): unknown {
+): JsonValue | undefined {
     const schema = parseSchemaObject(value);
-    if (schema === undefined) return typeof value === "boolean" ? value : undefined;
-    if (typeof schema.$ref !== "string") return schema;
+    if (schema === undefined) return isJsonBoolean(value) ? value : undefined;
+    if (!isJsonString(schema.$ref)) return schema;
     if (references.has(schema.$ref)) return undefined;
+
     const target = resolveSchemaReference(root, schema.$ref);
     if (target === undefined) return undefined;
     return resolveSchemaNode(root, target, new Set([...references, schema.$ref]));
 }
 
-function choiceValues(root: SchemaObject, value: unknown): readonly JsonPrimitive[] | undefined {
+function choiceValues(
+    root: SchemaObject,
+    value: JsonValue | undefined,
+): readonly JsonPrimitive[] | undefined {
     const resolved = resolveSchemaNode(root, value);
     const schema = parseSchemaObject(resolved);
     if (schema === undefined) return undefined;
@@ -331,19 +339,23 @@ function choiceValues(root: SchemaObject, value: unknown): readonly JsonPrimitiv
 
     const branches = schemaArray(schema, "anyOf") ?? schemaArray(schema, "oneOf");
     if (branches === undefined || branches.length === 0) return undefined;
+
     const choices: JsonPrimitive[] = [];
     for (const branch of branches) {
         const branchChoices = choiceValues(root, branch);
         if (branchChoices === undefined) return undefined;
+
         for (const choice of branchChoices) {
             if (!choices.some((candidate) => Object.is(candidate, choice))) choices.push(choice);
         }
     }
+
     return choices;
 }
 
 function constraintSummary(schema: SchemaObject): string {
     const constraints: string[] = [];
+
     const labels: ReadonlyArray<readonly [string, string]> = [
         ["minimum", "min"],
         ["exclusiveMinimum", ">"],
@@ -358,42 +370,44 @@ function constraintSummary(schema: SchemaObject): string {
     ];
     for (const [key, label] of labels) {
         const value = schema[key];
-        if (typeof value === "number" || typeof value === "string") {
+        if (isJsonNumber(value) || isJsonString(value)) {
             constraints.push(`${label}: ${String(value)}`);
         }
     }
-    if (typeof schema.pattern === "string") constraints.push(`pattern: ${schema.pattern}`);
+
+    if (isJsonString(schema.pattern)) constraints.push(`pattern: ${schema.pattern}`);
     if (schema.uniqueItems === true) constraints.push("unique items");
     return constraints.join(" • ");
 }
 
-function resolvedSchemaObject(root: SchemaObject, value: unknown): SchemaObject | undefined {
+function resolvedSchemaObject(
+    root: SchemaObject,
+    value: JsonValue | undefined,
+): SchemaObject | undefined {
     return parseSchemaObject(resolveSchemaNode(root, value));
 }
 
-function isStringValueSchema(root: SchemaObject, value: unknown): boolean {
+function isStringValueSchema(root: SchemaObject, value: JsonValue | undefined): boolean {
     if (resolvedSchemaObject(root, value)?.type === "string") return true;
+
     const choices = choiceValues(root, value);
-    return (
-        choices !== undefined &&
-        choices.length > 0 &&
-        choices.every((choice) => typeof choice === "string")
-    );
+    return choices !== undefined && choices.length > 0 && choices.every(isJsonString);
 }
 
-function isStringArraySchema(root: SchemaObject, value: unknown): boolean {
+function isStringArraySchema(root: SchemaObject, value: JsonValue | undefined): boolean {
     const schema = resolvedSchemaObject(root, value);
     return schema?.type === "array" && isStringValueSchema(root, schema.items);
 }
 
 function fixedObjectProperties(
     root: SchemaObject,
-    value: unknown,
-): Readonly<Record<string, unknown>> | undefined {
+    value: JsonValue | undefined,
+): SchemaObject | undefined {
     const resolved = resolveSchemaNode(root, value);
     const schema = parseSchemaObject(resolved);
     if (schema === undefined || schema.type !== "object") return undefined;
     if (parseSchemaObject(schema.patternProperties) !== undefined) return undefined;
+
     const properties = parseSchemaObject(schema.properties);
     return properties;
 }
@@ -414,18 +428,22 @@ function conditionalChoiceDefaults(
         const consequence = resolvedSchemaObject(root, branch?.then);
         const consequenceProperties = parseSchemaObject(consequence?.properties);
         if (consequenceProperties === undefined) continue;
+
         const siblingValues = defaults.get(conditionProperty.const) ?? {};
         for (const [key, rawProperty] of Object.entries(consequenceProperties)) {
             if (key === propertyKey) continue;
+
             const property = resolvedSchemaObject(root, rawProperty);
             if (property !== undefined && isJsonValue(property.default)) {
                 siblingValues[key] = structuredClone(property.default);
             }
         }
+
         if (Object.keys(siblingValues).length > 0) {
             defaults.set(conditionProperty.const, siblingValues);
         }
     }
+
     return [...defaults].map(([choice, siblingValues]) => ({ choice, siblingValues }));
 }
 
@@ -437,12 +455,14 @@ function listPresentation(
     if (itemSchema !== undefined && isStringValueSchema(root, itemSchema)) {
         return { _tag: "StringListPresentation" };
     }
+
     if (itemSchema?.type !== "object") return { _tag: "GenericListPresentation" };
 
     const properties = fixedObjectProperties(root, itemSchema);
     if (properties === undefined || Object.keys(properties).length !== 2) {
         return { _tag: "GenericListPresentation" };
     }
+
     const groupKeys = Object.entries(properties)
         .filter(([, property]) => resolvedSchemaObject(root, property)?.type === "string")
         .map(([key]) => key);
@@ -451,6 +471,7 @@ function listPresentation(
         .map(([key]) => key);
     const groupKey = groupKeys[0];
     const valuesKey = valuesKeys[0];
+
     if (
         groupKeys.length !== 1 ||
         valuesKeys.length !== 1 ||
@@ -459,6 +480,7 @@ function listPresentation(
     ) {
         return { _tag: "GenericListPresentation" };
     }
+
     return { _tag: "GroupedStringListPresentation", groupKey, valuesKey };
 }
 
@@ -468,11 +490,12 @@ function schemaHasType(schema: SchemaObject, type: string): boolean {
 
 function numericSchemaValue(schema: SchemaObject, key: string): number | undefined {
     const value = schema[key];
-    return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+    return isJsonNumber(value) && Number.isFinite(value) ? value : undefined;
 }
 
 function settingsControlHint(schema: SchemaObject): SettingsControlHint | undefined {
     const hint = schema["x-control"];
+
     return SETTINGS_CONTROL_HINTS.find((candidate) => candidate === hint);
 }
 
@@ -489,37 +512,41 @@ function textPresentationForSchema(
     ) {
         return hint;
     }
+
     if (schema.format === "color") return "color";
     if (schema.format === "path") return "path";
-    if (typeof schema.default === "string" && schema.default.includes("\n")) return "textarea";
+    if (isJsonString(schema.default) && schema.default.includes("\n")) return "textarea";
+
     const examples = schemaArray(schema, "examples") ?? [];
-    if (examples.some((example) => typeof example === "string" && example.includes("\n"))) {
+    if (examples.some((example) => isJsonString(example) && example.includes("\n"))) {
         return "textarea";
     }
+
     return (numericSchemaValue(schema, "maxLength") ?? 0) > 200 ? "textarea" : "text";
 }
 
 function textSuggestions(schema: SchemaObject): readonly string[] {
     const suggestions: string[] = [];
     for (const example of schemaArray(schema, "examples") ?? []) {
-        if (typeof example === "string" && !suggestions.includes(example)) {
-            suggestions.push(example);
-        }
+        if (isJsonString(example) && !suggestions.includes(example)) suggestions.push(example);
     }
+
     return suggestions;
 }
 
 function settingsValueNode(
     root: SchemaObject,
-    value: unknown,
+    value: JsonValue | undefined,
     key: string,
     required: boolean,
     references: ReadonlySet<string>,
 ): SettingsValueNode {
     const schema = resolvedSchemaObject(root, value) ?? parseSchemaObject(value) ?? {};
     const fallbackDescription = "No description was provided by the extension.";
+
     // oxlint-disable-next-line no-use-before-define -- Node and control normalization recurse.
     const nodeDefault = defaultForSchema(root, value);
+
     return {
         label: schemaTitle(schema, key),
         description: schemaDescription(schema, fallbackDescription),
@@ -531,41 +558,50 @@ function settingsValueNode(
     };
 }
 
-function objectVariantLabel(root: SchemaObject, value: unknown): string | undefined {
+function objectVariantLabel(root: SchemaObject, value: JsonValue | undefined): string | undefined {
     const properties = fixedObjectProperties(root, value);
     if (properties === undefined) return undefined;
+
     for (const property of Object.values(properties)) {
         const choices = choiceValues(root, property);
         if (choices?.length !== 1) continue;
+
         const choice = choices[0];
-        if (typeof choice === "string") return formatSettingLabel(choice);
+        if (isJsonString(choice)) return formatSettingLabel(choice);
         if (choice !== undefined) return String(choice);
     }
+
     const schema = resolvedSchemaObject(root, value);
-    const required = (schemaArray(schema ?? {}, "required") ?? []).filter(
-        (entry): entry is string => typeof entry === "string",
-    );
+    const required = (schemaArray(schema ?? {}, "required") ?? []).filter(isJsonString);
     const semanticKeys = required.filter((key) => key !== "args" && key !== "fact");
     const semanticKey = semanticKeys.length === 1 ? semanticKeys[0] : undefined;
     if (semanticKey !== undefined) return formatSettingLabel(semanticKey);
+
     const onlyKey = required.length === 1 ? required[0] : undefined;
     if (onlyKey !== undefined) return formatSettingLabel(onlyKey);
     return undefined;
 }
 
-function unionVariantLabel(root: SchemaObject, value: unknown, index: number): string {
+function unionVariantLabel(
+    root: SchemaObject,
+    value: JsonValue | undefined,
+    index: number,
+): string {
     const schema = resolvedSchemaObject(root, value) ?? parseSchemaObject(value);
-    if (typeof schema?.title === "string" && schema.title.trim() !== "") {
+    if (isJsonString(schema?.title) && schema.title.trim() !== "") {
         return schema.title.trim();
     }
+
     const objectLabel = objectVariantLabel(root, value);
     if (objectLabel !== undefined) return objectLabel;
+
     const choices = choiceValues(root, value);
     if (choices?.length === 1) {
         const choice = choices[0];
         if (choice === null) return "None";
-        return typeof choice === "string" ? formatSettingLabel(choice) : String(choice);
+        return isJsonString(choice) ? formatSettingLabel(choice) : String(choice);
     }
+
     if (schema !== undefined) {
         if (schemaHasType(schema, "null")) return "None";
         if (schemaHasType(schema, "array")) return "List";
@@ -575,6 +611,7 @@ function unionVariantLabel(root: SchemaObject, value: unknown, index: number): s
         if (schemaHasType(schema, "number")) return "Number";
         if (schemaHasType(schema, "string")) return "Text";
     }
+
     return `Option ${index + 1}`;
 }
 
@@ -591,6 +628,7 @@ function mapControlForSchema(
         const entries = Object.entries(patterns);
         const entry = entries[0];
         if (entries.length !== 1 || entry === undefined) return undefined;
+
         return {
             _tag: "MapControl",
             value: settingsValueNode(root, entry[1], "Value", false, references),
@@ -600,6 +638,7 @@ function mapControlForSchema(
 
     const additionalProperties = parseSchemaObject(schema.additionalProperties);
     if (additionalProperties === undefined) return undefined;
+
     return {
         _tag: "MapControl",
         value: settingsValueNode(root, additionalProperties, "Value", false, references),
@@ -607,14 +646,18 @@ function mapControlForSchema(
     };
 }
 
-function stringOnlySchema(root: SchemaObject, value: unknown, depth = 0): boolean {
+function stringOnlySchema(root: SchemaObject, value: JsonValue | undefined, depth = 0): boolean {
     if (depth > 64) return false;
+
     const schema = resolvedSchemaObject(root, value);
     if (schema === undefined) return false;
     if (schemaHasType(schema, "string")) return true;
+
     const choices = choiceValues(root, schema);
-    if (choices !== undefined) return choices.every((choice) => typeof choice === "string");
+    if (choices !== undefined) return choices.every(isJsonString);
+
     const branches = schemaArray(schema, "anyOf") ?? schemaArray(schema, "oneOf");
+
     return (
         branches !== undefined &&
         branches.length > 0 &&
@@ -622,37 +665,48 @@ function stringOnlySchema(root: SchemaObject, value: unknown, depth = 0): boolea
     );
 }
 
-function stringSuggestionsForSchema(root: SchemaObject, value: unknown): readonly string[] {
+function stringSuggestionsForSchema(
+    root: SchemaObject,
+    value: JsonValue | undefined,
+): readonly string[] {
     const suggestions: string[] = [];
-    function visit(candidate: unknown, depth: number): void {
+
+    function visit(candidate: JsonValue | undefined, depth: number): void {
         if (depth > 64) return;
+
         const schema = resolvedSchemaObject(root, candidate);
         if (schema === undefined) return;
+
         for (const example of schemaArray(schema, "examples") ?? []) {
-            if (typeof example === "string" && !suggestions.includes(example)) {
+            if (isJsonString(example) && !suggestions.includes(example)) {
                 suggestions.push(example);
             }
         }
+
         const choices = choiceValues(root, schema);
         if (choices !== undefined) {
             for (const choice of choices) {
-                if (typeof choice === "string" && !suggestions.includes(choice)) {
+                if (isJsonString(choice) && !suggestions.includes(choice)) {
                     suggestions.push(choice);
                 }
             }
+
             return;
         }
+
         for (const branch of schemaArray(schema, "anyOf") ?? schemaArray(schema, "oneOf") ?? []) {
             visit(branch, depth + 1);
         }
     }
+
     visit(value, 0);
+
     return suggestions;
 }
 
 function controlForSchema(
     root: SchemaObject,
-    value: unknown,
+    value: JsonValue | undefined,
     references: ReadonlySet<string> = new Set(),
 ): SettingsControl {
     if (value === false) {
@@ -662,17 +716,20 @@ function controlForSchema(
             fixedValue: undefined,
         };
     }
+
     if (value === true) return { _tag: "JsonControl", expected: "JSON value" };
 
     const incoming = parseSchemaObject(value);
-    if (typeof incoming?.$ref === "string") {
+    if (isJsonString(incoming?.$ref)) {
         if (references.has(incoming.$ref)) {
             return { _tag: "JsonControl", expected: "recursive JSON value" };
         }
+
         const target = resolveSchemaReference(root, incoming.$ref);
         if (target === undefined) {
             return { _tag: "JsonControl", expected: "JSON value for an unresolved schema" };
         }
+
         return controlForSchema(root, target, new Set([...references, incoming.$ref]));
     }
 
@@ -681,6 +738,7 @@ function controlForSchema(
     if (schema === undefined) {
         return { _tag: "JsonControl", expected: "JSON value matching the extension schema" };
     }
+
     if (schema.readOnly === true) {
         return {
             _tag: "ReadOnlyControl",
@@ -688,6 +746,7 @@ function controlForSchema(
             fixedValue: undefined,
         };
     }
+
     if (settingsControlHint(schema) === "json-editor") {
         return { _tag: "JsonControl", expected: "JSON value matching the extension schema" };
     }
@@ -701,6 +760,7 @@ function controlForSchema(
                 fixedValue: choices[0],
             };
         }
+
         const hint = settingsControlHint(schema);
         let presentation: "combobox" | "segmented" | "select";
         if (hint === "combobox" || hint === "segmented" || hint === "select") {
@@ -708,6 +768,7 @@ function controlForSchema(
         } else {
             presentation = choices.length <= 6 ? "segmented" : "select";
         }
+
         return { _tag: "ChoiceControl", choices, presentation };
     }
 
@@ -741,6 +802,7 @@ function controlForSchema(
     }
 
     if (schemaHasType(schema, "boolean")) return { _tag: "BooleanControl" };
+
     if (schemaHasType(schema, "string")) {
         const presentation = textPresentationForSchema(schema);
         return {
@@ -751,6 +813,7 @@ function controlForSchema(
             minLength: numericSchemaValue(schema, "minLength") ?? 0,
         };
     }
+
     if (schemaHasType(schema, "integer") || schemaHasType(schema, "number")) {
         const minimum = numericSchemaValue(schema, "minimum");
         const exclusiveMinimum = numericSchemaValue(schema, "exclusiveMinimum");
@@ -758,12 +821,14 @@ function controlForSchema(
         const exclusiveMaximum = numericSchemaValue(schema, "exclusiveMaximum");
         const hint = settingsControlHint(schema);
         let presentation: "numeric" | "slider";
+
         if (hint === "numeric" || hint === "slider") presentation = hint;
         else {
             const hasMinimum = minimum !== undefined || exclusiveMinimum !== undefined;
             const hasMaximum = maximum !== undefined || exclusiveMaximum !== undefined;
             presentation = hasMinimum && hasMaximum ? "slider" : "numeric";
         }
+
         return {
             _tag: "NumberControl",
             presentation,
@@ -775,8 +840,10 @@ function controlForSchema(
             multipleOf: numericSchemaValue(schema, "multipleOf"),
         };
     }
+
     if (schemaHasType(schema, "array")) {
         const itemSchema = schema.items;
+
         return {
             _tag: "ListControl",
             expected: "JSON array",
@@ -786,17 +853,17 @@ function controlForSchema(
             maxItems: numericSchemaValue(schema, "maxItems"),
         };
     }
+
     if (schemaHasType(schema, "null")) return { _tag: "NullControl" };
+
     if (schemaHasType(schema, "object") || parseSchemaObject(schema.properties) !== undefined) {
         const mapControl = mapControlForSchema(root, schema, references);
         if (mapControl !== undefined) return mapControl;
+
         const properties = parseSchemaObject(schema.properties);
         if (properties !== undefined) {
-            const required = new Set(
-                (schemaArray(schema, "required") ?? []).filter(
-                    (entry): entry is string => typeof entry === "string",
-                ),
-            );
+            const required = new Set((schemaArray(schema, "required") ?? []).filter(isJsonString));
+
             return {
                 _tag: "ObjectControl",
                 properties: Object.entries(properties).map(([key, property]) => ({
@@ -805,12 +872,17 @@ function controlForSchema(
                 })),
             };
         }
+
         return { _tag: "JsonControl", expected: "JSON object" };
     }
+
     return { _tag: "JsonControl", expected: "JSON value matching the extension schema" };
 }
 
-function defaultForSchema(root: SchemaObject, value: unknown): JsonValue | typeof NO_DEFAULT {
+function defaultForSchema(
+    root: SchemaObject,
+    value: JsonValue | undefined,
+): JsonValue | typeof NO_DEFAULT {
     const resolved = resolveSchemaNode(root, value);
     const schema = parseSchemaObject(resolved);
     if (schema === undefined || !("default" in schema) || !isJsonValue(schema.default)) {
@@ -818,22 +890,26 @@ function defaultForSchema(root: SchemaObject, value: unknown): JsonValue | typeo
     }
 
     const rawDefault = structuredClone(schema.default);
-    if (!isJsonObjectValue(rawDefault)) return rawDefault;
+    if (!isJsonObject(rawDefault)) return rawDefault;
+
     const properties = fixedObjectProperties(root, resolved);
     if (properties === undefined) return rawDefault;
 
-    const defaults: Record<string, JsonValue> = { ...rawDefault };
+    const defaults = { ...rawDefault };
     for (const [key, childSchema] of Object.entries(properties)) {
         if (key in defaults) continue;
+
         const childDefault = defaultForSchema(root, childSchema);
         if (childDefault !== NO_DEFAULT) defaults[key] = childDefault;
     }
+
     return defaults;
 }
 
 /** Create the smallest useful value represented by a normalized settings node. */
 export function materializeSettingsValue(node: SettingsValueNode): JsonValue | undefined {
     if (node.defaultValue !== undefined) return structuredClone(node.defaultValue);
+
     switch (node.control._tag) {
         case "BooleanControl":
             return false;
@@ -846,8 +922,10 @@ export function materializeSettingsValue(node: SettingsValueNode): JsonValue | u
             for (let index = 0; index < node.control.minItems; index += 1) {
                 const item = materializeSettingsValue(node.control.item);
                 if (item === undefined) return undefined;
+
                 values.push(item);
             }
+
             return values;
         }
         case "MapControl":
@@ -857,6 +935,7 @@ export function materializeSettingsValue(node: SettingsValueNode): JsonValue | u
         case "NumberControl": {
             const minimum = node.control.minimum;
             if (minimum !== undefined) return minimum;
+
             const exclusiveMinimum = node.control.exclusiveMinimum;
             if (exclusiveMinimum === undefined) return 0;
             return node.control.integer ? Math.floor(exclusiveMinimum) + 1 : exclusiveMinimum + 1;
@@ -865,13 +944,16 @@ export function materializeSettingsValue(node: SettingsValueNode): JsonValue | u
             const value: Record<string, JsonValue> = {};
             for (const property of node.control.properties) {
                 if (!property.node.required && property.node.defaultValue === undefined) continue;
+
                 const child = materializeSettingsValue(property.node);
                 if (child === undefined) {
                     if (property.node.required) return undefined;
                     continue;
                 }
+
                 value[property.key] = child;
             }
+
             return value;
         }
         case "ReadOnlyControl":
@@ -883,16 +965,18 @@ export function materializeSettingsValue(node: SettingsValueNode): JsonValue | u
                 const value = materializeSettingsValue(variant.node);
                 if (value !== undefined) return value;
             }
+
             return undefined;
     }
 }
 
-function buildDefaultDocument(root: SchemaDocument): JsonObject {
+function buildDefaultDocument(root: SchemaDocument) {
     const defaults: Record<string, JsonValue> = {};
     for (const [key, childSchema] of Object.entries(root.properties)) {
         const childDefault = defaultForSchema(root, childSchema);
         if (childDefault !== NO_DEFAULT) defaults[key] = childDefault;
     }
+
     return defaults;
 }
 
@@ -910,13 +994,14 @@ function buildFields(root: SchemaDocument, extensionName: string): readonly Sett
     const fields: SettingsField[] = [];
 
     function visit(
-        properties: Readonly<Record<string, unknown>>,
+        properties: SchemaObject,
         prefix: readonly string[],
         requiredNames: ReadonlySet<string>,
         parentSchema: SchemaObject,
     ): void {
         for (const [key, rawSchema] of Object.entries(properties)) {
             if (prefix.length === 0 && key === "$schema") continue;
+
             const resolved = resolveSchemaNode(root, rawSchema);
             const schema = parseSchemaObject(resolved) ?? parseSchemaObject(rawSchema);
             const path = [...prefix, key];
@@ -926,9 +1011,7 @@ function buildFields(root: SchemaDocument, extensionName: string): readonly Sett
                 settingsControlHint(schema ?? {}) !== "json-editor"
             ) {
                 const nestedRequired = new Set(
-                    (schemaArray(schema ?? {}, "required") ?? []).filter(
-                        (name): name is string => typeof name === "string",
-                    ),
+                    (schemaArray(schema ?? {}, "required") ?? []).filter(isJsonString),
                 );
                 visit(nestedProperties, path, nestedRequired, schema ?? {});
                 continue;
@@ -936,6 +1019,7 @@ function buildFields(root: SchemaDocument, extensionName: string): readonly Sett
 
             const fallbackDescription = "No description was provided by the extension.";
             const label = schema === undefined ? schemaTitle({}, key) : schemaTitle(schema, key);
+
             fields.push({
                 path,
                 label: contextualSettingLabel(label, extensionName),
@@ -951,12 +1035,9 @@ function buildFields(root: SchemaDocument, extensionName: string): readonly Sett
         }
     }
 
-    const rootRequired = new Set(
-        (schemaArray(root, "required") ?? []).filter(
-            (name): name is string => typeof name === "string",
-        ),
-    );
+    const rootRequired = new Set((schemaArray(root, "required") ?? []).filter(isJsonString));
     visit(root.properties, [], rootRequired, root);
+
     return fields;
 }
 
@@ -979,13 +1060,14 @@ export function parseExtensionSettingsSchema(
     }
 
     const raw = parseJsonText(schemaText);
-    if (raw === undefined || !Value.Check(schemaDocumentBoundary, raw)) {
+    const document = raw === undefined ? undefined : parseSchemaDocument(raw);
+    if (document === undefined) {
         return {
             _tag: "InvalidSchema",
             message: "The file is not a generated Pi extension settings schema.",
         };
     }
-    const document = Value.Decode(schemaDocumentBoundary, raw);
+
     if (!IsSchema(document)) {
         return { _tag: "InvalidSchema", message: "The schema document is not usable by TypeBox." };
     }
@@ -1009,6 +1091,7 @@ export function parseExtensionSettingsSchema(
         if (!Value.Check(document, defaultDocument)) {
             return { _tag: "InvalidSchema", message: "The schema defaults are invalid." };
         }
+
         return {
             _tag: "ParsedSchema",
             schema: {
@@ -1051,14 +1134,16 @@ export function parseSettingsDocument(
                 (issue) =>
                     `${issue.instancePath === "" ? "/" : issue.instancePath}: ${issue.message}`,
             );
+
             return {
                 _tag: "InvalidDocument",
                 message: "Settings do not match the extension schema.",
                 issues,
             };
         }
+
         const decoded: unknown = Value.Decode(extensionSchema.schema, raw);
-        const document = parseJsonObject(decoded);
+        const document = isJsonObjectBoundary(decoded) ? decoded : undefined;
         if (document === undefined) {
             return {
                 _tag: "InvalidDocument",
@@ -1066,6 +1151,7 @@ export function parseSettingsDocument(
                 issues: [],
             };
         }
+
         return { _tag: "ParsedDocument", document };
     } catch {
         return {
@@ -1079,8 +1165,9 @@ export function parseSettingsDocument(
 /** Parse an arbitrary JSON value entered through a structured settings control. */
 export function parseSettingsValue(text: string): ParseSettingsValueOutcome {
     const raw = parseJsonText(text);
-    if (raw === undefined || !isJsonValue(raw)) {
+    if (raw === undefined) {
         return { _tag: "InvalidValue", message: "Enter a valid JSON value." };
     }
+
     return { _tag: "ParsedValue", value: raw };
 }

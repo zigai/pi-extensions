@@ -26,6 +26,7 @@ describe("extension settings schemas", () => {
             schemaText,
         );
         expect(parsed._tag).toBe("ParsedSchema");
+
         if (parsed._tag === "InvalidSchema") return;
 
         const controlsByPath = new Map(
@@ -45,6 +46,7 @@ describe("extension settings schemas", () => {
                 ["locked", "ReadOnlyControl"],
             ]),
         );
+
         expect(
             parsed.schema.fields.find((field) => field.path[0] === "names")?.control,
         ).toMatchObject({
@@ -52,12 +54,14 @@ describe("extension settings schemas", () => {
             presentation: { _tag: "StringListPresentation" },
             item: { control: { _tag: "TextControl" } },
         });
+
         expect(
             parsed.schema.fields.find((field) => field.path[0] === "aliases")?.control,
         ).toMatchObject({
             _tag: "MapControl",
             value: { control: { _tag: "TextControl" } },
         });
+
         expect(
             parsed.schema.fields.find((field) => field.path[0] === "flexible")?.control,
         ).toMatchObject({
@@ -67,6 +71,7 @@ describe("extension settings schemas", () => {
                 { label: "List", node: { control: { _tag: "ListControl" } } },
             ],
         });
+
         expect(parsed.schema.defaultDocument).toMatchObject({
             $schema: "./schemas/pi-fixture.schema.json",
             enabled: true,
@@ -280,43 +285,52 @@ describe("extension settings schemas", () => {
             editor: "inline",
             presentation: "text",
         });
+
         expect(controls.get("textarea")).toMatchObject({
             _tag: "TextControl",
             editor: "multiline",
             presentation: "textarea",
         });
+
         expect(controls.get("switch")).toMatchObject({ _tag: "BooleanControl" });
         expect(controls.get("segmented")).toMatchObject({
             _tag: "ChoiceControl",
             presentation: "segmented",
         });
+
         expect(controls.get("select")).toMatchObject({
             _tag: "ChoiceControl",
             presentation: "select",
         });
+
         expect(controls.get("slider")).toMatchObject({
             _tag: "NumberControl",
             presentation: "slider",
             minimum: 1,
             maximum: 10,
         });
+
         expect(controls.get("numeric")).toMatchObject({
             _tag: "NumberControl",
             presentation: "numeric",
         });
+
         expect(controls.get("color")).toMatchObject({
             _tag: "TextControl",
             presentation: "color",
         });
+
         expect(controls.get("path")).toMatchObject({
             _tag: "TextControl",
             presentation: "path",
         });
+
         expect(controls.get("combobox")).toMatchObject({
             _tag: "TextControl",
             presentation: "combobox",
             suggestions: ["accent", "warning"],
         });
+
         expect(controls.get("jsonEditor")).toMatchObject({ _tag: "JsonControl" });
         expect(controls.has("jsonEditor.name")).toBe(false);
     });
@@ -354,6 +368,7 @@ describe("extension settings schemas", () => {
         });
         const field = parsed.schema.fields[0];
         if (field === undefined) throw new Error("Missing combobox union field.");
+
         expect(
             materializeSettingsValue({
                 label: field.label,
@@ -581,10 +596,12 @@ describe("extension settings schemas", () => {
                 '{"$schema":"./schemas/pi-fixture.schema.json","threshold":3}',
             ),
         ).toMatchObject({ _tag: "ParsedDocument" });
+
         expect(parseSettingsDocument(parsedSchema.schema, '{"threshold":0}')).toMatchObject({
             _tag: "InvalidDocument",
             issues: [expect.stringContaining("/threshold")],
         });
+
         expect(parseSettingsDocument(parsedSchema.schema, "{")).toMatchObject({
             _tag: "InvalidDocument",
             message: "Settings contain malformed JSON.",
@@ -596,6 +613,7 @@ describe("extension settings schemas", () => {
             _tag: "ParsedValue",
             value: { name: "value" },
         });
+
         expect(parseSettingsValue("undefined")).toEqual({
             _tag: "InvalidValue",
             message: "Enter a valid JSON value.",

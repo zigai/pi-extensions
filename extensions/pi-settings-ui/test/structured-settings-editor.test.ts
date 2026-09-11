@@ -86,6 +86,7 @@ describe("structured settings editor", () => {
         const schema = structuredSchema();
         const field = schema.fields.find((candidate) => candidate.path[0] === "entries");
         if (field === undefined) throw new Error("entries field missing");
+
         const initial = schema.defaultDocument.entries;
         const rows = buildStructuredRows(nodeForField(field, initial), initial);
 
@@ -97,12 +98,14 @@ describe("structured settings editor", () => {
             "AddRow",
             "AddRow",
         ]);
+
         expect(rows.map((row) => row.label)).toContain("Provider");
         expect(rows.map((row) => row.label)).toContain("Models");
         expect(rows[0]).toMatchObject({ _tag: "GroupRow", label: "openai" });
 
         const add = rows.find((row) => row._tag === "AddRow" && row.containerPath.length === 0);
         if (add?._tag !== "AddRow") throw new Error("outer add row missing");
+
         const added = addStructuredEntry(initial, add);
         expect(added).toEqual({
             _tag: "StructuredValueChanged",
@@ -113,9 +116,11 @@ describe("structured settings editor", () => {
         });
 
         if (added._tag !== "StructuredValueChanged") return;
+
         const addedRows = buildStructuredRows(nodeForField(field, added.value), added.value);
         const removable = addedRows.find((row) => row._tag === "GroupRow" && row.path[0] === 1);
         if (removable?._tag !== "GroupRow") throw new Error("added entry missing");
+
         expect(removeStructuredEntry(added.value, removable)).toEqual({
             _tag: "StructuredValueChanged",
             value: [{ provider: "openai", models: ["gpt-5.6*"] }],
@@ -126,6 +131,7 @@ describe("structured settings editor", () => {
         const schema = structuredSchema();
         const field = schema.fields.find((candidate) => candidate.path[0] === "modes");
         if (field === undefined) throw new Error("modes field missing");
+
         const initial = schema.defaultDocument.modes;
         const rows = buildStructuredRows(nodeForField(field, initial), initial);
         const add = rows.find((row) => row._tag === "AddRow");
@@ -136,10 +142,13 @@ describe("structured settings editor", () => {
             _tag: "StructuredValueChanged",
             value: { entry_1: { provider: "value", enabled: true } },
         });
+
         if (added._tag !== "StructuredValueChanged") return;
+
         const addedRows = buildStructuredRows(nodeForField(field, added.value), added.value);
         const entry = addedRows.find((row) => row._tag === "GroupRow" && row.label === "entry_1");
         if (entry?._tag !== "GroupRow") throw new Error("map entry missing");
+
         expect(renameStructuredMapEntry(added.value, entry, "nightly")).toMatchObject({
             _tag: "StructuredValueChanged",
             value: { nightly: { provider: "value", enabled: true } },
@@ -150,11 +159,13 @@ describe("structured settings editor", () => {
         const schema = structuredSchema();
         const field = schema.fields.find((candidate) => candidate.path[0] === "flexible");
         if (field === undefined) throw new Error("flexible field missing");
+
         const initial = schema.defaultDocument.flexible;
         const node = nodeForField(field, initial);
         const rows = buildStructuredRows(node, initial);
         const variant = rows.find((row) => row._tag === "VariantRow");
         if (variant?._tag !== "VariantRow") throw new Error("variant row missing");
+
         expect(variant.variantIndex).toBe(1);
         expect(cycleStructuredVariant(initial, variant, 1)).toEqual({
             _tag: "StructuredValueChanged",

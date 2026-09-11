@@ -66,6 +66,7 @@ const defaultKeys: Pick<KeybindingsManager, "matches"> = {
 function fixtureExtension(id: string, title = "Fixture Extension"): CatalogExtensionSettings {
     const parsedSchema = parseFixtureSchema(id);
     const schema = { ...parsedSchema, title };
+
     return {
         schema,
         global: {
@@ -384,6 +385,7 @@ function contextualCategoryExtension(): CatalogExtensionSettings {
 
 function fakePiSettingsPane(): PiSettingsPane {
     let activeScope: "global" | "project" = "global";
+
     return {
         get activeScope() {
             return activeScope;
@@ -427,6 +429,7 @@ describe("settings TUI", () => {
             keybindings: defaultKeys,
             save: async (requests) => {
                 saveCount += requests.length;
+
                 return requests.map((request) => ({
                     _tag: "SavedLayer" as const,
                     extensionId: request.extensionId,
@@ -599,6 +602,7 @@ describe("settings TUI", () => {
                 keybindings: defaultKeys,
                 save: async (requests) => {
                     saveCount += requests.length;
+
                     return requests.map((request) => ({
                         _tag: "SavedLayer" as const,
                         extensionId: request.extensionId,
@@ -638,9 +642,9 @@ describe("settings TUI", () => {
             expect(
                 completedPath.replaceAll("\u001b[7m", "").replaceAll("\u001b[27m", ""),
             ).toContain("alpha/");
+
             expect(completedPath).toContain("Path completed.");
             component.handleInput("\u001b");
-
             component.handleInput("\u001b[B");
             expect(component.render(100).join("\n")).toContain("\u001b[48;2;18;52;86m");
 
@@ -766,7 +770,6 @@ describe("settings TUI", () => {
         component.handleInput("custom.slot");
         expect(component.render(80).join("\n")).toContain("Use “custom.slot”");
         component.handleInput("\u001b");
-
         component.handleInput("\u001b");
         component.handleInput("\u001b[B");
         component.handleInput("\r");
@@ -917,12 +920,15 @@ describe.each([
             expect(
                 styledMarginCells.filter(({ row }) => row < 0 || row >= screenRows.length),
             ).toEqual([]);
+
             expect(styledMarginCells.filter(({ row }) => screenRows[row]?.trim() === "")).toEqual(
                 [],
             );
+
             expect(
                 styledMarginCells.filter(({ column }) => column < 0 || column >= terminal.columns),
             ).toEqual([]);
+
             expect(terminal.wrappedRows()).toEqual([]);
             expect(terminal.screenRows().every((row) => row.length <= terminal.columns)).toBe(true);
 

@@ -50,16 +50,19 @@ describe("settings control behavior", () => {
                 value: "alp",
                 matches: ["alpha/", "alpine/"],
             });
+
             expect(completeSettingsPath("alph", cwd)).toEqual({
                 _tag: "PathCompleted",
                 value: "alpha/",
             });
+
             expect(completeSettingsPath("z", cwd)).toEqual({
                 _tag: "PathUnavailable",
                 message: "No matching paths.",
             });
             const visibleEntries = completeSettingsPath("", cwd);
             expect(visibleEntries._tag).toBe("PathMatches");
+
             if (visibleEntries._tag === "PathMatches") {
                 expect(visibleEntries.matches).not.toContain(".hidden/");
             }

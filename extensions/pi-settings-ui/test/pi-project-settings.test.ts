@@ -35,6 +35,7 @@ describe("Pi project settings", () => {
         expect(await loadPiProjectSettings(cwd, false)).toMatchObject({
             _tag: "UnavailableProjectSettings",
         });
+
         expect(await loadPiProjectSettings(cwd, true)).toMatchObject({
             _tag: "BlockedProjectSettings",
         });

@@ -18,6 +18,7 @@ async function testLocation(): Promise<{
     const root = await mkdtemp(join(tmpdir(), "pi-settings-ui-"));
     const globalDirectory = join(root, "agent", "extension-settings");
     const projectDirectory = join(root, "project", ".pi", "extension-settings");
+
     return {
         root,
         location: {
@@ -58,6 +59,7 @@ describe("settings catalog", () => {
             _tag: "BlockedLayer",
             message: "Settings contain malformed JSON.",
         });
+
         expect(await readFile(location.globalConfigPath("pi-fixture"), "utf8")).toBe("{");
     });
 });
@@ -94,6 +96,7 @@ describe("settings persistence", () => {
                 changed: true,
             },
         ]);
+
         expect(await readFile(configPath, "utf8")).toBe(changed);
     });
 

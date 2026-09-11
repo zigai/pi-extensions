@@ -23,9 +23,17 @@ import {
     stepSettingsNumber,
 } from "./settings-controls.ts";
 import {
-    formatSettingLabel,
+    isJsonArray,
+    isJsonBoolean,
+    isJsonNumber,
+    isJsonObject,
+    isJsonString,
+    type JsonObject,
     type JsonPrimitive,
     type JsonValue,
+} from "./json-value.ts";
+import {
+    formatSettingLabel,
     type SettingsControl,
     type SettingsValueNode,
 } from "./settings-schema.ts";
@@ -57,9 +65,11 @@ export type SettingsEditorComponentOptions = {
     readonly tui: TUI;
     readonly theme: SettingsUiTheme;
     readonly keybindings: Pick<KeybindingsManager, "matches">;
+
     readonly save: (
         requests: readonly SaveSettingsLayerRequest[],
     ) => Promise<readonly SaveSettingsLayerOutcome[]>;
+
     readonly close: () => void;
 };
 
@@ -141,20 +151,13 @@ type FilteredValuePickerOption = ValuePickerOption & {
     readonly _tag: "CustomValue" | "SchemaValue";
 };
 
-function isJsonArray(value: JsonValue | undefined): value is readonly JsonValue[] {
-    return Array.isArray(value);
-}
-
-function isJsonObject(value: JsonValue | undefined): value is Readonly<Record<string, JsonValue>> {
-    return value !== null && typeof value === "object" && !isJsonArray(value);
-}
-
 function countLabel(key: string, count: number): string {
     const label = formatSettingLabel(key).toLocaleLowerCase();
     if (count === 1) {
         if (label.endsWith("ies")) return `${label.slice(0, -3)}y`;
         return label.endsWith("s") ? label.slice(0, -1) : label;
     }
+
     return label.endsWith("s") ? label : `${label}s`;
 }
 
@@ -162,50 +165,62 @@ function displayValue(field: EditorFieldView): string {
     const { value } = field;
     if (value === undefined) return "<unset>";
     if (value === null) return "<none>";
-    if (typeof value === "string") {
+
+    if (isJsonString(value)) {
         if (value === "") return '""';
+
         if (
             field.control._tag === "ChoiceControl" ||
             (field.control._tag === "ReadOnlyControl" && field.control.fixedValue !== undefined)
         ) {
             return formatSettingLabel(value);
         }
+
         const text = value.replaceAll(/\s*\n\s*/g, " ");
         if (field.control._tag !== "TextControl" || field.control.presentation !== "color") {
             return text;
         }
+
         const swatch = colorSwatch(value);
         return swatch === undefined ? text : `${text} ${swatch}`;
     }
+
     if (isJsonArray(value)) {
         if (field.control._tag === "ListControl") {
             const presentation = field.control.presentation;
             if (presentation._tag === "StringListPresentation") {
                 return `${value.length} ${value.length === 1 ? "entry" : "entries"}`;
             }
+
             if (presentation._tag === "GroupedStringListPresentation") {
                 let valueCount = 0;
                 for (const item of value) {
                     if (!isJsonObject(item)) continue;
+
                     const entries = item[presentation.valuesKey];
                     if (isJsonArray(entries)) valueCount += entries.length;
                 }
+
                 return `${value.length} ${countLabel(presentation.groupKey, value.length)} · ${valueCount} ${countLabel(presentation.valuesKey, valueCount)}`;
             }
         }
+
         return `${value.length} ${value.length === 1 ? "entry" : "entries"}`;
     }
-    if (typeof value === "object") {
+
+    if (isJsonObject(value)) {
         const count = Object.keys(value).length;
         return `${count} ${count === 1 ? "entry" : "entries"}`;
     }
+
     if (
         field.control._tag === "NumberControl" &&
         field.control.presentation === "slider" &&
-        typeof value === "number"
+        isJsonNumber(value)
     ) {
         return formatSliderValue(field.control, value);
     }
+
     return String(value);
 }
 
@@ -223,14 +238,12 @@ function singleLineValue(value: string): string {
 
 function primitivePreview(value: JsonValue): string | undefined {
     if (value === null) return "<none>";
-    if (typeof value === "string") return singleLineValue(value);
-    if (typeof value === "boolean" || typeof value === "number") return String(value);
+    if (isJsonString(value)) return singleLineValue(value);
+    if (isJsonBoolean(value) || isJsonNumber(value)) return String(value);
     return undefined;
 }
 
-function collectionCount(
-    value: readonly JsonValue[] | Readonly<Record<string, JsonValue>>,
-): string {
+function collectionCount(value: readonly JsonValue[] | JsonObject): string {
     const count = isJsonArray(value) ? value.length : Object.keys(value).length;
     return `${count} ${count === 1 ? "entry" : "entries"}`;
 }
@@ -246,6 +259,7 @@ function appendNamedPreview(
         rows.push({ depth, text: `${label}  ${primitive}`, group: false, aligned: true });
         return;
     }
+
     if (isJsonArray(value)) {
         rows.push({
             depth,
@@ -253,9 +267,12 @@ function appendNamedPreview(
             group: false,
             aligned: true,
         });
+
         return;
     }
+
     if (!isJsonObject(value)) return;
+
     if (depth >= 4) {
         rows.push({
             depth,
@@ -263,15 +280,18 @@ function appendNamedPreview(
             group: false,
             aligned: true,
         });
+
         return;
     }
+
     rows.push({ depth, text: label, group: true });
+
     for (const [key, child] of Object.entries(value)) {
         appendNamedPreview(rows, formatSettingLabel(key), child, depth + 1);
     }
 }
 
-function recordHeading(value: Readonly<Record<string, JsonValue>>):
+function recordHeading(value: JsonObject):
     | {
           readonly keys: readonly string[];
           readonly text: string;
@@ -297,11 +317,13 @@ function recordHeading(value: Readonly<Record<string, JsonValue>>):
         const preview = candidate === undefined ? undefined : primitivePreview(candidate);
         if (preview !== undefined) return { keys: [key], text: preview };
     }
+
     return undefined;
 }
 
 function genericListPreviewRows(values: readonly JsonValue[]): readonly PreviewRow[] {
     if (values.length === 0) return [{ depth: 2, text: "No entries", group: false }];
+
     const rows: PreviewRow[] = [];
     for (const [index, value] of values.entries()) {
         const primitive = primitivePreview(value);
@@ -309,28 +331,34 @@ function genericListPreviewRows(values: readonly JsonValue[]): readonly PreviewR
             rows.push({ depth: 2, text: primitive, group: false });
             continue;
         }
+
         if (isJsonArray(value)) {
             rows.push({ depth: 2, text: collectionCount(value), group: false });
             continue;
         }
+
         if (!isJsonObject(value)) continue;
+
         const heading = recordHeading(value);
         rows.push({
             depth: 2,
             text: heading?.text ?? `Entry ${index + 1}`,
             group: true,
         });
+
         for (const [key, child] of Object.entries(value)) {
             if (heading?.keys.includes(key) === true) continue;
             appendNamedPreview(rows, formatSettingLabel(key), child, 3);
         }
     }
+
     return rows;
 }
 
-function objectPreviewRows(value: Readonly<Record<string, JsonValue>>): readonly PreviewRow[] {
+function objectPreviewRows(value: JsonObject): readonly PreviewRow[] {
     const entries = Object.entries(value);
     if (entries.length === 0) return [{ depth: 2, text: "No entries", group: false }];
+
     const rows: PreviewRow[] = [];
     for (const [key, child] of entries) {
         const primitive = primitivePreview(child);
@@ -343,6 +371,7 @@ function objectPreviewRows(value: Readonly<Record<string, JsonValue>>): readonly
             });
             continue;
         }
+
         if (isJsonArray(child)) {
             rows.push({
                 depth: 2,
@@ -352,12 +381,15 @@ function objectPreviewRows(value: Readonly<Record<string, JsonValue>>): readonly
             });
             continue;
         }
+
         if (!isJsonObject(child)) continue;
         rows.push({ depth: 2, text: singleLineValue(key), group: true });
+
         for (const [nestedKey, nestedValue] of Object.entries(child)) {
             appendNamedPreview(rows, formatSettingLabel(nestedKey), nestedValue, 3);
         }
     }
+
     return rows;
 }
 
@@ -365,6 +397,7 @@ function collectionPreviewRows(field: EditorFieldView): readonly PreviewRow[] {
     if (isJsonObject(field.value)) return objectPreviewRows(field.value);
     if (!isJsonArray(field.value)) return [];
     if (field.control._tag !== "ListControl") return genericListPreviewRows(field.value);
+
     const presentation = field.control.presentation;
     if (presentation._tag === "GenericListPresentation") {
         return genericListPreviewRows(field.value);
@@ -373,24 +406,27 @@ function collectionPreviewRows(field: EditorFieldView): readonly PreviewRow[] {
     const rows: PreviewRow[] = [];
     if (presentation._tag === "StringListPresentation") {
         for (const value of field.value) {
-            if (typeof value === "string") {
+            if (isJsonString(value)) {
                 rows.push({ depth: 2, text: singleLineValue(value), group: false });
             }
         }
     } else {
         for (const group of field.value) {
             if (!isJsonObject(group)) continue;
+
             const label = group[presentation.groupKey];
             const values = group[presentation.valuesKey];
-            if (typeof label !== "string" || !isJsonArray(values)) continue;
+            if (!isJsonString(label) || !isJsonArray(values)) continue;
             rows.push({ depth: 2, text: singleLineValue(label), group: true });
+
             for (const value of values) {
-                if (typeof value === "string") {
+                if (isJsonString(value)) {
                     rows.push({ depth: 3, text: singleLineValue(value), group: false });
                 }
             }
         }
     }
+
     return rows.length === 0 ? [{ depth: 2, text: "No entries", group: false }] : rows;
 }
 
@@ -402,6 +438,7 @@ function renderCollectionPreview(
 ): string[] {
     const rows = collectionPreviewRows(field);
     if (rows.length === 0 || budget <= 0) return [];
+
     const visible = rows.slice(0, budget);
     if (rows.length > budget) {
         visible[Math.max(0, budget - 1)] = {
@@ -410,14 +447,18 @@ function renderCollectionPreview(
             group: false,
         };
     }
+
     const labelWidths = new Map<number, number>();
     for (const row of visible) {
         if (row.aligned !== true) continue;
+
         const separator = row.text.indexOf("  ");
         if (separator === -1) continue;
+
         const labelWidth = visibleWidth(row.text.slice(0, separator));
         labelWidths.set(row.depth, Math.max(labelWidths.get(row.depth) ?? 0, labelWidth));
     }
+
     return visible.map((row) => {
         let text = row.text;
         if (row.aligned === true) {
@@ -429,6 +470,7 @@ function renderCollectionPreview(
                 text = `${label}${" ".repeat(Math.max(0, labelWidth - visibleWidth(label)))}  ${value}`;
             }
         }
+
         return truncateToWidth(
             `${"  ".repeat(row.depth)}${theme.fg(row.group ? "text" : "muted", text)}`,
             width,
@@ -443,16 +485,18 @@ function compactExtensionTitle(title: string): string {
 
 function isPrintableText(data: string): boolean {
     if (data === "") return false;
+
     for (const character of data) {
         const codePoint = character.codePointAt(0);
         if (codePoint === undefined || codePoint < 32 || codePoint === 127) return false;
     }
+
     return true;
 }
 
 function primitiveChoiceLabel(value: JsonPrimitive): string {
     if (value === null) return "None";
-    if (typeof value === "string") return value === "" ? "Disabled" : formatSettingLabel(value);
+    if (isJsonString(value)) return value === "" ? "Disabled" : formatSettingLabel(value);
     return String(value);
 }
 
@@ -476,21 +520,24 @@ function structuredNodeForField(field: EditorFieldView): SettingsValueNode {
 
 function structuredDisplayValue(row: StructuredEditorRow): string {
     if (row._tag !== "ValueRow") return structuredRowValue(row);
+
     if (
         row.node.control._tag === "NumberControl" &&
         row.node.control.presentation === "slider" &&
-        typeof row.value === "number"
+        isJsonNumber(row.value)
     ) {
         return formatSliderValue(row.node.control, row.value);
     }
+
     if (
         row.node.control._tag === "TextControl" &&
         row.node.control.presentation === "color" &&
-        typeof row.value === "string"
+        isJsonString(row.value)
     ) {
         const swatch = colorSwatch(row.value);
         if (swatch !== undefined) return `${structuredRowValue(row)} ${swatch}`;
     }
+
     return structuredRowValue(row);
 }
 
@@ -534,8 +581,10 @@ function renderInlineControl(input: Input, control: SettingsControl, width: numb
     if (control._tag !== "TextControl" || control.presentation !== "color") {
         return input.render(width)[0] ?? "";
     }
+
     const swatch = colorSwatch(input.getValue());
     if (swatch === undefined || width < 4) return input.render(width)[0] ?? "";
+
     const swatchWidth = visibleWidth(swatch);
     const inputWidth = Math.max(1, width - swatchWidth - 1);
     return `${input.render(inputWidth)[0] ?? ""} ${swatch}`;
@@ -555,6 +604,7 @@ function paddedLine(text: string, width: number): string {
 function rightAlignedLine(left: string, right: string, width: number): string {
     const rightWidth = visibleWidth(right);
     if (rightWidth >= width) return truncateToWidth(right, width, "");
+
     const leftLimit = Math.max(0, width - rightWidth - 1);
     const baseLine = truncateToWidth(left.replace(/ +$/u, ""), leftLimit, "");
     const gap = Math.max(1, width - visibleWidth(baseLine) - rightWidth);
@@ -568,6 +618,7 @@ function border(theme: SettingsUiTheme, width: number): string {
 function wrapInset(text: string, width: number): string[] {
     const inset = truncateToWidth("  ", width, "");
     const contentWidth = Math.max(1, width - visibleWidth(inset));
+
     return wrapTextWithAnsi(text, contentWidth).map((line) =>
         truncateToWidth(`${inset}${line}`, width, ""),
     );
@@ -599,6 +650,7 @@ export class SettingsEditorComponent implements Component, Focusable {
         this._focused = value;
         if (this.editing !== undefined) this.editing.editor.focused = value;
         if (this.inlineEditing !== undefined) this.inlineEditing.input.focused = value;
+
         const structuredTextEditing = this.structuredEditing?.textEditing;
         if (structuredTextEditing?._tag === "StructuredFullTextEditing") {
             structuredTextEditing.editor.focused = value;
@@ -609,18 +661,22 @@ export class SettingsEditorComponent implements Component, Focusable {
 
     handleInput(data: string): void {
         if (this.saving) return;
+
         if (this.valuePicker !== undefined) {
             this.handleValuePickerInput(data);
             return;
         }
+
         if (this.inlineEditing !== undefined) {
             this.handleInlineInput(data);
             return;
         }
+
         if (this.structuredEditing !== undefined) {
             this.handleStructuredInput(data);
             return;
         }
+
         if (this.editing !== undefined) {
             if (this.options.keybindings.matches(data, "tui.select.cancel")) {
                 this.editing = undefined;
@@ -628,8 +684,10 @@ export class SettingsEditorComponent implements Component, Focusable {
                 this.options.tui.requestRender();
                 return;
             }
+
             this.editing.editor.handleInput(data);
             this.options.tui.requestRender();
+
             return;
         }
 
@@ -647,19 +705,24 @@ export class SettingsEditorComponent implements Component, Focusable {
             this.changeTab(1);
             return;
         }
+
         if (matchesKey(data, Key.shift("tab"))) {
             this.changeTab(-1);
             return;
         }
+
         if (matchesKey(data, Key.ctrl("g"))) {
             this.toggleScope();
             return;
         }
+
         if (this.activeTabIndex === 0) {
             if (!this.options.keybindings.matches(data, "tui.select.cancel")) {
                 this.discardArmed = false;
             }
+
             this.options.piSettings.handleInput(data);
+
             return;
         }
 
@@ -667,23 +730,28 @@ export class SettingsEditorComponent implements Component, Focusable {
             this.requestClose();
             return;
         }
+
         this.discardArmed = false;
         if (this.options.keybindings.matches(data, "tui.select.up")) {
             this.moveSelection(-1);
             return;
         }
+
         if (this.options.keybindings.matches(data, "tui.select.down")) {
             this.moveSelection(1);
             return;
         }
+
         if (this.options.keybindings.matches(data, "tui.select.pageUp")) {
             this.moveSelection(-this.visibleFieldCount());
             return;
         }
+
         if (this.options.keybindings.matches(data, "tui.select.pageDown")) {
             this.moveSelection(this.visibleFieldCount());
             return;
         }
+
         if (matchesKey(data, Key.delete) || matchesKey(data, Key.backspace)) {
             this.applyEdit(this.options.model.clearField(this.selectedField), "Override removed.");
             return;
@@ -691,6 +759,7 @@ export class SettingsEditorComponent implements Component, Focusable {
 
         const field = this.options.model.fields()[this.selectedField];
         if (field === undefined) return;
+
         if (matchesKey(data, Key.left)) {
             if (
                 field.control._tag === "ChoiceControl" &&
@@ -705,8 +774,10 @@ export class SettingsEditorComponent implements Component, Focusable {
             ) {
                 this.adjustMainSlider(-1);
             }
+
             return;
         }
+
         if (matchesKey(data, Key.right)) {
             if (
                 field.control._tag === "ChoiceControl" &&
@@ -721,8 +792,10 @@ export class SettingsEditorComponent implements Component, Focusable {
             ) {
                 this.adjustMainSlider(1);
             }
+
             return;
         }
+
         if (
             matchesKey(data, Key.space) ||
             this.options.keybindings.matches(data, "tui.select.confirm")
@@ -771,6 +844,7 @@ export class SettingsEditorComponent implements Component, Focusable {
         this.options.piSettings.invalidate();
         this.editing?.editor.invalidate();
         this.inlineEditing?.input.invalidate();
+
         const structuredTextEditing = this.structuredEditing?.textEditing;
         if (structuredTextEditing?._tag === "StructuredFullTextEditing") {
             structuredTextEditing.editor.invalidate();
@@ -785,21 +859,25 @@ export class SettingsEditorComponent implements Component, Focusable {
 
         if (this.tabPicker !== undefined) {
             lines.push(...this.renderTabPicker(safeWidth));
+
             return lines.map((line) => truncateToWidth(line, safeWidth, ""));
         }
 
         if (this.valuePicker !== undefined) {
             lines.push(...this.renderValuePicker(safeWidth));
+
             return lines.map((line) => truncateToWidth(line, safeWidth, ""));
         }
 
         if (this.activeTabIndex === 0) {
             lines.push(...this.options.piSettings.render(safeWidth));
+
             if (this.statusMessage !== undefined) {
                 lines.push(
                     ...wrapInset(this.options.theme.fg("warning", this.statusMessage), safeWidth),
                 );
             }
+
             return lines.map((line) => truncateToWidth(line, safeWidth, ""));
         }
 
@@ -826,6 +904,7 @@ export class SettingsEditorComponent implements Component, Focusable {
         if (this.statusMessage !== undefined) {
             lines.push(...wrapInset(this.options.theme.fg("muted", this.statusMessage), safeWidth));
         }
+
         const canChange =
             this.options.model.scopeView(this.options.model.activeScope).editable &&
             this.options.model
@@ -846,8 +925,10 @@ export class SettingsEditorComponent implements Component, Focusable {
                   : canChange
                     ? "Tab switch • Ctrl+P choose • Ctrl+G scope • Enter change • Esc close"
                     : "Tab switch • Ctrl+P choose • Ctrl+G scope • Esc close";
+
         lines.push(...wrapInset(this.options.theme.fg("dim", help), safeWidth));
         lines.push(border(this.options.theme, safeWidth));
+
         return lines.map((line) => truncateToWidth(line, safeWidth, ""));
     }
 
@@ -857,10 +938,12 @@ export class SettingsEditorComponent implements Component, Focusable {
         const scope = this.renderScope();
         const combined = `${title}  ${navigation}  ${scope}`;
         let lines: string[];
+
         if (visibleWidth(combined) <= width) {
             lines = [combined];
         } else {
             const primary = `${title}  ${navigation}`;
+
             lines =
                 visibleWidth(primary) <= width
                     ? [primary, truncateToWidth(scope, width, "")]
@@ -875,6 +958,7 @@ export class SettingsEditorComponent implements Component, Focusable {
         if (counter !== undefined && lines[0] !== undefined) {
             lines[0] = rightAlignedLine(lines[0], this.options.theme.fg("dim", counter), width);
         }
+
         return lines;
     }
 
@@ -885,11 +969,13 @@ export class SettingsEditorComponent implements Component, Focusable {
             this.valuePicker !== undefined
         )
             return undefined;
+
         if (this.structuredEditing !== undefined) {
             const rows = this.currentStructuredRows();
             if (rows.length === 0) return undefined;
             return `(${Math.min(this.structuredEditing.selectedRow + 1, rows.length)}/${rows.length})`;
         }
+
         const count = this.options.model.fields().length;
         if (count === 0) return undefined;
         return `(${Math.min(this.selectedField + 1, count)}/${count})`;
@@ -902,6 +988,7 @@ export class SettingsEditorComponent implements Component, Focusable {
                 "selectedBg",
                 this.options.theme.fg("accent", this.options.theme.bold(` ${text} `)),
             );
+
         let activeTitle = "Pi";
         if (this.activeTabIndex > 0) {
             const tab = tabs[this.activeTabIndex - 1];
@@ -910,6 +997,7 @@ export class SettingsEditorComponent implements Component, Focusable {
             const title = tab === undefined ? "Extension" : compactExtensionTitle(tab.title);
             activeTitle = `${title}${marker}`;
         }
+
         const choose = this.options.theme.fg("dim", "  Ctrl+P");
         return `${selected(activeTitle)}${choose}`;
     }
@@ -917,6 +1005,7 @@ export class SettingsEditorComponent implements Component, Focusable {
     private renderTabPicker(width: number): string[] {
         const picker = this.tabPicker;
         if (picker === undefined) return [];
+
         const choices = this.filteredTabChoices(picker.query);
         const visibleCount = Math.max(4, Math.min(12, this.options.tui.terminal.rows - 9));
         const maxOffset = Math.max(0, choices.length - visibleCount);
@@ -924,6 +1013,7 @@ export class SettingsEditorComponent implements Component, Focusable {
         if (picker.selectedIndex < picker.scrollOffset) {
             picker.scrollOffset = picker.selectedIndex;
         }
+
         if (picker.selectedIndex >= picker.scrollOffset + visibleCount) {
             picker.scrollOffset = picker.selectedIndex - visibleCount + 1;
         }
@@ -940,6 +1030,7 @@ export class SettingsEditorComponent implements Component, Focusable {
                 width,
             ),
         ];
+
         const visible = choices.slice(picker.scrollOffset, picker.scrollOffset + visibleCount);
         for (const [offset, choice] of visible.entries()) {
             const index = picker.scrollOffset + offset;
@@ -950,30 +1041,36 @@ export class SettingsEditorComponent implements Component, Focusable {
             const text = this.options.theme.fg(selected ? "accent" : "text", label);
             lines.push(truncateToWidth(`${prefix} ${text}`, width, ""));
         }
+
         if (choices.length === 0) {
             lines.push(this.options.theme.fg("muted", "  No matching settings tabs."));
         }
+
         lines.push(
             border(this.options.theme, width),
             this.options.theme.fg("dim", "Type to filter • ↑↓ move • Enter select • Esc cancel"),
         );
+
         return lines;
     }
 
     private renderValuePicker(width: number): string[] {
         const picker = this.valuePicker;
         if (picker === undefined) return [];
+
         const choices = this.filteredValuePickerOptions(picker);
         picker.selectedIndex = Math.max(
             0,
             Math.min(Math.max(0, choices.length - 1), picker.selectedIndex),
         );
+
         const visibleCount = Math.max(4, Math.min(12, this.options.tui.terminal.rows - 9));
         const maxOffset = Math.max(0, choices.length - visibleCount);
         picker.scrollOffset = Math.min(picker.scrollOffset, maxOffset);
         if (picker.selectedIndex < picker.scrollOffset) {
             picker.scrollOffset = picker.selectedIndex;
         }
+
         if (picker.selectedIndex >= picker.scrollOffset + visibleCount) {
             picker.scrollOffset = picker.selectedIndex - visibleCount + 1;
         }
@@ -993,6 +1090,7 @@ export class SettingsEditorComponent implements Component, Focusable {
                 width,
             ),
         ];
+
         const visible = choices.slice(picker.scrollOffset, picker.scrollOffset + visibleCount);
         for (const [offset, choice] of visible.entries()) {
             const index = picker.scrollOffset + offset;
@@ -1002,17 +1100,21 @@ export class SettingsEditorComponent implements Component, Focusable {
             const text = this.options.theme.fg(selected ? "accent" : "text", label);
             lines.push(truncateToWidth(`${prefix} ${text}`, width, ""));
         }
+
         if (choices.length === 0) {
             const empty = picker.allowCustom ? "Type a custom value." : "No matching choices.";
             lines.push(this.options.theme.fg("muted", `  ${empty}`));
         }
+
         if (picker.error !== undefined) {
             lines.push(...wrapInset(this.options.theme.fg("error", picker.error), width));
         }
+
         lines.push(
             border(this.options.theme, width),
             this.options.theme.fg("dim", "Type to filter • ↑↓ move • Enter select • Esc cancel"),
         );
+
         return lines;
     }
 
@@ -1036,6 +1138,7 @@ export class SettingsEditorComponent implements Component, Focusable {
                   )
                 : this.options.theme.fg("muted", ` ${label} `);
         };
+
         return `${scopeTitle} ${scopeLabel("Global", active === "global", globalAvailable)} ${scopeLabel("Project", active === "project", projectAvailable)}`;
     }
 
@@ -1044,6 +1147,7 @@ export class SettingsEditorComponent implements Component, Focusable {
         if (!scope.editable) {
             return wrapInset(this.options.theme.fg("warning", scope.message), width);
         }
+
         const fields = this.options.model.fields();
         if (fields.length === 0)
             return wrapInset(this.options.theme.fg("dim", "No user-editable settings."), width);
@@ -1052,6 +1156,7 @@ export class SettingsEditorComponent implements Component, Focusable {
         const maxOffset = Math.max(0, fields.length - visibleCount);
         this.scrollOffset = Math.min(this.scrollOffset, maxOffset);
         if (this.selectedField < this.scrollOffset) this.scrollOffset = this.selectedField;
+
         if (this.selectedField >= this.scrollOffset + visibleCount) {
             this.scrollOffset = this.selectedField - visibleCount + 1;
         }
@@ -1092,7 +1197,9 @@ export class SettingsEditorComponent implements Component, Focusable {
                     ),
                 );
             }
+
             previousGroup = group;
+
             const selected = index === this.selectedField;
             const prefix = selected ? this.options.theme.fg("accent", "▎") : " ";
             const label = paddedLine(field.label, labelWidth);
@@ -1108,6 +1215,7 @@ export class SettingsEditorComponent implements Component, Focusable {
                 this.options.theme.fg(color, truncateWithEllipsis(displayValue(field), valueWidth));
             const row = `${prefix} ${this.options.theme.fg(color, label)}  ${value}`;
             lines.push(truncateToWidth(row, width, ""));
+
             if (selected && inlineValue === undefined) {
                 lines.push(
                     ...renderCollectionPreview(field, width, listPreviewBudget, this.options.theme),
@@ -1126,6 +1234,7 @@ export class SettingsEditorComponent implements Component, Focusable {
                     ? `${selected.description} ${origin}${requirement}`
                     : `${selected.description} ${origin}${requirement} (${selected.constraints})`;
             const guidance = controlGuidance(selected.control);
+
             lines.push("");
             lines.push(
                 ...wrapInset(
@@ -1136,18 +1245,21 @@ export class SettingsEditorComponent implements Component, Focusable {
                     width,
                 ),
             );
+
             if (this.inlineEditing?.error !== undefined) {
                 lines.push(
                     ...wrapInset(this.options.theme.fg("error", this.inlineEditing.error), width),
                 );
             }
         }
+
         return lines;
     }
 
     private currentStructuredRows(): readonly StructuredEditorRow[] {
         const state = this.structuredEditing;
         if (state === undefined) return [];
+
         const field = this.options.model.fields()[state.fieldIndex];
         return field === undefined
             ? []
@@ -1157,10 +1269,12 @@ export class SettingsEditorComponent implements Component, Focusable {
     private renderStructuredEditing(width: number): string[] {
         const state = this.structuredEditing;
         if (state === undefined) return [];
+
         const field = this.options.model.fields()[state.fieldIndex];
         if (field === undefined) {
             return wrapInset(this.options.theme.fg("error", "The setting disappeared."), width);
         }
+
         const rows = this.currentStructuredRows();
         state.selectedRow = Math.max(0, Math.min(Math.max(0, rows.length - 1), state.selectedRow));
 
@@ -1174,6 +1288,7 @@ export class SettingsEditorComponent implements Component, Focusable {
                     : row?._tag === "ValueRow"
                       ? row.node.description
                       : field.description;
+
             const lines = [
                 truncateToWidth(
                     `  ${this.options.theme.fg("accent", this.options.theme.bold(`${field.label} › ${label}`))}`,
@@ -1186,6 +1301,7 @@ export class SettingsEditorComponent implements Component, Focusable {
             if (textEditing.error !== undefined) {
                 lines.push(...wrapInset(this.options.theme.fg("error", textEditing.error), width));
             }
+
             return lines;
         }
 
@@ -1209,9 +1325,11 @@ export class SettingsEditorComponent implements Component, Focusable {
         const maxOffset = Math.max(0, rows.length - visibleCount);
         state.scrollOffset = Math.min(state.scrollOffset, maxOffset);
         if (state.selectedRow < state.scrollOffset) state.scrollOffset = state.selectedRow;
+
         if (state.selectedRow >= state.scrollOffset + visibleCount) {
             state.scrollOffset = state.selectedRow - visibleCount + 1;
         }
+
         const visibleRows = rows.slice(state.scrollOffset, state.scrollOffset + visibleCount);
         const maxLabelWidth = Math.max(1, width - 12);
         const labelWidth = Math.min(
@@ -1241,6 +1359,7 @@ export class SettingsEditorComponent implements Component, Focusable {
                     : row._tag === "GroupRow"
                       ? "text"
                       : "muted";
+
             if (row._tag === "GroupRow") {
                 if (inlineEditing !== undefined) {
                     const inputWidth = Math.max(
@@ -1251,6 +1370,7 @@ export class SettingsEditorComponent implements Component, Focusable {
                     lines.push(truncateToWidth(`${prefix} ${indentation}${input}`, width, ""));
                     continue;
                 }
+
                 const summary = structuredRowValue(row);
                 const content = `${indentation}${structuredRowLabel(row)}${summary === "" ? "" : `  ${summary}`}`;
                 lines.push(
@@ -1260,8 +1380,10 @@ export class SettingsEditorComponent implements Component, Focusable {
                         "",
                     ),
                 );
+
                 continue;
             }
+
             const label = paddedLine(`${indentation}${structuredRowLabel(row)}`, labelWidth);
             const valueWidth = Math.max(1, width - labelWidth - 4);
             const value =
@@ -1273,6 +1395,7 @@ export class SettingsEditorComponent implements Component, Focusable {
                     : row._tag === "ValueRow"
                       ? renderInlineControl(inlineEditing.input, row.node.control, valueWidth)
                       : (inlineEditing.input.render(valueWidth)[0] ?? "");
+
             lines.push(
                 truncateToWidth(
                     `${prefix} ${this.options.theme.fg(rowColor, label)}  ${value}`,
@@ -1309,21 +1432,26 @@ export class SettingsEditorComponent implements Component, Focusable {
                     details = "Choose which schema variant this value uses.";
                     break;
             }
+
             lines.push("");
             lines.push(...wrapInset(this.options.theme.fg("dim", details), width));
+
             if (textEditing?.error !== undefined) {
                 lines.push(...wrapInset(this.options.theme.fg("error", textEditing.error), width));
             }
         }
+
         return lines;
     }
 
     private renderEditing(width: number): string[] {
         const editing = this.editing;
         if (editing === undefined) return [];
+
         const field = this.options.model.fields()[editing.fieldIndex];
         if (field === undefined)
             return wrapInset(this.options.theme.fg("error", "The setting disappeared."), width);
+
         const lines = [
             truncateToWidth(
                 `  ${this.options.theme.fg("accent", this.options.theme.bold(field.path.join(" › ")))}`,
@@ -1336,18 +1464,21 @@ export class SettingsEditorComponent implements Component, Focusable {
         if (editing.error !== undefined) {
             lines.push(...wrapInset(this.options.theme.fg("error", editing.error), width));
         }
+
         return lines;
     }
 
     private handleInlineInput(data: string): void {
         const editing = this.inlineEditing;
         if (editing === undefined) return;
+
         if (this.options.keybindings.matches(data, "tui.select.cancel")) {
             this.inlineEditing = undefined;
             this.statusMessage = "Edit cancelled.";
             this.options.tui.requestRender();
             return;
         }
+
         const field = this.options.model.fields()[editing.fieldIndex];
         if (
             matchesKey(data, Key.tab) &&
@@ -1357,6 +1488,7 @@ export class SettingsEditorComponent implements Component, Focusable {
             this.completePathInput(editing.input);
             return;
         }
+
         editing.input.handleInput(data);
         this.options.tui.requestRender();
     }
@@ -1364,6 +1496,7 @@ export class SettingsEditorComponent implements Component, Focusable {
     private handleStructuredInput(data: string): void {
         const state = this.structuredEditing;
         if (state === undefined) return;
+
         const textEditing = state.textEditing;
         if (textEditing !== undefined) {
             if (this.options.keybindings.matches(data, "tui.select.cancel")) {
@@ -1372,6 +1505,7 @@ export class SettingsEditorComponent implements Component, Focusable {
                 this.options.tui.requestRender();
                 return;
             }
+
             if (textEditing._tag === "StructuredFullTextEditing") {
                 textEditing.editor.handleInput(data);
             } else {
@@ -1386,9 +1520,12 @@ export class SettingsEditorComponent implements Component, Focusable {
                     this.completePathInput(textEditing.input);
                     return;
                 }
+
                 textEditing.input.handleInput(data);
             }
+
             this.options.tui.requestRender();
+
             return;
         }
 
@@ -1398,31 +1535,39 @@ export class SettingsEditorComponent implements Component, Focusable {
             this.options.tui.requestRender();
             return;
         }
+
         const rows = this.currentStructuredRows();
         if (this.options.keybindings.matches(data, "tui.select.up")) {
             this.moveStructuredSelection(-1, rows.length);
             return;
         }
+
         if (this.options.keybindings.matches(data, "tui.select.down")) {
             this.moveStructuredSelection(1, rows.length);
             return;
         }
+
         if (this.options.keybindings.matches(data, "tui.select.pageUp")) {
             this.moveStructuredSelection(
                 -Math.max(4, this.options.tui.terminal.rows - 14),
                 rows.length,
             );
+
             return;
         }
+
         if (this.options.keybindings.matches(data, "tui.select.pageDown")) {
             this.moveStructuredSelection(
                 Math.max(4, this.options.tui.terminal.rows - 14),
                 rows.length,
             );
+
             return;
         }
+
         const row = rows[state.selectedRow];
         if (row === undefined) return;
+
         if (matchesKey(data, Key.delete) || matchesKey(data, Key.backspace)) {
             if (row._tag === "GroupRow" || row._tag === "ValueRow") {
                 const field = this.options.model.fields()[state.fieldIndex];
@@ -1434,16 +1579,20 @@ export class SettingsEditorComponent implements Component, Focusable {
                 this.statusMessage = "The selected row is not removable.";
                 this.options.tui.requestRender();
             }
+
             return;
         }
+
         if (matchesKey(data, Key.left)) {
             this.activateStructuredRow(row, -1, false);
             return;
         }
+
         if (matchesKey(data, Key.right)) {
             this.activateStructuredRow(row, 1, true);
             return;
         }
+
         if (
             matchesKey(data, Key.space) ||
             this.options.keybindings.matches(data, "tui.select.confirm")
@@ -1455,6 +1604,7 @@ export class SettingsEditorComponent implements Component, Focusable {
     private moveStructuredSelection(offset: number, rowCount: number): void {
         const state = this.structuredEditing;
         if (state === undefined || rowCount === 0) return;
+
         state.selectedRow = Math.max(0, Math.min(rowCount - 1, state.selectedRow + offset));
         this.statusMessage = undefined;
         this.options.tui.requestRender();
@@ -1467,6 +1617,7 @@ export class SettingsEditorComponent implements Component, Focusable {
     ): void {
         const state = this.structuredEditing;
         if (state === undefined) return;
+
         const field = this.options.model.fields()[state.fieldIndex];
         const root = field?.value;
         switch (row._tag) {
@@ -1474,6 +1625,7 @@ export class SettingsEditorComponent implements Component, Focusable {
                 if (booleanValue === undefined) {
                     this.applyStructuredOutcome(addStructuredEntry(root, row), "Entry added.");
                 }
+
                 return;
             case "GroupRow":
                 if (booleanValue === undefined && row.renameable) {
@@ -1485,12 +1637,14 @@ export class SettingsEditorComponent implements Component, Focusable {
                             : "Use Delete to remove this entry.";
                     this.options.tui.requestRender();
                 }
+
                 return;
             case "VariantRow":
                 this.applyStructuredOutcome(
                     cycleStructuredVariant(root, row, offset),
                     "Value type changed.",
                 );
+
                 return;
             case "ValueRow":
                 break;
@@ -1506,6 +1660,7 @@ export class SettingsEditorComponent implements Component, Focusable {
                     },
                     "Setting updated.",
                 );
+
                 return;
             }
             case "ChoiceControl": {
@@ -1513,6 +1668,7 @@ export class SettingsEditorComponent implements Component, Focusable {
                     if (booleanValue === undefined) this.openStructuredValuePicker(row);
                     return;
                 }
+
                 const choices = row.node.control.choices;
                 const currentIndex = choices.findIndex((choice) => Object.is(choice, row.value));
                 const index =
@@ -1527,6 +1683,7 @@ export class SettingsEditorComponent implements Component, Focusable {
                     this.options.tui.requestRender();
                     return;
                 }
+
                 this.applyStructuredOutcome(
                     {
                         _tag: "StructuredValueChanged",
@@ -1534,6 +1691,7 @@ export class SettingsEditorComponent implements Component, Focusable {
                     },
                     "Setting updated.",
                 );
+
                 return;
             }
             case "JsonControl":
@@ -1541,7 +1699,7 @@ export class SettingsEditorComponent implements Component, Focusable {
                 return;
             case "NumberControl":
                 if (row.node.control.presentation === "slider" && booleanValue !== undefined) {
-                    const current = typeof row.value === "number" ? row.value : undefined;
+                    const current = isJsonNumber(row.value) ? row.value : undefined;
                     const next = stepSettingsNumber(row.node.control, current, offset < 0 ? -1 : 1);
                     this.applyStructuredOutcome(
                         {
@@ -1553,14 +1711,17 @@ export class SettingsEditorComponent implements Component, Focusable {
                 } else if (booleanValue === undefined) {
                     this.beginStructuredTextEdit(row, "value");
                 }
+
                 return;
             case "TextControl":
                 if (booleanValue !== undefined) return;
+
                 if (row.node.control.presentation === "combobox") {
                     this.openStructuredValuePicker(row);
                 } else {
                     this.beginStructuredTextEdit(row, "value");
                 }
+
                 return;
             case "ReadOnlyControl":
                 this.statusMessage = row.node.control.reason;
@@ -1585,19 +1746,23 @@ export class SettingsEditorComponent implements Component, Focusable {
     ): boolean {
         const state = this.structuredEditing;
         if (state === undefined) return false;
+
         if (outcome._tag === "StructuredValueRejected") {
             this.statusMessage = outcome.message;
             this.options.tui.requestRender();
             return false;
         }
+
         const edited = this.options.model.setFieldValue(state.fieldIndex, outcome.value);
         if (edited._tag === "EditRejected") {
             this.statusMessage = edited.message;
             this.options.tui.requestRender();
             return false;
         }
+
         this.statusMessage = successMessage;
         this.startSave();
+
         return true;
     }
 
@@ -1607,10 +1772,12 @@ export class SettingsEditorComponent implements Component, Focusable {
     ): void {
         const state = this.structuredEditing;
         if (state === undefined) return;
+
         const rowIndex = state.selectedRow;
         const submit = (text: string) => {
             const currentState = this.structuredEditing;
             if (currentState === undefined) return;
+
             const currentRows = this.currentStructuredRows();
             const currentRow = currentRows[rowIndex];
             const field = this.options.model.fields()[currentState.fieldIndex];
@@ -1624,6 +1791,7 @@ export class SettingsEditorComponent implements Component, Focusable {
                 this.options.tui.requestRender();
                 return;
             }
+
             let outcome: StructuredValueOutcome;
             if (mode === "rename" && currentRow._tag === "GroupRow") {
                 outcome = renameStructuredMapEntry(field.value, currentRow, text);
@@ -1633,8 +1801,10 @@ export class SettingsEditorComponent implements Component, Focusable {
                     const activeEditor = currentState.textEditing;
                     if (activeEditor !== undefined) activeEditor.error = parsed.message;
                     this.options.tui.requestRender();
+
                     return;
                 }
+
                 outcome = {
                     _tag: "StructuredValueChanged",
                     value: setStructuredValueAtPath(field.value, currentRow.path, parsed.value),
@@ -1645,6 +1815,7 @@ export class SettingsEditorComponent implements Component, Focusable {
                     message: "The selected row cannot be edited as text.",
                 };
             }
+
             if (
                 this.applyStructuredOutcome(
                     outcome,
@@ -1656,15 +1827,17 @@ export class SettingsEditorComponent implements Component, Focusable {
                 const activeEditor = currentState.textEditing;
                 if (activeEditor !== undefined) activeEditor.error = this.statusMessage;
             }
+
             this.options.tui.requestRender();
         };
+
         const inline =
             mode === "rename" ||
             (row._tag === "ValueRow" &&
                 (row.node.control._tag === "NumberControl" ||
                     (row.node.control._tag === "TextControl" &&
                         row.node.control.editor === "inline" &&
-                        !(typeof row.value === "string" && row.value.includes("\n")))));
+                        !(isJsonString(row.value) && row.value.includes("\n")))));
         if (inline) {
             const input = new Input();
             input.setValue(initialStructuredInput(row));
@@ -1682,6 +1855,7 @@ export class SettingsEditorComponent implements Component, Focusable {
                 borderColor: (text) => this.options.theme.fg("accent", text),
                 selectList: getSelectListTheme(),
             });
+
             editor.setText(initialStructuredInput(row));
             editor.focused = this._focused;
             editor.onSubmit = submit;
@@ -1693,6 +1867,7 @@ export class SettingsEditorComponent implements Component, Focusable {
                 error: undefined,
             };
         }
+
         this.statusMessage = undefined;
         this.options.tui.requestRender();
     }
@@ -1709,6 +1884,7 @@ export class SettingsEditorComponent implements Component, Focusable {
     private moveSelection(offset: number): void {
         const fieldCount = this.options.model.fields().length;
         if (fieldCount === 0) return;
+
         this.selectedField = Math.max(0, Math.min(fieldCount - 1, this.selectedField + offset));
         this.statusMessage = undefined;
         this.options.tui.requestRender();
@@ -1730,11 +1906,13 @@ export class SettingsEditorComponent implements Component, Focusable {
             }
         } else {
             this.options.model.selectExtension(tabIndex - 1);
+
             if (!this.options.model.selectScope(this.activeScopeValue)) {
                 this.activeScopeValue = "global";
                 this.options.model.selectScope("global");
             }
         }
+
         this.selectedField = 0;
         this.scrollOffset = 0;
         this.editing = undefined;
@@ -1779,11 +1957,13 @@ export class SettingsEditorComponent implements Component, Focusable {
     private handleTabPickerInput(data: string): void {
         const picker = this.tabPicker;
         if (picker === undefined) return;
+
         if (this.options.keybindings.matches(data, "tui.select.cancel")) {
             this.tabPicker = undefined;
             this.options.tui.requestRender();
             return;
         }
+
         const choices = this.filteredTabChoices(picker.query);
         if (this.options.keybindings.matches(data, "tui.select.up")) {
             if (choices.length > 0) {
@@ -1816,6 +1996,7 @@ export class SettingsEditorComponent implements Component, Focusable {
             picker.selectedIndex = 0;
             picker.scrollOffset = 0;
         }
+
         this.options.tui.requestRender();
     }
 
@@ -1830,7 +2011,7 @@ export class SettingsEditorComponent implements Component, Focusable {
             )
             .map((option) => ({ ...option, _tag: "SchemaValue" }));
         const hasExactValue = picker.options.some(
-            (option) => typeof option.value === "string" && option.value === picker.query,
+            (option) => isJsonString(option.value) && option.value === picker.query,
         );
         if (picker.allowCustom && picker.query !== "" && !hasExactValue) {
             options.unshift({
@@ -1839,6 +2020,7 @@ export class SettingsEditorComponent implements Component, Focusable {
                 value: picker.query,
             });
         }
+
         return options;
     }
 
@@ -1860,7 +2042,7 @@ export class SettingsEditorComponent implements Component, Focusable {
                 value,
             }));
             if (
-                typeof field.value === "string" &&
+                isJsonString(field.value) &&
                 !options.some((option) => option.value === field.value)
             ) {
                 options.unshift({ label: primitiveChoiceLabel(field.value), value: field.value });
@@ -1868,10 +2050,12 @@ export class SettingsEditorComponent implements Component, Focusable {
         } else {
             return;
         }
+
         const selectedIndex = Math.max(
             0,
             options.findIndex((option) => Object.is(option.value, field.value)),
         );
+
         this.valuePicker = {
             allowCustom,
             initialValue: field.value,
@@ -1892,6 +2076,7 @@ export class SettingsEditorComponent implements Component, Focusable {
     ): void {
         const state = this.structuredEditing;
         if (state === undefined) return;
+
         let options: ValuePickerOption[];
         let allowCustom = false;
         if (row.node.control._tag === "ChoiceControl") {
@@ -1908,19 +2093,18 @@ export class SettingsEditorComponent implements Component, Focusable {
                 label: primitiveChoiceLabel(value),
                 value,
             }));
-            if (
-                typeof row.value === "string" &&
-                !options.some((option) => option.value === row.value)
-            ) {
+            if (isJsonString(row.value) && !options.some((option) => option.value === row.value)) {
                 options.unshift({ label: primitiveChoiceLabel(row.value), value: row.value });
             }
         } else {
             return;
         }
+
         const selectedIndex = Math.max(
             0,
             options.findIndex((option) => Object.is(option.value, row.value)),
         );
+
         this.valuePicker = {
             allowCustom,
             initialValue: row.value,
@@ -1944,11 +2128,13 @@ export class SettingsEditorComponent implements Component, Focusable {
     private handleValuePickerInput(data: string): void {
         const picker = this.valuePicker;
         if (picker === undefined) return;
+
         if (this.options.keybindings.matches(data, "tui.select.cancel")) {
             this.valuePicker = undefined;
             this.options.tui.requestRender();
             return;
         }
+
         const choices = this.filteredValuePickerOptions(picker);
         if (this.options.keybindings.matches(data, "tui.select.up")) {
             if (choices.length > 0) {
@@ -1980,18 +2166,21 @@ export class SettingsEditorComponent implements Component, Focusable {
             picker.scrollOffset = 0;
             picker.error = undefined;
         }
+
         this.options.tui.requestRender();
     }
 
     private commitValuePicker(value: JsonPrimitive): void {
         const picker = this.valuePicker;
         if (picker === undefined) return;
+
         if (Object.is(picker.initialValue, value)) {
             this.valuePicker = undefined;
             this.statusMessage = "No change.";
             this.options.tui.requestRender();
             return;
         }
+
         if (picker.target._tag === "MainFieldTarget") {
             const field = this.options.model.fields()[picker.target.fieldIndex];
             if (field === undefined) {
@@ -1999,6 +2188,7 @@ export class SettingsEditorComponent implements Component, Focusable {
                 this.options.tui.requestRender();
                 return;
             }
+
             if (field.control._tag === "ChoiceControl") {
                 const outcome = this.options.model.selectChoice(picker.target.fieldIndex, value);
                 if (outcome._tag === "EditRejected") {
@@ -2006,7 +2196,7 @@ export class SettingsEditorComponent implements Component, Focusable {
                     this.options.tui.requestRender();
                     return;
                 }
-            } else if (field.control._tag === "TextControl" && typeof value === "string") {
+            } else if (field.control._tag === "TextControl" && isJsonString(value)) {
                 const outcome = this.options.model.submitFieldText(picker.target.fieldIndex, value);
                 if (outcome._tag === "SubmissionRejected") {
                     picker.error = outcome.message;
@@ -2018,9 +2208,11 @@ export class SettingsEditorComponent implements Component, Focusable {
                 this.options.tui.requestRender();
                 return;
             }
+
             this.valuePicker = undefined;
             this.statusMessage = "Setting updated.";
             this.startSave();
+
             return;
         }
 
@@ -2030,21 +2222,26 @@ export class SettingsEditorComponent implements Component, Focusable {
             this.options.tui.requestRender();
             return;
         }
+
         let parsedValue: JsonValue = value;
+
         if (picker.target.node.control._tag === "TextControl") {
-            if (typeof value !== "string") {
+            if (!isJsonString(value)) {
                 picker.error = "Enter a text value.";
                 this.options.tui.requestRender();
                 return;
             }
+
             const parsed = parseStructuredInput(picker.target.node, value);
             if (parsed._tag === "StructuredInputRejected") {
                 picker.error = parsed.message;
                 this.options.tui.requestRender();
                 return;
             }
+
             parsedValue = parsed.value;
         }
+
         const candidate = setStructuredValueAtPath(field.value, picker.target.path, parsedValue);
         const outcome = this.options.model.setFieldValue(picker.target.fieldIndex, candidate);
         if (outcome._tag === "EditRejected") {
@@ -2052,6 +2249,7 @@ export class SettingsEditorComponent implements Component, Focusable {
             this.options.tui.requestRender();
             return;
         }
+
         this.valuePicker = undefined;
         this.statusMessage = "Setting updated.";
         this.startSave();
@@ -2060,7 +2258,8 @@ export class SettingsEditorComponent implements Component, Focusable {
     private adjustMainSlider(direction: -1 | 1): void {
         const field = this.options.model.fields()[this.selectedField];
         if (field?.control._tag !== "NumberControl") return;
-        const current = typeof field.value === "number" ? field.value : undefined;
+
+        const current = isJsonNumber(field.value) ? field.value : undefined;
         const next = stepSettingsNumber(field.control, current, direction);
         if (current !== undefined && Object.is(current, next)) {
             this.statusMessage =
@@ -2068,6 +2267,7 @@ export class SettingsEditorComponent implements Component, Focusable {
             this.options.tui.requestRender();
             return;
         }
+
         this.applyEdit(this.options.model.setFieldValue(this.selectedField, next));
     }
 
@@ -2080,10 +2280,12 @@ export class SettingsEditorComponent implements Component, Focusable {
             this.statusMessage = "Path completed.";
         } else {
             input.setValue(outcome.value);
+
             const visibleMatches = outcome.matches.slice(0, 5).join(", ");
             const remaining = Math.max(0, outcome.matches.length - 5);
             this.statusMessage = `${outcome.matches.length} matches: ${visibleMatches}${remaining === 0 ? "" : `, and ${remaining} more`}`;
         }
+
         this.options.tui.requestRender();
     }
 
@@ -2094,6 +2296,7 @@ export class SettingsEditorComponent implements Component, Focusable {
             this.options.tui.requestRender();
             return;
         }
+
         this.options.piSettings.leave();
         this.options.close();
     }
@@ -2112,6 +2315,7 @@ export class SettingsEditorComponent implements Component, Focusable {
             this.activeScopeValue = scope;
             this.statusMessage = undefined;
         }
+
         this.selectedField = 0;
         this.scrollOffset = 0;
         this.options.tui.requestRender();
@@ -2129,25 +2333,29 @@ export class SettingsEditorComponent implements Component, Focusable {
     ): void {
         this.statusMessage = outcome._tag === "EditApplied" ? successMessage : outcome.message;
         this.options.tui.requestRender();
+
         if (outcome._tag === "EditApplied") this.startSave();
     }
 
     private beginEdit(): void {
         const field = this.options.model.fields()[this.selectedField];
         if (field === undefined) return;
+
         if (
             field.control._tag === "NumberControl" ||
             (field.control._tag === "TextControl" &&
                 field.control.editor === "inline" &&
-                !(typeof field.value === "string" && field.value.includes("\n")))
+                !(isJsonString(field.value) && field.value.includes("\n")))
         ) {
             this.beginInlineEdit();
             return;
         }
+
         const editor = new Editor(this.options.tui, {
             borderColor: (text) => this.options.theme.fg("accent", text),
             selectList: getSelectListTheme(),
         });
+
         editor.setText(this.options.model.initialFieldText(this.selectedField));
         editor.focused = this._focused;
         editor.onSubmit = (text) => {
@@ -2160,6 +2368,7 @@ export class SettingsEditorComponent implements Component, Focusable {
                 this.statusMessage = "Setting updated.";
                 this.startSave();
             }
+
             this.options.tui.requestRender();
         };
         this.editing = { fieldIndex: this.selectedField, editor, error: undefined };
@@ -2182,6 +2391,7 @@ export class SettingsEditorComponent implements Component, Focusable {
                 this.statusMessage = "Setting updated.";
                 this.startSave();
             }
+
             this.options.tui.requestRender();
         };
         this.inlineEditing = { fieldIndex, input, error: undefined };
@@ -2192,6 +2402,7 @@ export class SettingsEditorComponent implements Component, Focusable {
     private beginStructuredEdit(): void {
         const field = this.options.model.fields()[this.selectedField];
         if (field === undefined) return;
+
         this.structuredEditing = {
             fieldIndex: this.selectedField,
             selectedRow: 0,
@@ -2209,6 +2420,7 @@ export class SettingsEditorComponent implements Component, Focusable {
             this.options.tui.requestRender();
             return;
         }
+
         this.saving = true;
         this.statusMessage = `Saving ${requests.length} settings file${requests.length === 1 ? "" : "s"}…`;
         this.options.tui.requestRender();
@@ -2225,12 +2437,15 @@ export class SettingsEditorComponent implements Component, Focusable {
             this.options.tui.requestRender();
             return;
         }
+
         this.options.model.acceptSaveOutcomes(outcomes);
+
         const failures = outcomes.filter((outcome) => outcome._tag !== "SavedLayer");
         if (failures.length === 0) {
             const changed = outcomes.filter(
                 (outcome) => outcome._tag === "SavedLayer" && outcome.changed,
             ).length;
+
             this.statusMessage =
                 changed === 0
                     ? "Settings were already up to date."
@@ -2238,6 +2453,7 @@ export class SettingsEditorComponent implements Component, Focusable {
         } else {
             this.statusMessage = failures[0]?.message ?? "Some settings could not be saved.";
         }
+
         this.saving = false;
         this.options.tui.requestRender();
     }

@@ -39,10 +39,12 @@ export class SettingsCommandEditor implements EditorComponent, Focusable {
         if (base.onSubmit !== undefined) this.onSubmit = base.onSubmit;
         if (base.onChange !== undefined) this.onChange = base.onChange;
         if (base.borderColor !== undefined) this.borderColor = base.borderColor;
+
         if (isAppAwareEditor(base)) {
             if (base.onEscape !== undefined) this.onEscape = base.onEscape;
             if (base.onCtrlD !== undefined) this.onCtrlD = base.onCtrlD;
             if (base.onPasteImage !== undefined) this.onPasteImage = base.onPasteImage;
+
             if (base.onExtensionShortcut !== undefined) {
                 this.onExtensionShortcut = base.onExtensionShortcut;
             }
@@ -76,6 +78,7 @@ export class SettingsCommandEditor implements EditorComponent, Focusable {
 
     handleInput(data: string): void {
         this.syncBaseCallbacks();
+
         const text = this.base.getExpandedText?.() ?? this.base.getText();
         if (
             !this.opening &&
@@ -93,8 +96,10 @@ export class SettingsCommandEditor implements EditorComponent, Focusable {
                     this.reportOpenFailure();
                 },
             );
+
             return;
         }
+
         this.base.handleInput(data);
     }
 
@@ -139,6 +144,7 @@ export class SettingsCommandEditor implements EditorComponent, Focusable {
         if (this.onEscape !== undefined) this.base.onEscape = this.onEscape;
         if (this.onCtrlD !== undefined) this.base.onCtrlD = this.onCtrlD;
         if (this.onPasteImage !== undefined) this.base.onPasteImage = this.onPasteImage;
+
         if (this.onExtensionShortcut !== undefined) {
             this.base.onExtensionShortcut = this.onExtensionShortcut;
         }

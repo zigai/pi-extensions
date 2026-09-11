@@ -3,12 +3,8 @@ import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/pro
 import { basename, dirname, join } from "node:path";
 
 import { CONFIG_DIR_NAME, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
-import { Type, type Static } from "typebox";
-import { Value } from "typebox/value";
 
-const jsonObjectBoundary = Type.Record(Type.String(), Type.Unknown());
-
-type JsonObject = Static<typeof jsonObjectBoundary>;
+import { isJsonObject, parseJsonText, type JsonObject, type JsonValue } from "./json-value.ts";
 
 export type PiProjectSettingsSnapshot =
     | {
@@ -35,11 +31,12 @@ export type SavePiProjectSettingOutcome =
       }
     | { readonly _tag: "ProjectSettingSaveFailed"; readonly message: string };
 
+function hasStringCode(cause: unknown): cause is Error & { readonly code: string } {
+    return cause instanceof Error && "code" in cause && typeof cause.code === "string";
+}
+
 function errorCode(cause: unknown): string | undefined {
-    if (cause instanceof Error && "code" in cause && typeof cause.code === "string") {
-        return cause.code;
-    }
-    return undefined;
+    return hasStringCode(cause) ? cause.code : undefined;
 }
 
 async function readTextIfPresent(path: string): Promise<string | undefined> {
@@ -63,8 +60,10 @@ async function existingMode(path: string): Promise<number> {
 async function writeAtomically(path: string, content: string): Promise<void> {
     const directory = dirname(path);
     const temporaryPath = join(directory, `.${basename(path)}.${randomUUID()}.tmp`);
+
     try {
         await mkdir(directory, { recursive: true });
+
         const mode = await existingMode(path);
         await writeFile(temporaryPath, content, { encoding: "utf8", flag: "wx", mode });
         await chmod(temporaryPath, mode);
@@ -79,30 +78,23 @@ async function writeAtomically(path: string, content: string): Promise<void> {
 }
 
 function decodeDocument(sourceText: string): JsonObject | undefined {
-    let parsed: unknown;
-    try {
-        parsed = JSON.parse(sourceText);
-    } catch {
-        return undefined;
-    }
-    if (!Value.Check(jsonObjectBoundary, parsed)) return undefined;
-    return Value.Decode(jsonObjectBoundary, parsed);
+    const value = parseJsonText(sourceText);
+    return isJsonObject(value) ? value : undefined;
 }
 
-function setNestedValue(document: JsonObject, path: readonly string[], value: unknown): JsonObject {
-    const updated = structuredClone(document);
-    let current = updated;
-    for (const segment of path.slice(0, -1)) {
-        const existing = current[segment];
-        const child = Value.Check(jsonObjectBoundary, existing)
-            ? Value.Decode(jsonObjectBoundary, existing)
-            : {};
-        current[segment] = child;
-        current = child;
-    }
-    const leaf = path.at(-1);
-    if (leaf !== undefined) current[leaf] = structuredClone(value);
-    return updated;
+function setNestedValue(
+    document: JsonObject,
+    path: readonly string[],
+    value: JsonValue,
+): JsonObject {
+    const [key, ...remainingPath] = path;
+
+    if (key === undefined) return document;
+    if (remainingPath.length === 0) return { ...document, [key]: structuredClone(value) };
+
+    const existing = document[key];
+    const child = isJsonObject(existing) ? existing : {};
+    return { ...document, [key]: setNestedValue(child, remainingPath, value) };
 }
 
 /** Load Pi's trusted project settings without creating or repairing user files. */
@@ -118,6 +110,7 @@ export async function loadPiProjectSettings(
             message: "Project settings are unavailable until this project is trusted.",
         };
     }
+
     let sourceText: string | undefined;
     try {
         sourceText = await readTextIfPresent(path);
@@ -128,9 +121,11 @@ export async function loadPiProjectSettings(
             message: "Project settings could not be read.",
         };
     }
+
     if (sourceText === undefined) {
         return { _tag: "ReadyProjectSettings", path, sourceText, document: {} };
     }
+
     const document = decodeDocument(sourceText);
     if (document === undefined) {
         return {
@@ -139,6 +134,7 @@ export async function loadPiProjectSettings(
             message: "Project settings contain malformed JSON or are not a JSON object.",
         };
     }
+
     return { _tag: "ReadyProjectSettings", path, sourceText, document };
 }
 
@@ -146,11 +142,12 @@ export async function loadPiProjectSettings(
 export async function savePiProjectSetting(
     snapshot: PiProjectSettingsSnapshot,
     path: readonly string[],
-    value: unknown,
+    value: JsonValue,
 ): Promise<SavePiProjectSettingOutcome> {
     if (snapshot._tag !== "ReadyProjectSettings") {
         return { _tag: "ProjectSettingSaveFailed", message: snapshot.message };
     }
+
     return withFileMutationQueue(snapshot.path, async () => {
         try {
             const currentText = await readTextIfPresent(snapshot.path);
@@ -161,6 +158,7 @@ export async function savePiProjectSetting(
                         "Project settings changed while the editor was open. Reopen /settings.",
                 };
             }
+
             const document = setNestedValue(snapshot.document, path, value);
             const content = `${JSON.stringify(document, undefined, 2)}\n`;
             if (content !== currentText) await writeAtomically(snapshot.path, content);

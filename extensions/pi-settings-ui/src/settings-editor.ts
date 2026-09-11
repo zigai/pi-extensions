@@ -1,8 +1,14 @@
 import {
-    type ExtensionSettingsSchema,
+    isJsonArray,
+    isJsonNumber,
+    isJsonObject,
+    isJsonString,
     type JsonObject,
     type JsonPrimitive,
     type JsonValue,
+} from "./json-value.ts";
+import {
+    type ExtensionSettingsSchema,
     type SettingsControl,
     type SettingsField,
     parseSettingsDocument,
@@ -78,18 +84,16 @@ function cloneJson<Value extends JsonValue>(value: Value): Value {
     return structuredClone(value);
 }
 
-function isJsonObjectValue(value: JsonValue | undefined): value is JsonObject {
-    return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
 function canonicalJson(value: JsonValue): JsonValue {
-    if (Array.isArray(value)) return value.map(canonicalJson);
-    if (!isJsonObjectValue(value)) return value;
+    if (isJsonArray(value)) return value.map(canonicalJson);
+    if (!isJsonObject(value)) return value;
+
     const canonical: Record<string, JsonValue> = {};
     for (const key of Object.keys(value).sort()) {
         const child = value[key];
         if (child !== undefined) canonical[key] = canonicalJson(child);
     }
+
     return canonical;
 }
 
@@ -133,66 +137,82 @@ function isDirty(layer: LayerDraft): boolean {
 }
 
 function mergeJsonObjects(base: JsonObject, override: JsonObject): JsonObject {
-    const merged: Record<string, JsonValue> = { ...base };
+    const merged = { ...base };
     for (const [key, value] of Object.entries(override)) {
         const existing = merged[key];
-        if (isJsonObjectValue(existing) && isJsonObjectValue(value)) {
+        if (isJsonObject(existing) && isJsonObject(value)) {
             merged[key] = mergeJsonObjects(existing, value);
             continue;
         }
+
         merged[key] = cloneJson(value);
     }
+
     return merged;
 }
 
 function valueAtPath(document: JsonObject, path: readonly string[]): JsonValue | undefined {
     let current: JsonValue = document;
+
     for (const segment of path) {
-        if (!isJsonObjectValue(current)) return undefined;
+        if (!isJsonObject(current)) return undefined;
+
         const next: JsonValue | undefined = current[segment];
         if (next === undefined) return undefined;
+
         current = next;
     }
+
     return current;
 }
 
 function hasPath(document: JsonObject, path: readonly string[]): boolean {
     if (path.length === 0) return true;
+
     let current: JsonValue = document;
+
     for (const segment of path) {
-        if (!isJsonObjectValue(current)) return false;
+        if (!isJsonObject(current)) return false;
         if (!(segment in current)) return false;
+
         const next: JsonValue | undefined = current[segment];
         if (next === undefined) return false;
+
         current = next;
     }
+
     return true;
 }
 
 function setPath(document: JsonObject, path: readonly string[], value: JsonValue): JsonObject {
     const [segment, ...remaining] = path;
+
     if (segment === undefined) return document;
     if (remaining.length === 0) return { ...document, [segment]: cloneJson(value) };
 
     const existing = document[segment];
-    const child: JsonObject = isJsonObjectValue(existing) ? existing : {};
+    const child: JsonObject = isJsonObject(existing) ? existing : {};
     return { ...document, [segment]: setPath(child, remaining, value) };
 }
 
 function removePath(document: JsonObject, path: readonly string[]): JsonObject {
     const [segment, ...remaining] = path;
+
     if (segment === undefined || !(segment in document)) return document;
-    const next: Record<string, JsonValue> = { ...document };
+
+    const next = { ...document };
     if (remaining.length === 0) {
         delete next[segment];
         return next;
     }
 
     const existing = document[segment];
-    if (!isJsonObjectValue(existing)) return document;
+    if (!isJsonObject(existing)) return document;
+
     const child = removePath(existing, remaining);
     if (Object.keys(child).length === 0) delete next[segment];
     else next[segment] = child;
+
     return next;
 }
 
@@ -236,6 +256,7 @@ function controlValueLabel(control: SettingsControl): string {
 
 function parseNumberInput(text: string): number | undefined {
     if (text.trim() === "") return undefined;
+
     const value = Number(text);
     return Number.isFinite(value) ? value : undefined;
 }
@@ -286,12 +307,14 @@ export class SettingsEditorModel {
 
     selectExtension(index: number): void {
         if (index < 0 || index >= this.extensions.length) return;
+
         this.activeIndex = index;
         if (!this.scopeView(this.activeScopeValue).available) this.activeScopeValue = "global";
     }
 
     selectAdjacentExtension(offset: number): void {
         if (this.extensions.length === 0) return;
+
         this.activeIndex =
             (this.activeIndex + offset + this.extensions.length) % this.extensions.length;
         if (!this.scopeView(this.activeScopeValue).available) this.activeScopeValue = "global";
@@ -299,6 +322,7 @@ export class SettingsEditorModel {
 
     selectScope(scope: SettingsScope): boolean {
         if (!this.scopeView(scope).available) return false;
+
         this.activeScopeValue = scope;
         return true;
     }
@@ -315,7 +339,9 @@ export class SettingsEditorModel {
                 message: "No extension settings schemas were found.",
             };
         }
+
         const layer = scope === "global" ? extension.global : extension.project;
+
         if (scope === "project" && !this.projectScopeEnabled) {
             return {
                 scope,
@@ -326,6 +352,7 @@ export class SettingsEditorModel {
                 message: "Project overrides are disabled in Pi Settings UI settings.",
             };
         }
+
         if (layer._tag === "UnavailableDraft") {
             return {
                 scope,
@@ -336,6 +363,7 @@ export class SettingsEditorModel {
                 message: layer.message,
             };
         }
+
         if (layer._tag === "BlockedDraft") {
             const issue = layer.issues[0];
             const details = issue === undefined ? layer.message : `${layer.message} ${issue}`;
@@ -348,6 +376,7 @@ export class SettingsEditorModel {
                 message: `${details} Fix ${layer.path} before editing it here.`,
             };
         }
+
         return {
             scope,
             available: true,
@@ -362,8 +391,10 @@ export class SettingsEditorModel {
     fields(): readonly EditorFieldView[] {
         const extension = this.activeExtension();
         if (extension === undefined) return [];
+
         const layer = readyLayer(extension, this.activeScopeValue);
         const effective = resolveDocument(extension, this.activeScopeValue);
+
         return extension.schema.fields.map((field) => ({
             ...field,
             value: valueAtPath(effective, field.path),
@@ -385,18 +416,22 @@ export class SettingsEditorModel {
         if (extension === undefined || field === undefined) {
             return { _tag: "EditRejected", message: "The selected setting no longer exists." };
         }
+
         if (field.control._tag === "ReadOnlyControl") {
             return { _tag: "EditRejected", message: field.control.reason };
         }
+
         const layer = readyLayer(extension, this.activeScopeValue);
         if (layer === undefined) {
             return { _tag: "EditRejected", message: this.scopeView(this.activeScopeValue).message };
         }
+
         let candidate = setPath(layer.document, field.path, value);
         const parentPath = field.path.slice(0, -1);
         for (const [key, siblingValue] of Object.entries(siblingValues)) {
             candidate = setPath(candidate, [...parentPath, key], siblingValue);
         }
+
         const parsed = parseSettingsDocument(extension.schema, serializeDocument(candidate));
         if (parsed._tag === "InvalidDocument") {
             return {
@@ -404,6 +439,7 @@ export class SettingsEditorModel {
                 message: parsed.issues[0] ?? parsed.message,
             };
         }
+
         layer.document = parsed.document;
         return { _tag: "EditApplied" };
     }
@@ -414,13 +450,16 @@ export class SettingsEditorModel {
         if (extension === undefined || field === undefined) {
             return { _tag: "EditRejected", message: "The selected setting no longer exists." };
         }
+
         if (field.control._tag === "ReadOnlyControl") {
             return { _tag: "EditRejected", message: field.control.reason };
         }
+
         const layer = readyLayer(extension, this.activeScopeValue);
         if (layer === undefined) {
             return { _tag: "EditRejected", message: this.scopeView(this.activeScopeValue).message };
         }
+
         const candidate = removePath(layer.document, field.path);
         const parsed = parseSettingsDocument(extension.schema, serializeDocument(candidate));
         if (parsed._tag === "InvalidDocument") {
@@ -429,6 +468,7 @@ export class SettingsEditorModel {
                 message: parsed.issues[0] ?? parsed.message,
             };
         }
+
         layer.document = parsed.document;
         return { _tag: "EditApplied" };
     }
@@ -438,6 +478,7 @@ export class SettingsEditorModel {
         if (field?.control._tag !== "BooleanControl") {
             return { _tag: "EditRejected", message: "The selected setting is not a boolean." };
         }
+
         return this.setFieldValue(fieldIndex, field.value !== true);
     }
 
@@ -446,6 +487,7 @@ export class SettingsEditorModel {
         if (field?.control._tag !== "ChoiceControl") {
             return { _tag: "EditRejected", message: "The selected setting is not a choice." };
         }
+
         const currentIndex = field.control.choices.findIndex((choice: JsonPrimitive) =>
             Object.is(choice, field.value),
         );
@@ -460,6 +502,7 @@ export class SettingsEditorModel {
         if (choice === undefined) {
             return { _tag: "EditRejected", message: "The setting has no available choices." };
         }
+
         return this.selectChoice(fieldIndex, choice);
     }
 
@@ -468,9 +511,11 @@ export class SettingsEditorModel {
         if (field?.control._tag !== "ChoiceControl") {
             return { _tag: "EditRejected", message: "The selected setting is not a choice." };
         }
+
         if (!field.control.choices.some((candidate) => Object.is(candidate, choice))) {
             return { _tag: "EditRejected", message: "That choice is not accepted by the schema." };
         }
+
         const choiceDefaults = field.choiceDefaults.find((candidate) =>
             Object.is(candidate.choice, choice),
         );
@@ -500,6 +545,7 @@ export class SettingsEditorModel {
                 if (parsed === undefined) {
                     return { _tag: "SubmissionRejected", message: "Enter a finite number." };
                 }
+
                 value = parsed;
                 break;
             }
@@ -512,6 +558,7 @@ export class SettingsEditorModel {
                 if (parsed._tag === "InvalidValue") {
                     return { _tag: "SubmissionRejected", message: parsed.message };
                 }
+
                 value = parsed.value;
                 break;
             }
@@ -534,11 +581,12 @@ export class SettingsEditorModel {
     initialFieldText(fieldIndex: number): string {
         const field = this.fields()[fieldIndex];
         if (field === undefined || field.value === undefined) return "";
+
         switch (field.control._tag) {
             case "TextControl":
-                return typeof field.value === "string" ? field.value : "";
+                return isJsonString(field.value) ? field.value : "";
             case "NumberControl":
-                return typeof field.value === "number" ? String(field.value) : "";
+                return isJsonNumber(field.value) ? String(field.value) : "";
             case "JsonControl":
             case "ListControl":
             case "MapControl":
@@ -576,16 +624,19 @@ export class SettingsEditorModel {
                 });
             }
         }
+
         return requests;
     }
 
     acceptSaveOutcomes(outcomes: readonly SaveSettingsLayerOutcome[]): void {
         for (const outcome of outcomes) {
             if (outcome._tag !== "SavedLayer") continue;
+
             const extension = this.extensions.find(
                 (candidate) => candidate.schema.id === outcome.extensionId,
             );
             if (extension === undefined) continue;
+
             const layer = readyLayer(extension, outcome.scope);
             if (layer === undefined) continue;
             layer.originalText = outcome.content;

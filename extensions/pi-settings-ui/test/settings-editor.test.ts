@@ -6,6 +6,7 @@ import { editableCatalog, parseFixtureSchema } from "./fixture.ts";
 
 function fixtureExtension(): CatalogExtensionSettings {
     const schema = parseFixtureSchema();
+
     return {
         schema,
         global: {
@@ -43,13 +44,16 @@ describe("settings editor model", () => {
         expect(model.fields()[enabled]).toMatchObject({ value: false, overridden: true });
         const invalidThreshold = model.submitFieldText(threshold, "0");
         expect(invalidThreshold._tag).toBe("SubmissionRejected");
+
         if (invalidThreshold._tag === "SubmissionRejected") {
             expect(invalidThreshold.message).toContain("/threshold");
         }
+
         expect(model.submitFieldText(threshold, "3")).toEqual({ _tag: "FieldSubmitted" });
         expect(model.submitFieldText(names, '["one","two"]')).toEqual({
             _tag: "FieldSubmitted",
         });
+
         expect(model.hasDirtySettings()).toBe(true);
     });
 
@@ -115,6 +119,7 @@ describe("settings editor model", () => {
         expect(model.toggleBoolean(fieldIndex(model, "enabled"))).toMatchObject({
             _tag: "EditRejected",
         });
+
         expect(model.saveRequests()).toEqual([]);
     });
 });
