@@ -9,32 +9,8 @@ export type PickerModelReference =
     | { readonly type: "current" }
     | { readonly type: "specific"; readonly provider: string; readonly id: string };
 
-export type ExtensionSettings = {
-    readonly enabled: boolean;
-
-    readonly initialNaming: {
-        readonly enabled: boolean;
-        readonly timing: ExtensionSettingsDocument["initialNaming"]["timing"];
-        readonly trigger: ExtensionSettingsDocument["initialNaming"]["trigger"];
-        readonly threshold: number;
-    };
-
-    readonly refreshNaming: {
-        readonly enabled: boolean;
-        readonly trigger: ExtensionSettingsDocument["refreshNaming"]["trigger"];
-        readonly threshold: number;
-    };
-
+export type ExtensionSettings = Omit<ExtensionSettingsDocument, "model"> & {
     readonly model: PickerModelReference;
-    readonly reasoningEffort: ExtensionSettingsDocument["reasoningEffort"];
-    readonly timeoutMs: number;
-    readonly conversationScope: ExtensionSettingsDocument["conversationScope"];
-    readonly prompt: string;
-
-    readonly nameConstraints: {
-        readonly minLength: number;
-        readonly maxLength: number;
-    };
 };
 
 type AutonameSessionSettingsLoadResult = {
@@ -135,29 +111,7 @@ export function loadAutonameSessionSettings(
     }
 
     return {
-        settings: {
-            enabled: loaded.settings.enabled,
-            initialNaming: {
-                enabled: loaded.settings.initialNaming.enabled,
-                timing: loaded.settings.initialNaming.timing,
-                trigger: loaded.settings.initialNaming.trigger,
-                threshold: loaded.settings.initialNaming.threshold,
-            },
-            refreshNaming: {
-                enabled: loaded.settings.refreshNaming.enabled,
-                trigger: loaded.settings.refreshNaming.trigger,
-                threshold: loaded.settings.refreshNaming.threshold,
-            },
-            model,
-            reasoningEffort: loaded.settings.reasoningEffort,
-            timeoutMs: loaded.settings.timeoutMs,
-            conversationScope: loaded.settings.conversationScope,
-            prompt: loaded.settings.prompt,
-            nameConstraints: {
-                minLength: loaded.settings.nameConstraints.minLength,
-                maxLength: loaded.settings.nameConstraints.maxLength,
-            },
-        },
+        settings: { ...loaded.settings, model },
         diagnostics: loaded.diagnostics,
     };
 }
