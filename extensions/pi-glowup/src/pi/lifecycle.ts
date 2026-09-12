@@ -5,7 +5,11 @@ import {
     isToolCallEventType,
     type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
-import { getGlowupDiagnosticsDirectory, readGlowupConfig } from "../config/load.ts";
+import {
+    createDefaultGlowupConfig,
+    getGlowupDiagnosticsDirectory,
+    readGlowupConfig,
+} from "../config/load.ts";
 import { type GlowupConfig } from "../config/normalize.ts";
 import { DebugFileLogger } from "../diagnostics/logger.ts";
 import {
@@ -153,7 +157,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
     };
 
     const reportWarning = (message: string): void => console.warn(message);
-    let config = readGlowupConfig({ reportWarning });
+    let config = createDefaultGlowupConfig(reportWarning);
     const debugLogger = new DebugFileLogger({
         extensionDirectory: getGlowupDiagnosticsDirectory(),
         reportWarning,
@@ -163,6 +167,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
     let formatter = scriptBlockFormatter(config, reportWarning);
     let headerLayout = scriptPreviewHeaderLayout(config);
     let sessionGeneration = 0;
+    let extensionLoadedRecorded = false;
     const syntax = createSyntaxLifecycle({
         generation: () => sessionGeneration,
         debugLogger,
@@ -223,6 +228,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
 
     applyConfig(config);
     debugLogger.record("extension_loaded", diagnosticSnapshot);
+    extensionLoadedRecorded = config.debugLog.enabled;
 
     installExplorationSession(pi, exploration);
 
@@ -351,6 +357,10 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
             { includeProjectConfig: ctx.isProjectTrusted() },
         );
         debugLogger.configure(nextConfig.debugLog);
+        if (!extensionLoadedRecorded) {
+            debugLogger.record("extension_loaded", diagnosticSnapshot);
+            extensionLoadedRecorded = true;
+        }
         debugLogger.startMemorySampling(diagnosticSnapshot);
         debugLogger.record("session_start", () => ({
             phase: "before_reset",

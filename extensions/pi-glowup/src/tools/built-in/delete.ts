@@ -22,6 +22,7 @@ import { captureDeletedTextPreview, type DeletedTextPreview } from "./delete-pre
 import { type MutationSettings } from "../../rendering/preview-settings.ts";
 
 export function createNativeDeleteFeature() {
+    let generation = 0;
     const nativeDeletePreviews = new Map<string, DeletedTextPreview>();
 
     function persistedDeletePreview(
@@ -58,12 +59,16 @@ export function createNativeDeleteFeature() {
         ) {
             return;
         }
-
+        const captureGeneration = generation;
         const preview = await captureDeletedTextPreview(
             cwd,
             filePath,
             mutationSettings.limits.maxDeletePreimageBytes,
         );
+        if (captureGeneration !== generation) {
+            return;
+        }
+
         if (preview !== undefined) {
             nativeDeletePreviews.set(toolCallId, preview);
             trimOldestMapEntries(nativeDeletePreviews, 300);
@@ -108,6 +113,7 @@ export function createNativeDeleteFeature() {
     }
 
     function clear(): void {
+        generation += 1;
         nativeDeletePreviews.clear();
     }
 

@@ -16,6 +16,14 @@ type FixtureWorkspace = {
     readonly sessionPath: string;
 };
 
+function glowupEntrypoint(): string {
+    const override = process.env.PI_GLOWUP_ENTRYPOINT;
+    if (override !== undefined && override.length > 0) {
+        return resolve(override);
+    }
+    return resolve("src/index.ts");
+}
+
 function createFixtureWorkspace(workspaceName = "workspace"): FixtureWorkspace {
     const root = mkdtempSync(join(tmpdir(), "pi-glowup-pty-"));
     const cwd = join(root, workspaceName);
@@ -26,7 +34,7 @@ function createFixtureWorkspace(workspaceName = "workspace"): FixtureWorkspace {
     mkdirSync(extensionDirectory, { recursive: true });
     mkdirSync(configDirectory, { recursive: true });
 
-    const glowupPath = resolve("src/index.ts");
+    const glowupPath = glowupEntrypoint();
     const providerPath = resolve("test/pty/fixtures/offline-provider.ts");
     writeFileSync(
         join(extensionDirectory, "glowup.ts"),

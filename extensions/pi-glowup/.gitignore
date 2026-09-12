@@ -5,3 +5,5 @@ dist/
 *.tgz
 .DS_Store
 artifacts
+
+.cache/

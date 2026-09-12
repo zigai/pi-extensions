@@ -1,4 +1,4 @@
-import Type, { type Static } from "typebox";
+import Type, { type StaticDecode } from "typebox";
 import { DEFAULT_MUTATION_SETTINGS } from "./rendering/preview-settings.ts";
 
 const DEFAULT_APPEARANCE = {
@@ -351,7 +351,7 @@ export const settingsSchema = Type.Object(
     { additionalProperties: false },
 );
 
-export type ExtensionSettings = Static<typeof settingsSchema>;
+export type ExtensionSettings = StaticDecode<typeof settingsSchema>;
 
 export const extensionSettingsInput = {
     id: "pi-glowup",

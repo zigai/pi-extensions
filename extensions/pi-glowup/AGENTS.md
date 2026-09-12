@@ -22,7 +22,7 @@
 - Keep PTY assertions semantic and invariant-based. Reject duplicate mutation blocks, stale content, raw argument JSON, internal paths, over-width or wrapped rows, and blank completion padding.
 - Write raw ANSI and interpreted frame artifacts only when a PTY test fails. CI uploads those failure artifacts; do not commit bulky recordings.
 - Use seeded property tests for streaming chunk boundaries, rewrites, truncation, CRLF, Unicode, width changes, component reuse, tool-call isolation, and cached-versus-cold equivalence.
-- Run `just benchmark` for the full informational TUI benchmark or `just benchmark-quick` for its smoke form. Keep performance timing out of Vitest assertions until a reviewed regression policy exists.
+- Run `just benchmark` for the full informational TUI benchmark or `just benchmark-quick` for its reduced form. Keep performance timing out of Vitest assertions until a reviewed regression policy exists.
 
 ## Tool Rendering Contract
 

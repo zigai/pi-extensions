@@ -40,10 +40,10 @@ import { buildEditPreview, EditPreviewStore } from "./file-previews.ts";
 import { type MutationSettings } from "../../rendering/preview-settings.ts";
 
 export function createNativeEditFeature() {
+    let generation = 0;
     const editPreviews = new EditPreviewStore(300);
     const nativeEditSnapshots = new Map<string, EditSnapshotState>();
     const nativeEditPierrePayloads = new Map<string, PierreDiffPayload>();
-
     async function captureNativeEditSnapshot(
         toolCallId: string,
         cwd: string,
@@ -58,11 +58,16 @@ export function createNativeEditFeature() {
             return;
         }
 
+        const captureGeneration = generation;
         const snapshot = await createEditSnapshot(
             cwd,
             filePath,
             diffRenderLimits(mutationSettings),
         );
+        if (captureGeneration !== generation) {
+            return;
+        }
+
         nativeEditSnapshots.set(toolCallId, snapshot);
         trimOldestMapEntries(nativeEditSnapshots, 300);
     }
@@ -79,15 +84,19 @@ export function createNativeEditFeature() {
             return undefined;
         }
 
+        const finishGeneration = generation;
         const payload = buildPierreDiffPayload(
             await snapshot.finish(),
             diffRenderLimits(mutationSettings),
         );
+        if (finishGeneration !== generation) {
+            return undefined;
+        }
+
         if (payload !== undefined) {
             nativeEditPierrePayloads.set(toolCallId, payload);
             trimOldestMapEntries(nativeEditPierrePayloads, 300);
         }
-
         return payload;
     }
 
@@ -214,6 +223,7 @@ export function createNativeEditFeature() {
     }
 
     function clear(): void {
+        generation += 1;
         editPreviews.clear();
         nativeEditSnapshots.clear();
         nativeEditPierrePayloads.clear();

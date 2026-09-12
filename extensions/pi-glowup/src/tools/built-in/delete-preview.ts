@@ -1,4 +1,4 @@
-import { readFile, stat } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import type { DiffSection } from "../../rendering/diff/text-diff.ts";
 
@@ -20,7 +20,17 @@ type TextFilePreimageOptions = {
     readonly allowOutsideCwd?: boolean;
 };
 
-/** Captures a bounded readable text file. By default, paths cannot leave the working directory. */
+function leavesDirectory(directory: string, filePath: string): boolean {
+    const relativePath = path.relative(directory, filePath);
+    return (
+        relativePath.length === 0 ||
+        relativePath === ".." ||
+        relativePath.startsWith(`..${path.sep}`) ||
+        path.isAbsolute(relativePath)
+    );
+}
+
+/** Captures text after a size check; default paths must resolve within cwd. */
 export async function captureTextFilePreimage(
     cwd: string,
     filePath: string,
@@ -29,23 +39,30 @@ export async function captureTextFilePreimage(
 ): Promise<TextFilePreimage | undefined> {
     const resolvedCwd = path.resolve(cwd);
     const resolvedPath = path.resolve(resolvedCwd, filePath);
-    const relativePath = path.relative(resolvedCwd, resolvedPath);
-    const leavesCwd =
-        relativePath.length === 0 ||
-        relativePath === ".." ||
-        relativePath.startsWith(`..${path.sep}`) ||
-        path.isAbsolute(relativePath);
-    if (leavesCwd && options.allowOutsideCwd !== true) {
+    if (leavesDirectory(resolvedCwd, resolvedPath) && options.allowOutsideCwd !== true) {
         return undefined;
     }
 
     try {
-        const stats = await stat(resolvedPath);
+        let readablePath = resolvedPath;
+        if (options.allowOutsideCwd !== true) {
+            const canonicalCwd = await realpath(resolvedCwd);
+            const canonicalPath = await realpath(resolvedPath);
+            if (leavesDirectory(canonicalCwd, canonicalPath)) {
+                return undefined;
+            }
+
+            // Follow the validated target, not the original symlink. This does not
+            // provide an atomic sandbox against concurrent ancestor replacement.
+            readablePath = canonicalPath;
+        }
+
+        const stats = await stat(readablePath);
         if (!stats.isFile() || (maxBytes !== null && stats.size > maxBytes)) {
             return undefined;
         }
 
-        const data = await readFile(resolvedPath);
+        const data = await readFile(readablePath);
         if (data.includes(0)) {
             return undefined;
         }

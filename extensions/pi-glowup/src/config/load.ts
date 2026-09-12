@@ -30,8 +30,6 @@ function parseDefaultSettingsInput(): JsonValue {
     return parsed;
 }
 
-const defaultSettingsInput = parseDefaultSettingsInput();
-
 const nodeErrorSchema = Type.Object(
     { code: Type.Optional(Type.String()) },
     { additionalProperties: true },
@@ -113,7 +111,7 @@ function migrateLegacySettingsFile(
         return;
     }
 
-    const candidate = mergeConfigInputs(defaultSettingsInput, withoutSchemaMetadata(raw));
+    const candidate = mergeConfigInputs(parseDefaultSettingsInput(), withoutSchemaMetadata(raw));
     const rawRecord = jsonObjectParser.parse(raw);
     if (!Value.Check(settingsSchema, candidate) || rawRecord === undefined) {
         reportWarning?.(`[pi-glowup] Legacy settings at ${legacyPath} were not migrated.`);
@@ -151,6 +149,13 @@ function configSchemaErrorSummary(input: JsonValue): string {
 
     return messages.join("; ") || "invalid settings shape";
 }
+/** Create default in-memory configuration without reading or modifying any files. */
+export function createDefaultGlowupConfig(reportWarning?: ConfigWarningReporter): GlowupConfig {
+    return normalizeGlowupConfig(
+        Value.Decode(settingsSchema, extensionSettingsDefinition.defaultSettings),
+        reportWarning,
+    );
+}
 
 /** Parse a partial settings object with the definition's defaults. */
 export function parseGlowupConfig(
@@ -161,7 +166,10 @@ export function parseGlowupConfig(
     } = {},
 ): GlowupConfig {
     const parsedInput = jsonValueParser.parse(input) ?? null;
-    const candidate = mergeConfigInputs(defaultSettingsInput, withoutSchemaMetadata(parsedInput));
+    const candidate = mergeConfigInputs(
+        parseDefaultSettingsInput(),
+        withoutSchemaMetadata(parsedInput),
+    );
     if (!Value.Check(settingsSchema, candidate)) {
         options.reportWarning?.(
             `[pi-glowup] Ignoring invalid ${options.source ?? "config"}: ${configSchemaErrorSummary(candidate)}`,

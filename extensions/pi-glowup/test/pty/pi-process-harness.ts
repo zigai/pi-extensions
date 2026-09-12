@@ -176,6 +176,7 @@ export class PiPtyProcess {
             if (match !== undefined) return match;
 
             if (this.exitState !== undefined) {
+                await this.parseQueue.catch(() => {});
                 throw new Error(
                     `Pi exited before the requested screen appeared (${this.exitState.exitCode})`,
                 );
@@ -201,27 +202,51 @@ export class PiPtyProcess {
     }
 
     async stop(): Promise<ProcessExit> {
-        if (this.exitState !== undefined) return this.exitState;
+        if (this.exitState !== undefined) {
+            await this.parseQueue.catch(() => {});
+            this.terminal.dispose();
+            return this.exitState;
+        }
 
         this.process.write("\u0004");
 
         const graceful = await Promise.race([this.exitPromise, delay(1_500).then(() => undefined)]);
         if (graceful !== undefined) {
-            await this.parseQueue;
+            await this.parseQueue.catch(() => {});
+            this.terminal.dispose();
             return graceful;
         }
 
         this.process.kill();
+        const terminated = await Promise.race([
+            this.exitPromise,
+            delay(2_000).then(() => undefined),
+        ]);
+        if (terminated !== undefined) {
+            await this.parseQueue.catch(() => {});
+            this.terminal.dispose();
+            return terminated;
+        }
 
-        const exit = await this.exitPromise;
+        try {
+            this.process.kill("SIGKILL");
+        } catch {
+            // Process may have already exited
+        }
 
-        await this.parseQueue;
+        const forceKilled = await Promise.race([
+            this.exitPromise,
+            delay(1_000).then(() => ({ exitCode: 137, signal: 9 })),
+        ]);
 
-        return exit;
+        await this.parseQueue.catch(() => {});
+        this.terminal.dispose();
+
+        return forceKilled;
     }
 
     async writeFailureArtifacts(testName: string, cause: unknown): Promise<void> {
-        await this.parseQueue;
+        await this.parseQueue.catch(() => {});
 
         const artifactDirectory = resolve("artifacts/pty");
         mkdirSync(artifactDirectory, { recursive: true });

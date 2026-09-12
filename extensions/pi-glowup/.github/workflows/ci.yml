@@ -25,7 +25,7 @@ jobs:
       - name: Check
         run: npm run check
 
-      - name: Informational TUI benchmark smoke
+      - name: Informational TUI benchmark check
         run: npm run benchmark:tui -- --quick
 
       - name: Upload PTY failure frames
