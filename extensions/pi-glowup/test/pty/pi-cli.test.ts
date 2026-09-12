@@ -292,7 +292,8 @@ describe("actual Pi CLI in a real PTY", () => {
                 (frame) =>
                     frame.columns === 70 &&
                     frame.text.includes("restored9") &&
-                    frame.text.includes("SESSION_SENTINEL"),
+                    frame.text.includes("SESSION_SENTINEL") &&
+                    !mutationBlock(frame, "restored.ts", "SESSION_SENTINEL").includes(" │ "),
                 PTY_TIMEOUT_MS,
                 nextSequence,
             );
@@ -519,10 +520,11 @@ describe("actual Pi CLI in a real PTY", () => {
                 (frame) =>
                     frame.text.includes("STREAM_COMPLETE") &&
                     frame.text.includes("• Python") &&
-                    frame.text.includes("records = ["),
+                    frame.text.includes("records = [") &&
+                    frame.text.includes('"argv"') &&
+                    frame.text.includes('"median_ms"'),
                 PTY_TIMEOUT_MS,
             );
-
             expect(collapsed.text).not.toContain("uv run");
             expect(collapsed.text).not.toContain("import json");
             expect(collapsed.text).not.toContain("import/setup lines omitted");
