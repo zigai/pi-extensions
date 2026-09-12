@@ -127,6 +127,9 @@ try {
     });
     await first.waitForIdle();
     await first.extensionRunner.emit({ type: "agent_settled" });
+    for (let i = 0; i < 200 && manager.getSessionName() === undefined; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+    }
     if (errors.length > 0) {
         throw new Error(`Extension errors encountered: ${JSON.stringify(errors)}`);
     }
@@ -138,6 +141,9 @@ try {
     });
     await first.waitForIdle();
     await first.extensionRunner.emit({ type: "agent_settled" });
+    for (let i = 0; i < 50 && manager.getSessionName() === undefined; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+    }
     if (errors.length > 0) {
         throw new Error(`Extension errors encountered on second prompt: ${JSON.stringify(errors)}`);
     }
