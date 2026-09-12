@@ -133,6 +133,11 @@ try {
     if (errors.length > 0) {
         throw new Error(`Extension errors encountered: ${JSON.stringify(errors)}`);
     }
+    if (manager.getSessionName() === undefined) {
+        throw new Error(
+            `SessionName undefined! callCount=${faux.state.callCount}, branchTypes=${JSON.stringify(manager.getBranch().map((e) => e.type))}`,
+        );
+    }
     assert.equal(manager.getSessionName(), "Fix parser recovery");
     assert.equal(faux.state.callCount, 2);
     faux.setResponses([fauxAssistantMessage("I will also inspect incomplete tokens.")]);
