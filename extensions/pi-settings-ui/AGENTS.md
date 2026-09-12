@@ -24,7 +24,7 @@ Use environment variables only for secrets, CI/session overrides, or explicit pa
 
 ## Lifecycle and UI
 
-Keep settings I/O out of imports and the factory. Load own settings when installing the session editor and when opening the settings catalog. Preserve fresh reads for explicit editing and dispose the editor on shutdown. Ordinary cached loads must retain disabled/invalid results and deduplicate diagnostics; do not turn explicit editing into a reload-only workflow.
+Keep settings I/O and editor-only implementation imports out of module loading, the factory, and session-editor installation. `session_start` installs only the lightweight editor wrapper; load this extension's own settings and dynamically import the catalog/editor stack when the user opens the settings UI. Preserve fresh reads for explicit editing and dispose the editor wrapper on shutdown. Do not add a second activation flag or turn explicit editing into a reload-only workflow.
 
 Renderers receive `ToolRenderContext`, not `ExtensionContext`. Render from arguments, results, and renderer state without settings I/O or retained execution contexts. Return a component even before execution/activation and for history. Guard dialogs with `ctx.hasUI` and terminal-only work with `ctx.mode === "tui"`.
 

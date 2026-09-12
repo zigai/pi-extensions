@@ -6,32 +6,32 @@ import {
     type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 
-import { PiSettingsTab } from "./pi-settings-tab.ts";
-import { loadPiProjectSettings } from "./pi-project-settings.ts";
+import type { PiSettingsTab } from "./pi-settings-tab.ts";
 import { SettingsCommandEditor } from "./settings-command-editor.ts";
-import { SettingsEditorModel } from "./settings-editor.ts";
-import {
-    createPiSettingsLocation,
-    loadSettingsCatalog,
-    saveSettingsLayers,
-} from "./settings-store.ts";
-import { SettingsEditorComponent } from "./settings-ui.ts";
-import { loadSettingsUiSettings } from "./settings.ts";
+import type { SettingsEditorComponent } from "./settings-ui.ts";
 
 async function openSettingsEditor(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
-    const ownSettings = loadSettingsUiSettings(ctx);
+    const [piTab, piProject, editorModel, store, ui, ownSettingsLoader] = await Promise.all([
+        import("./pi-settings-tab.ts"),
+        import("./pi-project-settings.ts"),
+        import("./settings-editor.ts"),
+        import("./settings-store.ts"),
+        import("./settings-ui.ts"),
+        import("./settings.ts"),
+    ]);
+    const ownSettings = ownSettingsLoader.loadSettingsUiSettings(ctx);
     for (const diagnostic of ownSettings.diagnostics) {
         ctx.ui.notify(diagnostic.message, diagnostic.severity);
     }
 
-    const catalog = await loadSettingsCatalog(createPiSettingsLocation(ctx.cwd), {
+    const catalog = await store.loadSettingsCatalog(store.createPiSettingsLocation(ctx.cwd), {
         projectTrusted: ctx.isProjectTrusted(),
     });
     for (const diagnostic of catalog.diagnostics) {
         ctx.ui.notify(`${diagnostic.message} (${diagnostic.path})`, "warning");
     }
 
-    const model = new SettingsEditorModel(
+    const model = new editorModel.SettingsEditorModel(
         catalog,
         ownSettings.settings.projectOverrides && ctx.isProjectTrusted(),
     );
@@ -45,10 +45,13 @@ async function openSettingsEditor(pi: ExtensionAPI, ctx: ExtensionContext): Prom
         const projectSettings = SettingsManager.create(ctx.cwd, getAgentDir(), {
             projectTrusted: ctx.isProjectTrusted(),
         });
-        const projectSnapshot = await loadPiProjectSettings(ctx.cwd, ctx.isProjectTrusted());
+        const projectSnapshot = await piProject.loadPiProjectSettings(
+            ctx.cwd,
+            ctx.isProjectTrusted(),
+        );
         let editor: SettingsEditorComponent | undefined;
 
-        piSettings = new PiSettingsTab({
+        piSettings = new piTab.PiSettingsTab({
             globalSettings,
             projectSettings,
             projectSnapshot,
@@ -60,14 +63,14 @@ async function openSettingsEditor(pi: ExtensionAPI, ctx: ExtensionContext): Prom
             onCancel: () => editor?.requestClose(),
             requestRender: () => tui.requestRender(),
         });
-        editor = new SettingsEditorComponent({
+        editor = new ui.SettingsEditorComponent({
             cwd: ctx.cwd,
             model,
             piSettings,
             tui,
             theme,
             keybindings,
-            save: saveSettingsLayers,
+            save: store.saveSettingsLayers,
             close: () => done(undefined),
         });
 
@@ -81,13 +84,6 @@ export default function extension(pi: ExtensionAPI): void {
     let restoreEditor: (() => void) | undefined;
 
     pi.on("session_start", (_event, ctx) => {
-        const loaded = loadSettingsUiSettings(ctx);
-        if (ctx.hasUI) {
-            for (const diagnostic of loaded.diagnostics) {
-                ctx.ui.notify(diagnostic.message, diagnostic.severity);
-            }
-        }
-
         if (ctx.mode !== "tui") return;
 
         const previousFactory = ctx.ui.getEditorComponent();

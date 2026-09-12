@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { chmod, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 
+import lockfile from "proper-lockfile";
+
 import {
     CONFIG_DIR_NAME,
     getAgentDir,
@@ -281,7 +283,24 @@ async function saveSettingsLayer(
     request: SaveSettingsLayerRequest,
 ): Promise<SaveSettingsLayerOutcome> {
     return withFileMutationQueue(request.configPath, async () => {
+        let release: (() => Promise<void>) | undefined;
+        let lockCompromised = false;
         try {
+            await mkdir(dirname(request.configPath), { recursive: true });
+            release = await lockfile.lock(request.configPath, {
+                realpath: false,
+                retries: {
+                    retries: 20,
+                    factor: 1.25,
+                    minTimeout: 10,
+                    maxTimeout: 100,
+                    randomize: true,
+                },
+                onCompromised: () => {
+                    lockCompromised = true;
+                },
+            });
+
             const currentSchemaText = await readTextIfPresent(request.schemaPath);
             if (currentSchemaText !== request.expectedSchemaText) {
                 return {
@@ -314,6 +333,15 @@ async function saveSettingsLayer(
                 };
             }
 
+            if (lockCompromised) {
+                return {
+                    _tag: "SaveFailed",
+                    extensionId: request.extensionId,
+                    scope: request.scope,
+                    message: "The settings lock was lost before the file could be saved.",
+                };
+            }
+
             await writeAtomically(request.configPath, request.content);
 
             return {
@@ -330,6 +358,12 @@ async function saveSettingsLayer(
                 scope: request.scope,
                 message: "The settings file could not be saved.",
             };
+        } finally {
+            try {
+                await release?.();
+            } catch {
+                // A completed write or conflict result is more useful than a cleanup failure.
+            }
         }
     });
 }
