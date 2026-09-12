@@ -1,6 +1,6 @@
 {
   "name": "@zigai/pi-settings-ui",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Schema-driven TUI editor for Pi extension settings.",
   "keywords": [
     "pi",
