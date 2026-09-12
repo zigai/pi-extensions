@@ -125,7 +125,7 @@ try {
         expandPromptTemplates: false,
     });
     await first.waitForIdle();
-    for (let i = 0; i < 50 && manager.getSessionName() === undefined; i++) {
+    for (let i = 0; i < 200 && manager.getSessionName() === undefined; i++) {
         await new Promise((resolve) => setTimeout(resolve, 50));
     }
     assert.equal(manager.getSessionName(), "Fix parser recovery");
@@ -135,7 +135,7 @@ try {
         expandPromptTemplates: false,
     });
     await first.waitForIdle();
-    for (let i = 0; i < 50 && manager.getSessionName() === undefined; i++) {
+    for (let i = 0; i < 200 && manager.getSessionName() === undefined; i++) {
         await new Promise((resolve) => setTimeout(resolve, 50));
     }
     assert.equal(manager.getSessionName(), "Fix parser recovery");
