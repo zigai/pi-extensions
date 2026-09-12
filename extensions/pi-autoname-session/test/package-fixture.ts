@@ -26,6 +26,7 @@ const packageDir = packageDirArgument;
 const agentDir = join(runtimeDir, "agent");
 const cwd = join(runtimeDir, "project");
 const sessionDir = join(runtimeDir, "sessions");
+process.env.PI_CODING_AGENT_DIR = agentDir;
 
 await mkdir(cwd, { recursive: true });
 await mkdir(join(agentDir, "extension-settings"), { recursive: true });
@@ -128,6 +129,9 @@ try {
     for (let i = 0; i < 200 && manager.getSessionName() === undefined; i++) {
         await new Promise((resolve) => setTimeout(resolve, 50));
     }
+    if (errors.length > 0) {
+        throw new Error(`Extension errors encountered: ${JSON.stringify(errors)}`);
+    }
     assert.equal(manager.getSessionName(), "Fix parser recovery");
     assert.equal(faux.state.callCount, 2);
     faux.setResponses([fauxAssistantMessage("I will also inspect incomplete tokens.")]);
@@ -137,6 +141,9 @@ try {
     await first.waitForIdle();
     for (let i = 0; i < 200 && manager.getSessionName() === undefined; i++) {
         await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    if (errors.length > 0) {
+        throw new Error(`Extension errors encountered on second prompt: ${JSON.stringify(errors)}`);
     }
     assert.equal(manager.getSessionName(), "Fix parser recovery");
     assert.equal(faux.state.callCount, 3);
