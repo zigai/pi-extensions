@@ -355,11 +355,11 @@ async function pickSessionName(options: PickSessionNameOptions): Promise<PickSes
         }
 
         return { type: "picked", name };
-    } catch {
+    } catch (cause: unknown) {
+        console.error("PICKER CAUGHT ERROR:", cause);
         if (timeoutSignal.aborted) {
             return { type: "timeout", diagnostic: timeoutDiagnostic(settings.timeoutMs) };
         }
-
         if (signal.aborted) {
             return { type: "cancelled" };
         }
