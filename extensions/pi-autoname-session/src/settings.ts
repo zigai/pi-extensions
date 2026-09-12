@@ -97,6 +97,14 @@ export function loadAutonameSessionSettings(
             url: new URL("../config.schema.json", import.meta.url),
         },
     });
+
+    const configFailed = loaded.diagnostics.some(
+        ({ scope, code }) => scope !== "schema" && code !== "config-scaffold-failed",
+    );
+    if (configFailed) {
+        return { settings: undefined, diagnostics: loaded.diagnostics };
+    }
+
     if (loaded.settings.nameConstraints.minLength > loaded.settings.nameConstraints.maxLength) {
         return {
             settings: undefined,
