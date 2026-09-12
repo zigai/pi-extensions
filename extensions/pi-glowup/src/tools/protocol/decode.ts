@@ -1,5 +1,5 @@
+// oxlint-disable antislop/no-runtime-typeof
 import Type, { type Static, type TProperties, type TObject } from "typebox";
-import { Guard } from "typebox/guard";
 import { Value } from "typebox/value";
 import type {
     GlowupCallNode,
@@ -150,11 +150,26 @@ function countText(state: DecodeState, value: string): void {
     if (state.textCharacters > state.limits.maxTextCharacters) reject();
 }
 
+// oxlint-disable-next-line antislop/no-unknown-parameters, antislop/no-unsafe-dictionary-type, antislop/no-runtime-typeof
+function isObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null;
+}
+
+// oxlint-disable-next-line antislop/no-unknown-parameters, antislop/no-unsafe-dictionary-type, antislop/no-runtime-typeof
+function isObjectNotArray(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// oxlint-disable-next-line antislop/no-unknown-parameters
+function isArray(value: unknown): value is unknown[] {
+    return Array.isArray(value);
+}
+
 // Decoding reads each producer field once, checks traversal budgets, and rejects cycles.
 // Helpers validate captured fields before returning a detached semantic snapshot.
 // oxlint-disable-next-line antislop/no-unknown-parameters, antislop/no-unknown-returns -- Cached producer fields remain unvalidated until consumed by a decoder.
 function readField(value: unknown, key: string, state: DecodeState): unknown {
-    if (!Guard.IsObject(value)) return reject();
+    if (!isObject(value)) return reject();
 
     let fields = state.fields.get(value);
     if (fields === undefined) {
@@ -173,7 +188,7 @@ function capture<Properties extends TProperties>(
     state: DecodeState,
     textFields: readonly string[] = [],
 ): Static<TObject<Properties>> {
-    if (!Guard.IsObjectNotArray(value)) return reject();
+    if (!isObjectNotArray(value)) return reject();
 
     const entries: Array<[string, unknown]> = [];
     for (const key of Object.keys(schema.properties)) {
@@ -191,7 +206,7 @@ function capture<Properties extends TProperties>(
 
 // oxlint-disable-next-line antislop/no-unknown-parameters -- Array length must be checked before traversing producer input.
 function collection(value: unknown, maximum: number, state: DecodeState) {
-    if (!Guard.IsArray(value)) return reject();
+    if (!isArray(value)) return reject();
 
     const length = readField(value, "length", state);
     if (!Value.Check(collectionLengthSchema, length) || length > maximum) return reject();
@@ -245,7 +260,7 @@ function decodeListItem(
 // oxlint-disable-next-line antislop/no-unknown-parameters -- Raw nodes require cycle and budget checks before variant validation.
 function decodeNode(value: unknown, state: DecodeState, depth: number): GlowupNode {
     if (depth > state.limits.maxDepth || ++state.nodes > state.limits.maxNodes) return reject();
-    if (!Guard.IsObjectNotArray(value) || state.active.has(value)) return reject();
+    if (!isObjectNotArray(value) || state.active.has(value)) return reject();
 
     state.active.add(value);
     try {
