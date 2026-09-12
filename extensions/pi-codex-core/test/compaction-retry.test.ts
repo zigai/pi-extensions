@@ -129,11 +129,12 @@ test("stream retries exhaust after two retries and preserve the last failure", a
     const scenario = runScenario([failure({ code: "rate_limit_exceeded", message: "Busy" })]);
     const result = await scenario.result;
     assert.ok(result.isErr());
-    assert.equal(result.error._tag, "CodexStreamRetryable");
 
     if (result.error._tag === "CodexStreamRetryable") {
         assert.equal(result.error.code, "rate_limit_exceeded");
         assert.equal(result.error.retryAfterMs, undefined);
+    } else {
+        assert.fail("expected CodexStreamRetryable error");
     }
 
     assert.equal(result.error.message, "response.failed: Busy");

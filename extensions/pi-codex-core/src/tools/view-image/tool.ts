@@ -341,7 +341,7 @@ async function describeImage(
 ): Promise<CodexResult<string>> {
     const promptImage = await prepareCodexPromptImageContent(image, detail, { signal });
     const provider = await resolveCodexToolProvider(ctx);
-    if (provider.isErr()) return provider;
+    if (provider.isErr()) return fail(provider.error);
 
     const headers = codexToolProviderHeaders(provider.value);
     headers.set("OpenAI-Beta", "responses=experimental");

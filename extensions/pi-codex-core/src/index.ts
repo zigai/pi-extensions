@@ -15,7 +15,11 @@ import {
     clearProviderRequestTemplate,
 } from "./compaction/provider-request-template.ts";
 import { CodexTokenizer } from "./compaction/tokenizer.ts";
-import { readCodexCoreStartupConfig, type CodexCoreConfig } from "./config/config.ts";
+import {
+    DEFAULT_CODEX_CORE_CONFIG,
+    readCodexCoreStartupConfig,
+    type CodexCoreConfig,
+} from "./config/config.ts";
 import { rewriteProviderImageDetails } from "./images/detail.ts";
 import { buildCodexCoreSystemPromptResult } from "./prompt/system-prompt.ts";
 import { CodexRecoveryCoordinator, supportsInteractiveRecovery } from "./recovery/coordinator.ts";
@@ -50,8 +54,7 @@ async function loadCompactionModule(): Promise<CompactionModule> {
 export default function extension(pi: ExtensionAPI): void {
     if (activatedApis.has(pi)) return;
 
-    let config: CodexCoreConfig = readCodexCoreStartupConfig();
-
+    let config: CodexCoreConfig = DEFAULT_CODEX_CORE_CONFIG;
     activatedApis.add(pi);
 
     const responsesLitePolicy = new ResponsesLiteRequestPolicy();

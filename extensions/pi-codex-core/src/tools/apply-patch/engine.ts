@@ -1069,7 +1069,7 @@ async function resolvePhysicalPath(
             seenLinks.add(absolutePath);
 
             const linkTarget = await fileSystem.readlink(absolutePath);
-            return resolvePhysicalPath(
+            return await resolvePhysicalPath(
                 fileSystem,
                 resolve(dirname(absolutePath), linkTarget),
                 seenLinks,

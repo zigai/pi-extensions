@@ -119,11 +119,9 @@ export async function resolveCodexToolProvider(
     const model = options.useActiveModel
         ? resolveActiveCompatibleToolModel(ctx)
         : resolveCodexToolAuthModel(ctx);
-    if (model.isErr()) return model;
+    if (model.isErr()) return fail(model.error);
     return resolveCodexProviderForModel(ctx, model.value, {
-        requireAccountId:
-            options.requireAccountId ??
-            isChatGptBackend(model.value.baseUrl ?? DEFAULT_CODEX_BASE_URL),
+        requireAccountId: options.requireAccountId ?? isChatGptBackend(model.value.baseUrl),
         tokenUnavailableMessage:
             "Codex tools require /login openai-codex or an OpenAI Codex-compatible token.",
     });
@@ -162,7 +160,7 @@ export async function resolveActiveCodexResponsesProvider(
         tokenUnavailableMessage: "OpenAI Codex auth is unavailable.",
         requireAccountId: true,
     });
-    if (provider.isErr()) return provider;
+    if (provider.isErr()) return fail(provider.error);
 
     const headers = codexToolProviderHeaders(provider.value);
     headers.set("OpenAI-Beta", "responses=experimental");

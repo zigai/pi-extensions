@@ -41,7 +41,7 @@ export function syncCodexCoreTools(
         } else if (editSuppressedByApplyPatch && !activeTools.includes("edit")) {
             activeTools = [...activeTools, "edit"];
             editSuppressedByApplyPatchByApi.set(pi, false);
-        } else if (!applyPatchEnabled) {
+        } else {
             editSuppressedByApplyPatchByApi.set(pi, false);
         }
 

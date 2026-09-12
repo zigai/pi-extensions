@@ -52,7 +52,7 @@ test("registers extension handlers once per Pi API", () => {
         getAllTools: () => [],
     };
 
-    const extensionApi = testDouble<ExtensionAPI>()(api);
+    const extensionApi = testDouble<ExtensionAPI>(api);
     extension(extensionApi);
     assert.ok(registeredTools > 0, "first activation registers tools");
     assert.ok(registeredCommands > 0, "first activation registers commands");
@@ -393,7 +393,7 @@ function makeStartupWarningContext(
         },
     };
 
-    return testDouble<ExtensionContext>()(context);
+    return testDouble<ExtensionContext>(context);
 }
 
 test("applies GPT-5.6 Responses Lite compatibility through extension hooks", async () => {
@@ -659,8 +659,10 @@ test("warns once when an earlier extension fully replaces the system prompt", as
         await harness.prepareSystemPrompt(replacedPrompt, options, ctx);
         await harness.prepareSystemPrompt(replacedPrompt, options, ctx);
         assert.equal(notifications.length, 1);
-        assert.equal(notifications[0]?.type, "warning");
-        assert.match(notifications[0]?.message ?? "", /could not safely merge/);
+        const notification = notifications[0];
+        assert.ok(notification);
+        assert.equal(notification.type, "warning");
+        assert.match(notification.message, /could not safely merge/);
     } finally {
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;

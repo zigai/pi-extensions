@@ -147,7 +147,12 @@ export class CodexTokenizer {
 
                 state.pending.delete(request.id);
                 pending.disposeAbort();
-                reject(signal?.reason);
+
+                const abortReason =
+                    signal?.reason instanceof Error
+                        ? signal.reason
+                        : new DOMException("Aborted", "AbortError");
+                reject(abortReason);
             };
 
             const disposeAbort = () => signal?.removeEventListener("abort", abort);
@@ -335,7 +340,12 @@ async function waitForPromise<T>(
     return new Promise((resolve, reject) => {
         const abort = () => {
             signal.removeEventListener("abort", abort);
-            reject(signal.reason);
+
+            const abortReason =
+                signal.reason instanceof Error
+                    ? signal.reason
+                    : new DOMException("Aborted", "AbortError");
+            reject(abortReason);
         };
 
         signal.addEventListener("abort", abort, { once: true });
@@ -346,7 +356,9 @@ async function waitForPromise<T>(
             },
             (cause: unknown) => {
                 signal.removeEventListener("abort", abort);
-                reject(cause);
+
+                const error = cause instanceof Error ? cause : new Error(String(cause));
+                reject(error);
             },
         );
     });

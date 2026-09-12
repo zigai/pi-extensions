@@ -110,5 +110,5 @@ function makeToolAuthContext(auth: {
         },
     };
 
-    return testDouble<ExtensionContext>()(ctx);
+    return testDouble<ExtensionContext>(ctx);
 }

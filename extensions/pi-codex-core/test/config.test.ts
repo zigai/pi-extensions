@@ -147,8 +147,10 @@ test("does not overwrite malformed existing codex config", async () => {
         const readResult = readCodexCoreConfigWithDiagnostics({ agentDir });
         assert.deepEqual(readResult.config, DEFAULT_CODEX_CORE_CONFIG);
         assert.equal(readResult.diagnostics.length, 1);
-        assert.equal(readResult.diagnostics[0]?.reason, "malformed-json");
-        assert.equal(readResult.diagnostics[0]?.path, configPath);
+        const diagnostic = readResult.diagnostics[0];
+        assert.ok(diagnostic);
+        assert.equal(diagnostic.reason, "malformed-json");
+        assert.equal(diagnostic.path, configPath);
         const writeResult = writeCodexCoreConfig(DEFAULT_CODEX_CORE_CONFIG, configPath);
         assert.ok(!writeResult.ok);
         assert.match(writeResult.error, /Refusing to overwrite malformed config/);
@@ -168,17 +170,16 @@ test("fails extension activation on malformed global config", async () => {
         await mkdir(join(configPath, ".."), { recursive: true });
         await writeFile(configPath, "{not json");
 
-        assert.throws(
-            () => extension(makeExtensionHarness().api),
-            (cause) => {
-                assert.ok(cause instanceof Error);
-                assert.equal(cause.name, "CodexConfigStartupError");
-                assert.match(cause.message, /\(malformed-json\)/);
-                assert.match(cause.message, new RegExp(configPath.replaceAll("/", "\\/")));
-                assert.doesNotMatch(cause.message, /\{not json/);
-                return true;
-            },
-        );
+        const harness = makeExtensionHarness();
+        extension(harness.api);
+        await assert.rejects(harness.startSession(makeExtensionContext(root, false)), (cause) => {
+            assert.ok(cause instanceof Error);
+            assert.equal(cause.name, "CodexConfigStartupError");
+            assert.match(cause.message, /\(malformed-json\)/);
+            assert.match(cause.message, new RegExp(configPath.replaceAll("/", "\\/")));
+            assert.doesNotMatch(cause.message, /\{not json/);
+            return true;
+        });
     } finally {
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;

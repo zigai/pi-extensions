@@ -639,28 +639,24 @@ function buildItems(
         ];
     }
 
-    if (tab === "usage") {
-        const canReset = canConsumeResetCredit(usageState);
+    const canReset = canConsumeResetCredit(usageState);
 
-        return [
-            {
-                id: "refreshUsage",
-                label: "Refresh usage",
-                description: "Fetch current Codex usage and banked reset credits.",
-                currentValue: usageLoading ? "loading" : "refresh",
-                values: [usageLoading ? "loading" : "refresh"],
-            },
-            {
-                id: "useReset",
-                label: "Use reset credit",
-                description: "Spend one banked reset credit after an in-screen confirmation.",
-                currentValue: resetLoading ? "resetting" : canReset ? "confirm..." : "unavailable",
-                values: [resetLoading ? "resetting" : canReset ? "confirm..." : "unavailable"],
-            },
-        ];
-    }
-
-    return [];
+    return [
+        {
+            id: "refreshUsage",
+            label: "Refresh usage",
+            description: "Fetch current Codex usage and banked reset credits.",
+            currentValue: usageLoading ? "loading" : "refresh",
+            values: [usageLoading ? "loading" : "refresh"],
+        },
+        {
+            id: "useReset",
+            label: "Use reset credit",
+            description: "Spend one banked reset credit after an in-screen confirmation.",
+            currentValue: resetLoading ? "resetting" : canReset ? "confirm..." : "unavailable",
+            values: [resetLoading ? "resetting" : canReset ? "confirm..." : "unavailable"],
+        },
+    ];
 }
 
 function applySettingChange(id: string, value: string, config: CodexCoreConfig): CodexCoreConfig {

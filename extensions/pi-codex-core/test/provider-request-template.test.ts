@@ -180,8 +180,9 @@ test("captures standard static fields without reading conversation or unrelated 
             },
         });
         assert.equal(reads, 0);
-        assert.equal(template?.instructions, "system");
-        assert.equal(template?.layout, "responses");
+        assert.ok(template);
+        assert.equal(template.instructions, "system");
+        assert.equal(template.layout, "responses");
     } finally {
         clearProviderRequestTemplate(sessionId);
     }

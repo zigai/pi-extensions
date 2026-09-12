@@ -183,7 +183,7 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
     };
 
     return {
-        api: testDouble<ExtensionAPI>()(api),
+        api: testDouble<ExtensionAPI>(api),
         events,
         get activeTools() {
             return activeTools;
@@ -245,7 +245,7 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
             const resultObject = JsonObjectDecoder.decode(result);
             return resultObject === undefined
                 ? undefined
-                : testDouble<Payload & Readonly<Record<string, JsonValue | undefined>>>()(
+                : testDouble<Payload & Readonly<Record<string, JsonValue | undefined>>>(
                       resultObject,
                   );
         },
@@ -368,7 +368,7 @@ export function makeExtensionContext(
           }
         : { cwd, hasUI: false, isProjectTrusted: () => trusted, model, sessionManager };
 
-    return testDouble<ExtensionContext>()(ctx);
+    return testDouble<ExtensionContext>(ctx);
 }
 
 export function makeTestRuntime(
@@ -464,15 +464,16 @@ function makeTestTheme(): Theme {
         getBashModeBorderColor: () => (text: string) => text,
     };
 
-    return testDouble<Theme>()(theme);
+    return testDouble<Theme>(theme);
 }
 
-export function testDouble<TTarget>() {
-    return <TValue>(value: TValue): TTarget => {
-        // @ts-expect-error TS2352 -- Test fixtures intentionally implement only the host surface exercised by each test.
-        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: The explicit fixture builders keep every implemented host member reviewable at the construction site.
-        return value as TTarget;
-    };
+// oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- SAFETY: testDouble is a type-assertion double builder for partial host fixtures.
+export function testDouble<TTarget>(
+    // oxlint-disable-next-line antislop/no-unknown-parameters, typescript/no-unsafe-type-assertion -- SAFETY: testDouble receives partial host objects at test construction sites.
+    value: unknown = {},
+): TTarget {
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: The explicit fixture builders keep every implemented host member reviewable at the construction site.
+    return value as TTarget;
 }
 
 export function messageEntry<Message>(id: string, parentId: string | null, message: Message) {

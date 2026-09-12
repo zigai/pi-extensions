@@ -129,10 +129,10 @@ export async function fetchCodexUsage(
     const runtime = options.runtime ?? defaultCodexRuntime;
     const signal = options.signal ?? ctx.signal;
     const model = requireOpenAICodexModel(ctx.model);
-    if (model.isErr()) return model;
+    if (model.isErr()) return fail(model.error);
 
     const headers = await buildCodexUsageHeaders(ctx, model.value);
-    if (headers.isErr()) return headers;
+    if (headers.isErr()) return fail(headers.error);
 
     const requestInit: RequestInit = { method: "GET", headers: headers.value };
     if (signal) requestInit.signal = signal;
@@ -142,7 +142,7 @@ export async function fetchCodexUsage(
         buildCodexUsageUrl(model.value.baseUrl),
         requestInit,
     );
-    if (response.isErr()) return response;
+    if (response.isErr()) return fail(response.error);
 
     if (!response.value.ok) {
         return fail(
@@ -156,7 +156,7 @@ export async function fetchCodexUsage(
     }
 
     const rawUsagePayload = await parseJsonResponse(response.value, "codexUsage");
-    if (rawUsagePayload.isErr()) return rawUsagePayload;
+    if (rawUsagePayload.isErr()) return fail(rawUsagePayload.error);
 
     const snapshot = parseCodexUsagePayload(rawUsagePayload.value);
     if (snapshot.resetCredits && snapshot.resetCredits.availableCount <= 0) return ok(snapshot);
@@ -185,10 +185,10 @@ export async function consumeCodexRateLimitResetCredit(
     const runtime = options.runtime ?? defaultCodexRuntime;
     const signal = options.signal ?? ctx.signal;
     const model = requireOpenAICodexModel(ctx.model);
-    if (model.isErr()) return model;
+    if (model.isErr()) return fail(model.error);
 
     const headers = await buildCodexUsageHeaders(ctx, model.value);
-    if (headers.isErr()) return headers;
+    if (headers.isErr()) return fail(headers.error);
 
     headers.value.set("content-type", "application/json");
     resetCreditsCacheGeneration += 1;
@@ -209,7 +209,7 @@ export async function consumeCodexRateLimitResetCredit(
         resetCreditsCacheGeneration += 1;
         resetCreditsCache = undefined;
     });
-    if (response.isErr()) return response;
+    if (response.isErr()) return fail(response.error);
 
     if (!response.value.ok) {
         return fail(
@@ -223,7 +223,7 @@ export async function consumeCodexRateLimitResetCredit(
     }
 
     const rawConsumePayload = await parseJsonResponse(response.value, "codexResetCredit");
-    if (rawConsumePayload.isErr()) return rawConsumePayload;
+    if (rawConsumePayload.isErr()) return fail(rawConsumePayload.error);
     return ok(parseCodexRateLimitResetConsumePayload(rawConsumePayload.value));
 }
 
@@ -460,11 +460,11 @@ async function fetchCodexRateLimitResetCreditsWithHeaders(
     if (signal) requestInit.signal = signal;
 
     const response = await fetchUsageResponse(runtime, creditsUrl, requestInit);
-    if (response.isErr()) return response;
+    if (response.isErr()) return fail(response.error);
     if (!response.value.ok) return ok(undefined);
 
     const rawCreditsPayload = await parseJsonResponse(response.value, "codexResetCredits");
-    if (rawCreditsPayload.isErr()) return rawCreditsPayload;
+    if (rawCreditsPayload.isErr()) return fail(rawCreditsPayload.error);
 
     const credits = parseCodexRateLimitResetCreditsPayload(rawCreditsPayload.value);
     if (

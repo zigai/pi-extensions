@@ -28,7 +28,7 @@ test("native compaction renderer clips colored CJK and emoji by terminal columns
 
     let renderer: Renderer | undefined;
     registerNativeCompactionDisplay(
-        testDouble<ExtensionAPI>()({
+        testDouble<ExtensionAPI>({
             registerMessageRenderer(type: string, callback: Renderer) {
                 assert.equal(type, NATIVE_COMPACTION_MESSAGE_TYPE);
                 renderer = callback;
@@ -37,7 +37,7 @@ test("native compaction renderer clips colored CJK and emoji by terminal columns
     );
 
     assert.ok(renderer);
-    const theme = testDouble<Theme>()({
+    const theme = testDouble<Theme>({
         fg(color: string, text: string) {
             assert.equal(color, "dim");
             return `\u001b[38;2;100;120;140m${text}\u001b[39m`;

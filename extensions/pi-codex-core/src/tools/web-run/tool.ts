@@ -306,7 +306,7 @@ async function executeWebRun(
     tokenizer: CodexTokenizer,
 ): Promise<CodexResult<{ readonly output: string }>> {
     const provider = await resolveCodexToolProvider(ctx);
-    if (provider.isErr()) return provider;
+    if (provider.isErr()) return fail(provider.error);
 
     const headers = codexToolProviderHeaders(provider.value);
     headers.set("accept", "application/json");
@@ -331,7 +331,7 @@ async function executeWebRun(
         signal,
         runtime,
     );
-    if (fetched.isErr()) return fetched;
+    if (fetched.isErr()) return fail(fetched.error);
 
     const { response, responseText } = fetched.value;
     if (!response.ok) {
@@ -640,7 +640,7 @@ function splitSearchRequest(params: WebRunParams): WebRunCommands {
 
 function hasRealWebRunCommand(params: WebRunParams): boolean {
     return WEB_RUN_COMMAND_KEYS.some((key) => {
-        const value = params[key];
+        const value: unknown = params[key];
         return Array.isArray(value) ? value.length > 0 : value !== undefined;
     });
 }

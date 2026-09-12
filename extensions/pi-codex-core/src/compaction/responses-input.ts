@@ -177,13 +177,9 @@ function serializeMessagesToResponsesInput(
             continue;
         }
 
-        if (message.role === "user") {
-            insertSyntheticToolResults();
-            serializeNormalizedMessage(message);
-            continue;
-        }
-
+        insertSyntheticToolResults();
         serializeNormalizedMessage(message);
+        continue;
     }
 
     insertSyntheticToolResults();
@@ -386,20 +382,16 @@ function serializeMessage(
         return items;
     }
 
-    if (message.role === "toolResult") {
-        const callId = responseCallIdFromToolCallId(message.toolCallId);
-        if (!callId) return [];
+    const callId = responseCallIdFromToolCallId(message.toolCallId);
+    if (!callId) return [];
 
-        return [
-            {
-                type: "function_call_output",
-                call_id: callId,
-                output: toolResultOutputFromContent(message.content, model),
-            },
-        ];
-    }
-
-    return [];
+    return [
+        {
+            type: "function_call_output",
+            call_id: callId,
+            output: toolResultOutputFromContent(message.content, model),
+        },
+    ];
 }
 
 function inputContentFromContent(

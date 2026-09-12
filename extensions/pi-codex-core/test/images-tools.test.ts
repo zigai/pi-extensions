@@ -64,8 +64,9 @@ test("model-facing Codex tool guidance matches v0.145.0", async () => {
         ),
         true,
     );
+    assert.ok(imagegenTool.promptGuidelines);
     assert.equal(
-        imagegenTool.promptGuidelines?.some((guideline) =>
+        imagegenTool.promptGuidelines.some((guideline) =>
             guideline.includes("do not mention downloads"),
         ),
         false,
@@ -260,8 +261,9 @@ test("rejects invalid tool arguments before I/O", () => {
         () => imagegenTool.prepareArguments?.({ prompt: "draw", num_last_images_to_include: 1.5 }),
         /Invalid imagegen arguments/,
     );
+    assert.ok(imagegenTool.prepareArguments);
     assert.deepEqual(
-        imagegenTool.prepareArguments?.({
+        imagegenTool.prepareArguments({
             prompt: "edit",
             referenced_image_paths: ["@input.png", "@@literal-at.png"],
         }),
@@ -272,13 +274,14 @@ test("rejects invalid tool arguments before I/O", () => {
     );
 
     const viewImageTool = createViewImageTool({ getConfig: () => DEFAULT_CODEX_CORE_CONFIG });
-    assert.ok(viewImageTool.prepareArguments);
-    assert.throws(() => viewImageTool.prepareArguments?.({ file_path: 123 }), /Invalid view_image/);
-    assert.throws(() => viewImageTool.prepareArguments?.({}), /view_image requires a path/);
-    assert.deepEqual(viewImageTool.prepareArguments?.({ path: "@input.png" }), {
+    const prepareArguments = viewImageTool.prepareArguments;
+    assert.ok(prepareArguments);
+    assert.throws(() => prepareArguments({ file_path: 123 }), /Invalid view_image/);
+    assert.throws(() => prepareArguments({}), /view_image requires a path/);
+    assert.deepEqual(prepareArguments({ path: "@input.png" }), {
         path: "input.png",
     });
-    assert.deepEqual(viewImageTool.prepareArguments?.({ image_path: "@@literal-at.png" }), {
+    assert.deepEqual(prepareArguments({ image_path: "@@literal-at.png" }), {
         path: "@literal-at.png",
     });
 });
@@ -1478,7 +1481,7 @@ function makeImageContext(cwd: string): ExtensionContext {
         },
     };
 
-    return testDouble<ExtensionContext>()(ctx);
+    return testDouble<ExtensionContext>(ctx);
 }
 
 type TestContextModel = NonNullable<ExtensionContext["model"]>;
@@ -1522,7 +1525,7 @@ function makeWebRunContext(
         },
     };
 
-    return testDouble<ExtensionContext>()(ctx);
+    return testDouble<ExtensionContext>(ctx);
 }
 
 function makeWebRunContextWithBranch(
@@ -1538,7 +1541,7 @@ function makeWebRunContextWithBranch(
         },
     };
 
-    return testDouble<ExtensionContext>()(ctx);
+    return testDouble<ExtensionContext>(ctx);
 }
 
 function solidPngBytes(

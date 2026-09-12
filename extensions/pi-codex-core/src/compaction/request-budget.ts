@@ -27,6 +27,7 @@ import type {
     ResponsesInputItem,
     ResponsesTool,
     ShrinkRemoteCompactionRequestResult,
+    TokenCacheKey,
     TokenEstimateCache,
 } from "./types.ts";
 
@@ -566,7 +567,7 @@ export function resolveCompactionTargetModel(
     modelId: string,
 ): ExtensionContext["model"] | undefined {
     if (ctx.model?.provider === "openai-codex" && ctx.model.id === modelId) return ctx.model;
-    return ctx.modelRegistry.find?.("openai-codex", modelId);
+    return ctx.modelRegistry.find("openai-codex", modelId);
 }
 
 function stripResponsesLiteImageDetails(item: ResponsesInputItem): ResponsesInputItem {
@@ -637,13 +638,13 @@ async function estimateTokenCount(
     const object = JsonObjectDecoder.decode(value) ?? (Array.isArray(value) ? value : undefined);
     if (cache && object !== undefined) {
         return cachedObjectTokenCount(object, cache, async () => {
-            const serialized = JSON.stringify(sanitizeForTokenEstimate(value)) ?? "";
+            const serialized = JSON.stringify(sanitizeForTokenEstimate(value));
             return estimateTextTokens(serialized, cache, options);
         });
     }
 
     const serialized =
-        JsonStringDecoder.decode(value) ?? JSON.stringify(sanitizeForTokenEstimate(value)) ?? "";
+        JsonStringDecoder.decode(value) ?? JSON.stringify(sanitizeForTokenEstimate(value));
     return estimateTextTokens(serialized, cache, options);
 }
 
@@ -652,11 +653,7 @@ async function estimateRemoteCompactionRequestTokens(
     cache: TokenEstimateCache,
     options: TokenWorkOptions,
 ): Promise<number> {
-    let total = await estimateTextTokens(
-        JSON.stringify({ ...request, input: [] }) ?? "",
-        cache,
-        options,
-    );
+    let total = await estimateTextTokens(JSON.stringify({ ...request, input: [] }), cache, options);
     for (const item of request.input) {
         total += await estimateResponsesInputItemTokens(item, cache, options);
     }
@@ -682,12 +679,12 @@ async function estimateResponsesInputItemTokens(
 function* responsesInputItemTokenParts(item: ResponsesInputItem): Generator<string> {
     const output = JsonStringDecoder.decode(item.output);
     if (item.type === "function_call_output" && output !== undefined) {
-        yield JSON.stringify(sanitizeForTokenEstimate({ ...item, output: "" })) ?? "";
+        yield JSON.stringify(sanitizeForTokenEstimate({ ...item, output: "" }));
         yield output;
         return;
     }
 
-    yield JSON.stringify(sanitizeForTokenEstimate(item)) ?? "";
+    yield JSON.stringify(sanitizeForTokenEstimate(item));
 }
 
 function nestedInputImageTokenCount(value: JsonValue | undefined): number {
@@ -754,8 +751,8 @@ async function estimateTokenParts(
     return chunk.length > 0 ? total + (await estimateTextTokens(chunk, cache, options)) : total;
 }
 
-async function cachedObjectTokenCount<Value extends object>(
-    value: Value,
+async function cachedObjectTokenCount(
+    value: TokenCacheKey,
     cache: TokenEstimateCache,
     compute: () => Promise<number>,
 ): Promise<number> {

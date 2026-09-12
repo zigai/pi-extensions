@@ -519,7 +519,7 @@ function makeUsageContext(
         },
     };
 
-    return testDouble<ExtensionContext>()(ctx);
+    return testDouble<ExtensionContext>(ctx);
 }
 
 function makeCodexJwtAccountToken(accountId: string): string {

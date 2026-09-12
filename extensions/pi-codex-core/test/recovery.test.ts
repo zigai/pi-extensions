@@ -6,6 +6,7 @@ import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-wor
 import { DEFAULT_CODEX_CORE_CONFIG, type CodexCoreConfig } from "../src/config/config.ts";
 import { CodexRecoveryCoordinator, isTransientCodexFailure } from "../src/recovery/coordinator.ts";
 import type { ScheduledTask, Scheduler } from "../src/runtime.ts";
+import type { JsonValue } from "../src/compaction/types.ts";
 import { testDouble } from "./helpers.ts";
 
 test("classifies transient provider failures without retrying terminal failures", () => {
@@ -83,7 +84,9 @@ test("does not inject recovery into a new active turn", () => {
     fixture.coordinator.observeAssistant(successMessage());
     fixture.coordinator.settle(fixture.api, fixture.ctx);
     fixture.scheduler.runNext();
-    assert.match(fixture.sent[0] ?? "", /Held update/);
+    const firstSent = fixture.sent[0];
+    assert.ok(firstSent);
+    assert.match(firstSent, /Held update/);
 });
 
 test("manual input cancels delayed recovery and includes held follow-ups", () => {
@@ -121,7 +124,7 @@ function makeRecoveryFixture(config: CodexCoreConfig = DEFAULT_CODEX_CORE_CONFIG
     let idle = true;
 
     const api = {
-        appendEntry<Data>(customType: string, data: Data) {
+        appendEntry(customType: string, data: JsonValue) {
             entries.push({
                 type: "custom",
                 id: `entry-${entries.length + 1}`,
@@ -152,8 +155,8 @@ function makeRecoveryFixture(config: CodexCoreConfig = DEFAULT_CODEX_CORE_CONFIG
             scheduler,
             nowMs: () => 1_000,
         }),
-        api: testDouble<ExtensionAPI>()(api),
-        ctx: testDouble<ExtensionContext>()(ctx),
+        api: testDouble<ExtensionAPI>(api),
+        ctx: testDouble<ExtensionContext>(ctx),
         scheduler,
         sent,
         notifications,

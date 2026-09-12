@@ -145,9 +145,10 @@ test("codex command refuses malformed config without applying or overwriting it"
         await command.run("", ctx);
         assert.equal(applied, 0);
         assert.equal(await readFile(configPath, "utf8"), "{not json");
-        assert.equal(notifications.length, 1);
-        assert.equal(notifications[0]?.type, "error");
-        assert.match(notifications[0]?.message ?? "", /not saved.*malformed/);
+        const notification = notifications[0];
+        assert.ok(notification);
+        assert.equal(notification.type, "error");
+        assert.match(notification.message, /not saved.*malformed/);
     } finally {
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
@@ -189,9 +190,10 @@ test("codex command reports write errors without applying settings", async () =>
 
         await command.run("", ctx);
         assert.equal(applied, 0);
-        assert.equal(notifications.length, 1);
-        assert.equal(notifications[0]?.type, "error");
-        assert.match(notifications[0]?.message ?? "", /Failed to save Codex settings/);
+        const notification = notifications[0];
+        assert.ok(notification);
+        assert.equal(notification.type, "error");
+        assert.match(notification.message, /Failed to save Codex settings/);
         assert.equal(await readFile(configDirectory, "utf8"), blocker);
     } finally {
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
@@ -293,7 +295,9 @@ test("contributed settings keep the changed item selected after save", async () 
             const component = factory({ requestRender() {} }, TEST_THEME, {}, () => {});
             component.handleInput?.("\x1b[B");
             component.handleInput?.(" ");
-            await new Promise((resolve) => setImmediate(resolve));
+            await new Promise<void>((resolve) => {
+                setImmediate(resolve);
+            });
             rendered = component.render(120).join("\n");
         },
     });
@@ -349,7 +353,9 @@ test("settings tasks recover from failures and dispose contributions before afte
             });
             for (let attempt = 0; attempt < 3; attempt += 1) {
                 component.handleInput?.(" ");
-                await new Promise((resolve) => setImmediate(resolve));
+                await new Promise<void>((resolve) => {
+                    setImmediate(resolve);
+                });
             }
         },
         notify(message) {
@@ -374,7 +380,7 @@ test("settings tasks recover from failures and dispose contributions before afte
                             values: ["off", "on"],
                         },
                     ],
-                    onChange() {
+                    async onChange() {
                         changes += 1;
                         if (changes === 1) throw new Error("Synchronous task failure");
 
@@ -572,7 +578,12 @@ test("settings screen cancels owned reset work when the custom UI closes", async
                 const signal = options?.signal;
                 if (signal?.aborted) {
                     resetTaskCancelled = true;
-                    reject(signal.reason);
+                    reject(
+                        signal.reason instanceof Error
+                            ? signal.reason
+                            : new DOMException("Aborted", "AbortError"),
+                    );
+
                     return;
                 }
 
@@ -580,7 +591,11 @@ test("settings screen cancels owned reset work when the custom UI closes", async
                     "abort",
                     () => {
                         resetTaskCancelled = true;
-                        reject(signal.reason);
+                        reject(
+                            signal.reason instanceof Error
+                                ? signal.reason
+                                : new DOMException("Aborted", "AbortError"),
+                        );
                     },
                     { once: true },
                 );
@@ -655,10 +670,11 @@ test("settings screen aborts its default reset HTTP request when closed", async 
             onChange: () => ({ ok: false }),
         });
         await disconnected;
-        assert.equal(requests.length, 1);
-        assert.equal(requests[0]?.method, "POST");
-        assert.equal(requests[0]?.url, "/backend-api/wham/rate-limit-reset-credits/consume");
-        const body = JsonObjectDecoder.Parse(JSON.parse(requests[0]?.body ?? ""));
+        const req = requests[0];
+        assert.ok(req);
+        assert.equal(req.method, "POST");
+        assert.equal(req.url, "/backend-api/wham/rate-limit-reset-credits/consume");
+        const body = JsonObjectDecoder.Parse(JSON.parse(req.body));
         assert.deepEqual(Object.keys(body), ["redeem_request_id"]);
         assert.ok(JsonStringDecoder.Parse(body.redeem_request_id).length > 0);
     } finally {
@@ -739,7 +755,7 @@ function makeCodexCommandHarness(): CodexCommandHarness {
     };
 
     return {
-        api: testDouble<ExtensionAPI>()(api),
+        api: testDouble<ExtensionAPI>(api),
         registeredCommands,
         get hasArgumentCompletions() {
             return hasArgumentCompletions;

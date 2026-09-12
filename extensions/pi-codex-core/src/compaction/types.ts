@@ -196,8 +196,10 @@ export type RemoteCompactionPreflightResult = {
     readonly estimatedTokensAfter: number;
 };
 
+export type TokenCacheKey = JsonObject | readonly JsonValue[];
+
 export type TokenEstimateCache = {
-    readonly objectTokens: WeakMap<object, number>;
+    readonly objectTokens: WeakMap<TokenCacheKey, number>;
     readonly textTokens: Map<string, number>;
 };
 

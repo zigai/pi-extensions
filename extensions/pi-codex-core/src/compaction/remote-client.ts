@@ -299,7 +299,11 @@ async function withRemoteCompactionIdleTimeout<T>(
     onTimeout: (cause: RemoteCompactionIdleTimeout) => void,
 ): Promise<T> {
     if (signal.aborted) {
-        return Promise.reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+        const abortReason =
+            signal.reason instanceof Error
+                ? signal.reason
+                : new DOMException("Aborted", "AbortError");
+        return Promise.reject(abortReason);
     }
 
     return new Promise<T>((resolve, reject) => {
@@ -314,13 +318,20 @@ async function withRemoteCompactionIdleTimeout<T>(
             complete();
         };
 
-        const onAbort = () =>
-            settle(() => reject(signal.reason ?? new DOMException("Aborted", "AbortError")));
+        const onAbort = () => {
+            const abortReason =
+                signal.reason instanceof Error
+                    ? signal.reason
+                    : new DOMException("Aborted", "AbortError");
+
+            settle(() => reject(abortReason));
+        };
 
         signal.addEventListener("abort", onAbort, { once: true });
         operation.then(
             (value) => settle(() => resolve(value)),
-            (cause: unknown) => settle(() => reject(cause)),
+            (cause: unknown) =>
+                settle(() => reject(cause instanceof Error ? cause : new Error(String(cause)))),
         );
         timeoutTask = services.scheduler.set(REMOTE_COMPACTION_STREAM_IDLE_TIMEOUT_MS, () => {
             const cause = new RemoteCompactionIdleTimeout();
@@ -328,6 +339,8 @@ async function withRemoteCompactionIdleTimeout<T>(
             settle(() => reject(cause));
             onTimeout(cause);
         });
+
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- SAFETY: settled can be mutated synchronously during scheduler registration.
         if (settled) timeoutTask.cancel();
     });
 }
@@ -420,7 +433,7 @@ async function readResponseTextPrefix(
             );
 
             if (done) return text + decoder.decode();
-            if (!value || value.length === 0) continue;
+            if (value.length === 0) continue;
 
             const retained = value.subarray(0, remaining);
             text += decoder.decode(retained, { stream: retained.length === value.length });

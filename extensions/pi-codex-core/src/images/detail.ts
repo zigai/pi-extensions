@@ -34,12 +34,16 @@ export function rewriteProviderImageDetails(payload: unknown): JsonObject | unde
 
         return item;
     });
+
+    // oxlint-disable-next-line typescript/no-unnecessary-condition -- SAFETY: changed is set to true inside the array map callback when any item is rewritten.
     return changed ? { ...parsedPayload, input } : undefined;
 }
 
 function rewriteFunctionOutput(item: ResponsesInputItem): ResponsesInputItem | undefined {
+    if (item.type !== "function_call_output") return undefined;
+
     const output = JsonArrayDecoder.decode(item.output);
-    if (item.type !== "function_call_output" || !output) return undefined;
+    if (!output) return undefined;
 
     const detail = output.flatMap((part) => {
         const object = JsonObjectDecoder.decode(part);

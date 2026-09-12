@@ -357,7 +357,7 @@ async function requestImageGeneration(
     }>
 > {
     const provider = await resolveImageGenerationProvider(ctx);
-    if (provider.isErr()) return provider;
+    if (provider.isErr()) return fail(provider.error);
 
     const headers = codexToolProviderHeaders(provider.value);
     headers.set("accept", "application/json");

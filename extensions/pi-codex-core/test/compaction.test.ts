@@ -100,9 +100,9 @@ test("Codex tokenizer creates real workers and completes requests across shutdow
                 terminated: false,
             };
             workers.push(record);
-            worker.on("message", (message: unknown): number =>
-                record.messages.push(JsonObjectDecoder.Parse(message)),
-            );
+            worker.on("message", (message: JsonValue) => {
+                record.messages.push(JsonObjectDecoder.Parse(message));
+            });
 
             return {
                 on: worker.on.bind(worker),
@@ -162,9 +162,9 @@ test("Codex tokenizer uses exact fallback after controlled worker creation failu
             if (attempts <= 2) throw new Error("controlled worker creation failure");
 
             const worker = new Worker(url);
-            worker.on("message", (message: unknown): number =>
-                recoveredMessages.push(JsonObjectDecoder.Parse(message)),
-            );
+            worker.on("message", (message: JsonValue) => {
+                recoveredMessages.push(JsonObjectDecoder.Parse(message));
+            });
 
             return {
                 on: worker.on.bind(worker),
@@ -341,23 +341,25 @@ test("creates native compaction using remote compaction v2", async () => {
         requestBody.client_metadata["x-codex-turn-metadata"],
         requestHeaders.get("x-codex-turn-metadata"),
     );
-    assert.equal(result?.compaction?.details.strategy, "pi-codex-core-remote-compaction-v2");
-    assert.equal(result?.compaction?.details.model, "gpt-5.5");
-    assert.equal(result?.compaction?.details.compHash, "2911");
-    assert.deepEqual(result?.compaction?.details.compactedWindow, [
+    const compaction = result?.compaction;
+    assert.ok(compaction);
+    assert.equal(compaction.details.strategy, "pi-codex-core-remote-compaction-v2");
+    assert.equal(compaction.details.model, "gpt-5.5");
+    assert.equal(compaction.details.compHash, "2911");
+    assert.deepEqual(compaction.details.compactedWindow, [
         {
             role: "user",
             content: [{ type: "input_text", text: "keep this request" }],
         },
         { type: "compaction", encrypted_content: "sealed" },
     ]);
-    assert.equal(result?.compaction?.details.windowNumber, 1);
-    assert.equal(result?.compaction?.details.firstWindowId, result?.compaction?.details.windowId);
-    assert.equal(result?.compaction?.details.previousWindowId, undefined);
-    assert.equal(Object.hasOwn(result?.compaction?.details ?? {}, "replacementInput"), false);
-    assert.equal(result?.compaction?.details.worldState.cwd, "/workspace");
-    assert.equal(result?.compaction?.details.worldState.model, "openai-codex/gpt-5.5");
-    assert.deepEqual(result?.compaction?.details.worldState.activeToolNames, ["read"]);
+    assert.equal(compaction.details.windowNumber, 1);
+    assert.equal(compaction.details.firstWindowId, compaction.details.windowId);
+    assert.equal(compaction.details.previousWindowId, undefined);
+    assert.equal(Object.hasOwn(compaction.details, "replacementInput"), false);
+    assert.equal(compaction.details.worldState.cwd, "/workspace");
+    assert.equal(compaction.details.worldState.model, "openai-codex/gpt-5.5");
+    assert.deepEqual(compaction.details.worldState.activeToolNames, ["read"]);
 });
 
 test("reuses captured provider fields and records compaction cache usage", async () => {
@@ -435,10 +437,14 @@ test("reuses captured provider fields and records compaction cache usage", async
                 strict: false,
             },
         ]);
-        assert.equal(result?.compaction?.details.requestMeta?.providerTemplateUsed, true);
-        assert.equal(result?.compaction?.details.requestMeta?.inputTokens, 1200);
-        assert.equal(result?.compaction?.details.requestMeta?.cachedInputTokens, 900);
-        assert.equal(isNativeCompactionDetails(result?.compaction?.details), true);
+        const compaction = result?.compaction;
+        assert.ok(compaction);
+        const requestMeta = compaction.details.requestMeta;
+        assert.ok(requestMeta);
+        assert.equal(requestMeta.providerTemplateUsed, true);
+        assert.equal(requestMeta.inputTokens, 1200);
+        assert.equal(requestMeta.cachedInputTokens, 900);
+        assert.equal(isNativeCompactionDetails(compaction.details), true);
     } finally {
         clearProviderRequestTemplate(sessionId);
     }
@@ -566,7 +572,8 @@ test("creates GPT-5.6 native compaction with Responses Lite", async () => {
     );
 
     assert.equal(responsesLiteHeader, "true");
-    const turnMetadata: unknown = JSON.parse(turnMetadataHeader ?? "null");
+    assert.ok(turnMetadataHeader);
+    const turnMetadata: unknown = JSON.parse(turnMetadataHeader);
     assert.ok(isRecord(turnMetadata));
     assert.deepEqual(turnMetadata.compaction, {
         trigger: "auto",
@@ -587,10 +594,11 @@ test("creates GPT-5.6 native compaction with Responses Lite", async () => {
         "00000000-0000-7000-8000-000000000001",
     );
     const input = responseInput(requestBody);
-    assert.ok(isRecord(input[0]));
-    assert.match(String(input[0]?.id), /^at_[0-9a-f-]{36}$/);
-    assert.deepEqual(input[0], {
-        id: input[0]?.id,
+    const firstInput = input[0];
+    assert.ok(isRecord(firstInput));
+    assert.match(String(firstInput.id), /^at_[0-9a-f-]{36}$/);
+    assert.deepEqual(firstInput, {
+        id: firstInput.id,
         type: "additional_tools",
         role: "developer",
         tools: [
@@ -607,10 +615,11 @@ test("creates GPT-5.6 native compaction with Responses Lite", async () => {
             },
         ],
     });
-    assert.ok(isRecord(input[1]));
-    assert.match(String(input[1]?.id), /^msg_[0-9a-f-]{36}$/);
-    assert.deepEqual(input[1], {
-        id: input[1]?.id,
+    const secondInput = input[1];
+    assert.ok(isRecord(secondInput));
+    assert.match(String(secondInput.id), /^msg_[0-9a-f-]{36}$/);
+    assert.deepEqual(secondInput, {
+        id: secondInput.id,
         type: "message",
         role: "developer",
         content: [{ type: "input_text", text: "system prompt" }],
@@ -963,7 +972,7 @@ test("streams remote compaction SSE without buffering response text", async () =
             throw new Error("response text should not be buffered");
         },
     };
-    const runtime = makeTestRuntime(async () => testDouble<Response>()(response));
+    const runtime = makeTestRuntime(async () => testDouble<Response>(response));
 
     const result = await handleCodexNativeCompaction(
         makeBeforeCompactEvent(),
@@ -1002,7 +1011,7 @@ test("cancels remote compaction streams with oversized pending SSE events", asyn
             throw new Error("response text should not be buffered");
         },
     };
-    const runtime = makeTestRuntime(async () => testDouble<Response>()(response));
+    const runtime = makeTestRuntime(async () => testDouble<Response>(response));
 
     const result = await handleCodexNativeCompaction(
         makeBeforeCompactEvent(),
@@ -1057,12 +1066,14 @@ test("chains previous native compaction into the next remote v2 request", async 
         { role: "user", content: [{ type: "input_text", text: "new live tail" }] },
         { type: "compaction_trigger" },
     ]);
-    assert.equal(result?.compaction?.details.requestMeta?.previousCompactionEntryId, "compact-1");
-    assert.equal(result?.compaction?.details.windowNumber, 2);
-    assert.equal(result?.compaction?.details.previousWindowId, "window-1");
-    assert.equal(result?.compaction?.details.firstWindowId, "window-1");
-    assert.equal(result?.compaction?.details.sourceCompactionEntryId, "compact-1");
-    assert.deepEqual(result?.compaction?.details.compactedWindow, [
+    const compaction = result?.compaction;
+    assert.ok(compaction);
+    assert.equal(compaction.details.requestMeta?.previousCompactionEntryId, "compact-1");
+    assert.equal(compaction.details.windowNumber, 2);
+    assert.equal(compaction.details.previousWindowId, "window-1");
+    assert.equal(compaction.details.firstWindowId, "window-1");
+    assert.equal(compaction.details.sourceCompactionEntryId, "compact-1");
+    assert.deepEqual(compaction.details.compactedWindow, [
         { role: "user", content: [{ type: "input_text", text: "new live tail" }] },
         { type: "compaction", encrypted_content: "sealed-new" },
     ]);
@@ -2465,7 +2476,7 @@ function makeBeforeCompactEvent(
         signal: new AbortController().signal,
     };
 
-    return testDouble<SessionBeforeCompactEvent>()(event);
+    return testDouble<SessionBeforeCompactEvent>(event);
 }
 
 function nativeCompactionEntry(options: {
@@ -2659,7 +2670,7 @@ function makeCompactionApi(): ExtensionAPI {
         ],
     };
 
-    return testDouble<ExtensionAPI>()(api);
+    return testDouble<ExtensionAPI>(api);
 }
 
 function makeNativeCompactionContext(
@@ -2707,7 +2718,7 @@ function makeNativeCompactionContext(
         getSystemPrompt: () => "system prompt",
     };
 
-    return testDouble<ExtensionContext>()(ctx);
+    return testDouble<ExtensionContext>(ctx);
 }
 
 function makeAutoCompactionContext(
@@ -2754,7 +2765,7 @@ function makeAutoCompactionContext(
         },
     };
 
-    return testDouble<ExtensionContext>()(ctx);
+    return testDouble<ExtensionContext>(ctx);
 }
 
 type StaleAutoCompactionFixture = {
@@ -2831,7 +2842,7 @@ function makeCompactionContext(
           }
         : { hasUI: false, ...contextFields };
 
-    return testDouble<ExtensionContext>()(ctx);
+    return testDouble<ExtensionContext>(ctx);
 }
 
 function decodeRequestBody(init: RequestInit | undefined): JsonValue {
@@ -2857,11 +2868,11 @@ function isRecord<Value>(value: Value): value is Value & JsonObject {
     return JsonObjectDecoder.decode(value) !== undefined;
 }
 
-function responseInput<Value>(value: Value): JsonValue[] {
+function responseInput(value: unknown): JsonValue[] {
     return [...JsonArrayDecoder.Parse(JsonObjectDecoder.Parse(value).input)];
 }
 
-function worldStateText<Value>(item: Value): string {
+function worldStateText(item: unknown): string {
     const content = JsonArrayDecoder.decode(JsonObjectDecoder.decode(item)?.content);
     if (!content) return "";
     return content
@@ -2872,7 +2883,7 @@ function worldStateText<Value>(item: Value): string {
         .join("\n");
 }
 
-function textFromResponseItem<Value>(item: Value): string {
+function textFromResponseItem(item: unknown): string {
     const content = JsonObjectDecoder.decode(item)?.content;
     const directText = JsonStringDecoder.decode(content);
     if (directText !== undefined) return directText;

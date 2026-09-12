@@ -352,6 +352,8 @@ function webRunLabels(args: WebRunGlowupArgs) {
         case "time":
             return { static: "Time", running: "Checking time", completed: "Checked time" };
     }
+
+    return webResearchLabels();
 }
 
 function renderWebRunCall(args: WebRunGlowupArgs) {

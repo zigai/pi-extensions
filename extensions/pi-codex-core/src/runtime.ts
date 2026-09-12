@@ -32,11 +32,18 @@ export async function waitWithScheduler(
 ): Promise<void> {
     const { signal } = options;
     if (signal?.aborted) {
-        return Promise.reject(
-            options.preservePreAbortReason
-                ? signal.reason
-                : (signal.reason ?? new DOMException("Aborted", "AbortError")),
-        );
+        let abortReason: Error;
+        if (options.preservePreAbortReason) {
+            // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: preservePreAbortReason requires forwarding signal.reason verbatim even if undefined or non-Error.
+            abortReason = signal.reason as Error;
+        } else {
+            abortReason =
+                signal.reason instanceof Error
+                    ? signal.reason
+                    : new DOMException("Aborted", "AbortError");
+        }
+
+        return Promise.reject(abortReason);
     }
 
     return new Promise<void>((resolve, reject) => {
@@ -51,16 +58,26 @@ export async function waitWithScheduler(
             complete();
         };
 
-        const onAbort = () =>
-            settle(() => reject(signal?.reason ?? new DOMException("Aborted", "AbortError")));
+        const onAbort = () => {
+            const abortReason =
+                signal?.reason instanceof Error
+                    ? signal.reason
+                    : new DOMException("Aborted", "AbortError");
+
+            settle(() => reject(abortReason));
+        };
 
         signal?.addEventListener("abort", onAbort, { once: true });
 
         try {
             task = scheduler.set(delayMs, () => settle(resolve));
+
+            // oxlint-disable-next-line typescript/no-unnecessary-condition -- SAFETY: settled can be mutated synchronously during scheduler registration.
             if (settled) task.cancel();
         } catch (cause: unknown) {
-            settle(() => reject(cause));
+            const error = cause instanceof Error ? cause : new Error(String(cause));
+
+            settle(() => reject(error));
         }
     });
 }

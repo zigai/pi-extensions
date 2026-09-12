@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import { DEFAULT_CODEX_CORE_CONFIG } from "../src/config/config.ts";
-import { parseGlowupWireRecord } from "../src/glowup/wire.ts";
+import { parseGlowupWireRecord, type GlowupWireValue } from "../src/glowup/wire.ts";
 import { StringDecoder } from "../src/schema-parsing.ts";
 import { applyPatchGlowupRendering } from "../src/tools/apply-patch/glowup-rendering.ts";
 import { createApplyPatchTool } from "../src/tools/apply-patch/tool.ts";
@@ -22,13 +22,13 @@ const completeContext = {
     isError: false,
 } as const;
 
-function inlineText<Value>(value: Value): string {
+function inlineText(value: GlowupWireValue | undefined): string {
     const text = StringDecoder.decode(value);
     if (text !== undefined) return text;
     return StringDecoder.decode(parseGlowupWireRecord(value)?.text) ?? "";
 }
 
-function nodeText<Value>(node: Value): string {
+function nodeText(node: GlowupWireValue | undefined): string {
     const record = parseGlowupWireRecord(node);
     if (!record) return "";
     if (record.kind === "text") return inlineText(record.text);
@@ -75,7 +75,7 @@ test("Codex tools expose passive Glowup protocol v3 adapters", () => {
     const applyPatch = createApplyPatchTool();
     const rendering = testDouble<{
         readonly glowupRendering: typeof applyPatchGlowupRendering;
-    }>()(applyPatch).glowupRendering;
+    }>(applyPatch).glowupRendering;
     assert.equal(rendering.version, 3);
     assert.ok(applyPatch.renderCall, "apply_patch keeps its native renderer without Glowup");
 });
@@ -121,21 +121,15 @@ test("apply_patch adapter owns partial, planned, settled, and restored mutation 
         patch: `*** Begin Patch\n*** Add File: src/live.ts\n+text${"🧪".slice(0, 1)}`,
     });
     assert.equal(splitNode.kind, "mutation");
-
-    if (splitNode.kind === "mutation") {
-        const text = splitNode.files[0]?.lines[0]?.text;
-        assert.equal(text, "text");
-        assert.doesNotMatch(text ?? "", /[\uD800-\uDFFF]/u);
-    }
+    const text = splitNode.files[0]?.lines[0]?.text;
+    assert.equal(text, "text");
+    assert.doesNotMatch(text, /[\uD800-\uDFFF]/u);
 
     const completeEmoji = rendering.renderPartialCall({
         patch: "*** Begin Patch\n*** Add File: src/live.ts\n+text🧪",
     });
     assert.equal(completeEmoji.kind, "mutation");
-
-    if (completeEmoji.kind === "mutation") {
-        assert.equal(completeEmoji.files[0]?.lines[0]?.text, "text🧪");
-    }
+    assert.equal(completeEmoji.files[0]?.lines[0]?.text, "text🧪");
 
     const settled: unknown = rendering.renderCall(args, {
         ...completeContext,
@@ -192,12 +186,10 @@ test("web_run adapter summarizes calls and bounded source results", () => {
         getConfig: () => DEFAULT_CODEX_CORE_CONFIG,
     }).glowupRendering;
     const args = parseArgs(renderer, { search_query: [{ q: "latest pi docs" }] });
-    assert.equal(renderer.parseArgs?.(null), undefined);
+    assert.equal(renderer.parseArgs(null), undefined);
     assert.equal("renderPartialCall" in renderer, false);
-    const call = renderer.renderCall?.(args, completeContext);
-    assert.equal(call?.kind, "call");
-    if (call?.kind !== "call") return;
-
+    const call = renderer.renderCall(args, completeContext);
+    assert.equal(call.kind, "call");
     assert.equal(call.labels.static, "Web Search");
     assert.equal(nodeText(call), '"latest pi docs"');
     assert.doesNotMatch(nodeText(call), /search search/u);
@@ -216,7 +208,7 @@ test("web_run adapter summarizes calls and bounded source results", () => {
     ] as const;
     for (const [rawArgs, label] of operationLabels) {
         const parsedArgs = parseArgs(renderer, rawArgs);
-        const node = renderer.renderCall?.(parsedArgs, completeContext);
+        const node = renderer.renderCall(parsedArgs, completeContext);
         const record = parseGlowupWireRecord(node);
         const labels = parseGlowupWireRecord(record?.labels);
         assert.ok(labels);
@@ -235,9 +227,9 @@ test("web_run adapter summarizes calls and bounded source results", () => {
         content: [{ type: "text", text: output }],
         details: { sourceCount: 6, fullOutputPath: "/tmp/private-web-run.txt" },
     });
-    const collapsed = nodeText(renderer.renderResult?.(result, { ...completeContext, args }));
+    const collapsed = nodeText(renderer.renderResult(result, { ...completeContext, args }));
     const expanded = nodeText(
-        renderer.renderResult?.(result, { ...completeContext, args, expanded: true }),
+        renderer.renderResult(result, { ...completeContext, args, expanded: true }),
     );
 
     assert.match(collapsed, /6 sources/u);
@@ -266,7 +258,7 @@ test("web_run adapter keeps dense and huge result summaries bounded", () => {
         content: [{ type: "text", text: denseOutput }],
         details: { sourceCount: 3, fullOutputPath: "/tmp/private.txt" },
     });
-    const dense = nodeText(renderer.renderResult?.(denseResult, { ...completeContext, args }));
+    const dense = nodeText(renderer.renderResult(denseResult, { ...completeContext, args }));
     assert.match(dense, /3 sources/u);
     assert.match(dense, /API References \| Shiki — shiki\.style\/api/u);
     assert.match(dense, /… \+2 sources/u);
@@ -283,7 +275,7 @@ test("web_run adapter keeps dense and huge result summaries bounded", () => {
         details: { sourceCount: 1_000 },
     });
     const huge = nodeText(
-        renderer.renderResult?.(hugeResult, {
+        renderer.renderResult(hugeResult, {
             ...completeContext,
             args,
             expanded: true,
@@ -304,7 +296,7 @@ test("imagegen adapter preserves streaming, multiline, Unicode, and private-path
     )}latest lighting direction`;
     const longArgs = parseArgs(renderer, { prompt: longPrompt });
     assert.ok("renderPartialCall" in renderer);
-    const active = renderer.renderPartialCall?.(
+    const active = renderer.renderPartialCall(
         { prompt: longPrompt },
         {
             ...completeContext,
@@ -313,7 +305,7 @@ test("imagegen adapter preserves streaming, multiline, Unicode, and private-path
             isPartial: true,
         },
     );
-    const completed = renderer.renderCall?.(longArgs, completeContext);
+    const completed = renderer.renderCall(longArgs, completeContext);
     const compactActive = nodeText(active).replace(/\s+/gu, " ");
     const compactCompleted = nodeText(completed).replace(/\s+/gu, " ");
     assert.match(compactActive, /latest lighting direction/u);
@@ -324,7 +316,7 @@ test("imagegen adapter preserves streaming, multiline, Unicode, and private-path
     const multilineArgs = parseArgs(renderer, {
         prompt: "First composition line.\nSecond lighting line.\nThird material line.",
     });
-    const multiline = nodeText(renderer.renderCall?.(multilineArgs, completeContext));
+    const multiline = nodeText(renderer.renderCall(multilineArgs, completeContext));
     assert.match(
         multiline,
         /First composition line\.\nSecond lighting line\.\nThird material line\./u,
@@ -332,7 +324,7 @@ test("imagegen adapter preserves streaming, multiline, Unicode, and private-path
     assert.doesNotMatch(multiline, /"First composition/u);
     const emojiPrompt = `${"a".repeat(87)}🧪${"b".repeat(10)}`;
     const emojiArgs = parseArgs(renderer, { prompt: emojiPrompt });
-    const emoji = nodeText(renderer.renderCall?.(emojiArgs, { ...completeContext, expanded: true }))
+    const emoji = nodeText(renderer.renderCall(emojiArgs, { ...completeContext, expanded: true }))
         .trim()
         .replaceAll("\n", "");
     assert.equal(emoji, emojiPrompt);
@@ -347,7 +339,7 @@ test("imagegen adapter preserves streaming, multiline, Unicode, and private-path
         },
     });
     const renderedResult = nodeText(
-        renderer.renderResult?.(result, { ...completeContext, args: longArgs }),
+        renderer.renderResult(result, { ...completeContext, args: longArgs }),
     );
     assert.equal(renderedResult, "Generated 1 image");
     assert.doesNotMatch(renderedResult, /latest\.png|\/\.pi\//u);
@@ -362,18 +354,18 @@ test("view_image adapter owns call labels and suppresses only successful attachm
         detail: "high",
     });
     assert.equal("renderPartialCall" in renderer, false);
-    const call = renderer.renderCall?.(args, completeContext);
-    assert.equal(call?.kind, "call");
+    const call = renderer.renderCall(args, completeContext);
+    assert.equal(call.kind, "call");
     assert.equal(nodeText(call), "~/Projects/theme/preview.png");
 
     const result = parseResult(renderer, {
         content: [{ type: "text", text: "[view_image image attached: /tmp/preview.png]" }],
     });
-    assert.deepEqual(renderer.renderResult?.(result, { ...completeContext, args }), {
+    assert.deepEqual(renderer.renderResult(result, { ...completeContext, args }), {
         kind: "empty",
     });
     assert.equal(
-        renderer.renderResult?.(result, {
+        renderer.renderResult(result, {
             ...completeContext,
             args,
             isError: true,

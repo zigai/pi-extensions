@@ -301,6 +301,7 @@ export async function handleCodexNativeCompaction(
             },
         };
     } catch (cause: unknown) {
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- SAFETY: event.signal.aborted can become true during the preceding async operation.
         if (isCodexAbortCause(cause) || event.signal.aborted) {
             return { cancel: true };
         }

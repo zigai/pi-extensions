@@ -408,11 +408,12 @@ test("apply_patch tool executes patch argument and formats parser errors", async
         });
         assert.ok(params);
         const ctx = { cwd: root };
-        const executionContext = testDouble<ExtensionContext>()(ctx);
+        const executionContext = testDouble<ExtensionContext>(ctx);
         const result = await tool.execute("call-1", params, undefined, undefined, executionContext);
         assert.equal(await readFile(join(root, "hello.txt"), "utf8"), "hi\n");
-        assert.equal(result.content[0]?.type, "text");
-        assert.match(result.content[0]?.text ?? "", /A hello\.txt/);
+        const firstContent = result.content[0];
+        assert.ok(firstContent && firstContent.type === "text");
+        assert.match(firstContent.text, /A hello\.txt/);
         assert.match(result.details.diff, /hello\.txt\n\+1 hi/);
         assert.match(result.details.patch, /--- hello\.txt\n\+\+\+ hello\.txt/);
         assert.deepEqual(result.details.lineSummary, {
