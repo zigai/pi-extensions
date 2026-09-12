@@ -407,8 +407,10 @@ export default function extension(pi: ExtensionAPI): void {
         const loaded = loadAutonameSessionSettings(ctx);
         settings = loaded.settings;
 
-        for (const diagnostic of loaded.diagnostics) {
-            ctx.ui.notify(diagnostic.message, diagnostic.severity);
+        if (ctx.hasUI) {
+            for (const diagnostic of loaded.diagnostics) {
+                ctx.ui.notify(diagnostic.message, diagnostic.severity);
+            }
         }
 
         const restored = restoreNamingState(
