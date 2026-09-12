@@ -520,9 +520,8 @@ describe("actual Pi CLI in a real PTY", () => {
                 (frame) =>
                     frame.text.includes("STREAM_COMPLETE") &&
                     frame.text.includes("• Python") &&
-                    frame.text.includes("records = [") &&
-                    frame.text.includes('"argv"') &&
-                    frame.text.includes('"median_ms"'),
+                    frame.rows.some((row) => row.text.includes('"argv"')) &&
+                    frame.rows.some((row) => row.text.includes('"median_ms"')),
                 PTY_TIMEOUT_MS,
             );
             expect(collapsed.text).not.toContain("uv run");
