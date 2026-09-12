@@ -506,58 +506,68 @@ describe("actual Pi CLI in a real PTY", () => {
         }
     }, 45_000);
 
-    it("renders uv Python argv as Python and restores silent imports when expanded", async () => {
-        const fixture = createFixtureWorkspace();
-        fixtures.push(fixture);
-        const pi = new PiPtyProcess(
-            launchOptions(fixture, {
-                rows: 70,
-                initialPrompt: "run the deterministic uv python args",
-            }),
-        );
-        try {
-            const collapsed = await pi.waitForFrame(
-                (frame) =>
-                    frame.text.includes("STREAM_COMPLETE") &&
-                    frame.text.includes("• Python") &&
-                    frame.rows.some((row) => row.text.includes('"argv"')) &&
-                    frame.rows.some((row) => row.text.includes('"median_ms"')),
-                PTY_TIMEOUT_MS,
+    it(
+        "renders uv Python argv as Python and restores silent imports when expanded",
+        async () => {
+            const fixture = createFixtureWorkspace();
+            fixtures.push(fixture);
+            const pi = new PiPtyProcess(
+                launchOptions(fixture, {
+                    rows: 70,
+                    initialPrompt: "run the deterministic uv python args",
+                }),
             );
-            expect(collapsed.text).not.toContain("uv run");
-            expect(collapsed.text).not.toContain("import json");
-            expect(collapsed.text).not.toContain("import/setup lines omitted");
-            expect(collapsed.text).toContain("… +6 lines (ctrl+o to expand)");
-            const argvIndex = collapsed.rows.findIndex((row) => row.text.includes('"argv"'));
-            const outputMarkerIndex = collapsed.rows.findIndex(
-                (row, index) => index > argvIndex && row.text.includes("… +8 lines"),
-            );
-            const medianIndex = collapsed.rows.findIndex((row) => row.text.includes('"median_ms"'));
-            expect(argvIndex).toBeGreaterThanOrEqual(0);
-            expect(outputMarkerIndex).toBeGreaterThan(argvIndex);
-            expect(medianIndex).toBeGreaterThan(outputMarkerIndex);
-            expectTerminalInvariants(collapsed, [resolve("test/pty/fixtures/offline-provider.ts")]);
+            try {
+                const collapsed = await pi.waitForFrame(
+                    (frame) =>
+                        frame.text.includes("STREAM_COMPLETE") &&
+                        frame.text.includes("• Python") &&
+                        frame.rows.some((row) => row.text.includes('"argv"')) &&
+                        frame.rows.some((row) => row.text.includes('"median_ms"')),
+                    PTY_TIMEOUT_MS,
+                );
+                expect(collapsed.text).not.toContain("uv run");
+                expect(collapsed.text).not.toContain("import json");
+                expect(collapsed.text).not.toContain("import/setup lines omitted");
+                expect(collapsed.text).toContain("… +6 lines (ctrl+o to expand)");
+                const argvIndex = collapsed.rows.findIndex((row) => row.text.includes('"argv"'));
+                const outputMarkerIndex = collapsed.rows.findIndex(
+                    (row, index) => index > argvIndex && row.text.includes("… +8 lines"),
+                );
+                const medianIndex = collapsed.rows.findIndex((row) =>
+                    row.text.includes('"median_ms"'),
+                );
+                expect(argvIndex).toBeGreaterThanOrEqual(0);
+                expect(outputMarkerIndex).toBeGreaterThan(argvIndex);
+                expect(medianIndex).toBeGreaterThan(outputMarkerIndex);
+                expectTerminalInvariants(collapsed, [
+                    resolve("test/pty/fixtures/offline-provider.ts"),
+                ]);
 
-            const nextSequence = pi.frames().length;
-            pi.sendKey(CTRL_O);
-            const expanded = await pi.waitForFrame(
-                (frame) =>
-                    frame.text.includes("• Python") &&
-                    frame.text.includes("import json") &&
-                    frame.text.includes("from collections import Counter"),
-                PTY_TIMEOUT_MS,
-                nextSequence,
-            );
+                const nextSequence = pi.frames().length;
+                pi.sendKey(CTRL_O);
+                const expanded = await pi.waitForFrame(
+                    (frame) =>
+                        frame.text.includes("• Python") &&
+                        frame.text.includes("import json") &&
+                        frame.text.includes("from collections import Counter"),
+                    PTY_TIMEOUT_MS,
+                    nextSequence,
+                );
 
-            expect(expanded.text).not.toContain("uv run");
-            expectTerminalInvariants(expanded, [resolve("test/pty/fixtures/offline-provider.ts")]);
-        } catch (cause: unknown) {
-            await pi.writeFailureArtifacts("uv-python-args", cause);
-            throw cause;
-        } finally {
-            await pi.stop();
-        }
-    }, process.env.CI ? 60_000 : 45_000);
+                expect(expanded.text).not.toContain("uv run");
+                expectTerminalInvariants(expanded, [
+                    resolve("test/pty/fixtures/offline-provider.ts"),
+                ]);
+            } catch (cause: unknown) {
+                await pi.writeFailureArtifacts("uv-python-args", cause);
+                throw cause;
+            } finally {
+                await pi.stop();
+            }
+        },
+        process.env.CI ? 60_000 : 45_000,
+    );
 
     it("keeps an inline Python pipeline as one Bash call", async () => {
         const fixture = createFixtureWorkspace();
