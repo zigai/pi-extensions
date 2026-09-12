@@ -7,7 +7,7 @@ import { getGlowupGlobalConfigPath } from "../../src/config/load.ts";
 import { PiPtyProcess, type PiProcessOptions, type PtyScreenFrame } from "./pi-process-harness.ts";
 
 const CTRL_O = "\u000f";
-const PTY_TIMEOUT_MS = process.env.CI ? 40_000 : 20_000;
+const PTY_TIMEOUT_MS = process.env.CI !== undefined ? 40_000 : 20_000;
 
 type FixtureWorkspace = {
     readonly root: string;
@@ -566,7 +566,7 @@ describe("actual Pi CLI in a real PTY", () => {
                 await pi.stop();
             }
         },
-        process.env.CI ? 60_000 : 45_000,
+        process.env.CI !== undefined ? 60_000 : 45_000,
     );
 
     it("keeps an inline Python pipeline as one Bash call", async () => {
