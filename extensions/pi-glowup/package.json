@@ -70,7 +70,9 @@
     "verify": "npm run check",
     "prepack": "npm run config:check && npm run language-catalog:check && npm run build",
     "test:model": "vitest run test/tools/built-in/preview-store.model.test.ts",
-    "test:regressions": "vitest run --config test/audit/regressions.config.ts"
+    "test:regressions": "vitest run --config test/audit/regressions.config.ts",
+    "release": "release --root .",
+    "release:dry-run": "release --dry --root ."
   },
   "dependencies": {
     "@pierre/diffs": "1.2.12",
