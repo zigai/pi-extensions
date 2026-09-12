@@ -607,9 +607,13 @@ export default function extension(pi: ExtensionAPI): void {
                 return;
             }
 
-            if ("diagnostic" in outcome && !pickerDiagnosticShown && ctx.hasUI) {
+            if ("diagnostic" in outcome && !pickerDiagnosticShown) {
                 pickerDiagnosticShown = true;
-                ctx.ui.notify(outcome.diagnostic, "warning");
+                if (ctx.hasUI) {
+                    ctx.ui.notify(outcome.diagnostic, "warning");
+                } else {
+                    console.error("AUTONAME DIAGNOSTIC:", outcome.diagnostic);
+                }
             }
 
             if (outcome.type === "picked") {
