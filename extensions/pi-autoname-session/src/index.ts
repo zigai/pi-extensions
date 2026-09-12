@@ -1,5 +1,11 @@
 import { completeSimple } from "@earendil-works/pi-ai/compat";
-import type { Api, Model, SimpleStreamOptions, TextContent } from "@earendil-works/pi-ai";
+import type {
+    Api,
+    AssistantMessage,
+    Model,
+    SimpleStreamOptions,
+    TextContent,
+} from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { preparePickerPayload } from "./picker-request.ts";
 import {
@@ -220,6 +226,52 @@ async function resolveAuthentication(
     });
 }
 
+interface ModelRuntimeComplete {
+    completeSimple(
+        model: Model<Api>,
+        context: {
+            messages: {
+                role: "user";
+                content: TextContent[];
+                timestamp: number;
+            }[];
+        },
+        options?: SimpleStreamOptions,
+    ): Promise<AssistantMessage>;
+}
+
+function hasCompleteSimple(value: unknown): value is ModelRuntimeComplete {
+    return (
+        typeof value === "object" &&
+        value !== null &&
+        "completeSimple" in value &&
+        typeof value.completeSimple === "function"
+    );
+}
+
+async function completePickerModel(
+    ctx: ExtensionContext,
+    model: Model<Api>,
+    prompt: string,
+    streamOptions: SimpleStreamOptions,
+): Promise<AssistantMessage> {
+    const context = {
+        messages: [
+            {
+                role: "user" as const,
+                content: [{ type: "text" as const, text: prompt }],
+                timestamp: Date.now(),
+            },
+        ],
+    };
+    const registryObj: object = ctx.modelRegistry;
+    if ("runtime" in registryObj && hasCompleteSimple(registryObj.runtime)) {
+        return registryObj.runtime.completeSimple(model, context, streamOptions);
+    }
+
+    return completeSimple(model, context, streamOptions);
+}
+
 async function pickSessionName(options: PickSessionNameOptions): Promise<PickSessionNameOutcome> {
     const { settings, phase, entries, pendingPrompt, ctx, signal, repositoryContext } = options;
     const timeoutSignal = AbortSignal.timeout(settings.timeoutMs);
@@ -307,19 +359,7 @@ async function pickSessionName(options: PickSessionNameOptions): Promise<PickSes
         streamOptions.onPayload = (payload) => preparePickerPayload(model, payload, auth.headers);
         streamOptions.signal = operationSignal;
 
-        const response = await completeSimple(
-            model,
-            {
-                messages: [
-                    {
-                        role: "user",
-                        content: [{ type: "text", text: prompt }],
-                        timestamp: Date.now(),
-                    },
-                ],
-            },
-            streamOptions,
-        );
+        const response = await completePickerModel(ctx, model, prompt, streamOptions);
 
         if (response.stopReason === "aborted") {
             if (timeoutSignal.aborted) {
