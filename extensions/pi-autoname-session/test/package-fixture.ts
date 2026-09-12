@@ -125,6 +125,9 @@ try {
         expandPromptTemplates: false,
     });
     await first.waitForIdle();
+    for (let i = 0; i < 50 && manager.getSessionName() === undefined; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+    }
     assert.equal(manager.getSessionName(), "Fix parser recovery");
     assert.equal(faux.state.callCount, 2);
     faux.setResponses([fauxAssistantMessage("I will also inspect incomplete tokens.")]);
@@ -132,6 +135,9 @@ try {
         expandPromptTemplates: false,
     });
     await first.waitForIdle();
+    for (let i = 0; i < 50 && manager.getSessionName() === undefined; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+    }
     assert.equal(manager.getSessionName(), "Fix parser recovery");
     assert.equal(faux.state.callCount, 3);
 
