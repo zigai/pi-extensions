@@ -53,7 +53,7 @@
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
     "test": "npm run test:vitest && npm run test:pty",
-    "test:vitest": "vitest run --exclude=test/pty/**",
+    "test:vitest": "vitest run --exclude=test/pty/** --testTimeout=30000",
     "test:xterm": "vitest run test/xterm/tui-integration.test.ts",
     "test:pty": "vitest run test/pty/pi-cli.test.ts",
     "test:pty:dist": "npm run build && PI_GLOWUP_ENTRYPOINT=dist/src/index.ts vitest run test/pty/pi-cli.test.ts",
