@@ -5,7 +5,7 @@
 - Keep the extension entrypoint declared explicitly in `package.json` under `pi.extensions`.
 - Keep Pi-bundled imports in `peerDependencies` with `"*"` and in `devDependencies` for local checks only.
 - Bundle `pi-typed-args` because Pi packages do not share module roots at runtime.
-- Keep the package allowlist and package smoke test current when adding published files.
+- Keep the package allowlist and package verification check current when adding published files.
 - Validate changes with `just check` before handing off.
 
 ## Settings and Session Lifecycle

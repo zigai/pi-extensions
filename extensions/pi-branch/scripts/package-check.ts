@@ -19,7 +19,7 @@ type NpmPackOutput = Static<typeof NpmPackOutputSchema>;
 type DependencyManifest = Static<typeof DependencyManifestSchema>;
 
 function fail(message: string): never {
-    throw new Error(`Package smoke test failed: ${message}`);
+    throw new Error(`Package verification failed: ${message}`);
 }
 
 function parseNpmPackOutput(text: string): NpmPackOutput {
@@ -84,7 +84,7 @@ try {
         fail("bundled dependency has the wrong package name");
     }
 
-    process.stdout.write("package smoke test passed\n");
+    process.stdout.write("package verification passed\n");
 } finally {
     rmSync(packDirectory, { recursive: true, force: true });
 }
