@@ -28,11 +28,95 @@ describe("bash command analysis", () => {
             code: "import sys; print(sys.argv)",
         });
 
-        expect(
-            analyzeBashCommand(`node -e "console.log('ok')" 2>/dev/null`).pureScript,
-        ).toBeUndefined();
+        expect(analyzeBashCommand(`node -e "console.log('ok')" 2>/dev/null`).pureScript).toEqual({
+            label: "Node",
+            language: "javascript",
+            code: "console.log('ok')",
+        });
 
         expect(analyzeBashCommand("one && two").structurallyComplex).toBe(false);
+    });
+
+    it("extracts interpreter scripts with attached flags, ANSI-C quoting, and redirections", () => {
+        expect(analyzeBashCommand(`python3 -c"import os; print(os.getcwd())"`).pureScript).toEqual({
+            label: "Python",
+            language: "python",
+            code: "import os; print(os.getcwd())",
+        });
+
+        expect(
+            analyzeBashCommand(`python3 -c $'print("hello")' > output.log 2>&1`).pureScript,
+        ).toEqual({
+            label: "Python",
+            language: "python",
+            code: 'print("hello")',
+        });
+
+        expect(
+            analyzeBashCommand(`cat << 'EOF' | python3\nprint("piped")\nEOF`).pureScript,
+        ).toEqual({
+            label: "Python",
+            language: "python",
+            code: 'print("piped")',
+        });
+
+        expect(analyzeBashCommand(`pypy3 -c "print(1)"`).pureScript).toEqual({
+            label: "Python",
+            language: "python",
+            code: "print(1)",
+        });
+
+        expect(analyzeBashCommand(`ruby -e "puts 1"`).pureScript).toEqual({
+            label: "Ruby",
+            language: "ruby",
+            code: "puts 1",
+        });
+
+        expect(analyzeBashCommand(`perl -e "print 1"`).pureScript).toEqual({
+            label: "Perl",
+            language: "perl",
+            code: "print 1",
+        });
+
+        expect(analyzeBashCommand(`php -r "echo 1;"`).pureScript).toEqual({
+            label: "PHP",
+            language: "php",
+            code: "echo 1;",
+        });
+
+        expect(analyzeBashCommand(`python -c "print(1)" >> log.txt`).pureScript).toEqual({
+            label: "Python",
+            language: "python",
+            code: "print(1)",
+        });
+
+        expect(
+            analyzeBashCommand(`python << "EOF" > /tmp/out.txt\nprint(1)\nEOF`).pureScript,
+        ).toEqual({
+            label: "Python",
+            language: "python",
+            code: "print(1)",
+        });
+
+        expect(
+            analyzeBashCommand(`uv run --with requests python -c "print(1)"`).pureScript,
+        ).toEqual({
+            label: "Python",
+            language: "python",
+            code: "print(1)",
+        });
+
+        expect(analyzeBashCommand(`npx tsx -e "console.log(1)"`).pureScript).toEqual({
+            label: "TypeScript",
+            language: "typescript",
+            code: "console.log(1)",
+        });
+
+        expect(analyzeBashCommand(`node --no-warnings -e "console.log(1)"`).pureScript).toEqual({
+            label: "Node",
+            language: "javascript",
+            code: "console.log(1)",
+        });
     });
 
     it("reflows at step boundaries while keeping pipelines and fallbacks together", () => {

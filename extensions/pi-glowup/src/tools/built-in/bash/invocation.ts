@@ -48,9 +48,36 @@ function stripShellWrapper(command: string | undefined): string {
 
 function decodeShellWord(word: string): string {
     let decoded = "";
-    let quote: "'" | '"' | undefined;
+    let quote: "'" | '"' | "$'" | undefined;
     let escaped = false;
-    for (const char of word) {
+
+    for (let index = 0; index < word.length; index += 1) {
+        const char = word[index] ?? "";
+
+        if (quote === "$'") {
+            if (escaped) {
+                if (char === "n") decoded += "\n";
+                else if (char === "r") decoded += "\r";
+                else if (char === "t") decoded += "\t";
+                else if (char === "\\" || char === "'" || char === '"') decoded += char;
+                else decoded += `\\${char}`;
+                escaped = false;
+                continue;
+            }
+
+            if (char === "\\") {
+                escaped = true;
+                continue;
+            }
+
+            if (char === "'") {
+                quote = undefined;
+            } else {
+                decoded += char;
+            }
+            continue;
+        }
+
         if (quote === "'") {
             if (char === "'") {
                 quote = undefined;
@@ -91,6 +118,12 @@ function decodeShellWord(word: string): string {
             continue;
         }
 
+        if (char === "$" && word[index + 1] === "'") {
+            quote = "$'";
+            index += 1;
+            continue;
+        }
+
         if (char === "'" || char === '"') {
             quote = char;
         } else {
@@ -111,7 +144,7 @@ function unquoteCommandWord(word: string): string {
 
 function scriptInterpreterForWord(word: string): ScriptInterpreter | undefined {
     const basename = commandBasename(word);
-    if (basename === "py" || /^python(?:\d+(?:\.\d+)?)?$/.test(basename)) {
+    if (basename === "py" || /^(?:python|pypy)(?:\d+(?:\.\d+)?)?$/u.test(basename)) {
         return { displayName: "Python", language: "python" };
     }
 
@@ -160,6 +193,7 @@ function normalizeCodeForDisplay(code: string): string {
 
 type HeredocOpening = {
     readonly prefix: string;
+    readonly suffix: string;
     readonly marker: string;
     readonly bodyStart: number;
     readonly stripLeadingTabs: boolean;
@@ -186,7 +220,7 @@ function parseHeredocScriptInvocation(displayCommand: string): ScriptInvocation 
         return undefined;
     }
 
-    return buildScriptInvocation(opening.prefix, closing?.code ?? body);
+    return buildScriptInvocationForHeredoc(opening.prefix, opening.suffix, closing?.code ?? body);
 }
 
 function parseHeredocOpening(displayCommand: string): HeredocOpening | undefined {
@@ -205,6 +239,7 @@ function parseHeredocOpening(displayCommand: string): HeredocOpening | undefined
 
     return {
         prefix: firstLine.slice(0, match.index),
+        suffix,
         marker: groups.doubleMarker ?? groups.singleMarker ?? groups.bareMarker ?? "",
         bodyStart: nextLineStartIndex(displayCommand, firstLineEnd),
         stripLeadingTabs: groups.operator === "<<-",
@@ -235,9 +270,14 @@ function nextLineStartIndex(text: string, lineEnd: number): number {
 }
 
 function hasShellControlOperator(text: string): boolean {
+    const pipeInterpreter =
+        /^\s*\|\s*(?:[A-Za-z_][A-Za-z0-9_]*[\\/])?(?:python|python\d+(?:\.\d+)?|node|nodejs|bun|deno|ruby|perl|php)\b/iu.test(
+            text,
+        );
     let quote: "'" | '"' | undefined;
     let escaped = false;
-    for (const char of text) {
+    for (let index = 0; index < text.length; index += 1) {
+        const char = text[index] ?? "";
         if (quote !== undefined) {
             if (quote === '"' && escaped) {
                 escaped = false;
@@ -270,7 +310,11 @@ function hasShellControlOperator(text: string): boolean {
             continue;
         }
 
-        if (["|", ";", "&", "<", ">"].includes(char)) {
+        if (char === "|" && pipeInterpreter) {
+            continue;
+        }
+
+        if (["|", ";", "&"].includes(char)) {
             return true;
         }
     }
@@ -373,13 +417,25 @@ function buildScriptInvocationForInterpreter(
     };
 }
 
-function buildScriptInvocation(prefix: string, code: string): ScriptInvocation | undefined {
-    const interpreter = detectScriptInterpreter(prefix);
-    if (!interpreter) {
-        return undefined;
+function buildScriptInvocationForHeredoc(
+    prefix: string,
+    suffix: string,
+    code: string,
+): ScriptInvocation | undefined {
+    const pipeMatch = /^\s*\|\s*(?<pipedCmd>.+)$/u.exec(suffix);
+    if (pipeMatch?.groups?.pipedCmd !== undefined) {
+        const interpreter = detectScriptInterpreter(pipeMatch.groups.pipedCmd);
+        if (interpreter !== undefined) {
+            return buildScriptInvocationForInterpreter(interpreter, code);
+        }
     }
 
-    return buildScriptInvocationForInterpreter(interpreter, code);
+    const interpreter = detectScriptInterpreter(prefix);
+    if (interpreter !== undefined) {
+        return buildScriptInvocationForInterpreter(interpreter, code);
+    }
+
+    return undefined;
 }
 
 type ShellLexeme = {
@@ -389,27 +445,42 @@ type ShellLexeme = {
     readonly end: number;
 };
 
-function tokenizeShellLexemes(command: string): ShellLexeme[] {
+export function tokenizeShellLexemes(command: string): ShellLexeme[] {
     const lexemes: ShellLexeme[] = [];
     let wordStart: number | undefined;
-    let quote: "'" | '"' | undefined;
+    let quote: "'" | '"' | "$'" | undefined;
     let escaped = false;
+    let expectRedirectionTarget = false;
 
     const pushWord = (end: number): void => {
         if (wordStart !== undefined) {
             lexemes.push({
-                kind: "word",
+                kind: expectRedirectionTarget ? "redirection" : "word",
                 source: command.slice(wordStart, end),
                 start: wordStart,
                 end,
             });
             wordStart = undefined;
+            expectRedirectionTarget = false;
         }
     };
 
     for (let index = 0; index < command.length; index += 1) {
         const char = command[index] ?? "";
         if (quote !== undefined) {
+            if (quote === "$'") {
+                if (escaped) {
+                    escaped = false;
+                    continue;
+                }
+                if (char === "\\") {
+                    escaped = true;
+                    continue;
+                }
+                if (char === "'") quote = undefined;
+                continue;
+            }
+
             if (quote === '"' && escaped) {
                 escaped = false;
                 continue;
@@ -437,6 +508,13 @@ function tokenizeShellLexemes(command: string): ShellLexeme[] {
             continue;
         }
 
+        if (quote === undefined && char === "$" && command[index + 1] === "'") {
+            wordStart ??= index;
+            quote = "$'";
+            index += 1;
+            continue;
+        }
+
         if (char === "'" || char === '"') {
             wordStart ??= index;
             quote = char;
@@ -453,9 +531,26 @@ function tokenizeShellLexemes(command: string): ShellLexeme[] {
         }
 
         if (["|", ";", "&", "<", ">", "(", ")"].includes(char)) {
+            const redirectionMatch = /^(?:[012]?>&[012]|&>|>>|2>|1>|>|<|<<-?)/u.exec(
+                command.slice(index, index + 6),
+            );
+            if (redirectionMatch !== null) {
+                const redirText = redirectionMatch[0];
+                pushWord(index);
+                lexemes.push({
+                    kind: "redirection",
+                    source: redirText,
+                    start: index,
+                    end: index + redirText.length,
+                });
+                expectRedirectionTarget = !redirText.includes("&");
+                index += redirText.length - 1;
+                continue;
+            }
+
             pushWord(index);
             lexemes.push({
-                kind: char === "<" || char === ">" ? "redirection" : "separator",
+                kind: "separator",
                 source: char,
                 start: index,
                 end: index + 1,
@@ -478,9 +573,10 @@ function tokenizeShellWords(command: string): string[] {
 }
 
 function hasDynamicShellExpansion(command: string): boolean {
-    let quote: "'" | '"' | undefined;
+    let quote: "'" | '"' | "$'" | undefined;
     let escaped = false;
-    for (const char of command) {
+    for (let index = 0; index < command.length; index += 1) {
+        const char = command[index] ?? "";
         if (escaped) {
             escaped = false;
             continue;
@@ -491,13 +587,24 @@ function hasDynamicShellExpansion(command: string): boolean {
             continue;
         }
 
+        if (quote === undefined && char === "$" && command[index + 1] === "'") {
+            quote = "$'";
+            index += 1;
+            continue;
+        }
+
         if (char === "'" || char === '"') {
             if (quote === undefined) quote = char;
             else if (quote === char) quote = undefined;
             continue;
         }
 
-        if (quote !== "'" && (char === "$" || char === "`")) return true;
+        if (quote === "$'" && char === "'") {
+            quote = undefined;
+            continue;
+        }
+
+        if (quote !== "'" && quote !== "$'" && (char === "$" || char === "`")) return true;
     }
 
     return false;
@@ -505,7 +612,7 @@ function hasDynamicShellExpansion(command: string): boolean {
 
 function hasComposedShellSyntax(command: string): boolean {
     return (
-        tokenizeShellLexemes(command).some((lexeme) => lexeme.kind !== "word") ||
+        tokenizeShellLexemes(command).some((lexeme) => lexeme.kind === "separator") ||
         hasDynamicShellExpansion(command)
     );
 }
@@ -540,7 +647,7 @@ const wrapperOptionsWithValues = new Set([
 
 function commandBasename(word: string): string {
     const cleanWord = unquoteCommandWord(word);
-    const parts = cleanWord.split(/[\\/]/u);
+    const parts = cleanWord.replace(/\\/g, "/").split("/");
     return (parts[parts.length - 1] ?? cleanWord).toLowerCase().replace(/\.exe$/u, "");
 }
 
@@ -625,6 +732,14 @@ function inlineScriptFlagsForInterpreter(interpreter: ScriptInterpreter): Readon
         return new Set(["-e", "--eval"]);
     }
 
+    if (interpreter.displayName === "Ruby" || interpreter.displayName === "Perl") {
+        return new Set(["-e"]);
+    }
+
+    if (interpreter.displayName === "PHP") {
+        return new Set(["-r"]);
+    }
+
     return new Set();
 }
 
@@ -683,7 +798,8 @@ function inlineScriptCodeForInterpreter(
     }
 
     for (let index = startIndex; index < words.length; index += 1) {
-        const value = decodeShellWord(words[index] ?? "");
+        const rawWord = words[index] ?? "";
+        const value = decodeShellWord(rawWord);
         for (const flag of flags) {
             if (value === flag) {
                 const codeWord = words[index + 1];
@@ -701,6 +817,21 @@ function inlineScriptCodeForInterpreter(
             if (value.startsWith(assignmentPrefix)) {
                 const code = value.slice(assignmentPrefix.length);
                 return /^-[A-Za-z-]/u.test(code) ? undefined : { code, wordIndex: index };
+            }
+
+            if (rawWord.startsWith(flag) && rawWord.length > flag.length) {
+                const rest = rawWord.slice(flag.length);
+                if (
+                    rest.startsWith("'") ||
+                    rest.startsWith('"') ||
+                    rest.startsWith("='") ||
+                    rest.startsWith('="') ||
+                    rest.startsWith("$'")
+                ) {
+                    const payload = rest.startsWith("=") ? rest.slice(1) : rest;
+                    const code = decodeShellWord(payload);
+                    return /^-[A-Za-z-]/u.test(code) ? undefined : { code, wordIndex: index };
+                }
             }
         }
     }
