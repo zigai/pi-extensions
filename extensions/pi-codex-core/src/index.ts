@@ -323,6 +323,7 @@ function isActiveGptResponsesModel(ctx: Parameters<typeof syncCodexCoreTools>[1]
     );
 }
 
+export { codexModelRequestProfile } from "./codex/models.ts";
 export { formatCodexUsage, parseCodexUsagePayload } from "./codex/usage.ts";
 export {
     parseCodexCoreConfig,
