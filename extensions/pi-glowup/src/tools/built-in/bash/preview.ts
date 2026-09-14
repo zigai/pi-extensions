@@ -156,22 +156,25 @@ export function createNativeBashFeature() {
         readonly command: string;
         readonly formatter: ScriptBlockFormatter | undefined;
         readonly signal: AbortSignal | undefined;
+        readonly targetWidth?: number;
         readonly isCurrent: () => boolean;
         readonly invalidate: () => void;
     }): boolean {
         remember(options.toolCallId, options.command);
 
-        let formatOptions: FormatScriptPreviewOptions = {
+        // SAFETY: process.stdout.columns is number | undefined at runtime in Node.js.
+        const stdoutColumns = process.stdout.columns as number | undefined;
+        const columns =
+            options.targetWidth ??
+            (stdoutColumns !== undefined ? Math.max(20, stdoutColumns - 4) : undefined);
+
+        const formatOptions: FormatScriptPreviewOptions = {
             sink: scriptPreviews,
             toolCallId: options.toolCallId,
             command: options.command,
             formatter: options.formatter,
-        };
-        if (options.signal !== undefined)
-            formatOptions = { ...formatOptions, signal: options.signal };
-
-        formatOptions = {
-            ...formatOptions,
+            ...(columns !== undefined && { targetWidth: columns }),
+            ...(options.signal !== undefined && { signal: options.signal }),
             isCurrent: options.isCurrent,
             invalidate: () => {
                 bashRenderInvalidations.get(options.toolCallId)?.();

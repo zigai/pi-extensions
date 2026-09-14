@@ -9,10 +9,12 @@ export type ScriptBlockFormatterInput = {
     readonly label: string;
     readonly language: string;
     readonly code: string;
+    readonly targetWidth?: number;
 };
 
 export type ScriptBlockFormatterOptions = {
     readonly signal?: AbortSignal;
+    readonly targetWidth?: number;
 };
 
 export type ScriptBlockFormatter = (
@@ -70,6 +72,18 @@ function formatterCommand(value: JsonValue): readonly string[] | undefined {
 
 function normalizeCode(code: string): string {
     return code.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\n$/u, "");
+}
+
+function substituteWidthPlaceholders(
+    args: readonly string[],
+    targetWidth: number | undefined,
+): string[] {
+    if (targetWidth === undefined) {
+        return args.map((arg) => arg.replace(/\{width\}|\{line_length\}|\{cols\}/gi, "88"));
+    }
+
+    const widthStr = String(targetWidth);
+    return args.map((arg) => arg.replace(/\{width\}|\{line_length\}|\{cols\}/gi, widthStr));
 }
 
 export function parseScriptFormatterCommandsValue(
@@ -149,6 +163,18 @@ async function runFormatterCommand(
         return Promise.resolve(undefined);
     }
 
+    const targetWidth = options.targetWidth;
+    const finalArgs = substituteWidthPlaceholders(args, targetWidth);
+    const widthEnv =
+        targetWidth === undefined
+            ? undefined
+            : {
+                  TUFF_LINE_LENGTH: String(targetWidth),
+                  RUFF_LINE_LENGTH: String(targetWidth),
+                  COLUMNS: String(targetWidth),
+              };
+    const env = { ...process.env, ...widthEnv };
+
     return new Promise((resolve) => {
         let settled = false;
         let terminating = false;
@@ -157,9 +183,10 @@ async function runFormatterCommand(
         let escalation: ReturnType<typeof setTimeout> | undefined;
         let child: ChildProcessByStdio<Writable, Readable, null>;
         try {
-            child = spawn(executable, [...args], {
+            child = spawn(executable, [...finalArgs], {
                 shell: false,
                 signal: options.signal,
+                env,
                 stdio: ["pipe", "pipe", "ignore"],
             });
         } catch {
@@ -341,20 +368,32 @@ export function createCommandScriptFormatter(
             return undefined;
         }
 
+        const targetWidth = input.targetWidth ?? options.targetWidth;
+        const effectiveOptions: ScriptBlockFormatterOptions =
+            targetWidth === undefined ? options : { ...options, targetWidth };
+
         const cacheKey = createHash("sha256")
             .update(input.language)
+            .update("\0")
+            .update(targetWidth === undefined ? "" : String(targetWidth))
             .update("\0")
             .update(input.code)
             .digest("hex");
         const cached = cache.get(cacheKey);
         if (cached !== undefined) return cached.output;
 
-        const release = await acquireFormatterSlot(options);
+        const release = await acquireFormatterSlot(effectiveOptions);
         if (release === undefined) {
             return undefined;
         }
 
-        const output = await runFormatterCommand(executable, args, input.code, options, release);
+        const output = await runFormatterCommand(
+            executable,
+            args,
+            input.code,
+            effectiveOptions,
+            release,
+        );
         if (output === undefined) {
             return undefined;
         }

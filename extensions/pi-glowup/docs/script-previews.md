@@ -52,7 +52,9 @@ to show the omitted-line count. Expanding the tool call always restores the comp
 Script previews are not formatted by default. Configure `scriptPreview.formatters` to map rendered language ids to formatter command argv arrays.
 
 Formatters apply only to clean standalone language calls. Composed Bash commands are never passed
-to a language formatter. Successful formatter output is cached by language and source for the
+to a language formatter. Successful formatter output is cached by language, target width, and source for the
 session.
+
+`pi-glowup` dynamically adapts formatting to the available terminal rendering width. You can use `{width}`, `{line_length}`, or `{cols}` placeholders in your command arguments (e.g. `["tuff", "format", "--line-length", "{width}", "--stdin-filename", "script.py", "-"]`), and `pi-glowup` will also automatically export environment variables (`TUFF_LINE_LENGTH`, `RUFF_LINE_LENGTH`, `COLUMNS`) containing the available content width for tool rendering.
 
 Formatter failures, missing commands, invalid JSON, and empty output are ignored; the original script preview is rendered unchanged.

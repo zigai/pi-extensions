@@ -93,6 +93,28 @@ describe("script formatter settings", () => {
         ).resolves.toEqual({ label: "Node", language: "javascript", code: "console.log(1)" });
     });
 
+    it("substitutes width placeholders and passes environment variables", async () => {
+        const commands = parseScriptFormatterCommands(
+            JSON.stringify({
+                python: [
+                    process.execPath,
+                    "-e",
+                    "process.stdout.write(process.argv[1] + ':' + process.env.TUFF_LINE_LENGTH)",
+                    "{width}",
+                ],
+            }),
+        );
+        const formatter = createCommandScriptFormatter(commands);
+
+        await expect(
+            formatScriptInvocation(
+                { label: "Python", language: "python", code: "code" },
+                formatter,
+                { targetWidth: 76 },
+            ),
+        ).resolves.toEqual({ label: "Python", language: "python", code: "76:76" });
+    });
+
     it("skips command formatters for oversized inputs", async () => {
         const commands = parseScriptFormatterCommands(
             JSON.stringify({

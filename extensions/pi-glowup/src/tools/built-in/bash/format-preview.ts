@@ -1,4 +1,8 @@
-import { formatScriptInvocation, type ScriptBlockFormatter } from "./formatter.ts";
+import {
+    formatScriptInvocation,
+    type ScriptBlockFormatter,
+    type ScriptBlockFormatterOptions,
+} from "./formatter.ts";
 import { boundedScriptPreview } from "./preview-store.ts";
 import { parseScriptInvocation, type ScriptInvocation } from "./invocation.ts";
 
@@ -12,6 +16,7 @@ export type FormatScriptPreviewOptions = {
     readonly command: string;
     readonly formatter: ScriptBlockFormatter | undefined;
     readonly signal?: AbortSignal;
+    readonly targetWidth?: number;
     readonly isCurrent?: () => boolean;
     readonly invalidate?: () => void;
 };
@@ -35,7 +40,10 @@ async function formatAndStoreScriptPreview(options: FormatScriptPreviewOptions):
     const script = parseScriptInvocation(options.command);
     if (options.formatter === undefined || script === undefined) return;
 
-    const formatterOptions = options.signal === undefined ? {} : { signal: options.signal };
+    const formatterOptions: ScriptBlockFormatterOptions = {
+        ...(options.signal !== undefined && { signal: options.signal }),
+        ...(options.targetWidth !== undefined && { targetWidth: options.targetWidth }),
+    };
     const formattedScript = await formatScriptInvocation(
         script,
         options.formatter,
