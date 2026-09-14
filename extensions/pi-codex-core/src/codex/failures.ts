@@ -100,7 +100,16 @@ export function codexFailureToError(error: CodexFailure): Error {
 }
 
 export function safeCauseMessage(cause: unknown): string {
-    return cause instanceof Error ? cause.message : String(cause);
+    if (cause instanceof Error) {
+        if (cause.message === "fetch failed" && cause.cause) {
+            const inner = cause.cause instanceof Error ? cause.cause.message : String(cause.cause);
+            return `fetch failed (${inner})`;
+        }
+
+        return cause.message;
+    }
+
+    return String(cause);
 }
 
 export function isAbortCause(cause: unknown): boolean {
