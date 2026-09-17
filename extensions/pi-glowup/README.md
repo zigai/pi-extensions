@@ -1,6 +1,11 @@
 # pi-glowup
 
-High-signal rendering for Pi tool calls and results. Inspired by Codex CLI.
+[![CI](https://github.com/zigai/pi-glowup/actions/workflows/ci.yml/badge.svg)](https://github.com/zigai/pi-glowup/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/@zigai/pi-glowup?color=blue)](https://www.npmjs.com/package/@zigai/pi-glowup)
+[![npm downloads](https://img.shields.io/npm/dm/@zigai/pi-glowup?color=blue)](https://www.npmjs.com/package/@zigai/pi-glowup)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+`pi-glowup` provides compact, high-signal terminal UI rendering for [Pi](https://github.com/earendil-works/pi) tool calls and results. Inspired by Codex CLI, it formats file edits, writes, Bash executions, script previews, and tool outputs into readable, syntax-highlighted terminal components.
 
 ## Install
 
@@ -8,11 +13,20 @@ High-signal rendering for Pi tool calls and results. Inspired by Codex CLI.
 pi install npm:@zigai/pi-glowup
 ```
 
-## Contents
+## Usage
 
-- [Glowup tool rendering](docs/tool-rendering.md)
-- [Configuration guide](docs/configuration.md)
-- [Script previews](docs/script-previews.md)
+Once installed, `pi-glowup` automatically formats native Pi tool calls and compatible extension tools:
+
+- **File mutations:** Renders unified or side-by-side diffs for file edits, writes, and deletions with syntax highlighting and line numbers.
+- **Script previews:** Reflows composed Bash commands and presents multiline Python, Node, and shell scripts.
+- **Tool integration:** Compactly displays third-party tool executions through generic and custom protocol adapters.
+
+## Documentation
+
+- [Tool rendering](docs/tool-rendering.md): Protocol contract, custom tool adapters, and rendering selection rules.
+- [Configuration](docs/configuration.md): Visual diff styles, mutation line budgets, and appearance settings.
+- [Script previews](docs/script-previews.md): Adaptive Bash command reflowing, script header layouts, and code formatters.
+- [Architecture](docs/architecture.md): Internal code organization, dependency boundaries, and extension lifecycle.
 
 <!-- pi-extension-settings:start -->
 ## Configuration
