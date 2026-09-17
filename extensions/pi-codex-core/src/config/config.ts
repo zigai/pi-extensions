@@ -11,7 +11,8 @@ import {
 import { basename, dirname, join } from "node:path";
 
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import { type StaticDecode, Type } from "typebox";
+import { Value } from "typebox/value";
 
 import {
     makeConfigDiagnostic,
@@ -25,6 +26,7 @@ import {
     JsonValueDecoder,
 } from "../compaction/responses-input.ts";
 import type { JsonObject, JsonValue } from "../compaction/types.ts";
+import { settingsSchema } from "../settings-input.ts";
 
 export type CodexPromptMode = "pi" | "codex";
 export type CodexPersonality = "friendly" | "pragmatic" | "none";
@@ -55,144 +57,12 @@ export const CODEX_COMPACTION_REASONING_LEVELS: readonly CodexCompactionReasonin
     "ultra",
 ];
 
-export type CodexCoreConfig = {
-    readonly scope: {
-        readonly tools: CodexToolScope;
-    };
-
-    readonly tools: {
-        readonly webSearch: boolean;
-        readonly webSearchMode: CodexWebSearchMode;
-        readonly imageGeneration: boolean;
-        readonly viewImage: boolean;
-        readonly viewImageDescriptions: boolean;
-        readonly applyPatch: CodexApplyPatchMode;
-    };
-
-    readonly prompt: {
-        readonly mode: CodexPromptMode;
-        readonly personality: CodexPersonality;
-    };
-
-    readonly compaction: {
-        readonly enabled: boolean;
-        readonly auto: boolean;
-        readonly thresholdPercent: number;
-    };
-
-    readonly recovery: {
-        readonly enabled: boolean;
-        readonly batchFollowUps: boolean;
-        readonly maxAttempts: number;
-        readonly baseDelayMs: number;
-        readonly maxDelayMs: number;
-    };
-
-    readonly openai: {
-        readonly webSearchModel: string;
-        readonly imageModel: string;
-        readonly imageDescriptionModel: string;
-        readonly compactionModel: string;
-        readonly compactionReasoning: CodexCompactionReasoning;
-        readonly verbosity: CodexVerbosity;
-        readonly fast: boolean;
-        readonly showReasoningTraces: boolean;
-    };
-};
+export type CodexCoreConfig = StaticDecode<typeof settingsSchema>;
 
 export const CODEX_CORE_EXTENSION_ID = "pi-codex-core";
 export const CODEX_CORE_CONFIG_BASENAME = "config.json";
 export const CODEX_CORE_CONFIG_SCHEMA_BASENAME = "config.schema.json";
 export const CODEX_CORE_CONFIG_SCHEMA_REFERENCE = `./${CODEX_CORE_CONFIG_SCHEMA_BASENAME}`;
-const JSON_SCHEMA_DRAFT_URI = "https://json-schema.org/draft/2020-12/schema";
-const CODEX_CORE_CONFIG_SCHEMA_ID = "https://github.com/zigai/pi-codex-core/config.schema.json";
-const CodexToolScopeSchema = Type.Union([Type.Literal("codex"), Type.Literal("all")]);
-const CodexApplyPatchModeSchema = Type.Union([
-    Type.Literal("off"),
-    Type.Literal("openai"),
-    Type.Literal("all"),
-]);
-const CodexWebSearchModeSchema = Type.Union(
-    [Type.Literal("cached"), Type.Literal("indexed"), Type.Literal("live")],
-    { default: "live" },
-);
-const CodexPromptModeSchema = Type.Union([Type.Literal("pi"), Type.Literal("codex")]);
-const CodexPersonalitySchema = Type.Union([
-    Type.Literal("friendly"),
-    Type.Literal("pragmatic"),
-    Type.Literal("none"),
-]);
-
-const CodexVerbositySchema = Type.Union([
-    Type.Literal("low"),
-    Type.Literal("medium"),
-    Type.Literal("high"),
-]);
-
-const CodexCompactionReasoningSchema = Type.String({
-    minLength: 1,
-    pattern: "\\S",
-    default: "medium",
-});
-
-const CodexCoreConfigJsonSchema = Type.Object(
-    {
-        scope: Type.Object(
-            { tools: CodexToolScopeSchema },
-            { additionalProperties: false, default: { tools: "codex" } },
-        ),
-        tools: Type.Object(
-            {
-                webSearch: Type.Boolean({ default: true }),
-                webSearchMode: CodexWebSearchModeSchema,
-                imageGeneration: Type.Boolean({ default: true }),
-                viewImage: Type.Boolean({ default: true }),
-                viewImageDescriptions: Type.Boolean({ default: false }),
-                applyPatch: CodexApplyPatchModeSchema,
-            },
-            { additionalProperties: false },
-        ),
-        prompt: Type.Object(
-            { mode: CodexPromptModeSchema, personality: CodexPersonalitySchema },
-            { additionalProperties: false, default: { mode: "codex", personality: "pragmatic" } },
-        ),
-        compaction: Type.Object(
-            {
-                enabled: Type.Boolean({ default: true }),
-                auto: Type.Boolean({ default: true }),
-                thresholdPercent: Type.Integer({ minimum: 1, maximum: 99, default: 80 }),
-            },
-            { additionalProperties: false },
-        ),
-        recovery: Type.Object(
-            {
-                enabled: Type.Boolean({ default: true }),
-                batchFollowUps: Type.Boolean({ default: false }),
-                maxAttempts: Type.Integer({ minimum: 0, maximum: 10, default: 3 }),
-                baseDelayMs: Type.Integer({ minimum: 1000, maximum: 300000, default: 30000 }),
-                maxDelayMs: Type.Integer({ minimum: 1000, maximum: 900000, default: 120000 }),
-            },
-            { additionalProperties: false },
-        ),
-        openai: Type.Object(
-            {
-                webSearchModel: Type.String({ default: CODEX_CURRENT_MODEL_SELECTION }),
-                imageModel: Type.String({ default: "gpt-image-2" }),
-                imageDescriptionModel: Type.String({ default: CODEX_CURRENT_MODEL_SELECTION }),
-                compactionModel: Type.String({ default: CODEX_CURRENT_MODEL_SELECTION }),
-                compactionReasoning: CodexCompactionReasoningSchema,
-                verbosity: CodexVerbositySchema,
-                fast: Type.Boolean({ default: false }),
-                showReasoningTraces: Type.Boolean({ default: true }),
-            },
-            { additionalProperties: false },
-        ),
-    },
-    { additionalProperties: true },
-);
-
-const BooleanSchema = compileSchema(Type.Boolean());
-const NumberSchema = compileSchema(Type.Number());
 const StringSchema = JsonStringDecoder;
 const NodeErrorSchema = compileSchema(Type.Object({ code: Type.Optional(Type.String()) }));
 const ConfigReadOptionsSchema = compileSchema(
@@ -203,36 +73,10 @@ const ConfigReadOptionsSchema = compileSchema(
     }),
 );
 
-export const DEFAULT_CODEX_CORE_CONFIG: CodexCoreConfig = {
-    scope: { tools: "codex" },
-    tools: {
-        webSearch: true,
-        webSearchMode: "live",
-        imageGeneration: true,
-        viewImage: true,
-        viewImageDescriptions: false,
-        applyPatch: "off",
-    },
-    prompt: { mode: "codex", personality: "pragmatic" },
-    compaction: { enabled: true, auto: true, thresholdPercent: 80 },
-    recovery: {
-        enabled: true,
-        batchFollowUps: false,
-        maxAttempts: 3,
-        baseDelayMs: 30_000,
-        maxDelayMs: 120_000,
-    },
-    openai: {
-        webSearchModel: CODEX_CURRENT_MODEL_SELECTION,
-        imageModel: "gpt-image-2",
-        imageDescriptionModel: CODEX_CURRENT_MODEL_SELECTION,
-        compactionModel: CODEX_CURRENT_MODEL_SELECTION,
-        compactionReasoning: "medium",
-        verbosity: "low",
-        fast: false,
-        showReasoningTraces: true,
-    },
-};
+export const DEFAULT_CODEX_CORE_CONFIG: CodexCoreConfig = Value.Decode(
+    settingsSchema,
+    Value.Default(settingsSchema, {}),
+);
 
 export const DEFAULT_CODEX_CORE_CONFIG_JSON = {
     $schema: CODEX_CORE_CONFIG_SCHEMA_REFERENCE,
@@ -255,12 +99,14 @@ export function getCodexCoreConfigPath(agentDir: string = getAgentDir()): string
     return getCodexCoreGlobalConfigPath(agentDir);
 }
 
-export function codexCoreConfigJsonSchema() {
-    return {
-        $schema: JSON_SCHEMA_DRAFT_URI,
-        $id: CODEX_CORE_CONFIG_SCHEMA_ID,
-        ...structuredClone(CodexCoreConfigJsonSchema),
-    };
+export function codexCoreConfigJsonSchema(): JsonObject {
+    const content = readFileSync(join(import.meta.dirname, "../../config.schema.json"), "utf8");
+    const parsed = JsonObjectDecoder.decode(JSON.parse(content));
+    if (parsed === undefined) {
+        throw new Error("config.schema.json is not a valid JSON object.");
+    }
+
+    return parsed;
 }
 
 export function ensureCodexCoreGlobalConfigFiles(agentDir: string = getAgentDir()): void {
@@ -271,204 +117,83 @@ export function ensureCodexCoreGlobalConfigFiles(agentDir: string = getAgentDir(
     );
 }
 
-export function parseCodexCoreConfig(value: unknown): CodexCoreConfig {
-    return parseCodexCoreConfigWithDiagnostics(value).config;
+function formatTypeboxErrorMessage(instancePath: string): string {
+    if (instancePath.includes("thresholdPercent")) return "Expected an integer from 1 to 99.";
+    if (instancePath.includes("maxAttempts")) return "Expected an integer from 0 to 10.";
+    if (instancePath.includes("baseDelayMs")) return "Expected an integer from 1000 to 300000.";
+    if (instancePath.includes("maxDelayMs")) return "Expected an integer from 1000 to 900000.";
+    if (instancePath.includes("webSearchMode")) return "Expected one of: cached, indexed, live.";
+    if (instancePath.includes("applyPatch")) return "Expected one of: off, openai, all.";
+    if (instancePath.includes("personality")) return "Expected one of: friendly, pragmatic, none.";
+    if (instancePath.includes("verbosity")) return "Expected one of: low, medium, high.";
+    if (instancePath.includes("scope.tools")) return "Expected one of: codex, all.";
+    if (instancePath.includes("prompt.mode")) return "Expected one of: pi, codex.";
+
+    return "Expected a valid value.";
+}
+
+function deleteJsonPath(target: JsonObject, instancePath: string): void {
+    const segments = instancePath.split("/").filter((segment) => segment.length > 0);
+    let current = target;
+
+    for (let index = 0; index < segments.length - 1; index += 1) {
+        const key = segments[index];
+        if (key === undefined) return;
+
+        const next = JsonObjectDecoder.decode(current[key]);
+        if (next === undefined) return;
+
+        current = next;
+    }
+
+    const lastKey = segments.at(-1);
+    if (lastKey !== undefined) {
+        Reflect.deleteProperty(current, lastKey);
+    }
+}
+
+export function parseCodexCoreConfig(inputConfig: JsonValue | undefined): CodexCoreConfig {
+    return parseCodexCoreConfigWithDiagnostics(inputConfig).config;
 }
 
 export function parseCodexCoreConfigWithDiagnostics(
-    value: unknown,
+    inputConfig: JsonValue | undefined,
 ): CodexCoreConfigParseResult<CodexCoreConfig> {
-    const decodedValue = JsonValueDecoder.decode(value);
+    const rawObject = JsonObjectDecoder.decode(inputConfig);
     const diagnostics: CodexConfigDiagnostic[] = [];
-    const root = parseRecord(decodedValue, "$", diagnostics);
-    const scope = parseRecord(root.scope, "$.scope", diagnostics);
-    const tools = parseRecord(root.tools, "$.tools", diagnostics);
-    const prompt = parseRecord(root.prompt, "$.prompt", diagnostics);
-    const compaction = parseRecord(root.compaction, "$.compaction", diagnostics);
-    const recovery = parseRecord(root.recovery, "$.recovery", diagnostics);
-    const openai = parseRecord(root.openai, "$.openai", diagnostics);
 
-    return {
-        config: {
-            scope: {
-                tools: parseStringEnum(
-                    scope.tools,
-                    CODEX_TOOL_SCOPES,
-                    DEFAULT_CODEX_CORE_CONFIG.scope.tools,
-                    "$.scope.tools",
-                    diagnostics,
-                ),
-            },
-            tools: {
-                webSearch: parseBoolean(
-                    tools.webSearch,
-                    DEFAULT_CODEX_CORE_CONFIG.tools.webSearch,
-                    "$.tools.webSearch",
-                    diagnostics,
-                ),
-                webSearchMode: parseStringEnum(
-                    tools.webSearchMode,
-                    CODEX_WEB_SEARCH_MODES,
-                    DEFAULT_CODEX_CORE_CONFIG.tools.webSearchMode,
-                    "$.tools.webSearchMode",
-                    diagnostics,
-                ),
-                imageGeneration: parseBoolean(
-                    tools.imageGeneration,
-                    DEFAULT_CODEX_CORE_CONFIG.tools.imageGeneration,
-                    "$.tools.imageGeneration",
-                    diagnostics,
-                ),
-                viewImage: parseBoolean(
-                    tools.viewImage,
-                    DEFAULT_CODEX_CORE_CONFIG.tools.viewImage,
-                    "$.tools.viewImage",
-                    diagnostics,
-                ),
-                viewImageDescriptions: parseBoolean(
-                    tools.viewImageDescriptions,
-                    DEFAULT_CODEX_CORE_CONFIG.tools.viewImageDescriptions,
-                    "$.tools.viewImageDescriptions",
-                    diagnostics,
-                ),
-                applyPatch: parseStringEnum(
-                    tools.applyPatch,
-                    CODEX_APPLY_PATCH_MODES,
-                    DEFAULT_CODEX_CORE_CONFIG.tools.applyPatch,
-                    "$.tools.applyPatch",
-                    diagnostics,
-                ),
-            },
-            prompt: {
-                mode: parseStringEnum(
-                    prompt.mode,
-                    CODEX_PROMPT_MODES,
-                    DEFAULT_CODEX_CORE_CONFIG.prompt.mode,
-                    "$.prompt.mode",
-                    diagnostics,
-                ),
-                personality: parseStringEnum(
-                    prompt.personality,
-                    CODEX_PERSONALITIES,
-                    DEFAULT_CODEX_CORE_CONFIG.prompt.personality,
-                    "$.prompt.personality",
-                    diagnostics,
-                ),
-            },
-            compaction: {
-                enabled: parseBoolean(
-                    compaction.enabled,
-                    DEFAULT_CODEX_CORE_CONFIG.compaction.enabled,
-                    "$.compaction.enabled",
-                    diagnostics,
-                ),
-                auto: parseBoolean(
-                    compaction.auto,
-                    DEFAULT_CODEX_CORE_CONFIG.compaction.auto,
-                    "$.compaction.auto",
-                    diagnostics,
-                ),
-                thresholdPercent: parseIntegerInRange(
-                    compaction.thresholdPercent,
-                    DEFAULT_CODEX_CORE_CONFIG.compaction.thresholdPercent,
-                    1,
-                    99,
-                    "$.compaction.thresholdPercent",
-                    diagnostics,
-                ),
-            },
-            recovery: {
-                enabled: parseBoolean(
-                    recovery.enabled,
-                    DEFAULT_CODEX_CORE_CONFIG.recovery.enabled,
-                    "$.recovery.enabled",
-                    diagnostics,
-                ),
-                batchFollowUps: parseBoolean(
-                    recovery.batchFollowUps,
-                    DEFAULT_CODEX_CORE_CONFIG.recovery.batchFollowUps,
-                    "$.recovery.batchFollowUps",
-                    diagnostics,
-                ),
-                maxAttempts: parseIntegerInRange(
-                    recovery.maxAttempts,
-                    DEFAULT_CODEX_CORE_CONFIG.recovery.maxAttempts,
-                    0,
-                    10,
-                    "$.recovery.maxAttempts",
-                    diagnostics,
-                ),
-                baseDelayMs: parseIntegerInRange(
-                    recovery.baseDelayMs,
-                    DEFAULT_CODEX_CORE_CONFIG.recovery.baseDelayMs,
-                    1_000,
-                    300_000,
-                    "$.recovery.baseDelayMs",
-                    diagnostics,
-                ),
-                maxDelayMs: parseIntegerInRange(
-                    recovery.maxDelayMs,
-                    DEFAULT_CODEX_CORE_CONFIG.recovery.maxDelayMs,
-                    1_000,
-                    900_000,
-                    "$.recovery.maxDelayMs",
-                    diagnostics,
-                ),
-            },
-            openai: {
-                webSearchModel: parseNonEmptyString(
-                    openai.webSearchModel,
-                    DEFAULT_CODEX_CORE_CONFIG.openai.webSearchModel,
-                    "$.openai.webSearchModel",
-                    diagnostics,
-                ),
-                imageModel: parseNonEmptyString(
-                    openai.imageModel,
-                    DEFAULT_CODEX_CORE_CONFIG.openai.imageModel,
-                    "$.openai.imageModel",
-                    diagnostics,
-                ),
-                imageDescriptionModel: parseNonEmptyString(
-                    openai.imageDescriptionModel,
-                    DEFAULT_CODEX_CORE_CONFIG.openai.imageDescriptionModel,
-                    "$.openai.imageDescriptionModel",
-                    diagnostics,
-                ),
-                compactionModel: parseNonEmptyString(
-                    openai.compactionModel,
-                    DEFAULT_CODEX_CORE_CONFIG.openai.compactionModel,
-                    "$.openai.compactionModel",
-                    diagnostics,
-                ),
-                compactionReasoning: parseNonEmptyString(
-                    openai.compactionReasoning,
-                    DEFAULT_CODEX_CORE_CONFIG.openai.compactionReasoning,
-                    "$.openai.compactionReasoning",
-                    diagnostics,
-                ),
-                verbosity: parseStringEnum(
-                    openai.verbosity,
-                    CODEX_VERBOSITY_LEVELS,
-                    DEFAULT_CODEX_CORE_CONFIG.openai.verbosity,
-                    "$.openai.verbosity",
-                    diagnostics,
-                ),
-                fast: parseBoolean(
-                    openai.fast,
-                    DEFAULT_CODEX_CORE_CONFIG.openai.fast,
-                    "$.openai.fast",
-                    diagnostics,
-                ),
-                showReasoningTraces: parseBoolean(
-                    openai.showReasoningTraces,
-                    DEFAULT_CODEX_CORE_CONFIG.openai.showReasoningTraces,
-                    "$.openai.showReasoningTraces",
-                    diagnostics,
-                ),
-            },
-        },
-        diagnostics,
-    };
+    if (inputConfig !== undefined && rawObject === undefined) {
+        diagnostics.push(makeConfigDiagnostic("$", "invalid", "Expected an object."));
+    }
+
+    const cleanedObject =
+        JsonObjectDecoder.decode(
+            Value.Clean(settingsSchema, rawObject === undefined ? {} : structuredClone(rawObject)),
+        ) ?? {};
+    const errorPaths = new Set<string>();
+
+    for (const error of Value.Errors(settingsSchema, cleanedObject)) {
+        if (error.keyword === "required") continue;
+
+        const path = error.instancePath;
+        if (!errorPaths.has(path)) {
+            errorPaths.add(path);
+            const dotPath = `$${path.replaceAll("/", ".")}`;
+
+            diagnostics.push(
+                makeConfigDiagnostic(dotPath, "invalid", formatTypeboxErrorMessage(path)),
+            );
+        }
+    }
+
+    for (const path of errorPaths) {
+        deleteJsonPath(cleanedObject, path);
+    }
+
+    const withDefaults = Value.Default(settingsSchema, cleanedObject);
+    const config = Value.Decode(settingsSchema, withDefaults);
+
+    return { config, diagnostics };
 }
 
 export type CodexCoreConfigReadOptions = {
@@ -506,6 +231,7 @@ export function readCodexCoreConfigWithDiagnostics(
     const parsed = parseCodexCoreConfigWithDiagnostics(
         mergeConfigInputs(globalInput.value ?? {}, projectInput?.value ?? {}),
     );
+
     return {
         config: parsed.config,
         diagnostics: [
@@ -536,7 +262,9 @@ export function readCodexCoreStartupConfig(
 ): CodexCoreConfig {
     const result = readCodexCoreConfigWithDiagnostics(options);
     const diagnostic = result.diagnostics[0];
+
     if (diagnostic) throw new CodexConfigStartupError(diagnostic);
+
     return result.config;
 }
 
@@ -550,6 +278,7 @@ export function resolveCodexRequestModel(
         configuredText === undefined || configuredText.length === 0
             ? CODEX_CURRENT_MODEL_SELECTION
             : configuredText;
+
     if (configured !== CODEX_CURRENT_MODEL_SELECTION) return configured;
 
     const activeModel = currentModel?.trim() ?? "";
@@ -566,6 +295,7 @@ export function formatCodexModelSelection(configuredModel: string | undefined): 
         configuredText === undefined || configuredText.length === 0
             ? CODEX_CURRENT_MODEL_SELECTION
             : configuredText;
+
     return configured === CODEX_CURRENT_MODEL_SELECTION ? "current model" : configured;
 }
 
@@ -574,7 +304,9 @@ export function writeCodexCoreConfig(
     configPath: string = getCodexCoreConfigPath(),
 ): { readonly ok: true } | { readonly ok: false; readonly error: string } {
     const unsafeExistingConfig = existingConfigWriteBlocker(configPath);
+
     if (unsafeExistingConfig) return { ok: false, error: unsafeExistingConfig };
+
     try {
         mkdirSync(dirname(configPath), { recursive: true });
         writeFileAtomically(
@@ -582,10 +314,12 @@ export function writeCodexCoreConfig(
             `${JSON.stringify({ $schema: CODEX_CORE_CONFIG_SCHEMA_REFERENCE, ...parseCodexCoreConfig(config) }, null, 2)}\n`,
             existingFileMode(configPath, 0o600),
         );
+
         return { ok: true };
     } catch (cause: unknown) {
         const message = cause instanceof Error ? cause.message : String(cause);
         console.warn(`[pi-codex-core] Failed to write ${configPath}: ${message}`);
+
         return { ok: false, error: message };
     }
 }
@@ -598,6 +332,7 @@ function existingConfigWriteBlocker(configPath: string): string | undefined {
             diagnostic.reason === "malformed-json" || diagnostic.reason === "unreadable",
     );
     if (!unsafeDiagnostic) return undefined;
+
     return `Refusing to overwrite ${unsafeDiagnostic.reason === "malformed-json" ? "malformed" : "unreadable"} config: ${configPath}`;
 }
 
@@ -650,10 +385,12 @@ function readConfigInput(configPath: string): ConfigInputReadResult {
 
     try {
         const rawConfig: unknown = JSON.parse(readFileSync(configPath, "utf8"));
+
         return { value: JsonValueDecoder.decode(rawConfig), diagnostics: [] };
     } catch (cause: unknown) {
         const message = cause instanceof Error ? cause.message : String(cause);
         const reason = cause instanceof SyntaxError ? "malformed-json" : "unreadable";
+
         return {
             value: undefined,
             diagnostics: [makeConfigDiagnostic(configPath, reason, message)],
@@ -664,7 +401,8 @@ function readConfigInput(configPath: string): ConfigInputReadResult {
 function parseReadConfigInput(
     input: ConfigInputReadResult,
 ): CodexCoreConfigParseResult<CodexCoreConfig> {
-    const parsed = parseCodexCoreConfigWithDiagnostics(input.value ?? {});
+    const parsed = parseCodexCoreConfigWithDiagnostics(input.value);
+
     return {
         config: parsed.config,
         diagnostics: [...input.diagnostics, ...parsed.diagnostics],
@@ -720,105 +458,6 @@ function mergeConfigInputs(
     return merged;
 }
 
-function parseRecord(
-    value: JsonValue | undefined,
-    path: string,
-    diagnostics: CodexConfigDiagnostic[],
-): JsonObject {
-    if (value === undefined) return {};
-
-    const parsed = JsonObjectDecoder.decode(value);
-    if (parsed !== undefined) return parsed;
-
-    diagnostics.push(makeConfigDiagnostic(path, "invalid", "Expected an object."));
-
-    return {};
-}
-
 function hasNodeErrorCode(cause: unknown, code: string): boolean {
     return NodeErrorSchema.decode(cause)?.code === code;
-}
-
-function parseBoolean(
-    value: JsonValue | undefined,
-    fallback: boolean,
-    path: string,
-    diagnostics: CodexConfigDiagnostic[],
-): boolean {
-    if (value === undefined) return fallback;
-
-    const parsed = BooleanSchema.decode(value);
-    if (parsed !== undefined) return parsed;
-
-    diagnostics.push(makeConfigDiagnostic(path, "invalid", "Expected a boolean."));
-
-    return fallback;
-}
-
-function parseIntegerInRange(
-    value: JsonValue | undefined,
-    fallback: number,
-    minimum: number,
-    maximum: number,
-    path: string,
-    diagnostics: CodexConfigDiagnostic[],
-): number {
-    if (value === undefined) return fallback;
-
-    const parsed = NumberSchema.decode(value);
-    if (parsed === undefined || !Number.isInteger(parsed) || parsed < minimum || parsed > maximum) {
-        diagnostics.push(
-            makeConfigDiagnostic(
-                path,
-                "invalid",
-                `Expected an integer from ${minimum} to ${maximum}.`,
-            ),
-        );
-        return fallback;
-    }
-
-    return parsed;
-}
-
-function parseNonEmptyString(
-    value: JsonValue | undefined,
-    fallback: string,
-    path: string,
-    diagnostics: CodexConfigDiagnostic[],
-): string {
-    if (value === undefined) return fallback;
-
-    const parsed = StringSchema.decode(value);
-    const text = parsed?.trim() ?? "";
-    if (text.length > 0) return text;
-
-    diagnostics.push(makeConfigDiagnostic(path, "invalid", "Expected a non-empty string."));
-
-    return fallback;
-}
-
-function parseStringEnum<const TValue extends string>(
-    value: JsonValue | undefined,
-    allowed: readonly TValue[],
-    fallback: TValue,
-    path: string,
-    diagnostics: CodexConfigDiagnostic[],
-): TValue {
-    if (value === undefined) return fallback;
-
-    const parsed = StringSchema.decode(value);
-    if (parsed !== undefined && isOneOf(allowed, parsed)) return parsed;
-
-    diagnostics.push(
-        makeConfigDiagnostic(path, "invalid", `Expected one of: ${allowed.join(", ")}.`),
-    );
-
-    return fallback;
-}
-
-function isOneOf<const TValue extends string>(
-    allowed: readonly TValue[],
-    value: string,
-): value is TValue {
-    return allowed.some((candidate) => candidate === value);
 }

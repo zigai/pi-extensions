@@ -34,6 +34,8 @@
     "access": "public"
   },
   "scripts": {
+    "config:generate": "pi-extension-settings generate",
+    "config:check": "pi-extension-settings check",
     "lint": "oxlint -c ./oxlint.config.ts . --format default",
     "lint:fix": "oxlint -c ./oxlint.config.ts . --fix --format default",
     "format": "oxfmt .",
@@ -41,7 +43,7 @@
     "test": "vitest run",
     "coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
-    "check": "npm run format:check && npm run lint && npm run typecheck && npm test",
+    "check": "npm run config:check && npm run format:check && npm run lint && npm run typecheck && npm test",
     "verify": "npm run check",
     "release": "release --root .",
     "release:dry-run": "release --dry --root ."
@@ -93,5 +95,9 @@
     "extensions": [
       "./src/index.ts"
     ]
+  },
+  "piExtensionSettings": {
+    "definition": "./src/settings-input.ts",
+    "prevalidation": "./src/settings.prevalidated.ts"
   }
 }

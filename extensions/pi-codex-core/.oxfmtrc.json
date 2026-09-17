@@ -1,7 +1,9 @@
 {
   "ignorePatterns": [
     ".agents/audit/**",
+    "README.md",
     "src/prompt/codex-gpt-*.md",
+    "src/settings.prevalidated.ts",
     "src/tools/imagegen-description.md",
     "src/tools/web-run/web-run-description.md"
   ]

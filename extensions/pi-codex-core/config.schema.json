@@ -1,12 +1,18 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/zigai/pi-codex-core/config.schema.json",
+  "title": "Pi Codex Core settings",
+  "description": "Everything GPT models need to feel at home in Pi.",
   "type": "object",
-  "required": ["scope", "tools", "prompt", "compaction", "recovery", "openai"],
+  "additionalProperties": false,
   "properties": {
+    "$schema": {
+      "type": "string",
+      "default": "./schemas/pi-codex-core.schema.json",
+      "description": "JSON Schema used by editors for this settings file."
+    },
     "scope": {
       "type": "object",
-      "required": ["tools"],
       "properties": {
         "tools": {
           "anyOf": [
@@ -18,7 +24,9 @@
               "type": "string",
               "const": "all"
             }
-          ]
+          ],
+          "default": "codex",
+          "description": "Expose Codex tools only for Codex models (`codex`) or for all models (`all`)."
         }
       },
       "additionalProperties": false,
@@ -28,18 +36,11 @@
     },
     "tools": {
       "type": "object",
-      "required": [
-        "webSearch",
-        "webSearchMode",
-        "imageGeneration",
-        "viewImage",
-        "viewImageDescriptions",
-        "applyPatch"
-      ],
       "properties": {
         "webSearch": {
           "type": "boolean",
-          "default": true
+          "default": true,
+          "description": "Enable the `web_run` web search tool."
         },
         "webSearchMode": {
           "anyOf": [
@@ -56,19 +57,23 @@
               "const": "live"
             }
           ],
-          "default": "live"
+          "default": "live",
+          "description": "Set search mode: `cached`, `indexed`, or `live`."
         },
         "imageGeneration": {
           "type": "boolean",
-          "default": true
+          "default": true,
+          "description": "Enable the `imagegen` image generation and editing tool."
         },
         "viewImage": {
           "type": "boolean",
-          "default": true
+          "default": true,
+          "description": "Enable the `view_image` local image viewing tool."
         },
         "viewImageDescriptions": {
           "type": "boolean",
-          "default": false
+          "default": false,
+          "description": "Include Codex-generated descriptions when viewing images."
         },
         "applyPatch": {
           "anyOf": [
@@ -84,14 +89,23 @@
               "type": "string",
               "const": "all"
             }
-          ]
+          ],
+          "default": "off",
+          "description": "Replace standard `edit` with `apply_patch`: `off`, `openai`, or `all`."
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "default": {
+        "webSearch": true,
+        "webSearchMode": "live",
+        "imageGeneration": true,
+        "viewImage": true,
+        "viewImageDescriptions": false,
+        "applyPatch": "off"
+      }
     },
     "prompt": {
       "type": "object",
-      "required": ["mode", "personality"],
       "properties": {
         "mode": {
           "anyOf": [
@@ -103,7 +117,9 @@
               "type": "string",
               "const": "codex"
             }
-          ]
+          ],
+          "default": "codex",
+          "description": "Enable model-aware Codex prompts (`codex`) or standard Pi prompts (`pi`)."
         },
         "personality": {
           "anyOf": [
@@ -119,7 +135,9 @@
               "type": "string",
               "const": "none"
             }
-          ]
+          ],
+          "default": "pragmatic",
+          "description": "Set Codex communication style: `friendly`, `pragmatic`, or `none`."
         }
       },
       "additionalProperties": false,
@@ -130,92 +148,105 @@
     },
     "compaction": {
       "type": "object",
-      "required": ["enabled", "auto", "thresholdPercent"],
       "properties": {
         "enabled": {
           "type": "boolean",
-          "default": true
+          "default": true,
+          "description": "Enable Codex-style conversation compaction."
         },
         "auto": {
           "type": "boolean",
-          "default": true
+          "default": true,
+          "description": "Automatically trigger compaction when reaching the context threshold."
         },
         "thresholdPercent": {
           "type": "integer",
           "minimum": 1,
           "maximum": 99,
-          "default": 80
+          "default": 80,
+          "description": "Context percentage threshold that triggers auto-compaction."
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "default": {
+        "enabled": true,
+        "auto": true,
+        "thresholdPercent": 80
+      }
     },
     "recovery": {
       "type": "object",
-      "required": ["enabled", "batchFollowUps", "maxAttempts", "baseDelayMs", "maxDelayMs"],
       "properties": {
         "enabled": {
           "type": "boolean",
-          "default": true
+          "default": true,
+          "description": "Resume transiently failed Codex turns after Pi exhausts retries."
         },
         "batchFollowUps": {
           "type": "boolean",
-          "default": false
+          "default": false,
+          "description": "Deliver user follow-up messages sent during a turn together when it completes."
         },
         "maxAttempts": {
           "type": "integer",
           "minimum": 0,
           "maximum": 10,
-          "default": 3
+          "default": 3,
+          "description": "Maximum delayed resume attempts for a failed turn."
         },
         "baseDelayMs": {
           "type": "integer",
           "minimum": 1000,
           "maximum": 300000,
-          "default": 30000
+          "default": 30000,
+          "description": "Initial recovery delay in milliseconds."
         },
         "maxDelayMs": {
           "type": "integer",
           "minimum": 1000,
           "maximum": 900000,
-          "default": 120000
+          "default": 120000,
+          "description": "Maximum recovery delay in milliseconds."
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "default": {
+        "enabled": true,
+        "batchFollowUps": false,
+        "maxAttempts": 3,
+        "baseDelayMs": 30000,
+        "maxDelayMs": 120000
+      }
     },
     "openai": {
       "type": "object",
-      "required": [
-        "webSearchModel",
-        "imageModel",
-        "imageDescriptionModel",
-        "compactionModel",
-        "compactionReasoning",
-        "verbosity",
-        "fast",
-        "showReasoningTraces"
-      ],
       "properties": {
         "webSearchModel": {
           "type": "string",
-          "default": "current"
+          "default": "current",
+          "description": "Model for `web_run`; `current` uses the active model."
         },
         "imageModel": {
           "type": "string",
-          "default": "gpt-image-2"
+          "default": "gpt-image-2",
+          "description": "Model for `imagegen`."
         },
         "imageDescriptionModel": {
           "type": "string",
-          "default": "current"
+          "default": "current",
+          "description": "Model for image descriptions; `current` uses the active model."
         },
         "compactionModel": {
           "type": "string",
-          "default": "current"
+          "default": "current",
+          "description": "Model for compaction; `current` uses the active model."
         },
         "compactionReasoning": {
           "type": "string",
           "minLength": 1,
           "pattern": "\\S",
-          "default": "medium"
+          "default": "medium",
+          "description": "Reasoning effort for compaction requests: `medium`, `current`, `max`, or `ultra`."
         },
         "verbosity": {
           "anyOf": [
@@ -231,19 +262,32 @@
               "type": "string",
               "const": "high"
             }
-          ]
+          ],
+          "default": "low",
+          "description": "Verbosity level for Codex API requests: `low`, `medium`, or `high`."
         },
         "fast": {
           "type": "boolean",
-          "default": false
+          "default": false,
+          "description": "Prioritize speed for supported OpenAI models."
         },
         "showReasoningTraces": {
           "type": "boolean",
-          "default": true
+          "default": true,
+          "description": "Stream reasoning trace summaries for GPT Responses models."
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "default": {
+        "webSearchModel": "current",
+        "imageModel": "gpt-image-2",
+        "imageDescriptionModel": "current",
+        "compactionModel": "current",
+        "compactionReasoning": "medium",
+        "verbosity": "low",
+        "fast": false,
+        "showReasoningTraces": true
+      }
     }
-  },
-  "additionalProperties": true
+  }
 }
