@@ -271,17 +271,20 @@ function buildPiCodexContext(
 ): string {
     if (!options) return basePrompt;
 
-    return [
-        buildPiToolsSection(options),
-        buildPiGuidelinesSection(options),
-        buildPiDocumentationSection(),
-        buildPiCustomPromptSection(options),
-        buildPiAppendPromptSection(options),
-        buildPiProjectContextSection(options),
-        buildPiSkillsSection(options),
-        buildPiRuntimeContextSection(basePrompt, options, clock),
-        earlierPromptAppend ?? "",
-    ]
+    const sections = new Map([
+        ["tools", buildPiToolsSection(options)],
+        ["rules", buildPiGuidelinesSection(options)],
+        ["docs", buildPiDocumentationSection()],
+        ["addendum", buildPiAppendPromptSection(options)],
+        ["project_context", buildPiProjectContextSection(options)],
+        ["skills", buildPiSkillsSection(options)],
+        ["cwd", buildPiRuntimeContextSection(basePrompt, options, clock)],
+    ]);
+    for (const [name, content] of Object.entries(options.sections ?? {})) {
+        if (content) sections.set(name, `<${name}>\n${content}\n</${name}>`);
+    }
+
+    return [buildPiCustomPromptSection(options), ...sections.values(), earlierPromptAppend ?? ""]
         .filter((section) => section.length > 0)
         .join("\n\n");
 }
@@ -290,33 +293,33 @@ function analyzeEarlierPromptChange(
     basePrompt: string,
     options: BuildSystemPromptOptions | undefined,
 ): EarlierPromptChange {
-    if (!options) return { interop: "unchanged" };
+    // Pi records returned systemPrompt strings in forceSystemPrompt. Structured
+    // edits alone are not replacements, regardless of how Pi renders its sections.
+    if (!options || options.forceSystemPrompt === undefined) return { interop: "unchanged" };
 
     const expectedPromptStart = options.customPrompt ?? PI_DEFAULT_PROMPT_START;
     if (!basePrompt.startsWith(expectedPromptStart)) {
         return { interop: "unrecognized-replacement" };
     }
 
-    const cwdLine = `Current working directory: ${options.cwd.replace(/\\/g, "/")}`;
-    const cwdLineEnd = findLastExactLineEnd(basePrompt, cwdLine);
-    if (cwdLineEnd === undefined) return { interop: "unrecognized-replacement" };
+    const boundaries = new Map([["cwd", options.cwd.replace(/\\/g, "/")]]);
+    for (const [name, content] of Object.entries(options.sections ?? {})) {
+        if (content) boundaries.set(name, content);
+    }
 
-    const appendedInstructions = basePrompt.slice(cwdLineEnd).trim();
+    let boundaryEnd = 0;
+    for (const [name, content] of boundaries) {
+        const section = `<${name}>\n${content}\n</${name}>`;
+        const start = basePrompt.lastIndexOf(section);
+        if (start < 0) return { interop: "unrecognized-replacement" };
+
+        boundaryEnd = Math.max(boundaryEnd, start + section.length);
+    }
+
+    const appendedInstructions = basePrompt.slice(boundaryEnd).trim();
     return appendedInstructions.length > 0
         ? { interop: "preserved-append", appendedInstructions }
         : { interop: "unchanged" };
-}
-
-function findLastExactLineEnd(text: string, expectedLine: string): number | undefined {
-    let offset = 0;
-    let matchEnd: number | undefined;
-    for (const line of text.split("\n")) {
-        const lineEnd = offset + line.length;
-        if (line.replace(/\r$/, "") === expectedLine) matchEnd = lineEnd;
-        offset = lineEnd + 1;
-    }
-
-    return matchEnd;
 }
 
 function buildPiToolsSection(options: BuildSystemPromptOptions): string {
@@ -362,6 +365,10 @@ function buildPiGuidelinesSection(options: BuildSystemPromptOptions): string {
         !tools.includes("ls")
     ) {
         addGuideline("Use bash for file operations like ls, rg, find");
+    }
+
+    for (const tool of tools) {
+        for (const guideline of options.toolGuidelines?.[tool] ?? []) addGuideline(guideline);
     }
 
     for (const guideline of options.promptGuidelines ?? []) addGuideline(guideline);
