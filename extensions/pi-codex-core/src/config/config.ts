@@ -178,8 +178,8 @@ export function parseCodexCoreConfigWithDiagnostics(
         const path = error.instancePath;
         if (!errorPaths.has(path)) {
             errorPaths.add(path);
-            const dotPath = `$${path.replaceAll("/", ".")}`;
 
+            const dotPath = `$${path.replaceAll("/", ".")}`;
             diagnostics.push(
                 makeConfigDiagnostic(dotPath, "invalid", formatTypeboxErrorMessage(path)),
             );
@@ -192,7 +192,6 @@ export function parseCodexCoreConfigWithDiagnostics(
 
     const withDefaults = Value.Default(settingsSchema, cleanedObject);
     const config = Value.Decode(settingsSchema, withDefaults);
-
     return { config, diagnostics };
 }
 
@@ -231,7 +230,6 @@ export function readCodexCoreConfigWithDiagnostics(
     const parsed = parseCodexCoreConfigWithDiagnostics(
         mergeConfigInputs(globalInput.value ?? {}, projectInput?.value ?? {}),
     );
-
     return {
         config: parsed.config,
         diagnostics: [
@@ -262,7 +260,6 @@ export function readCodexCoreStartupConfig(
 ): CodexCoreConfig {
     const result = readCodexCoreConfigWithDiagnostics(options);
     const diagnostic = result.diagnostics[0];
-
     if (diagnostic) throw new CodexConfigStartupError(diagnostic);
 
     return result.config;
@@ -295,7 +292,6 @@ export function formatCodexModelSelection(configuredModel: string | undefined): 
         configuredText === undefined || configuredText.length === 0
             ? CODEX_CURRENT_MODEL_SELECTION
             : configuredText;
-
     return configured === CODEX_CURRENT_MODEL_SELECTION ? "current model" : configured;
 }
 
@@ -304,7 +300,6 @@ export function writeCodexCoreConfig(
     configPath: string = getCodexCoreConfigPath(),
 ): { readonly ok: true } | { readonly ok: false; readonly error: string } {
     const unsafeExistingConfig = existingConfigWriteBlocker(configPath);
-
     if (unsafeExistingConfig) return { ok: false, error: unsafeExistingConfig };
 
     try {
@@ -314,12 +309,10 @@ export function writeCodexCoreConfig(
             `${JSON.stringify({ $schema: CODEX_CORE_CONFIG_SCHEMA_REFERENCE, ...parseCodexCoreConfig(config) }, null, 2)}\n`,
             existingFileMode(configPath, 0o600),
         );
-
         return { ok: true };
     } catch (cause: unknown) {
         const message = cause instanceof Error ? cause.message : String(cause);
         console.warn(`[pi-codex-core] Failed to write ${configPath}: ${message}`);
-
         return { ok: false, error: message };
     }
 }
@@ -385,12 +378,10 @@ function readConfigInput(configPath: string): ConfigInputReadResult {
 
     try {
         const rawConfig: unknown = JSON.parse(readFileSync(configPath, "utf8"));
-
         return { value: JsonValueDecoder.decode(rawConfig), diagnostics: [] };
     } catch (cause: unknown) {
         const message = cause instanceof Error ? cause.message : String(cause);
         const reason = cause instanceof SyntaxError ? "malformed-json" : "unreadable";
-
         return {
             value: undefined,
             diagnostics: [makeConfigDiagnostic(configPath, reason, message)],
@@ -402,7 +393,6 @@ function parseReadConfigInput(
     input: ConfigInputReadResult,
 ): CodexCoreConfigParseResult<CodexCoreConfig> {
     const parsed = parseCodexCoreConfigWithDiagnostics(input.value);
-
     return {
         config: parsed.config,
         diagnostics: [...input.diagnostics, ...parsed.diagnostics],
