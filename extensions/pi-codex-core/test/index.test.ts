@@ -9,6 +9,7 @@ import {
     type ExtensionAPI,
     type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { buildSystemPrompt } from "../node_modules/@earendil-works/pi-coding-agent/dist/core/system-prompt.js";
 import extension, { packageName, extensionName } from "../src/index.ts";
 import { DEFAULT_CODEX_CORE_CONFIG_JSON, getCodexCoreConfigPath } from "../src/config/config.ts";
 import { JsonObjectDecoder } from "../src/compaction/responses-input.ts";
@@ -631,7 +632,7 @@ test("extension prompt hook follows the selected GPT model", async () => {
     }
 });
 
-test("warns once when an earlier extension fully replaces the system prompt", async () => {
+test("warns only once for a replacement, never for Pi's structured prompt or an append", async () => {
     const root = await mkdtemp(join(tmpdir(), "pi-codex-core-prompt-conflict-"));
     const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
     try {
@@ -652,9 +653,29 @@ test("warns once when an earlier extension fully replaces the system prompt", as
         const harness = makeExtensionHarness();
         extension(harness.api);
         await harness.startSession(ctx);
-        const options: BuildSystemPromptOptions = { cwd: "/workspace" };
-        const replacedPrompt =
-            "Earlier extension replacement.\nCurrent working directory: /workspace";
+        const baseOptions: BuildSystemPromptOptions = {
+            cwd: "/workspace",
+            selectedTools: ["read"],
+            toolGuidelines: { read: ["Read the relevant files first."] },
+            sections: { workflow: "Keep workflow instructions." },
+        };
+        const basePrompt = buildSystemPrompt(baseOptions);
+        const prepared = await harness.prepareSystemPrompt(basePrompt, baseOptions, ctx);
+        assert.match(prepared, /Read the relevant files first/);
+        assert.match(prepared, /Keep workflow instructions/);
+        const appended = `${basePrompt}\n\nEarlier extension append.`;
+        const appendedResult = await harness.prepareSystemPrompt(
+            appended,
+            { ...baseOptions, forceSystemPrompt: appended },
+            ctx,
+        );
+        assert.match(appendedResult, /Earlier extension append/);
+        assert.equal(notifications.length, 0);
+        const replacedPrompt = "Earlier extension replacement.";
+        const options: BuildSystemPromptOptions = {
+            cwd: "/workspace",
+            forceSystemPrompt: replacedPrompt,
+        };
 
         await harness.prepareSystemPrompt(replacedPrompt, options, ctx);
         await harness.prepareSystemPrompt(replacedPrompt, options, ctx);

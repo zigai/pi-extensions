@@ -3,6 +3,10 @@ import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import type { BuildSystemPromptOptions, Skill } from "@earendil-works/pi-coding-agent";
+
+// Pi does not export its renderer publicly. Exercise the installed implementation
+// here so a host format change cannot silently invalidate our interoperability tests.
+import { buildSystemPrompt } from "../node_modules/@earendil-works/pi-coding-agent/dist/core/system-prompt.js";
 import { supportsCodexPromptPersonality } from "../src/prompt/personality.ts";
 import {
     buildCodexCoreSystemPrompt,
@@ -108,10 +112,11 @@ test("preserves append-style system instructions from earlier extensions", () =>
         toolSnippets: { read: "Read files." },
     };
     const sentinel = "Earlier extension sentinel: retain this instruction.";
+    const prompt = `${buildSystemPrompt(options)}\n\n${sentinel}`;
     const result = buildCodexCoreSystemPromptResult(
-        `You are an expert coding assistant operating inside pi, a coding agent harness.\nCurrent working directory: /workspace\n\n${sentinel}`,
+        prompt,
         config,
-        options,
+        { ...options, forceSystemPrompt: prompt },
         { modelId: "gpt-5.6-sol" },
     );
 
@@ -127,7 +132,7 @@ test("reports earlier full system-prompt replacements that cannot be merged safe
     const result = buildCodexCoreSystemPromptResult(
         "A completely replaced prompt.\nCurrent working directory: /workspace",
         parseCodexCoreConfig({ prompt: { mode: "codex" } }),
-        { cwd: "/workspace" },
+        { cwd: "/workspace", forceSystemPrompt: "A completely replaced prompt." },
         { modelId: "gpt-5.6-sol" },
     );
 
@@ -329,5 +334,89 @@ test("bundled Codex prompts match the pinned upstream content", async () => {
     for (const [promptUrl, expectedHash] of prompts) {
         const prompt = await readFile(promptUrl);
         assert.equal(createHash("sha256").update(prompt).digest("hex"), expectedHash);
+    }
+});
+
+test("accepts Pi's actual structured prompt and preserves active tool guidance", () => {
+    const options: BuildSystemPromptOptions = {
+        cwd: "/workspace",
+        selectedTools: ["read", "get_goal"],
+        toolGuidelines: {
+            get_goal: [" Inspect the current goal before updating it. ", "Shared rule."],
+            inactive_tool: ["Inactive tool rule."],
+        },
+        promptGuidelines: ["Shared rule."],
+        sections: { workflow: "Workflow instructions." },
+    };
+    const result = buildCodexCoreSystemPromptResult(
+        buildSystemPrompt(options),
+        DEFAULT_CODEX_CORE_CONFIG,
+        options,
+        { modelId: "gpt-6-astra" },
+    );
+
+    assert.equal(result.interop, "unchanged");
+    assert.match(result.prompt, /Inspect the current goal before updating it\./);
+    assert.equal(result.prompt.split("Shared rule.").length - 1, 1);
+    assert.doesNotMatch(result.prompt, /Inactive tool rule/);
+    assert.match(result.prompt, /<workflow>\nWorkflow instructions\.\n<\/workflow>/);
+});
+
+test("preserves structured overrides and earlier appends once with a custom prefix", () => {
+    const options: BuildSystemPromptOptions = {
+        cwd: "/workspace",
+        customPrompt: "Custom prefix instructions.",
+        appendSystemPrompt: "Configured addendum.",
+        sections: {
+            rules: "Replacement rules.",
+            cwd: "/overridden-workspace",
+            workflow: "Workflow instructions.",
+            empty: "",
+        },
+    };
+    const prompt = `${buildSystemPrompt(options)}\n\nFirst extension append.\n\nSecond extension append.`;
+    const result = buildCodexCoreSystemPromptResult(
+        prompt,
+        DEFAULT_CODEX_CORE_CONFIG,
+        { ...options, forceSystemPrompt: prompt },
+        { modelId: "gpt-6-astra" },
+    );
+
+    assert.equal(result.interop, "preserved-append");
+
+    for (const text of [
+        "Custom prefix instructions.",
+        "Configured addendum.",
+        "Replacement rules.",
+        "Workflow instructions.",
+        "First extension append.",
+        "Second extension append.",
+    ])
+        assert.equal(result.prompt.split(text).length - 1, 1);
+
+    assert.match(result.prompt, /<cwd>\n\/overridden-workspace\n<\/cwd>/);
+    assert.doesNotMatch(result.prompt, /Be concise in your responses|<empty>/);
+});
+
+test("recognizes an unchanged returned prompt but rejects prepends and missing boundaries", () => {
+    const options: BuildSystemPromptOptions = {
+        cwd: "/workspace",
+        sections: { workflow: "Workflow instructions." },
+    };
+    const base = buildSystemPrompt(options);
+    for (const [prompt, expected] of [
+        [base, "unchanged"],
+        [`Prepended instructions.\n${base}`, "unrecognized-replacement"],
+        [base.replace("<cwd>", "<directory>"), "unrecognized-replacement"],
+        [base.replace("Workflow instructions.", "Rewritten workflow."), "unrecognized-replacement"],
+    ]) {
+        assert.ok(prompt);
+        const result = buildCodexCoreSystemPromptResult(
+            prompt,
+            DEFAULT_CODEX_CORE_CONFIG,
+            { ...options, forceSystemPrompt: prompt },
+            { modelId: "gpt-6-astra" },
+        );
+        assert.equal(result.interop, expected);
     }
 });

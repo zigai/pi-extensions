@@ -11,6 +11,7 @@ import {
     type ExtensionContext,
     type Theme,
 } from "@earendil-works/pi-coding-agent";
+import { normalizeBuildSystemPromptOptions } from "../node_modules/@earendil-works/pi-coding-agent/dist/core/system-prompt.js";
 import { JsonObjectDecoder, JsonStringDecoder } from "../src/compaction/responses-input.ts";
 import type { JsonValue } from "../src/compaction/types.ts";
 import type { CodexRuntime, ScheduledTask } from "../src/runtime.ts";
@@ -303,7 +304,7 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
                     type: "before_agent_start",
                     prompt: "test",
                     systemPrompt,
-                    systemPromptOptions: options,
+                    systemPromptOptions: normalizeBuildSystemPromptOptions(options),
                 },
                 ctx,
             );
