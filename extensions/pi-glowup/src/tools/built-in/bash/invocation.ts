@@ -183,7 +183,7 @@ function scriptInterpreterForWord(word: string): ScriptInterpreter | undefined {
     return undefined;
 }
 
-function detectScriptInterpreter(prefix: string): ScriptInterpreter | undefined {
+export function detectScriptInterpreter(prefix: string): ScriptInterpreter | undefined {
     return directScriptInterpreter(tokenizeShellWords(prefix))?.interpreter;
 }
 

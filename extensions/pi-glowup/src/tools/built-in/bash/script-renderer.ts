@@ -8,6 +8,7 @@ import {
 } from "../../../rendering/theme.ts";
 import {
     detectHeredocInterpreter,
+    detectScriptInterpreter,
     embeddedInlineScripts,
     type ScriptInvocation,
 } from "./invocation.ts";
@@ -192,8 +193,14 @@ function bashHeredocHighlightFromLine(line: string): BashHeredocHighlight | unde
         return undefined;
     }
 
-    const interpreter = detectHeredocInterpreter(line.slice(0, match.index));
-    if (!interpreter) {
+    const suffix = line.slice(match.index + match[0].length);
+    const pipeMatch = /^\s*\|\s*(?<pipedCmd>.+)$/u.exec(suffix);
+    let interpreter: ReturnType<typeof detectHeredocInterpreter>;
+    if (pipeMatch?.groups?.pipedCmd !== undefined) {
+        interpreter = detectScriptInterpreter(pipeMatch.groups.pipedCmd);
+    }
+    interpreter ??= detectHeredocInterpreter(line.slice(0, match.index));
+    if (interpreter === undefined) {
         return undefined;
     }
 
@@ -530,17 +537,22 @@ export function renderScriptCall(
             return wrapPrefixedLine("", width, header, "  ");
         }
 
+        const fullLines = trimEdgeBlankLines(preview.code.split("\n"));
+        const fullHighlighted = highlightScriptPreviewLines(fullLines, retained.language, theme);
         const collapsedPreview = expanded
             ? undefined
-            : collapsedPreviewLinesFromText(preview.code, maxCodePreviewLines, "head", omittedHint);
-        const rawLines =
+            : collapsedPreviewLinesFromText(
+                  fullHighlighted.join("\n"),
+                  maxCodePreviewLines,
+                  "head",
+                  omittedHint,
+              );
+        const highlighted =
             collapsedPreview?.isEmpty === true
                 ? [""]
                 : collapsedPreview === undefined
-                  ? trimEdgeBlankLines(preview.code.split("\n"))
+                  ? fullHighlighted
                   : collapsedPreview.lines;
-        const visible = [...rawLines];
-        const highlighted = highlightScriptPreviewLines(visible, retained.language, theme);
         const rendered: string[] = [];
         const headerLayout = resolveScriptHeaderLayout(headerLayoutOption, retained, highlighted);
         if (headerLayout === "block") {

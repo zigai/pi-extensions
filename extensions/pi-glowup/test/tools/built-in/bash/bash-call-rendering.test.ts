@@ -192,4 +192,51 @@ describe("bash command rendering", () => {
         );
         expect(rendered.every((line) => visibleWidth(line) <= 32)).toBe(true);
     });
+
+    it("highlights embedded heredocs accurately across preview truncation boundaries", () => {
+        const command = [
+            "node --input-type=module <<'JS'",
+            "import assert from 'node:assert/strict';",
+            "import { buildSystemPrompt } from './prompt.js';",
+            "const a = 1;",
+            "const b = 2;",
+            "const c = 3;",
+            "const d = 4;",
+            "const e = 5;",
+            "const f = 6;",
+            "JS",
+            "git diff --check",
+            "git diff -- src/prompt.js",
+        ].join("\n");
+        const collapsed = renderBashCommandCall(theme, command, {
+            state: "success",
+            expanded: false,
+            maxCodePreviewLines: 6,
+            showPrologueOmission: false,
+            headerLayout: "auto",
+            shellLayout: "auto",
+            shellOperatorPosition: "trailing",
+        })
+            .render(80)
+            .join("\n");
+
+        expect(collapsed).toContain("• Bash");
+        expect(collapsed).toContain("node --input-type=module <<'JS'");
+        expect(collapsed).toContain("import assert from 'node:assert/strict';");
+        expect(collapsed).toContain("… +6 lines (to expand)");
+
+        const expanded = renderBashCommandCall(theme, command, {
+            state: "success",
+            expanded: true,
+            maxCodePreviewLines: 6,
+            showPrologueOmission: false,
+            headerLayout: "auto",
+            shellLayout: "auto",
+            shellOperatorPosition: "trailing",
+        })
+            .render(80)
+            .join("\n");
+
+        expect(expanded).toContain("git diff --check");
+    });
 });
