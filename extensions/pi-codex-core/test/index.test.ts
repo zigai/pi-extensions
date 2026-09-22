@@ -615,6 +615,22 @@ test("extension prompt hook follows the selected GPT model", async () => {
                 id: "gpt-5.6-terra",
             }),
         );
+        const solPrompt = await harness.prepareSystemPrompt(
+            "Pi system prompt",
+            options,
+            makeExtensionContext("/workspace", true, {
+                ...DEFAULT_TEST_EXTENSION_MODEL,
+                id: "gpt-6-sol",
+            }),
+        );
+        const lunaPrompt = await harness.prepareSystemPrompt(
+            "Pi system prompt",
+            options,
+            makeExtensionContext("/workspace", true, {
+                ...DEFAULT_TEST_EXTENSION_MODEL,
+                id: "gpt-6-luna",
+            }),
+        );
         const gpt55Prompt = await harness.prepareSystemPrompt(
             "Pi system prompt",
             options,
@@ -623,6 +639,10 @@ test("extension prompt hook follows the selected GPT model", async () => {
 
         assert.match(terraPrompt, /^You are Codex, an agent based on GPT-5/);
         assert.doesNotMatch(terraPrompt, /## Engineering judgment/);
+        assert.match(solPrompt, /^You are Codex, an agent based on GPT-6/);
+        assert.match(solPrompt, /Once evidence in a session supports authorization/);
+        assert.match(lunaPrompt, /^You are Codex, an agent based on GPT-6/);
+        assert.match(lunaPrompt, /Do not add or run tests unless the user asks/);
         assert.match(gpt55Prompt, /## Engineering judgment/);
     } finally {
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;

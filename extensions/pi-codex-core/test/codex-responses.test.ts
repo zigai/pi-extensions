@@ -31,7 +31,14 @@ test("resolves current Codex model selections", () => {
 });
 
 test("tracks upstream native compaction compatibility families", () => {
-    for (const model of ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]) {
+    for (const model of [
+        "gpt-6-astra",
+        "gpt-6-sol",
+        "gpt-6-luna",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+    ]) {
         assert.equal(codexModelRequestProfile(model)?.compHash, "3000");
     }
 
@@ -106,6 +113,8 @@ test("normalizes ultra to supported model reasoning without changing the medium 
     const ultraConfig = parseCodexCoreConfig({ openai: { compactionReasoning: "ultra" } });
     for (const [model, expected] of [
         ["gpt-6-astra", "xhigh"],
+        ["gpt-6-sol", "max"],
+        ["gpt-6-luna", "max"],
         ["gpt-5.6-sol", "max"],
         ["gpt-5.6-terra", "max"],
         ["gpt-5.6-luna", "max"],
@@ -141,6 +150,28 @@ test("routes Astra through Lite with the upstream low default and ultra override
     );
     assert.deepEqual(ultra?.reasoning, { effort: "xhigh", context: "all_turns" });
     assert.equal(rewriteCodexResponsesPayload(payload, "astra-session", "gpt-5.6-sol"), undefined);
+});
+
+test("routes GPT-6 Sol and Luna through Lite with their supported reasoning", () => {
+    for (const model of ["gpt-6-sol", "gpt-6-luna"]) {
+        const profile = codexModelRequestProfile(model);
+        assert.ok(profile);
+        assert.equal(profile.useResponsesLite, true);
+        assert.equal(profile.supportsImageDetailOriginal, true);
+        assert.equal(profile.supportsPriorityServiceTier, true);
+        assert.equal(profile.defaultReasoningEffort, "medium");
+        assert.equal(profile.supportedReasoningEfforts.includes("ultra"), model === "gpt-6-sol");
+        const payload = { model, instructions: "system", tools: [], input: [] };
+        const rewritten = rewriteCodexResponsesPayload(payload, `${model}-session`, model);
+        assert.ok(rewritten);
+        assert.deepEqual(rewritten.reasoning, { effort: "medium", context: "all_turns" });
+        assert.equal(rewritten.parallel_tool_calls, false);
+        const ultra = rewriteCodexResponsesPayload(
+            { ...payload, reasoning: { effort: "ultra" } },
+            `${model}-session`,
+        );
+        assert.deepEqual(ultra?.reasoning, { effort: "max", context: "all_turns" });
+    }
 });
 
 test("keeps Lite prefix identities stable across retries, resumes and compaction", () => {

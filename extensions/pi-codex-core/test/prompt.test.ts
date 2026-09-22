@@ -303,8 +303,45 @@ test("adapts Astra code-mode and question guidance to active Pi capabilities", (
     assert.equal(supportsCodexPromptPersonality("gpt-6-astra"), false);
 });
 
+test("adapts GPT-6 Sol and Luna prompts without stale Codex-only tools", () => {
+    const config = parseCodexCoreConfig({ prompt: { mode: "codex" } });
+
+    for (const modelId of ["gpt-6-sol", "gpt-6-luna"]) {
+        const render = (selectedTools: string[]) =>
+            buildCodexCoreSystemPrompt(
+                "Pi prompt",
+                config,
+                { cwd: "/workspace", selectedTools },
+                { modelId },
+            );
+        const prompt = render(["read", "bash", "ask_user_question"]);
+        assert.match(prompt, /^You are Codex, an agent based on GPT-6\./);
+        assert.match(prompt, /simple, clear communicator/);
+        assert.match(prompt, /Use `ask_user_question` with its declared schema/);
+        assert.match(prompt, /Batch independent searches and reads using Pi's tool interface/);
+        assert.doesNotMatch(
+            prompt,
+            /functions\.(?:exec|request_user_input_async|send_user_message_async)|exec_command|skills\.(?:list|read)|tool_search|codex_apps/,
+        );
+        assert.equal(prompt.split("# Using skills").length - 1, 1);
+        assert.equal(supportsCodexPromptPersonality(modelId), false);
+        const asyncPrompt = render(["read", "request_user_input_async"]);
+        assert.match(asyncPrompt, /`request_user_input_async` tool/);
+        assert.doesNotMatch(asyncPrompt, /send_user_message_async|ask_user_question/);
+        assert.match(render([]), /Ask the user directly for missing information/);
+    }
+});
+
 test("bundled Codex prompts match the pinned upstream content", async () => {
     const prompts = [
+        [
+            new URL("../src/prompt/codex-gpt-6-sol.md", import.meta.url),
+            "b1dd8718c037906c53a305c5cbccb4a4be35ccbb7837461ec349bfc495412f0d",
+        ],
+        [
+            new URL("../src/prompt/codex-gpt-6-luna.md", import.meta.url),
+            "b707476816bfe5e571a1bd2179f130fff2b132da5ab8e61063acdb7fd24daf12",
+        ],
         [
             new URL("../src/prompt/codex-gpt-6-astra.md", import.meta.url),
             "152dfaeeb552876190962be1c12c93d426840ff12691f648261554a7675a6698",
