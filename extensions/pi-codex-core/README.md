@@ -24,7 +24,7 @@ pi install npm:@zigai/pi-codex-core
 
 ### System prompt
 
-Model-aware Codex prompt mode uses matching bundled GPT-6-Astra, GPT-5.6 Sol/Terra/Luna, or GPT-5.5 system prompts adapted to Pi's active tools and runtime context.
+Model-aware Codex prompt mode uses matching bundled GPT-6 Astra/Sol/Luna, GPT-5.6 Sol/Terra/Luna, or GPT-5.5 system prompts adapted to Pi's active tools and runtime context.
 
 ### Compaction
 
@@ -44,7 +44,7 @@ Use the `/codex` slash command to manage extension settings and usage:
 
 ### Additional capabilities
 
-- Compatibility for GPT-6-Astra and GPT-5.6 Responses Lite during standard turns, image descriptions, and native compaction.
+- Compatibility for GPT-6 Astra/Sol/Luna and GPT-5.6 Responses Lite during standard turns, image descriptions, and native compaction.
 - Streamed reasoning trace controls for GPT Responses models.
 - Fast mode option to prioritize response speed.
 
