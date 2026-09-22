@@ -32,6 +32,8 @@ const GPT_5_5_PRAGMATIC_PERSONALITY_PATH = fileURLToPath(
 
 const CODEX_PROMPT_PATHS_BY_MODEL = new Map<string, string>([
     ["gpt-6-astra", fileURLToPath(new URL("./codex-gpt-6-astra.md", import.meta.url))],
+    ["gpt-6-sol", fileURLToPath(new URL("./codex-gpt-6-sol.md", import.meta.url))],
+    ["gpt-6-luna", fileURLToPath(new URL("./codex-gpt-6-luna.md", import.meta.url))],
     ["gpt-5.5", GPT_5_5_CODEX_PROMPT_PATH],
     ["gpt-5.6-sol", GPT_5_6_SOL_CODEX_PROMPT_PATH],
     ["gpt-5.6-terra", GPT_5_6_TERRA_LUNA_CODEX_PROMPT_PATH],
@@ -224,14 +226,16 @@ function adaptCodexInteractionGuidance(prompt: string, tools: readonly string[])
         : tools.includes("ask_user_question")
           ? "Use `ask_user_question` with its declared schema to ask for missing information, preferences, constraints, or clarification. Ask only for information that cannot be inferred from available context. This tool waits for the user's response; do not assume asynchronous delivery. If an answer or approval is required, do not proceed with dependent work until it arrives. Elapsed time is not an answer or approval."
           : "Ask the user directly for missing information, preferences, constraints, or clarification only when it cannot be inferred from available context. If an answer or approval is required, do not proceed with dependent work until it arrives. Elapsed time is not an answer or approval.";
-    if (questionGuidance) {
-        return adapted.replace(
-            /^When available, you can use the `functions\.request_user_input_async` tool[^\n]+/m,
-            questionGuidance,
-        );
-    }
+    const questionToolGuidance =
+        /^(?:When available, you can use the `functions\.request_user_input_async` tool|You can use the `functions\.send_user_message_async` or `functions\.request_user_input_async` tool)[^\n]+/m;
+    if (questionGuidance) return adapted.replace(questionToolGuidance, questionGuidance);
 
-    return adapted.replaceAll("functions.request_user_input_async", "request_user_input_async");
+    return adapted
+        .replaceAll(
+            "`functions.send_user_message_async` or `functions.request_user_input_async`",
+            "`request_user_input_async`",
+        )
+        .replaceAll("functions.request_user_input_async", "request_user_input_async");
 }
 
 function removeLineContaining(prompt: string, marker: string): string {

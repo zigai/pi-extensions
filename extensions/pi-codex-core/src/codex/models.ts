@@ -11,6 +11,8 @@ export type CodexModelRequestProfile = {
 /** Current text models surfaced by the Codex settings UI, newest first. */
 export const CODEX_TEXT_MODEL_CHOICES = [
     "gpt-6-astra",
+    "gpt-6-sol",
+    "gpt-6-luna",
     "gpt-5.6-sol",
     "gpt-5.6-terra",
     "gpt-5.6-luna",
@@ -30,6 +32,22 @@ const CODEX_MODEL_REQUEST_PROFILES = {
         supportsImageDetailOriginal: true,
         supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max", "ultra"],
         multiAgentReasoningEffort: "xhigh",
+    },
+    "gpt-6-sol": {
+        useResponsesLite: true,
+        defaultReasoningEffort: "medium",
+        compHash: "3000",
+        supportsPriorityServiceTier: true,
+        supportsImageDetailOriginal: true,
+        supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max", "ultra"],
+    },
+    "gpt-6-luna": {
+        useResponsesLite: true,
+        defaultReasoningEffort: "medium",
+        compHash: "3000",
+        supportsPriorityServiceTier: true,
+        supportsImageDetailOriginal: true,
+        supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
     },
     "gpt-5.6-sol": {
         useResponsesLite: true,
