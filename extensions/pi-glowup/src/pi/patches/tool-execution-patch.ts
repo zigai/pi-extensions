@@ -370,6 +370,9 @@ function cacheCompletedComponent(component: Component): Component {
 
             return lines;
         },
+        handleMouse(event) {
+            return base.handleMouse?.(event);
+        },
         invalidate() {
             // Pi broadly invalidates transcript children for editor-only repaints. Semantic
             // changes replace this wrapper, while renderer invalidations clear its cache slot.
@@ -551,6 +554,7 @@ function thirdPartyRenderContext(
         toolCallId: context.toolCallId,
         phase: executionPhase(context),
         args: jsonValueParser.parse(context.args),
+        state: context.state,
         executionStarted: context.executionStarted,
         argsComplete: context.argsComplete,
         isPartial: context.isPartial,

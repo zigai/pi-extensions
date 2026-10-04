@@ -1,3 +1,6 @@
+import { MouseRegion, type Component } from "@earendil-works/pi-tui";
+import Type, { type Static } from "typebox";
+import { Value } from "typebox/value";
 import { makeComponent, wrapPrefixedLine, toolExpandHint } from "../../rendering/component.ts";
 import { renderGlowupOutput } from "../../rendering/output.ts";
 import {
@@ -18,11 +21,59 @@ import { takeGraphemePrefix } from "../../text-boundaries.ts";
 import { boundedExpandedResult, callState } from "../call-rendering.ts";
 import { previewCompactArgs, textOutput } from "../previews.ts";
 import { getArray, getNonEmptyString, getNumber, getString } from "../tool-values.ts";
-import type { ThirdPartyToolRenderer, ThirdPartyToolResult } from "../types.ts";
+import type {
+    ThirdPartyToolRenderContext,
+    ThirdPartyToolRenderer,
+    ThirdPartyToolResult,
+} from "../types.ts";
 
 const SCRIPT_HEADER = /^Script (?:completed|failed)\nWall time [\d.]+ seconds\nOutput:\n$/u;
 const VISIBLE_CALLS = 8;
 const MAX_CALLS = 256;
+
+const expansionSchema = Type.Object({
+    global: Type.Boolean(),
+    code: Type.Optional(Type.Boolean()),
+    response: Type.Optional(Type.Boolean()),
+});
+const rendererStateSchema = Type.Object(
+    { glowupCodemodeExpansion: Type.Optional(expansionSchema) },
+    { additionalProperties: true },
+);
+
+type CodemodeExpansion = Static<typeof expansionSchema>;
+type CodemodeSection = "code" | "response";
+
+function expansionState(context: ThirdPartyToolRenderContext): CodemodeExpansion | undefined {
+    if (context.state === undefined) return undefined;
+
+    const state = Value.Parse(rendererStateSchema, context.state);
+    const current = state.glowupCodemodeExpansion;
+    if (current !== undefined && current.global === context.expanded) return current;
+
+    const expansion: CodemodeExpansion = { global: context.expanded };
+    state.glowupCodemodeExpansion = expansion;
+    return expansion;
+}
+
+function clickableSection(
+    component: Component,
+    context: ThirdPartyToolRenderContext,
+    expansion: CodemodeExpansion | undefined,
+    section: CodemodeSection,
+): Component {
+    const invalidate = context.invalidate;
+    if (expansion === undefined || invalidate === undefined) return component;
+
+    return new MouseRegion(component, (event) => {
+        if (event.type !== "click" || event.button !== "left") return undefined;
+
+        expansion[section] = !(expansion[section] ?? context.expanded);
+        invalidate();
+
+        return { handled: true };
+    });
+}
 
 function formatCost(cost: number): string {
     return `$${cost >= 0.01 ? cost.toFixed(2) : cost.toPrecision(2)}`;
@@ -173,6 +224,8 @@ export function createCodemodeRenderer(
 ): ThirdPartyToolRenderer {
     return {
         renderCall(args, theme, context) {
+            const expansion = expansionState(context);
+            const expanded = expansion?.code ?? context.expanded;
             const record = jsonObjectParser.parse(args);
             const code = record === undefined ? undefined : getString(record, "code");
             if (code !== undefined) {
@@ -188,7 +241,7 @@ export function createCodemodeRenderer(
                 }),
             });
             const source = renderGlowupOutput(theme, code, {
-                expanded: context.expanded,
+                expanded,
                 mode: "head",
                 maxPreviewLines: 8,
                 prefixFirst: dim(theme, "  │ "),
@@ -198,26 +251,33 @@ export function createCodemodeRenderer(
                 syntax: { language: "javascript" },
             });
 
-            return makeComponent((width) => [...header.render(width), ...source.render(width)]);
+            const component = makeComponent((width) => [
+                ...header.render(width),
+                ...source.render(width),
+            ]);
+            return clickableSection(component, context, expansion, "code");
         },
-        renderResult(result, options, theme) {
-            const rows = callRows(result, theme, options.expanded);
+        renderResult(result, options, theme, context) {
+            const expansion = expansionState(context);
+            const expanded = expansion?.response ?? options.expanded;
+            const rows = callRows(result, theme, expanded);
             const text = options.isPartial ? undefined : scriptOutput(result);
             const output = renderGlowupOutput(
                 theme,
-                options.expanded ? boundedExpandedResult(text) : text,
+                expanded ? boundedExpandedResult(text) : text,
                 {
-                    expanded: options.expanded,
+                    expanded,
                     mode: "head",
                     maxPreviewLines: 5,
                     noOutputLabel: null,
                 },
             );
 
-            return makeComponent((width) => [
+            const component = makeComponent((width) => [
                 ...rows.flatMap((row) => wrapPrefixedLine(row, width, "  │ ", "  │ ")),
                 ...output.render(width),
             ]);
+            return clickableSection(component, context, expansion, "response");
         },
     };
 }

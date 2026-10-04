@@ -31,6 +31,7 @@ export type ToolExecutionInstance = {
 export type PiToolRenderContext = {
     readonly args: unknown;
     readonly toolCallId: string;
+    readonly state?: unknown;
     readonly executionStarted: boolean;
     readonly argsComplete: boolean;
     readonly isPartial: boolean;

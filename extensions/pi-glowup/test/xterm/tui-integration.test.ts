@@ -1301,6 +1301,84 @@ export const grownWriteTwelve = 12;
         }
     });
 
+    it.runIf(mode === "fullscreen")(
+        "toggles codemode code and response independently by click",
+        async () => {
+            const pendingTerminal = new VirtualTerminal(100, 55);
+            const activeTui = createTui(pendingTerminal);
+            const script = [
+                "const step0 = 0;",
+                ...Array.from(
+                    { length: 10 },
+                    (_, index) => `const step${index + 1} = ${index + 1};`,
+                ),
+                "finalCodeMarker();",
+            ].join("\n");
+            const output = Array.from({ length: 10 }, (_, index) => `result line ${index + 1}`);
+            output.push("last-result-line");
+            const code = new ToolExecutionComponent(
+                "codemode",
+                "call-xterm-independent",
+                { code: script },
+                undefined,
+                undefined,
+                activeTui,
+                cwd,
+            );
+            code.setArgsComplete();
+            code.updateResult({
+                content: [
+                    { type: "text", text: "Script completed\nWall time 0.02 seconds\nOutput:\n" },
+                    { type: "text", text: JSON.stringify({ output: output.join("\n") }) },
+                ],
+                isError: false,
+            });
+
+            activeTui.addChild(new LinesComponent(["BEFORE_CODEMODE"]));
+            activeTui.addChild(code);
+            activeTui.addChild(new LinesComponent(["AFTER_CODEMODE"]));
+            terminal = pendingTerminal;
+            tui = activeTui;
+            activeTui.start();
+            await pendingTerminal.settle();
+
+            const click = async (text: string): Promise<void> => {
+                const row = pendingTerminal.requireRowContaining(text);
+                const column = row.text.indexOf(text) + 1;
+                pendingTerminal.sendInput(`\u001b[<0;${column};${row.index + 1}M`);
+                pendingTerminal.sendInput(`\u001b[<0;${column};${row.index + 1}m`);
+                await pendingTerminal.settle();
+            };
+
+            expect(pendingTerminal.screenText()).not.toContain("finalCodeMarker");
+            expect(pendingTerminal.screenText()).not.toContain("last-result-line");
+            await click("const step0");
+            expect(pendingTerminal.screenText()).toContain("finalCodeMarker");
+            expect(pendingTerminal.screenText()).not.toContain("last-result-line");
+            await click("output:");
+            expect(pendingTerminal.screenText()).toContain("finalCodeMarker");
+            expect(pendingTerminal.screenText()).toContain("last-result-line");
+            await click("const step0");
+            expect(pendingTerminal.screenText()).not.toContain("finalCodeMarker");
+            expect(pendingTerminal.screenText()).toContain("last-result-line");
+
+            code.setExpanded(true);
+            activeTui.requestRender();
+            await pendingTerminal.settle();
+            expect(pendingTerminal.screenText()).toContain("finalCodeMarker");
+            expect(pendingTerminal.screenText()).toContain("last-result-line");
+            code.setExpanded(false);
+            activeTui.requestRender();
+            await pendingTerminal.settle();
+            expect(pendingTerminal.screenText()).not.toContain("finalCodeMarker");
+            expect(pendingTerminal.screenText()).not.toContain("last-result-line");
+            expect(pendingTerminal.countOccurrences("BEFORE_CODEMODE")).toBe(1);
+            expect(pendingTerminal.countOccurrences("AFTER_CODEMODE")).toBe(1);
+            pendingTerminal.assertNoWrappedRows();
+            pendingTerminal.assertRowsFitWidth();
+        },
+    );
+
     it("neutralizes tool-supplied terminal controls before they reach the PTY", async () => {
         const pendingTerminal = new VirtualTerminal(100, 20);
         const activeTui = createTui(pendingTerminal);
