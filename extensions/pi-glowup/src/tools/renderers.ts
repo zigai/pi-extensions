@@ -1,10 +1,13 @@
 import Type, { type Static } from "typebox";
 import { Value } from "typebox/value";
 import { createAgentBrowserRenderer } from "./external/agent-browser.ts";
+import { createCodemodeRenderer } from "./external/codemode.ts";
 import {
     createChromeDevtoolsMcpRenderer,
+    createDirectMcpRenderer,
     createMcpGatewayRenderer,
     hasChromeDevtoolsName,
+    isDirectMcpTool,
 } from "./external/mcp-gateway.ts";
 import { createPiCoreRenderer, isPiCoreTool } from "./external/pi-tools.ts";
 import { createGenericRenderer } from "./call-rendering.ts";
@@ -53,6 +56,11 @@ const toolDefinitionViewParser = {
 
 const TRANSITIONAL_RENDERER_PLUGINS: ReadonlyArray<ThirdPartyToolRendererPlugin> = [
     {
+        name: "codemode",
+        matches: (toolName) => toolName === "codemode",
+        createRenderer: (_toolName, options) => createCodemodeRenderer(options?.labelMode),
+    },
+    {
         name: "agent-browser",
         matches: (toolName) => toolName === "agent_browser",
         createRenderer: (toolName, options) =>
@@ -69,6 +77,12 @@ const TRANSITIONAL_RENDERER_PLUGINS: ReadonlyArray<ThirdPartyToolRendererPlugin>
         matches: hasChromeDevtoolsName,
         createRenderer: (toolName, options) =>
             createChromeDevtoolsMcpRenderer(toolName, options?.labelMode),
+    },
+    {
+        name: "direct-mcp-tools",
+        matches: isDirectMcpTool,
+        createRenderer: (toolName, options) =>
+            createDirectMcpRenderer(toolName, options?.labelMode),
     },
     {
         name: "pi-core-tools",

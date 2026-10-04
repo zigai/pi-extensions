@@ -200,6 +200,13 @@ describe("third-party tool renderers", () => {
         const cases: ReadonlyArray<{ readonly toolName: string; readonly args: JsonValue }> = [
             { toolName: "agent_browser", args: { args: ["open", "https://example.com"] } },
             { toolName: "mcp", args: { connect: "chrome-devtools" } },
+            { toolName: "mcp__docs__search", args: { query: "wide 世界" } },
+            {
+                toolName: "codemode",
+                args: {
+                    code: "const result = await tools.read({path: '/tmp/example'});\ntext(result);",
+                },
+            },
             { toolName: "finalize_plan", args: { markdown: "# Plan\n\nLong plan body" } },
             {
                 toolName: "ask_user_question",
@@ -1054,6 +1061,178 @@ describe("third-party tool renderers", () => {
 
         expect(rendered).toContain("questions: 1 item");
         expect(rendered).not.toContain("questions: 1 items");
+    });
+
+    it("shows codemode source and nested outcomes without script envelopes or raw result JSON", () => {
+        const renderer = createThirdPartyToolRenderer("codemode");
+        const script = "const result = await tools.read({path: '/tmp/example'});\ntext(result);";
+        const call = renderer
+            .renderCall({ code: script }, plainTheme, renderContext)
+            .render(80)
+            .join("\n");
+        expect(call).toContain("Codemode");
+        expect(call).toContain("tools.read");
+        expect(call).not.toContain('"code":');
+
+        const result = renderer
+            .renderResult(
+                {
+                    content: [
+                        {
+                            type: "text",
+                            text: "Script completed\nWall time 0.04 seconds\nOutput:\n",
+                        },
+                        { type: "text", text: "File contents" },
+                    ],
+                    details: {
+                        calls: [
+                            {
+                                id: "call-1/0",
+                                name: "read",
+                                args: '{"path":"/tmp/example"}',
+                                status: "ok",
+                                durationMs: 12,
+                            },
+                            {
+                                id: "call-1/1",
+                                name: "mcp__docs__lookup",
+                                args: '{"token":"private","query":"test"}',
+                                status: "error",
+                                durationMs: 25,
+                            },
+                        ],
+                    },
+                },
+                { expanded: false, isPartial: false },
+                plainTheme,
+                renderContext,
+            )
+            .render(80)
+            .join("\n");
+        expect(result).toContain("read");
+        expect(result).toContain("mcp__docs__lookup");
+        expect(result).toContain("File contents");
+        expect(result).toContain("[redacted]");
+        expect(result).not.toContain('"path"');
+        expect(result).not.toContain("private");
+        expect(result).not.toContain("Script completed");
+        expect(result).not.toContain("Wall time");
+    });
+
+    it("shows model call costs and their total when codemode reports usage", () => {
+        const renderer = createThirdPartyToolRenderer("codemode");
+        const result = renderer
+            .renderResult(
+                {
+                    content: [],
+                    details: {
+                        calls: [
+                            {
+                                id: "call-1/0",
+                                name: "models.classify",
+                                args: "{}",
+                                status: "ok",
+                                cost: 0.0025,
+                            },
+                            {
+                                id: "call-1/1",
+                                name: "models.classify",
+                                args: "{}",
+                                status: "ok",
+                                cost: 0.0035,
+                            },
+                        ],
+                    },
+                },
+                { expanded: false, isPartial: false },
+                plainTheme,
+                renderContext,
+            )
+            .render(80)
+            .join("\n");
+        expect(result).toContain("$0.0025");
+        expect(result).toContain("$0.0035");
+        expect(result).toContain("Model calls: $0.0060");
+    });
+
+    it("bounds codemode calls and scripts while preserving the expanded history", () => {
+        const renderer = createThirdPartyToolRenderer("codemode");
+        const source = Array.from({ length: 25 }, (_, index) => `text(${index});`).join("\n");
+        const calls = Array.from({ length: 15 }, (_, index) => ({
+            id: `call-1/${index}`,
+            name: `tool_${index}`,
+            args: "{}",
+            status: index === 14 ? "running" : "ok",
+        }));
+        const compactCall = renderer
+            .renderCall({ code: source }, plainTheme, renderContext)
+            .render(90)
+            .join("\n");
+        expect(compactCall).toContain("text(0)");
+        expect(compactCall).not.toContain("text(24)");
+        expect(compactCall).toContain("expand");
+        const compactResult = renderer
+            .renderResult(
+                { content: [], details: { calls } },
+                { expanded: false, isPartial: true },
+                plainTheme,
+                renderContext,
+            )
+            .render(90)
+            .join("\n");
+        expect(compactResult).toContain("tool_14");
+        expect(compactResult).not.toContain("tool_0");
+        expect(compactResult).toContain("earlier calls");
+        const expandedResult = renderer
+            .renderResult(
+                { content: [], details: { calls } },
+                { expanded: true, isPartial: false },
+                plainTheme,
+                renderContext,
+            )
+            .render(90)
+            .join("\n");
+        expect(expandedResult).toContain("tool_0");
+        expect(expandedResult).toContain("tool_14");
+    });
+
+    it("labels direct MCP calls by server and tool with redacted arguments and bounded output", () => {
+        const renderer = createThirdPartyToolRenderer("mcp__docs__search", undefined, {
+            label: "docs/search",
+        });
+        const call = renderer
+            .renderCall({ query: "release notes", apiKey: "private" }, plainTheme, renderContext)
+            .render(80)
+            .join("\n");
+        expect(call).toContain("MCP docs/search");
+        expect(call).toContain("release notes");
+        expect(call).toContain("[redacted]");
+        expect(call).not.toContain('"query":');
+        expect(call).not.toContain("private");
+        const result = renderer
+            .renderResult(
+                {
+                    content: [{ type: "text", text: "Found three pages" }],
+                    details: { server: "docs", tool: "search" },
+                },
+                { expanded: false, isPartial: false },
+                plainTheme,
+                renderContext,
+            )
+            .render(80)
+            .join("\n");
+        expect(result).toContain("Found three pages");
+        expect(result).not.toContain("server:");
+        expect(
+            renderer
+                .renderResult(
+                    { content: [], details: { server: "docs", tool: "search" } },
+                    { expanded: false, isPartial: false },
+                    plainTheme,
+                    renderContext,
+                )
+                .render(80),
+        ).toEqual([]);
     });
 
     it("uses Chrome DevTools labels for MCP gateway calls", () => {

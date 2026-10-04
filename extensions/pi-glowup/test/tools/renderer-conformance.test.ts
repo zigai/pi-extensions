@@ -51,6 +51,22 @@ const cases: ReadonlyArray<RendererConformanceCase> = [
         resultText: "Opened",
     },
     {
+        family: "codemode",
+        toolName: "codemode",
+        args: { code: "text('hello');" },
+        callText: "Ran code",
+        result: result("Script failed\nWall time 0.01 seconds\nOutput:\nError: example"),
+        resultText: "Error: example",
+    },
+    {
+        family: "direct-mcp",
+        toolName: "mcp__docs__search",
+        args: { query: "example" },
+        callText: "MCP docs/search",
+        result: result("Found example"),
+        resultText: "Found example",
+    },
+    {
         family: "mcp-gateway",
         toolName: "mcp",
         args: { connect: "chrome-devtools" },

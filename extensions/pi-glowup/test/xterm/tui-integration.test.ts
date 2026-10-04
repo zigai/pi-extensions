@@ -1227,6 +1227,78 @@ export const grownWriteTwelve = 12;
         pendingTerminal.assertRowsFitWidth();
     });
 
+    it("presents codemode and direct MCP calls through Pi's real transcript renderer across resizes", async () => {
+        const pendingTerminal = new VirtualTerminal(100, 28);
+        const activeTui = createTui(pendingTerminal);
+        activeTui.setClearOnShrink(true);
+        const code = new ToolExecutionComponent(
+            "codemode",
+            "call-xterm-codemode",
+            {
+                code: "const pages = await tools.mcp__docs__search({query: 'release'});\ntext(pages);",
+            },
+            undefined,
+            undefined,
+            activeTui,
+            cwd,
+        );
+        code.setArgsComplete();
+        code.updateResult({
+            content: [
+                { type: "text", text: "Script completed\nWall time 0.02 seconds\nOutput:\n" },
+                { type: "text", text: "Two pages" },
+            ],
+            details: {
+                calls: [
+                    {
+                        id: "call-xterm-codemode/0",
+                        name: "mcp__docs__search",
+                        args: '{"query":"release"}',
+                        status: "ok",
+                        durationMs: 20,
+                    },
+                ],
+            },
+            isError: false,
+        });
+        const mcp = new ToolExecutionComponent(
+            "mcp__docs__search",
+            "call-xterm-mcp",
+            { query: "release" },
+            undefined,
+            undefined,
+            activeTui,
+            cwd,
+        );
+        mcp.setArgsComplete();
+        mcp.updateResult({ content: [{ type: "text", text: "Found pages" }], isError: false });
+        activeTui.addChild(new LinesComponent(["BEFORE_PI_TOOLS"]));
+        activeTui.addChild(code);
+        activeTui.addChild(mcp);
+        activeTui.addChild(new LinesComponent(["AFTER_PI_TOOLS"]));
+        terminal = pendingTerminal;
+        tui = activeTui;
+        activeTui.start();
+        await pendingTerminal.settle();
+
+        for (const columns of [100, 45, 100]) {
+            pendingTerminal.resize(columns, 28);
+            await pendingTerminal.settle();
+            const screen = pendingTerminal.screenText();
+            expect(screen).toContain("Ran code");
+            expect(screen).toContain("tools.mcp__docs__search");
+            expect(screen).toContain("Two pages");
+            expect(screen).toContain("MCP docs/search");
+            expect(screen).toContain("Found pages");
+            expect(screen).not.toContain("Script completed");
+            expect(screen).not.toContain('"code":');
+            expect(pendingTerminal.countOccurrences("BEFORE_PI_TOOLS")).toBe(1);
+            expect(pendingTerminal.countOccurrences("AFTER_PI_TOOLS")).toBe(1);
+            pendingTerminal.assertNoWrappedRows();
+            pendingTerminal.assertRowsFitWidth();
+        }
+    });
+
     it("neutralizes tool-supplied terminal controls before they reach the PTY", async () => {
         const pendingTerminal = new VirtualTerminal(100, 20);
         const activeTui = createTui(pendingTerminal);

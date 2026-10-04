@@ -13,7 +13,12 @@ import {
     renderSimpleResult,
     renderThirdPartyCall,
 } from "../call-rendering.ts";
-import { compactWhitespaceText, previewArgsForContext } from "../previews.ts";
+import {
+    compactWhitespaceText,
+    previewArgsForContext,
+    previewCompactArgs,
+    textOutput,
+} from "../previews.ts";
 import {
     baseToolName,
     countLabel,
@@ -26,6 +31,48 @@ import { jsonObjectParser, type JsonValue, jsonValueParser } from "../../json-va
 import { stringParser } from "../../json-scalar.ts";
 
 const CHROME_DEVTOOLS_PREFIX_PATTERN = /(?:^|__)chrome[-_]?devtools(?:__|_|$)/i;
+const DIRECT_MCP_TOOL_PATTERN = /^mcp__(?<server>[A-Za-z0-9_]+)__(?<tool>.+)$/u;
+
+export function isDirectMcpTool(toolName: string): boolean {
+    return DIRECT_MCP_TOOL_PATTERN.test(toolName);
+}
+
+export function createDirectMcpRenderer(
+    toolName: string,
+    labelMode: ToolLabelMode = "static",
+): ThirdPartyToolRenderer {
+    const match = DIRECT_MCP_TOOL_PATTERN.exec(toolName);
+    if (match?.groups?.server === undefined || match.groups.tool === undefined) {
+        throw new Error(`Invalid direct MCP tool name: ${toolName}`);
+    }
+
+    const label = `MCP ${match.groups.server}/${match.groups.tool}`;
+
+    return {
+        renderCall(args, theme, context) {
+            if (shouldDeferSimpleToolCall(context)) return emptyComponent();
+
+            return renderThirdPartyCall(theme, {
+                state: callState(context),
+                statusText: toolStatusLabel(labelMode, context, {
+                    static: label,
+                    active: label,
+                    completed: label,
+                }),
+                body: context.expanded
+                    ? previewArgsForContext(args, context)
+                    : previewCompactArgs(args),
+                maxRenderedLines: DEFAULT_TOOL_CALL_PREVIEW_LINES,
+                expanded: context.expanded,
+            });
+        },
+        renderResult(result, options, theme) {
+            return textOutput(result) === undefined
+                ? emptyComponent()
+                : renderSimpleResult(theme, result, options);
+        },
+    };
+}
 
 const MCP_COMMAND_LABELS = new Map<string, string>([
     ["click", "Browser Click"],

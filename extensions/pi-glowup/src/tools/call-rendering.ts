@@ -48,7 +48,7 @@ export function callState(context: ThirdPartyToolRenderContext): GlowupCallState
     return "success";
 }
 
-function boundedExpandedResult(output: string | undefined): string | undefined {
+export function boundedExpandedResult(output: string | undefined): string | undefined {
     if (output === undefined) return undefined;
 
     const halfCharacterBudget = Math.floor(MAX_EXPANDED_RESULT_CHARACTERS / 2);

@@ -286,6 +286,10 @@ function previewPartialArgs(args: JsonValue | undefined, fallback?: string): str
     return record === undefined ? undefined : compactObjectPreview(record);
 }
 
+export function previewCompactArgs(args: unknown): string | undefined {
+    return previewPartialArgs(jsonValueParser.parse(args));
+}
+
 /** Returns a bounded structured argument preview for expanded views. */
 export function previewArgs(args: unknown, fallback?: string): string | undefined {
     const jsonVal = jsonValueParser.parse(args);

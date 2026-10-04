@@ -625,6 +625,25 @@ describe("tool execution patches", () => {
         ).toEqual(["existing renderer"]);
     });
 
+    it.each([
+        { name: "codemode", args: { code: "text('ready');" }, label: "Codemode" },
+        { name: "mcp__docs__search", args: { query: "ready" }, label: "MCP docs/search" },
+    ])("replaces Pi's native $name renderer with Glowup when enabled", ({ name, args, label }) => {
+        const prototype = createPrototype();
+        installThirdPartyToolRendererPatch(undefined, prototype);
+        const instance: FakeToolExecutionInstance = {
+            toolName: name,
+            toolDefinition: { renderCall: () => ({ render: () => [], invalidate: noop }) },
+        };
+        expect(prototype.getRenderShell.call(instance)).toBe("self");
+        expect(
+            prototype.getCallRenderer
+                .call(instance)?.(args, plainTheme, renderContext)
+                .render(80)
+                .join("\n"),
+        ).toContain(label);
+    });
+
     it("parses complete structured arguments for restored third-party calls", () => {
         const prototype = createPrototype();
         installThirdPartyToolRendererPatch({ labelMode: "lifecycle" }, prototype);
