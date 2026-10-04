@@ -1246,7 +1246,7 @@ export const grownWriteTwelve = 12;
         code.updateResult({
             content: [
                 { type: "text", text: "Script completed\nWall time 0.02 seconds\nOutput:\n" },
-                { type: "text", text: "Two pages" },
+                { type: "text", text: '{"output":"Two pages\\nMore pages"}' },
             ],
             details: {
                 calls: [
@@ -1288,6 +1288,8 @@ export const grownWriteTwelve = 12;
             expect(screen).toContain("Ran code");
             expect(screen).toContain("tools.mcp__docs__search");
             expect(screen).toContain("Two pages");
+            expect(screen).toContain("More pages");
+            expect(screen).not.toContain("\\nMore pages");
             expect(screen).toContain("MCP docs/search");
             expect(screen).toContain("Found pages");
             expect(screen).not.toContain("Script completed");

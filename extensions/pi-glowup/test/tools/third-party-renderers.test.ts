@@ -1119,6 +1119,56 @@ describe("third-party tool renderers", () => {
         expect(result).not.toContain("Wall time");
     });
 
+    it("renders object output as readable fields and real multiline text", () => {
+        const renderer = createThirdPartyToolRenderer("codemode");
+        const result = {
+            content: [
+                { type: "text", text: "Script completed\nWall time 0.1 seconds\nOutput:\n" },
+                {
+                    type: "text",
+                    text: '{"check":"first","result":{"output":"alpha\\nbeta\\n","exit_code":0,"truncated":false}}',
+                },
+                { type: "text", text: '{"check":"second","result":"ready"}' },
+            ],
+        };
+        const expanded = renderer
+            .renderResult(result, { expanded: true, isPartial: false }, plainTheme, renderContext)
+            .render(80)
+            .join("\n");
+        expect(expanded).toContain("check: first");
+        expect(expanded).toContain("output:\n");
+        expect(expanded).toContain("alpha\n");
+        expect(expanded).toContain("beta");
+        expect(expanded).toContain("exit_code: 0");
+        expect(expanded).toContain("check: second");
+        expect(expanded).toContain("result: ready");
+        expect(expanded).not.toContain("\\n");
+        expect(expanded).not.toContain('"check":');
+
+        const collapsed = renderer
+            .renderResult(result, { expanded: false, isPartial: false }, plainTheme, renderContext)
+            .render(80)
+            .join("\n");
+        expect(collapsed).toContain("check: first");
+        expect(collapsed).toContain("alpha");
+        expect(collapsed).toContain("expand");
+        expect(collapsed).not.toContain("\\n");
+    });
+
+    it("keeps plain text and malformed JSON output as written", () => {
+        const renderer = createThirdPartyToolRenderer("codemode");
+        const output = renderer
+            .renderResult(
+                { content: [{ type: "text", text: "Path: C:\\\\new\\nnot-json: {broken}" }] },
+                { expanded: true, isPartial: false },
+                plainTheme,
+                renderContext,
+            )
+            .render(80)
+            .join("\n");
+        expect(output).toContain("Path: C:\\\\new\\nnot-json: {broken}");
+    });
+
     it("shows model call costs and their total when codemode reports usage", () => {
         const renderer = createThirdPartyToolRenderer("codemode");
         const result = renderer

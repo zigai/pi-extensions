@@ -1,10 +1,19 @@
 import { makeComponent, wrapPrefixedLine, toolExpandHint } from "../../rendering/component.ts";
 import { renderGlowupOutput } from "../../rendering/output.ts";
-import { scheduleCodeOutputSyntaxLoad } from "../../rendering/syntax/code-component.ts";
+import {
+    detectStructuredOutputLanguage,
+    scheduleCodeOutputSyntaxLoad,
+} from "../../rendering/syntax/code-component.ts";
 import { toolStatusLabel, type ToolLabelMode } from "../../rendering/status-labels.ts";
 import { dim, muted, type GlowupRenderTheme } from "../../rendering/theme.ts";
 import { renderGlowupCall } from "../../rendering/tool-header.ts";
-import { jsonObjectParser, jsonValueParser } from "../../json-value.ts";
+import { booleanParser, numberParser, stringParser } from "../../json-scalar.ts";
+import {
+    isJsonArray,
+    jsonObjectParser,
+    jsonValueParser,
+    type JsonValue,
+} from "../../json-value.ts";
 import { takeGraphemePrefix } from "../../text-boundaries.ts";
 import { boundedExpandedResult, callState } from "../call-rendering.ts";
 import { previewCompactArgs, textOutput } from "../previews.ts";
@@ -19,6 +28,56 @@ function formatCost(cost: number): string {
     return `$${cost >= 0.01 ? cost.toFixed(2) : cost.toPrecision(2)}`;
 }
 
+function structuredLines(value: JsonValue, label = "", depth = 0): string[] {
+    const prefix = `${"  ".repeat(depth)}${label}`;
+    const stringValue = stringParser.parse(value);
+    if (stringValue !== undefined) {
+        const lines = stringValue.replace(/\r\n?/gu, "\n").split("\n");
+        if (lines.at(-1) === "") lines.pop();
+        if (lines.length <= 1) return [`${prefix}${lines[0] ?? ""}`];
+
+        return [prefix.trimEnd(), ...lines.map((line) => `${"  ".repeat(depth + 1)}${line}`)];
+    }
+
+    const primitive = numberParser.parse(value) ?? booleanParser.parse(value);
+    if (primitive !== undefined) return [`${prefix}${primitive}`];
+    if (value === null) return [`${prefix}null`];
+
+    let entries: ReadonlyArray<readonly [string, JsonValue]>;
+    let empty: string;
+    if (isJsonArray(value)) {
+        entries = value.map((item) => ["- ", item]);
+        empty = "[]";
+    } else {
+        const object = jsonObjectParser.parse(value);
+        if (object === undefined) throw new Error("Invalid structured output");
+
+        entries = Object.entries(object).map(([key, item]) => [`${key}: `, item]);
+        empty = "{}";
+    }
+
+    if (entries.length === 0) return [`${prefix}${empty}`];
+
+    return [
+        ...(label.length > 0 ? [prefix.trimEnd()] : []),
+        ...entries.flatMap(([key, item]) =>
+            structuredLines(item, key, depth + (label.length > 0 ? 1 : 0)),
+        ),
+    ];
+}
+
+function displayOutput(text: string): string {
+    if (detectStructuredOutputLanguage(text) !== "json") return text;
+
+    try {
+        const parsed: unknown = JSON.parse(text);
+        const value = jsonValueParser.parse(parsed);
+        return value === undefined ? text : structuredLines(value).join("\n");
+    } catch {
+        return text;
+    }
+}
+
 function scriptOutput(result: ThirdPartyToolResult): string | undefined {
     if (!Array.isArray(result.content)) return undefined;
 
@@ -28,8 +87,12 @@ function scriptOutput(result: ThirdPartyToolResult): string | undefined {
         SCRIPT_HEADER.test(getString(first ?? {}, "text") ?? "")
             ? result.content.slice(1)
             : result.content;
+    const blocks = content
+        .map((item) => textOutput({ content: [item] }))
+        .filter((text): text is string => text !== undefined)
+        .map(displayOutput);
 
-    return textOutput({ content });
+    return blocks.length === 0 ? undefined : blocks.join("\n");
 }
 
 function callRows(
