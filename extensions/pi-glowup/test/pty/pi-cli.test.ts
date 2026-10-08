@@ -21,6 +21,7 @@ function glowupEntrypoint(): string {
     if (override !== undefined && override.length > 0) {
         return resolve(override);
     }
+
     return resolve("src/index.ts");
 }
 
@@ -175,7 +176,7 @@ describe("actual Pi CLI in a real PTY", () => {
                 resolve("artifacts/pty"),
             ]);
             const initialBlock = mutationBlock(initial, "restored.ts", "SESSION_SENTINEL");
-            expect(initialBlock).toContain("to expand");
+            expect(initialBlock).toMatch(/ctrl\+o\b/u);
             expect(initialBlock).not.toContain("restored5");
             expect(initial.text).toContain("Candidates · Which candidates should be restored?");
             expect(initial.text).toContain("Stable only");
@@ -184,7 +185,7 @@ describe("actual Pi CLI in a real PTY", () => {
             let nextSequence = pi.frames().length;
             pi.sendKey(CTRL_O);
             const expanded = await pi.waitForFrame(
-                (frame) => frame.text.includes("restored5") && !frame.text.includes("to expand"),
+                (frame) => frame.text.includes("restored5"),
                 PTY_TIMEOUT_MS,
                 nextSequence,
             );
@@ -194,7 +195,10 @@ describe("actual Pi CLI in a real PTY", () => {
             nextSequence = pi.frames().length;
             pi.sendKey(CTRL_O);
             const collapsed = await pi.waitForFrame(
-                (frame) => frame.text.includes("to expand"),
+                (frame) =>
+                    frame.text.includes("Patched restored.ts") &&
+                    frame.text.includes("SESSION_SENTINEL") &&
+                    !frame.text.includes("restored5"),
                 PTY_TIMEOUT_MS,
                 nextSequence,
             );
@@ -283,7 +287,6 @@ describe("actual Pi CLI in a real PTY", () => {
             expect(wideBlock).toContain("restored5");
             expect(wideBlock).toContain("restored9");
             expect(wideBlock).toContain(" │ ");
-            expect(wideBlock).not.toContain("to expand");
             expectTerminalInvariants(wide, [resolve("test/pty/fixtures/offline-provider.ts")]);
 
             const nextSequence = pi.frames().length;
@@ -465,6 +468,218 @@ describe("actual Pi CLI in a real PTY", () => {
         }
     }, 45_000);
 
+    it("formats a restored Node call in the real transcript", async () => {
+        const fixture = createFixtureWorkspace();
+        fixtures.push(fixture);
+        writeFileSync(
+            getGlowupGlobalConfigPath(fixture.agentDir),
+            JSON.stringify({
+                scriptPreview: {
+                    formatters: {
+                        javascript: [
+                            process.execPath,
+                            "-e",
+                            "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>process.stdout.write(s.replace('; ', ';\\n')))",
+                        ],
+                    },
+                },
+            }),
+        );
+        const source = readFileSync(fixture.sessionPath, "utf8").trimEnd();
+        const usage = {
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 0,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        };
+
+        const restored = [
+            {
+                type: "message",
+                id: "00000008",
+                parentId: "00000007",
+                timestamp: "2026-07-15T12:00:08.000Z",
+                message: {
+                    role: "assistant",
+                    content: [
+                        {
+                            type: "toolCall",
+                            id: "restored-node",
+                            name: "bash",
+                            arguments: {
+                                command: `node -e 'const value = "RESTORED_NODE_SOURCE"; console.log(value)'`,
+                            },
+                        },
+                    ],
+                    api: "pty-offline",
+                    provider: "pty-offline",
+                    model: "deterministic",
+                    usage,
+                    stopReason: "toolUse",
+                    timestamp: 1784116808000,
+                },
+            },
+            {
+                type: "message",
+                id: "00000009",
+                parentId: "00000008",
+                timestamp: "2026-07-15T12:00:09.000Z",
+                message: {
+                    role: "toolResult",
+                    toolCallId: "restored-node",
+                    toolName: "bash",
+                    content: [{ type: "text", text: "RESTORED_NODE_SOURCE" }],
+                    isError: false,
+                    timestamp: 1784116809000,
+                },
+            },
+        ];
+        writeFileSync(
+            fixture.sessionPath,
+            `${source}\n${restored.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+        );
+        const pi = new PiPtyProcess(launchOptions(fixture, { sessionPath: fixture.sessionPath }));
+        try {
+            const formatted = await pi.waitForFrame(
+                (frame) =>
+                    frame.rows.some((row) => row.text.includes("│ const value")) &&
+                    frame.rows.some((row) => row.text.includes("│ console.log(value)")),
+                PTY_TIMEOUT_MS,
+            );
+
+            expect(formatted.text).toContain("Node");
+            expect(formatted.text).toContain("RESTORED_NODE_SOURCE");
+            expectTerminalInvariants(formatted, [resolve("test/pty/fixtures/offline-provider.ts")]);
+        } catch (cause: unknown) {
+            await pi.writeFailureArtifacts("restored-node-formatter-preview", cause);
+            throw cause;
+        } finally {
+            await pi.stop();
+        }
+    }, 45_000);
+
+    it("formats codemode JavaScript in the real transcript", async () => {
+        const fixture = createFixtureWorkspace();
+        fixtures.push(fixture);
+        writeFileSync(
+            getGlowupGlobalConfigPath(fixture.agentDir),
+            JSON.stringify({
+                scriptPreview: {
+                    formatters: {
+                        javascript: [
+                            process.execPath,
+                            "-e",
+                            "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>process.stdout.write(s.replace('; ', ';\\n')))",
+                        ],
+                    },
+                },
+            }),
+        );
+        const pi = new PiPtyProcess(
+            launchOptions(fixture, { initialPrompt: "run the deterministic codemode format" }),
+        );
+        try {
+            const formatted = await pi.waitForFrame(
+                (frame) =>
+                    frame.text.includes("STREAM_COMPLETE") &&
+                    frame.rows.some((row) => row.text.includes("│ const message")) &&
+                    frame.rows.some((row) => row.text.includes("│ text(message);")),
+                PTY_TIMEOUT_MS,
+            );
+
+            expect(formatted.text).toContain("Codemode");
+            expect(formatted.text).toContain("CODEMODE_SOURCE");
+            expectTerminalInvariants(formatted, [resolve("test/pty/fixtures/offline-provider.ts")]);
+        } catch (cause: unknown) {
+            await pi.writeFailureArtifacts("codemode-formatter-preview", cause);
+            throw cause;
+        } finally {
+            await pi.stop();
+        }
+    }, 45_000);
+
+    it("formats a standalone Node preview while the command is still running", async () => {
+        const fixture = createFixtureWorkspace();
+        fixtures.push(fixture);
+        writeFileSync(
+            getGlowupGlobalConfigPath(fixture.agentDir),
+            JSON.stringify({
+                scriptPreview: {
+                    formatters: {
+                        javascript: [
+                            process.execPath,
+                            "-e",
+                            "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>process.stdout.write(s.replace('; ', ';\\n')))",
+                        ],
+                    },
+                },
+            }),
+        );
+        const pi = new PiPtyProcess(
+            launchOptions(fixture, { initialPrompt: "run the deterministic formatted node" }),
+        );
+        try {
+            const running = await pi.waitForFrame(
+                (frame) =>
+                    frame.text.includes("NODE_BEGIN") &&
+                    frame.rows.some((row) => row.text.includes("│ await new Promise")) &&
+                    !frame.rows.some((row) => row.text.trim() === "NODE_DONE"),
+                PTY_TIMEOUT_MS,
+            );
+
+            expect(running.text).toContain("Node");
+            expect(running.text).not.toContain("STREAM_COMPLETE");
+            expectTerminalInvariants(running, [resolve("test/pty/fixtures/offline-provider.ts")]);
+        } catch (cause: unknown) {
+            await pi.writeFailureArtifacts("running-node-formatter-preview", cause);
+            throw cause;
+        } finally {
+            await pi.stop();
+        }
+    }, 45_000);
+
+    it("formats a completed short Node call after a delayed formatter finishes", async () => {
+        const fixture = createFixtureWorkspace();
+        fixtures.push(fixture);
+        writeFileSync(
+            getGlowupGlobalConfigPath(fixture.agentDir),
+            JSON.stringify({
+                scriptPreview: {
+                    formatters: {
+                        javascript: [
+                            process.execPath,
+                            "-e",
+                            "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>setTimeout(()=>process.stdout.write(s.replace('; ', ';\\n')), 350))",
+                        ],
+                    },
+                },
+            }),
+        );
+        const pi = new PiPtyProcess(
+            launchOptions(fixture, { initialPrompt: "run the deterministic fast node" }),
+        );
+        try {
+            const formatted = await pi.waitForFrame(
+                (frame) =>
+                    frame.text.includes("STREAM_COMPLETE") &&
+                    frame.rows.some((row) => row.text.includes("│ const value")) &&
+                    frame.rows.some((row) => row.text.includes("│ console.log(value)")),
+                PTY_TIMEOUT_MS,
+            );
+
+            expect(formatted.text).toContain("Node");
+            expect(formatted.text).toContain("FAST_NODE_SOURCE");
+            expectTerminalInvariants(formatted, [resolve("test/pty/fixtures/offline-provider.ts")]);
+        } catch (cause: unknown) {
+            await pi.writeFailureArtifacts("fast-node-formatter-preview", cause);
+            throw cause;
+        } finally {
+            await pi.stop();
+        }
+    }, 45_000);
+
     it("redraws a completed standalone script when language formatting finishes", async () => {
         const fixture = createFixtureWorkspace();
         fixtures.push(fixture);
@@ -529,7 +744,7 @@ describe("actual Pi CLI in a real PTY", () => {
                 expect(collapsed.text).not.toContain("uv run");
                 expect(collapsed.text).not.toContain("import json");
                 expect(collapsed.text).not.toContain("import/setup lines omitted");
-                expect(collapsed.text).toContain("… +6 lines (ctrl+o to expand)");
+                expect(collapsed.text).toMatch(/… \+6 lines[^\n]*\bctrl\+o\b/u);
                 const argvIndex = collapsed.rows.findIndex((row) => row.text.includes('"argv"'));
                 const outputMarkerIndex = collapsed.rows.findIndex(
                     (row, index) => index > argvIndex && row.text.includes("… +8 lines"),

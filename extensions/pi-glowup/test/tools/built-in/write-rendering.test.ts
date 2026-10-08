@@ -167,7 +167,7 @@ describe("write rendering", () => {
         expect(rendered).not.toContain("export const value3 = 3;");
         expect(rendered).toContain("export const value195 = 195;");
         expect(rendered).toContain("export const value200 = 200;");
-        expect(rendered).toContain("… +194 lines (to expand)");
+        expect(rendered).toMatch(/… \+194 lines/u);
         expect(rendered).not.toContain("export const value19 = 19;");
         expect(rendered).not.toContain("export const value100 = 100;");
     });
@@ -196,7 +196,7 @@ describe("write rendering", () => {
 
         expect(rendered).toContain("export const value1 = 1;");
         expect(rendered).toContain("export const value6 = 6;");
-        expect(rendered).toContain("… +194 lines (to expand)");
+        expect(rendered).toMatch(/… \+194 lines/u);
         expect(rendered).not.toContain("export const value7 = 7;");
     });
 
@@ -219,7 +219,7 @@ describe("write rendering", () => {
 
         expect(rendered).toContain("export const value1 = 1;");
         expect(rendered).toContain("export const value40 = 40;");
-        expect(rendered).not.toContain("to expand");
+        expect(rendered).not.toMatch(/… \+\d+ lines/u);
     });
 
     it.each([false, true])(
@@ -285,7 +285,7 @@ describe("write rendering", () => {
         expect(rendered).toContain("export const value1 = 1;");
         expect(rendered).toContain("export const value40 = 40;");
         expect(rendered).not.toContain("export const value20 = 20;");
-        expect(rendered).toContain("lines (to expand)");
+        expect(rendered).toMatch(/… \+\d+ lines/u);
     });
 
     it("renders every completed write row in the default full mutation view", () => {
@@ -305,7 +305,7 @@ describe("write rendering", () => {
         expect(rendered).toContain("value1 = 1");
         expect(rendered).toContain("value20 = 20");
         expect(rendered).toContain("value40 = 40");
-        expect(rendered).not.toContain("to expand");
+        expect(rendered).not.toMatch(/… \+\d+ lines/u);
     });
 
     it("honors the configurable write preview byte limit", () => {
@@ -347,7 +347,9 @@ describe("write rendering", () => {
         }).render(120);
 
         expect(lines).toHaveLength(6);
-        expect(lines.join("\n")).toContain("… +8 lines (to expand)");
+        expect(lines.join("\n")).toMatch(/… \+8 lines/u);
+        expect(lines.join("\n")).toContain("line 12");
+        expect(lines.join("\n")).not.toContain("line 6");
     });
 
     it("keeps streaming mutation counters compact without internal padding", () => {

@@ -2,7 +2,7 @@ import { PreviewStore } from "../file-previews.ts";
 import type { ScriptInvocation } from "./invocation.ts";
 import { truncateUtf8ByGrapheme } from "../../../text-boundaries.ts";
 
-const MAX_SCRIPT_PREVIEW_ENTRIES = 300;
+export const MAX_SCRIPT_PREVIEW_ENTRIES = 300;
 const MAX_SCRIPT_PREVIEW_BYTES = 64 * 1024;
 const MAX_SCRIPT_PREVIEW_TOTAL_BYTES = 4 * 1024 * 1024;
 const SCRIPT_PREVIEW_TRUNCATION_SUFFIX = "\n… preview truncated";

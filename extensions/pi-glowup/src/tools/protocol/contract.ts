@@ -74,6 +74,7 @@ export type GlowupParser<Value> = (value: JsonValue) => Value | undefined;
 
 type GlowupRendererBase<Args> = {
     readonly version: typeof GLOWUP_RENDERING_VERSION;
+    readonly independentExpansion?: true;
     readonly parseArgs: GlowupParser<Args>;
 };
 

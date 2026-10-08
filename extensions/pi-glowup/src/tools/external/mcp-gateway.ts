@@ -7,6 +7,7 @@ import {
 } from "../../rendering/status-labels.ts";
 import { browserLifecycleLabels } from "./browser-labels.ts";
 import type { ThirdPartyToolRenderContext, ThirdPartyToolRenderer } from "../types.ts";
+import { renderExpandableSection } from "../section-expansion.ts";
 import {
     callState,
     DEFAULT_TOOL_CALL_PREVIEW_LINES,
@@ -52,24 +53,30 @@ export function createDirectMcpRenderer(
         renderCall(args, theme, context) {
             if (shouldDeferSimpleToolCall(context)) return emptyComponent();
 
-            return renderThirdPartyCall(theme, {
-                state: callState(context),
-                statusText: toolStatusLabel(labelMode, context, {
-                    static: label,
-                    active: label,
-                    completed: label,
+            return renderExpandableSection(context, "call", (expanded) =>
+                renderThirdPartyCall(theme, {
+                    state: callState(context),
+                    statusText: toolStatusLabel(labelMode, context, {
+                        static: label,
+                        active: label,
+                        completed: label,
+                    }),
+                    body: expanded
+                        ? previewArgsForContext(args, { ...context, expanded })
+                        : previewCompactArgs(args),
+                    maxRenderedLines: DEFAULT_TOOL_CALL_PREVIEW_LINES,
+                    expanded,
                 }),
-                body: context.expanded
-                    ? previewArgsForContext(args, context)
-                    : previewCompactArgs(args),
-                maxRenderedLines: DEFAULT_TOOL_CALL_PREVIEW_LINES,
-                expanded: context.expanded,
-            });
+            );
         },
-        renderResult(result, options, theme) {
+        renderResult(result, options, theme, context) {
             return textOutput(result) === undefined
                 ? emptyComponent()
-                : renderSimpleResult(theme, result, options);
+                : renderExpandableSection(
+                      { ...context, expanded: options.expanded },
+                      "result",
+                      (expanded) => renderSimpleResult(theme, result, { ...options, expanded }),
+                  );
         },
     };
 }

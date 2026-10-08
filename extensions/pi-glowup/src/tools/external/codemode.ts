@@ -1,7 +1,6 @@
-import { MouseRegion, type Component } from "@earendil-works/pi-tui";
-import Type, { type Static } from "typebox";
-import { Value } from "typebox/value";
 import { makeComponent, wrapPrefixedLine, toolExpandHint } from "../../rendering/component.ts";
+import { formatScriptInvocation, type ScriptBlockFormatter } from "../built-in/bash/formatter.ts";
+import { PreviewStore } from "../built-in/file-previews.ts";
 import { renderGlowupOutput } from "../../rendering/output.ts";
 import {
     detectStructuredOutputLanguage,
@@ -21,58 +20,111 @@ import { takeGraphemePrefix } from "../../text-boundaries.ts";
 import { boundedExpandedResult, callState } from "../call-rendering.ts";
 import { previewCompactArgs, textOutput } from "../previews.ts";
 import { getArray, getNonEmptyString, getNumber, getString } from "../tool-values.ts";
-import type {
-    ThirdPartyToolRenderContext,
-    ThirdPartyToolRenderer,
-    ThirdPartyToolResult,
-} from "../types.ts";
+import { renderExpandableSection } from "../section-expansion.ts";
+import type { ThirdPartyToolRenderer, ThirdPartyToolResult } from "../types.ts";
 
 const SCRIPT_HEADER = /^Script (?:completed|failed)\nWall time [\d.]+ seconds\nOutput:\n$/u;
 const VISIBLE_CALLS = 8;
 const MAX_CALLS = 256;
 
-const expansionSchema = Type.Object({
-    global: Type.Boolean(),
-    code: Type.Optional(Type.Boolean()),
-    response: Type.Optional(Type.Boolean()),
-});
-const rendererStateSchema = Type.Object(
-    { glowupCodemodeExpansion: Type.Optional(expansionSchema) },
-    { additionalProperties: true },
-);
+type FormattedCode = { readonly source: string; readonly code: string };
 
-type CodemodeExpansion = Static<typeof expansionSchema>;
-type CodemodeSection = "code" | "response";
-
-function expansionState(context: ThirdPartyToolRenderContext): CodemodeExpansion | undefined {
-    if (context.state === undefined) return undefined;
-
-    const state = Value.Parse(rendererStateSchema, context.state);
-    const current = state.glowupCodemodeExpansion;
-    if (current !== undefined && current.global === context.expanded) return current;
-
-    const expansion: CodemodeExpansion = { global: context.expanded };
-    state.glowupCodemodeExpansion = expansion;
-    return expansion;
-}
-
-function clickableSection(
-    component: Component,
-    context: ThirdPartyToolRenderContext,
-    expansion: CodemodeExpansion | undefined,
-    section: CodemodeSection,
-): Component {
-    const invalidate = context.invalidate;
-    if (expansion === undefined || invalidate === undefined) return component;
-
-    return new MouseRegion(component, (event) => {
-        if (event.type !== "click" || event.button !== "left") return undefined;
-
-        expansion[section] = !(expansion[section] ?? context.expanded);
-        invalidate();
-
-        return { handled: true };
+export function createCodemodePreview() {
+    const previews = new PreviewStore<FormattedCode>({
+        maxEntries: 300,
+        maxBytes: 4 * 1024 * 1024,
+        measureBytes: ({ source, code }) =>
+            Buffer.byteLength(source, "utf8") + Buffer.byteLength(code, "utf8"),
     });
+    const invalidations = new Map<string, () => void>();
+    const scheduled = new Map<
+        string,
+        {
+            code: string;
+            isCurrent: () => boolean;
+            invalidate: () => void;
+        }
+    >();
+    let generation = 0;
+    let controller = new AbortController();
+
+    return {
+        observe(toolCallId: string, invalidate: (() => void) | undefined): void {
+            if (invalidate === undefined) return;
+
+            invalidations.delete(toolCallId);
+            invalidations.set(toolCallId, invalidate);
+
+            if (invalidations.size > 300) {
+                const oldest = invalidations.keys().next().value;
+                if (oldest !== undefined) invalidations.delete(oldest);
+            }
+        },
+        get(toolCallId: string, source: string): string | undefined {
+            const preview = previews.get(toolCallId);
+            return preview?.source === source ? preview.code : undefined;
+        },
+        schedule(options: {
+            readonly toolCallId: string;
+            readonly code: string;
+            readonly formatter: ScriptBlockFormatter | undefined;
+            readonly isCurrent: () => boolean;
+            readonly invalidate: () => void;
+        }): void {
+            if (options.formatter === undefined) return;
+
+            const previous = scheduled.get(options.toolCallId);
+            scheduled.set(options.toolCallId, {
+                code: options.code,
+                isCurrent: options.isCurrent,
+                invalidate: options.invalidate,
+            });
+
+            if (previous?.code === options.code) return;
+
+            if (scheduled.size > 300) {
+                const oldest = scheduled.keys().next().value;
+                if (oldest !== undefined) scheduled.delete(oldest);
+            }
+
+            const currentGeneration = generation;
+            const columns = process.stdout.columns;
+            const targetWidth = Number.isFinite(columns) ? Math.max(20, columns - 4) : undefined;
+
+            void formatScriptInvocation(
+                { label: "Codemode", language: "javascript", code: options.code },
+                options.formatter,
+                { signal: controller.signal, ...(targetWidth !== undefined && { targetWidth }) },
+            )
+                .then((formatted) => {
+                    const current = scheduled.get(options.toolCallId);
+                    if (
+                        formatted.code === options.code ||
+                        generation !== currentGeneration ||
+                        current?.code !== options.code ||
+                        !current.isCurrent()
+                    )
+                        return;
+
+                    previews.set(options.toolCallId, {
+                        source: options.code,
+                        code: formatted.code,
+                    });
+
+                    invalidations.get(options.toolCallId)?.();
+                    current.invalidate();
+                })
+                .catch(() => {});
+        },
+        clear(): void {
+            generation += 1;
+            controller.abort();
+            controller = new AbortController();
+            previews.clear();
+            invalidations.clear();
+            scheduled.clear();
+        },
+    };
 }
 
 function formatCost(cost: number): string {
@@ -96,7 +148,8 @@ function structuredLines(value: JsonValue, label = "", depth = 0): string[] {
 
     let entries: ReadonlyArray<readonly [string, JsonValue]>;
     let empty: string;
-    if (isJsonArray(value)) {
+    const isArray = isJsonArray(value);
+    if (isArray) {
         entries = value.map((item) => ["- ", item]);
         empty = "[]";
     } else {
@@ -109,12 +162,18 @@ function structuredLines(value: JsonValue, label = "", depth = 0): string[] {
 
     if (entries.length === 0) return [`${prefix}${empty}`];
 
-    return [
-        ...(label.length > 0 ? [prefix.trimEnd()] : []),
-        ...entries.flatMap(([key, item]) =>
-            structuredLines(item, key, depth + (label.length > 0 ? 1 : 0)),
-        ),
-    ];
+    const lines = entries.flatMap(([key, item]) =>
+        structuredLines(item, key, depth + (label.length > 0 ? 1 : 0)),
+    );
+    if (label === "- " && !isArray) {
+        const childIndent = "  ".repeat(depth + 1);
+
+        return lines.map((line, index) =>
+            index === 0 ? `${prefix}${line.slice(childIndent.length)}` : line,
+        );
+    }
+
+    return [...(label.length > 0 ? [prefix.trimEnd()] : []), ...lines];
 }
 
 function displayOutput(text: string): string {
@@ -221,63 +280,71 @@ function callRows(
 
 export function createCodemodeRenderer(
     labelMode: ToolLabelMode = "static",
+    preview?: Pick<ReturnType<typeof createCodemodePreview>, "get" | "observe">,
 ): ThirdPartyToolRenderer {
     return {
         renderCall(args, theme, context) {
-            const expansion = expansionState(context);
-            const expanded = expansion?.code ?? context.expanded;
             const record = jsonObjectParser.parse(args);
-            const code = record === undefined ? undefined : getString(record, "code");
+            const sourceCode = record === undefined ? undefined : getString(record, "code");
+
+            preview?.observe(context.toolCallId, context.invalidate);
+
+            const code =
+                sourceCode === undefined
+                    ? undefined
+                    : (preview?.get(context.toolCallId, sourceCode) ?? sourceCode);
             if (code !== undefined) {
                 scheduleCodeOutputSyntaxLoad({ language: "javascript" }, context.invalidate, code);
             }
 
-            const header = renderGlowupCall(theme, {
-                state: callState(context),
-                statusText: toolStatusLabel(labelMode, context, {
-                    static: "Codemode",
-                    active: "Running code",
-                    completed: "Ran code",
-                }),
-            });
-            const source = renderGlowupOutput(theme, code, {
-                expanded,
-                mode: "head",
-                maxPreviewLines: 8,
-                prefixFirst: dim(theme, "  │ "),
-                prefixRest: dim(theme, "  │ "),
-                dimContent: false,
-                noOutputLabel: null,
-                syntax: { language: "javascript" },
-            });
-
-            const component = makeComponent((width) => [
-                ...header.render(width),
-                ...source.render(width),
-            ]);
-            return clickableSection(component, context, expansion, "code");
-        },
-        renderResult(result, options, theme, context) {
-            const expansion = expansionState(context);
-            const expanded = expansion?.response ?? options.expanded;
-            const rows = callRows(result, theme, expanded);
-            const text = options.isPartial ? undefined : scriptOutput(result);
-            const output = renderGlowupOutput(
-                theme,
-                expanded ? boundedExpandedResult(text) : text,
-                {
+            return renderExpandableSection(context, "call", (expanded) => {
+                const header = renderGlowupCall(theme, {
+                    state: callState(context),
+                    statusText: toolStatusLabel(labelMode, context, {
+                        static: "Codemode",
+                        active: "Running code",
+                        completed: "Ran code",
+                    }),
+                });
+                const source = renderGlowupOutput(theme, code, {
                     expanded,
                     mode: "head",
-                    maxPreviewLines: 5,
+                    maxPreviewLines: 8,
+                    prefixFirst: dim(theme, "  │ "),
+                    prefixRest: dim(theme, "  │ "),
+                    dimContent: false,
                     noOutputLabel: null,
+                    syntax: { language: "javascript" },
+                });
+
+                return makeComponent((width) => [...header.render(width), ...source.render(width)]);
+            });
+        },
+        renderResult(result, options, theme, context) {
+            const text = options.isPartial ? undefined : scriptOutput(result);
+
+            return renderExpandableSection(
+                { ...context, expanded: options.expanded },
+                "result",
+                (expanded) => {
+                    const rows = callRows(result, theme, expanded);
+                    const output = renderGlowupOutput(
+                        theme,
+                        expanded ? boundedExpandedResult(text) : text,
+                        {
+                            expanded,
+                            mode: "head",
+                            maxPreviewLines: 5,
+                            noOutputLabel: null,
+                        },
+                    );
+
+                    return makeComponent((width) => [
+                        ...rows.flatMap((row) => wrapPrefixedLine(row, width, "  │ ", "  │ ")),
+                        ...output.render(width),
+                    ]);
                 },
             );
-
-            const component = makeComponent((width) => [
-                ...rows.flatMap((row) => wrapPrefixedLine(row, width, "  │ ", "  │ ")),
-                ...output.render(width),
-            ]);
-            return clickableSection(component, context, expansion, "response");
         },
     };
 }

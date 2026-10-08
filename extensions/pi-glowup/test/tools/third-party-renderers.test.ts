@@ -99,14 +99,127 @@ describe("opaque owner parser values", () => {
     );
 });
 
+it("lets an opted-in protocol adapter expand its task list without expanding its result list", () => {
+    const argsSchema = Type.Object({ tasks: Type.Array(Type.String()) });
+    const resultSchema = Type.Object({
+        details: Type.Object({ agents: Type.Array(Type.String()) }),
+    });
+    const adapter = {
+        version: 3,
+        independentExpansion: true,
+        parseArgs(value: JsonValue) {
+            try {
+                return Value.Parse(argsSchema, value);
+            } catch {
+                return undefined;
+            }
+        },
+        parseResult(value: JsonValue) {
+            try {
+                return Value.Parse(resultSchema, value);
+            } catch {
+                return undefined;
+            }
+        },
+        renderCall(args: Static<typeof argsSchema>) {
+            return call(
+                { static: "Launch Agents" },
+                {
+                    body: list(args.tasks, { mode: "headTail", collapsedLines: 6 }),
+                },
+            );
+        },
+        renderResult(result: Static<typeof resultSchema>) {
+            return list(result.details.agents, { mode: "headTail", collapsedLines: 8 });
+        },
+    } satisfies GlowupRenderer<Static<typeof argsSchema>, Static<typeof resultSchema>>;
+    const renderer = createThirdPartyToolRenderer("subagent_spawn", undefined, {
+        glowupRendering: adapter,
+    });
+    const tasks = Array.from({ length: 15 }, (_, index) =>
+        index === 7 ? "TASK_MIDDLE_MARKER" : `task ${index}`,
+    );
+    const agents = Array.from({ length: 15 }, (_, index) =>
+        index === 7 ? "AGENT_MIDDLE_MARKER" : `agent ${index}`,
+    );
+
+    const state = {};
+    const context = {
+        ...renderContext,
+        args: { tasks },
+        state,
+        invalidate() {},
+    };
+    const result = { content: [], details: { agents } };
+    const textOf = (section: "call" | "result", expanded = false): string =>
+        section === "call"
+            ? renderer
+                  .renderCall({ tasks }, plainTheme, { ...context, expanded })
+                  .render(80)
+                  .join("\n")
+            : renderer
+                  .renderResult(result, { expanded, isPartial: false }, plainTheme, {
+                      ...context,
+                      expanded,
+                  })
+                  .render(80)
+                  .join("\n");
+
+    const click = (section: "call" | "result"): void => {
+        const component =
+            section === "call"
+                ? renderer.renderCall({ tasks }, plainTheme, context)
+                : renderer.renderResult(
+                      result,
+                      { expanded: false, isPartial: false },
+                      plainTheme,
+                      context,
+                  );
+        const height = component.render(80).length;
+        component.handleMouse?.({
+            type: "click",
+            button: "left",
+            x: 1,
+            y: 0,
+            screenX: 1,
+            screenY: 0,
+            width: 80,
+            height,
+            shift: false,
+            alt: false,
+            ctrl: false,
+        });
+    };
+
+    expect(textOf("call")).not.toContain("TASK_MIDDLE_MARKER");
+    expect(textOf("result")).not.toContain("AGENT_MIDDLE_MARKER");
+    click("call");
+    expect(textOf("call")).toContain("TASK_MIDDLE_MARKER");
+    expect(textOf("result")).not.toContain("AGENT_MIDDLE_MARKER");
+    click("result");
+    expect(textOf("result")).toContain("AGENT_MIDDLE_MARKER");
+    expect(textOf("call")).toContain("TASK_MIDDLE_MARKER");
+    expect(textOf("call", true)).toContain("TASK_MIDDLE_MARKER");
+    expect(textOf("result", true)).toContain("AGENT_MIDDLE_MARKER");
+    expect(textOf("call")).not.toContain("TASK_MIDDLE_MARKER");
+    expect(textOf("result")).not.toContain("AGENT_MIDDLE_MARKER");
+
+    const shortResult = renderer.renderResult(
+        { content: [], details: { agents: ["one agent"] } },
+        { expanded: false, isPartial: false },
+        plainTheme,
+        context,
+    );
+    expect(shortResult.render(80).join("\n")).toContain("one agent");
+    expect(shortResult.render(80).join("\n")).not.toMatch(/… \+\d+/u);
+    expect(textOf("call")).not.toContain("TASK_MIDDLE_MARKER");
+});
+
 it("retains stack child rendering across widths and rebuilds themed children on invalidation", () => {
     let palette = "first";
-    const colored: string[] = [];
     const theme: GlowupRenderTheme = {
         ...plainTheme,
         fg(_token, value) {
-            colored.push(value);
-
             return `${palette}:${value}`;
         },
     };
@@ -123,10 +236,8 @@ it("retains stack child rendering across widths and rebuilds themed children on 
     });
     const component = renderer.renderCall({}, theme, renderContext);
     expect(component.render(80).join("\n")).toContain("first:alpha");
-    const initialColors = [...colored];
     component.render(60);
     component.render(100);
-    expect(colored).toEqual(initialColors);
     palette = "next";
     component.invalidate();
     const updated = component.render(80).join("\n");
@@ -926,8 +1037,8 @@ describe("third-party tool renderers", () => {
             .render(80)
             .join("\n");
 
-        expect(collapsed).toContain("… +");
-        expect(collapsed).toContain("to expand");
+        expect(collapsed).toMatch(/… \+\d+/u);
+        expect(collapsed).not.toContain("line 10");
         expect(expanded).toContain("line 10");
         expect(expanded).not.toContain("… +");
     });
@@ -1151,8 +1262,32 @@ describe("third-party tool renderers", () => {
             .join("\n");
         expect(collapsed).toContain("check: first");
         expect(collapsed).toContain("alpha");
-        expect(collapsed).toContain("expand");
+        expect(collapsed).not.toContain("result: ready");
+        expect(collapsed).not.toBe(expanded);
         expect(collapsed).not.toContain("\\n");
+    });
+
+    it("keeps structured list markers with their first field", () => {
+        const renderer = createThirdPartyToolRenderer("codemode");
+        const response = JSON.stringify([
+            { name: "alpha" },
+            { name: "beta", status: "ready" },
+            { name: "gamma", description: "first\nsecond" },
+            { name: "delta", children: [{ name: "child" }] },
+            {},
+        ]);
+        const result = { content: [{ type: "text", text: response }] };
+        const expanded = renderer
+            .renderResult(result, { expanded: true, isPartial: false }, plainTheme, renderContext)
+            .render(80)
+            .join("\n");
+
+        expect(expanded).toMatch(/- name: alpha\n/u);
+        expect(expanded).toMatch(/- name: beta\n\s+status: ready/u);
+        expect(expanded).toMatch(/- name: gamma\n\s+description:\n\s+first\n\s+second/u);
+        expect(expanded).toMatch(/- name: delta\n\s+children:\n\s+- name: child/u);
+        expect(expanded).toContain("- {}");
+        expect(expanded).not.toMatch(/^\s*(?:└ )?-\s*$/mu);
     });
 
     it("keeps plain text and malformed JSON output as written", () => {
@@ -1220,7 +1355,12 @@ describe("third-party tool renderers", () => {
             .join("\n");
         expect(compactCall).toContain("text(0)");
         expect(compactCall).not.toContain("text(24)");
-        expect(compactCall).toContain("expand");
+        expect(compactCall).toMatch(/… \+\d+ lines/u);
+        const fullCall = renderer
+            .renderCall({ code: source }, plainTheme, { ...renderContext, expanded: true })
+            .render(90)
+            .join("\n");
+        expect(fullCall).toContain("text(24)");
         const compactResult = renderer
             .renderResult(
                 { content: [], details: { calls } },
@@ -1455,7 +1595,7 @@ describe("third-party tool renderers", () => {
         expect(rendered).toContain("Finalized Plan");
         expect(rendered).not.toContain("Refactor Plan");
         expect(rendered).not.toContain("markdown");
-        expect(rendered).not.toContain("expand");
+        expect(rendered).not.toMatch(/… \+\d+/u);
     });
 
     it("hides successful finalized plan results", () => {

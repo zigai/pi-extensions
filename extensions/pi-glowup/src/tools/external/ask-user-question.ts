@@ -19,6 +19,7 @@ import {
     renderThirdPartyCall,
 } from "../call-rendering.ts";
 import { previewArgsForContext, textOutput } from "../previews.ts";
+import { renderExpandableSection } from "../section-expansion.ts";
 import { jsonValueParser, type JsonValue, jsonObjectParser } from "../../json-value.ts";
 import { stringParser } from "../../json-scalar.ts";
 import {
@@ -250,37 +251,45 @@ export function createAskUserQuestionRenderer(
         renderCall(args, theme, context) {
             if (shouldDeferSimpleToolCall(context)) return emptyComponent();
 
-            return renderThirdPartyCall(theme, {
-                state: callState(context),
-                statusText: toolStatusLabel(labelMode, context, labels),
-                body: summarizeAskUserQuestionArgs(
-                    jsonValueParser.parse(args),
-                    theme,
-                    context.expanded,
-                    context,
-                ),
-                maxRenderedLines: DEFAULT_TOOL_CALL_PREVIEW_LINES,
-                expanded: context.expanded,
-            });
+            return renderExpandableSection(context, "call", (expanded) =>
+                renderThirdPartyCall(theme, {
+                    state: callState(context),
+                    statusText: toolStatusLabel(labelMode, context, labels),
+                    body: summarizeAskUserQuestionArgs(
+                        jsonValueParser.parse(args),
+                        theme,
+                        expanded,
+                        { ...context, expanded },
+                    ),
+                    maxRenderedLines: DEFAULT_TOOL_CALL_PREVIEW_LINES,
+                    expanded,
+                }),
+            );
         },
         renderResult(result, options, theme, context) {
-            const summary = summarizeAskUserQuestionResult(
-                result,
-                jsonValueParser.parse(context.args),
-                theme,
-                options.expanded,
-            );
-            if (summary !== undefined && summary.length > 0) {
-                return renderGlowupOutput(theme, summary, {
-                    expanded: options.expanded,
-                    mode: "head",
-                    maxPreviewLines: 6,
-                    dimContent: false,
-                    noOutputLabel: null,
-                });
-            }
+            return renderExpandableSection(
+                { ...context, expanded: options.expanded },
+                "result",
+                (expanded) => {
+                    const summary = summarizeAskUserQuestionResult(
+                        result,
+                        jsonValueParser.parse(context.args),
+                        theme,
+                        expanded,
+                    );
+                    if (summary !== undefined && summary.length > 0) {
+                        return renderGlowupOutput(theme, summary, {
+                            expanded,
+                            mode: "head",
+                            maxPreviewLines: 6,
+                            dimContent: false,
+                            noOutputLabel: null,
+                        });
+                    }
 
-            return renderSimpleResult(theme, result, options);
+                    return renderSimpleResult(theme, result, { ...options, expanded });
+                },
+            );
         },
     };
 }

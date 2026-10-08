@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ScriptBlockFormatter } from "../../../../src/tools/built-in/bash/formatter.ts";
+import { createNativeBashFeature } from "../../../../src/tools/built-in/bash/preview.ts";
 import {
     rememberRawScriptPreview,
     scheduleFormattedScriptPreview,
@@ -15,6 +16,35 @@ class RecordingPreviewSink {
 }
 
 describe("script preview events", () => {
+    it("runs one formatter per finalized command", async () => {
+        const bash = createNativeBashFeature();
+        const pending: Array<(code: string) => void> = [];
+        const formatter: ScriptBlockFormatter = async () =>
+            new Promise((resolve) => {
+                pending.push(resolve);
+            });
+        const options = {
+            toolCallId: "node-call",
+            formatter,
+            signal: undefined,
+            isCurrent: () => true,
+            invalidate: () => {},
+        };
+
+        bash.schedule({ ...options, command: `node -e 'console.log(1)'` });
+        bash.schedule({ ...options, command: `node -e 'console.log(1)'` });
+        expect(pending).toHaveLength(1);
+
+        bash.schedule({ ...options, command: `node -e 'console.log(3)'` });
+        expect(pending).toHaveLength(2);
+
+        pending[0]?.("console.log(2)");
+        pending[1]?.("console.log(4)");
+        await new Promise<void>((resolve) => {
+            setImmediate(resolve);
+        });
+    });
+
     it("replaces the preflight preview with the final bash command", () => {
         const sink = new RecordingPreviewSink();
 

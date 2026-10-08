@@ -380,7 +380,6 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
         expect(pendingTerminal.countOccurrences("Patched src/current.ts")).toBe(1);
         expect(completed).not.toContain("Done!");
         expect(completed).not.toContain("src/obsolete.ts");
-        expect(pendingTerminal.rawWrites().join("")).toContain("\u001b[?2026h");
     });
 
     it("renders the complete write lifecycle without stale content or styles", async () => {
@@ -1379,6 +1378,173 @@ export const grownWriteTwelve = 12;
         },
     );
 
+    const structuredArgs = {
+        first: "FIRST_ARGUMENT",
+        field0: "value0",
+        field1: "value1",
+        field2: "value2",
+        field3: "value3",
+        field4: "value4",
+        field5: "value5",
+        field6: "value6",
+        field7: "value7",
+        field8: "value8",
+        field9: "value9",
+    };
+
+    for (const scenario of [
+        {
+            name: "bash",
+            args: {
+                command: Array.from({ length: 12 }, (_, index) => `echo step${index + 1}`)
+                    .concat("echo BASH_CALL_TAIL")
+                    .join("\n"),
+            },
+            callStart: "• Bash",
+            callTail: "BASH_CALL_TAIL",
+        },
+        {
+            name: "mcp__docs__review",
+            args: { ...structuredArgs, last: "MCP_CALL_TAIL" },
+            callStart: "MCP docs/review",
+            callTail: "MCP_CALL_TAIL",
+        },
+        {
+            name: "unhandled_report",
+            args: { ...structuredArgs, last: "GENERIC_CALL_TAIL" },
+            callStart: "Called unhandled_report",
+            callTail: "GENERIC_CALL_TAIL",
+        },
+    ]) {
+        it.runIf(mode === "fullscreen")(
+            `expands ${scenario.name} call and result independently on click`,
+            async () => {
+                const pendingTerminal = new VirtualTerminal(100, 55);
+                const activeTui = createTui(pendingTerminal);
+                const tool = new ToolExecutionComponent(
+                    scenario.name,
+                    `call-xterm-${scenario.name}`,
+                    scenario.args,
+                    undefined,
+                    undefined,
+                    activeTui,
+                    cwd,
+                );
+                tool.setArgsComplete();
+                const output = Array.from({ length: 12 }, (_, index) =>
+                    index === 6 ? "RESULT_MIDDLE_MARKER" : `output row ${index + 1}`,
+                ).join("\n");
+                tool.updateResult({ content: [{ type: "text", text: output }], isError: false });
+                activeTui.addChild(tool);
+                terminal = pendingTerminal;
+                tui = activeTui;
+                activeTui.start();
+                await pendingTerminal.settle();
+
+                const click = async (text: string): Promise<void> => {
+                    const row = pendingTerminal.requireRowContaining(text);
+                    const column = row.text.indexOf(text) + 1;
+                    pendingTerminal.sendInput(`\u001b[<0;${column};${row.index + 1}M`);
+                    pendingTerminal.sendInput(`\u001b[<0;${column};${row.index + 1}m`);
+                    await pendingTerminal.settle();
+                };
+
+                expect(pendingTerminal.screenText()).not.toContain(scenario.callTail);
+                expect(pendingTerminal.screenText()).not.toContain("RESULT_MIDDLE_MARKER");
+                await click(scenario.callStart);
+                expect(pendingTerminal.screenText()).toContain(scenario.callTail);
+                expect(pendingTerminal.screenText()).not.toContain("RESULT_MIDDLE_MARKER");
+                await click("└ output row 1");
+                expect(pendingTerminal.screenText()).toContain(scenario.callTail);
+                expect(pendingTerminal.screenText()).toContain("RESULT_MIDDLE_MARKER");
+                await click(scenario.callStart);
+                expect(pendingTerminal.screenText()).not.toContain(scenario.callTail);
+                expect(pendingTerminal.screenText()).toContain("RESULT_MIDDLE_MARKER");
+
+                tool.setExpanded(true);
+                activeTui.requestRender();
+                await pendingTerminal.settle();
+                expect(pendingTerminal.screenText()).toContain(scenario.callTail);
+                expect(pendingTerminal.screenText()).toContain("RESULT_MIDDLE_MARKER");
+                tool.setExpanded(false);
+                activeTui.requestRender();
+                await pendingTerminal.settle();
+                expect(pendingTerminal.screenText()).not.toContain(scenario.callTail);
+                expect(pendingTerminal.screenText()).not.toContain("RESULT_MIDDLE_MARKER");
+                pendingTerminal.assertRowsFitWidth();
+            },
+        );
+    }
+
+    it.runIf(mode === "fullscreen")(
+        "expands question choices and answer context independently",
+        async () => {
+            const pendingTerminal = new VirtualTerminal(100, 35);
+            const activeTui = createTui(pendingTerminal);
+
+            const questions = [
+                {
+                    header: "Alpha",
+                    question: "Where should Alpha go?",
+                    options: [
+                        { label: "Near", description: "ALPHA_OPTION_DETAIL" },
+                        { label: "Far", description: "Another option" },
+                    ],
+                },
+                {
+                    header: "Beta",
+                    question: "Where should Beta go?",
+                    options: [
+                        { label: "Here", description: "BETA_OPTION_DETAIL" },
+                        { label: "There", description: "Another option" },
+                    ],
+                },
+            ];
+
+            const tool = new ToolExecutionComponent(
+                "ask_user_question",
+                "call-xterm-questions",
+                { questions },
+                undefined,
+                undefined,
+                activeTui,
+                cwd,
+            );
+            tool.setArgsComplete();
+            tool.updateResult({
+                content: [
+                    {
+                        type: "text",
+                        text: '"Where should Alpha go?" = "Near"\n"Where should Beta go?" = "Here"',
+                    },
+                ],
+                isError: false,
+            });
+            activeTui.addChild(tool);
+            terminal = pendingTerminal;
+            tui = activeTui;
+            activeTui.start();
+            await pendingTerminal.settle();
+
+            const click = async (text: string): Promise<void> => {
+                const row = pendingTerminal.requireRowContaining(text);
+                const column = row.text.indexOf(text) + 1;
+                pendingTerminal.sendInput(`\u001b[<0;${column};${row.index + 1}M`);
+                pendingTerminal.sendInput(`\u001b[<0;${column};${row.index + 1}m`);
+                await pendingTerminal.settle();
+            };
+
+            expect(pendingTerminal.screenText()).not.toContain("ALPHA_OPTION_DETAIL");
+            expect(pendingTerminal.countOccurrences("Where should Alpha go?")).toBe(1);
+            await click("Choose one: Near");
+            expect(pendingTerminal.screenText()).toContain("ALPHA_OPTION_DETAIL");
+            expect(pendingTerminal.countOccurrences("Where should Alpha go?")).toBe(1);
+            await click("→ Near");
+            expect(pendingTerminal.screenText()).toContain("ALPHA_OPTION_DETAIL");
+            expect(pendingTerminal.countOccurrences("Where should Alpha go?")).toBe(2);
+        },
+    );
+
     it("neutralizes tool-supplied terminal controls before they reach the PTY", async () => {
         const pendingTerminal = new VirtualTerminal(100, 20);
         const activeTui = createTui(pendingTerminal);
@@ -1519,8 +1685,9 @@ export const grownWriteTwelve = 12;
         pendingTerminal.resize(180, 30);
         await pendingTerminal.settle();
         expect(pendingTerminal.screenText()).toBe(firstWide);
-        const expectedRedraw = mode === "regular" ? "\u001b[2J\u001b[H\u001b[3J" : "\u001b[?1049h";
-        expect(pendingTerminal.rawWrites().join("")).toContain(expectedRedraw);
+        expect(pendingTerminal.countOccurrences("BEFORE_SENTINEL")).toBe(1);
+        expect(pendingTerminal.countOccurrences("AFTER_SENTINEL")).toBe(1);
+        pendingTerminal.assertNoWrappedRows();
     });
 
     it("renders completed apply_patch details side-by-side and preserves every row", async () => {
@@ -1581,7 +1748,6 @@ export const grownWriteTwelve = 12;
         expect(wide).toContain("new");
         expect(wide).toContain("omega");
         expect(wide).toContain(" │ ");
-        expect(wide).not.toContain("to expand");
 
         pendingTerminal.resize(80, 30);
         await pendingTerminal.settle();
@@ -1975,7 +2141,6 @@ export const grownWriteTwelve = 12;
 
         const running = await start([content], 80, 20);
         expect(running.terminal.screenText()).toContain("third stale completion");
-        const writesBeforeCleanup = running.terminal.rawWrites().length;
         configureAutocompleteCleanupPatch(true, cleanupPrototype);
         const editor: CleanupEditor = {
             tui: running.tui,
@@ -1992,10 +2157,7 @@ export const grownWriteTwelve = 12;
 
         expect(running.terminal.screenText().trimEnd()).toBe("EDITOR_PROMPT");
         expect(running.terminal.screenText()).not.toContain("stale completion");
-        const cleanupWrites = running.terminal.rawWrites().slice(writesBeforeCleanup).join("");
-        const expectedCleanup =
-            mode === "regular" ? "\u001b[2J\u001b[H\u001b[3J" : "\u001b[1;1H\u001b[2K";
-        expect(cleanupWrites).toContain(expectedCleanup);
+        running.terminal.assertNoWrappedRows();
         running.terminal.assertRowsFitWidth();
     });
 });

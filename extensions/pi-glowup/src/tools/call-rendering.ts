@@ -17,6 +17,7 @@ import type {
 } from "./types.ts";
 import { displayToolName } from "./tool-values.ts";
 import { detailsOutput, previewArgsForContext, textOutput } from "./previews.ts";
+import { renderExpandableSection } from "./section-expansion.ts";
 
 export const DEFAULT_TOOL_CALL_PREVIEW_LINES = 6;
 const MAX_EXPANDED_RESULT_CHARACTERS = 200_000;
@@ -141,20 +142,26 @@ export function createGenericRenderer(
 
             const staticLabel = label ?? displayToolName(toolName);
 
-            return renderThirdPartyCall(theme, {
-                state: callState(context),
-                statusText: toolStatusLabel(labelMode, context, {
-                    static: staticLabel,
-                    active: `Calling ${staticLabel}`,
-                    completed: `Called ${staticLabel}`,
+            return renderExpandableSection(context, "call", (expanded) =>
+                renderThirdPartyCall(theme, {
+                    state: callState(context),
+                    statusText: toolStatusLabel(labelMode, context, {
+                        static: staticLabel,
+                        active: `Calling ${staticLabel}`,
+                        completed: `Called ${staticLabel}`,
+                    }),
+                    body: previewArgsForContext(args, { ...context, expanded }),
+                    maxRenderedLines: DEFAULT_TOOL_CALL_PREVIEW_LINES,
+                    expanded,
                 }),
-                body: previewArgsForContext(args, context),
-                maxRenderedLines: DEFAULT_TOOL_CALL_PREVIEW_LINES,
-                expanded: context.expanded,
-            });
+            );
         },
-        renderResult(result, options, theme) {
-            return renderSimpleResult(theme, result, options);
+        renderResult(result, options, theme, context) {
+            return renderExpandableSection(
+                { ...context, expanded: options.expanded },
+                "result",
+                (expanded) => renderSimpleResult(theme, result, { ...options, expanded }),
+            );
         },
     };
 }

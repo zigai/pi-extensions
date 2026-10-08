@@ -189,6 +189,15 @@ function streamPatchResponse(
     return stream;
 }
 
+function streamCodemodeResponse(model: Model<string>): AssistantMessageEventStream {
+    return streamCompletedToolCall(model, {
+        type: "toolCall",
+        id: "pty-codemode-format",
+        name: "codemode",
+        arguments: { code: "const message = 'CODEMODE_SOURCE'; text(message);" },
+    });
+}
+
 function streamBashChainResponse(model: Model<string>): AssistantMessageEventStream {
     const toolCall: ToolCall = {
         type: "toolCall",
@@ -305,6 +314,30 @@ function streamReclassifiedBashResponse(
     return stream;
 }
 
+function streamFormattedNodeResponse(model: Model<string>): AssistantMessageEventStream {
+    return streamCompletedToolCall(model, {
+        type: "toolCall",
+        id: "pty-formatted-node",
+        name: "bash",
+        arguments: {
+            command:
+                `node --input-type=module -e 'console.log("NODE_BEGIN"); ` +
+                `await new Promise(resolve => setTimeout(resolve, 1200)); console.log("NODE_DONE")'`,
+        },
+    });
+}
+
+function streamFastNodeResponse(model: Model<string>): AssistantMessageEventStream {
+    return streamCompletedToolCall(model, {
+        type: "toolCall",
+        id: "pty-fast-node",
+        name: "bash",
+        arguments: {
+            command: `node -e 'const value = "FAST_NODE_SOURCE"; console.log(value)'`,
+        },
+    });
+}
+
 function streamFormattedPythonResponse(model: Model<string>): AssistantMessageEventStream {
     const toolCall: ToolCall = {
         type: "toolCall",
@@ -396,6 +429,7 @@ function streamOfflineProvider(
         return streamWrappingEditResponse(model);
     }
 
+    if (prompt.includes("deterministic codemode format")) return streamCodemodeResponse(model);
     if (prompt.includes("deterministic bash chain")) return streamBashChainResponse(model);
     if (prompt.includes("deterministic bash layout")) return streamBashLayoutResponse(model);
 
@@ -405,6 +439,14 @@ function streamOfflineProvider(
 
     if (prompt.includes("deterministic formatted python")) {
         return streamFormattedPythonResponse(model);
+    }
+
+    if (prompt.includes("deterministic formatted node")) {
+        return streamFormattedNodeResponse(model);
+    }
+
+    if (prompt.includes("deterministic fast node")) {
+        return streamFastNodeResponse(model);
     }
 
     if (prompt.includes("deterministic uv python args")) {
@@ -438,6 +480,21 @@ export default function offlinePtyProvider(pi: ExtensionAPI): void {
         ],
         streamSimple: streamOfflineProvider,
     });
+
+    pi.registerTool(
+        defineTool({
+            name: "codemode",
+            label: "Codemode",
+            description: "Deterministic JavaScript preview fixture.",
+            parameters: Type.Object({ code: Type.String() }),
+            async execute(_toolCallId, params) {
+                return Promise.resolve({
+                    content: [{ type: "text" as const, text: params.code }],
+                    details: {},
+                });
+            },
+        }),
+    );
 
     pi.registerTool(
         withGlowupRendering(

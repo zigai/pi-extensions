@@ -15,17 +15,32 @@ import {
     type TextResult,
 } from "../context.ts";
 import {
+    formatAndStoreScriptPreview,
     rememberRawScriptPreview,
     scheduleFormattedScriptPreview,
     type FormatScriptPreviewOptions,
 } from "./format-preview.ts";
 import type { ScriptBlockFormatter } from "./formatter.ts";
-import { boundedScriptPreview, createScriptPreviewStore } from "./preview-store.ts";
+import {
+    boundedScriptPreview,
+    createScriptPreviewStore,
+    MAX_SCRIPT_PREVIEW_ENTRIES,
+} from "./preview-store.ts";
 import { renderBashCommandCall, type BashCommandRenderOptions } from "./renderer.ts";
 import { StreamingScriptIdentityStore } from "./streaming-identity.ts";
+import { renderExpandableSection } from "../../section-expansion.ts";
+
+function scriptPreviewTargetWidth(targetWidth?: number): number | undefined {
+    // SAFETY: process.stdout.columns is number | undefined at runtime in Node.js.
+    const stdoutColumns = process.stdout.columns as number | undefined;
+    return (
+        targetWidth ?? (stdoutColumns !== undefined ? Math.max(20, stdoutColumns - 4) : undefined)
+    );
+}
 
 export function createNativeBashFeature() {
     const scriptPreviews = createScriptPreviewStore();
+    const scheduledCommands = new Map<string, string>();
     const PARTIAL_BASH_COMMAND_PREVIEW_CHARS = 4_000;
     const streamingScriptIdentities = new StreamingScriptIdentityStore();
     const bashRenderInvalidations = new Map<string, () => void>();
@@ -108,7 +123,9 @@ export function createNativeBashFeature() {
             bashOptions = { ...bashOptions, pureScriptOverride: stableScript };
         }
 
-        return renderBashCommandCall(theme, displayCommand, bashOptions);
+        return renderExpandableSection(context, "call", (expanded) =>
+            renderBashCommandCall(theme, displayCommand, { ...bashOptions, expanded }),
+        );
     }
 
     function renderBashResult(
@@ -138,11 +155,16 @@ export function createNativeBashFeature() {
             outputOptions = { ...outputOptions, syntax: { language } };
         }
 
-        return renderGlowupOutput(theme, output, outputOptions);
+        return renderExpandableSection(
+            { ...context, expanded: options.expanded },
+            "result",
+            (expanded) => renderGlowupOutput(theme, output, { ...outputOptions, expanded }),
+        );
     }
 
     function clear(): void {
         scriptPreviews.clear();
+        scheduledCommands.clear();
         bashRenderInvalidations.clear();
         streamingScriptIdentities.clear();
     }
@@ -160,13 +182,22 @@ export function createNativeBashFeature() {
         readonly isCurrent: () => boolean;
         readonly invalidate: () => void;
     }): boolean {
-        remember(options.toolCallId, options.command);
+        if (
+            options.formatter !== undefined &&
+            scheduledCommands.get(options.toolCallId) === options.command
+        ) {
+            return true;
+        }
 
-        // SAFETY: process.stdout.columns is number | undefined at runtime in Node.js.
-        const stdoutColumns = process.stdout.columns as number | undefined;
-        const columns =
-            options.targetWidth ??
-            (stdoutColumns !== undefined ? Math.max(20, stdoutColumns - 4) : undefined);
+        remember(options.toolCallId, options.command);
+        scheduledCommands.delete(options.toolCallId);
+
+        if (options.formatter !== undefined) {
+            scheduledCommands.set(options.toolCallId, options.command);
+            trimOldestMapEntries(scheduledCommands, MAX_BASH_RENDER_INVALIDATIONS);
+        }
+
+        const columns = scriptPreviewTargetWidth(options.targetWidth);
 
         const formatOptions: FormatScriptPreviewOptions = {
             sink: scriptPreviews,
@@ -175,21 +206,58 @@ export function createNativeBashFeature() {
             formatter: options.formatter,
             ...(columns !== undefined && { targetWidth: columns }),
             ...(options.signal !== undefined && { signal: options.signal }),
-            isCurrent: options.isCurrent,
+            isCurrent: () =>
+                options.isCurrent() &&
+                scheduledCommands.get(options.toolCallId) === options.command,
             invalidate: () => {
                 bashRenderInvalidations.get(options.toolCallId)?.();
                 options.invalidate();
             },
         };
+
         scheduleFormattedScriptPreview(formatOptions);
 
         return options.formatter !== undefined;
+    }
+
+    async function restore(options: {
+        readonly calls: Iterable<{ readonly toolCallId: string; readonly command: string }>;
+        readonly formatter: ScriptBlockFormatter | undefined;
+        readonly signal: AbortSignal;
+        readonly isCurrent: () => boolean;
+        readonly invalidate: () => void;
+    }): Promise<void> {
+        if (options.formatter === undefined) return;
+
+        const targetWidth = scriptPreviewTargetWidth();
+        let restored = 0;
+        for (const call of options.calls) {
+            if (options.signal.aborted || !options.isCurrent()) return;
+            if (parseScriptInvocation(call.command) === undefined) continue;
+            if (restored >= MAX_SCRIPT_PREVIEW_ENTRIES) return;
+
+            restored += 1;
+            await formatAndStoreScriptPreview({
+                sink: scriptPreviews,
+                toolCallId: call.toolCallId,
+                command: call.command,
+                formatter: options.formatter,
+                signal: options.signal,
+                ...(targetWidth !== undefined && { targetWidth }),
+                isCurrent: options.isCurrent,
+                invalidate: () => {
+                    bashRenderInvalidations.get(call.toolCallId)?.();
+                    options.invalidate();
+                },
+            }).catch(() => {});
+        }
     }
 
     return {
         stats: () => scriptPreviews.stats(),
         remember,
         schedule,
+        restore,
         renderBashCall,
         renderBashResult,
         clear,

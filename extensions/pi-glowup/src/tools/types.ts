@@ -69,6 +69,11 @@ export type ThirdPartyToolRenderingOptions = {
     readonly renderers?: ReadonlyArray<ThirdPartyToolRendererPlugin>;
     readonly labelMode?: ToolLabelMode;
     readonly mutationSettings?: MutationSettings;
+
+    readonly codemodePreview?: {
+        get(toolCallId: string, source: string): string | undefined;
+        observe(toolCallId: string, invalidate: (() => void) | undefined): void;
+    };
 };
 
 /** Builds a public-compatible execution context for internal renderers. */

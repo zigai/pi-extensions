@@ -58,7 +58,8 @@ const TRANSITIONAL_RENDERER_PLUGINS: ReadonlyArray<ThirdPartyToolRendererPlugin>
     {
         name: "codemode",
         matches: (toolName) => toolName === "codemode",
-        createRenderer: (_toolName, options) => createCodemodeRenderer(options?.labelMode),
+        createRenderer: (_toolName, options) =>
+            createCodemodeRenderer(options?.labelMode, options?.codemodePreview),
     },
     {
         name: "agent-browser",

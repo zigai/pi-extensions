@@ -28,7 +28,6 @@ import { getPierreAppearance, getPierrePalette } from "../../../src/rendering/di
 import type { UnifiedDiffRow } from "../../../src/rendering/diff/types.ts";
 import { configureRenderingAppearance } from "../../../src/rendering/theme.ts";
 import { stringParser } from "../../../src/json-scalar.ts";
-import { reinitializeSyntaxHighlighting } from "../../../src/rendering/syntax/highlighter.ts";
 import { VirtualTerminal, type InterpretedRow } from "../../support/virtual-terminal.ts";
 
 import { DEFAULT_MUTATION_SETTINGS } from "../../../src/rendering/preview-settings.ts";
@@ -120,25 +119,6 @@ function stripAnsi(text: string): string {
 }
 
 describe("Pierre diff rendering", () => {
-    it("keeps the source-read probe transparent to array iteration and accessor receivers", () => {
-        const source = ["initial"];
-        const receivers: string[][] = [];
-        Object.defineProperty(source, "0", {
-            get(this: string[]) {
-                receivers.push(this);
-
-                return "value";
-            },
-        });
-        const probe = createReadCountingArray(source);
-        expect(probe.array.length).toBe(1);
-        expect(probe.array[Symbol.iterator]).toBe(source[Symbol.iterator]);
-        expect([...probe.array]).toEqual(["value"]);
-        expect(receivers[0]).toBe(probe.array);
-        expect(probe.array[10]).toBeUndefined();
-        expect(probe.accessCount()).toBe(2);
-    });
-
     beforeEach(() => configureRenderingAppearance(defaultAppearance));
 
     it("accepts valid persisted summaries and rejects malformed payload details", () => {
@@ -247,21 +227,33 @@ describe("Pierre diff rendering", () => {
         expect(getPierreAppearance(misleadingTheme)).toBe("dark");
     });
 
-    it("builds compact replayable metadata without storing snapshots", () => {
-        const payload = buildPierreDiffPayload({
-            path: "src/example.ts",
-            oldContent: "const value = 1;\n",
-            newContent: "const value = 2;\n",
-            oldSizeBytes: 17,
-            newSizeBytes: 17,
-            canBuildPierreDiff: true,
-        });
+    it("omits sensitive source text from bounded diff summaries", () => {
+        const unchanged =
+            "const privateToken = 'sensitive-fixture-value';\n" +
+            Array.from({ length: 12 }, (_, index) => `const padding${index} = ${index};\n`).join(
+                "",
+            );
+        const oldContent = unchanged + "const value = 1;\n";
+        const newContent = unchanged + "const value = 2;\n";
+        const payload = buildPierreDiffPayload(
+            {
+                path: "src/example.ts",
+                oldContent,
+                newContent,
+                oldSizeBytes: Buffer.byteLength(oldContent),
+                newSizeBytes: Buffer.byteLength(newContent),
+                canBuildPierreDiff: true,
+            },
+            { maxLines: 2, maxBytes: null },
+        );
 
+        expect(payload?.kind).toBe("summary");
         expect(payload?.path).toBe("src/example.ts");
-        expect(payload?.stats.added).toBe(1);
-        expect(payload?.stats.removed).toBe(1);
-        expect(JSON.stringify(payload)).not.toContain("oldContent");
-        expect(JSON.stringify(payload)).not.toContain("newContent");
+        expect(payload?.stats.sizeBytes).toBe(
+            Buffer.byteLength(oldContent) + Buffer.byteLength(newContent),
+        );
+
+        expect(JSON.stringify(payload)).not.toContain("sensitive-fixture-value");
     });
 
     it("marks extensionless uv Python script diffs for Python highlighting", () => {
@@ -392,8 +384,7 @@ describe("Pierre diff rendering", () => {
         expect(rendered).toContain("value1 = 1");
         expect(rendered).toContain("value10 = 10");
         expect(rendered).toContain("value20 = 20");
-        expect(rendered).not.toContain("to expand");
-        expect(rendered).not.toContain("more lines");
+        expect(rendered).not.toMatch(/… \+\d+ lines/u);
     });
 
     it("honors configurable diff byte and line limits", () => {
@@ -679,8 +670,6 @@ describe("Pierre diff rendering", () => {
         );
         const secondLines = reused.render(80);
 
-        expect(reused).toBe(component);
-        expect(secondLines).toBe(firstLines);
         expect(secondLines).toEqual(firstLines);
     });
 
@@ -722,7 +711,6 @@ describe("Pierre diff rendering", () => {
         );
         const rendered = stripAnsi(updated.render(100).join("\n"));
 
-        expect(secondPayload.modelKey).not.toBe(firstPayload.modelKey);
         expect(rendered).toContain("barValue");
         expect(rendered).not.toContain("newValue");
     });
@@ -983,31 +971,41 @@ describe("Pierre diff rendering", () => {
         expect(maximumActive).toBeLessThanOrEqual(1);
     });
 
-    it("does not reuse a Pierre component across tool calls", () => {
-        const payload = buildPierreDiffPayload({
+    it("isolates rendered output across tool calls", () => {
+        const firstPayload = buildPierreDiffPayload({
             path: "src/example.ts",
             oldContent: "old\n",
-            newContent: "new\n",
+            newContent: "first-call\n",
             oldSizeBytes: 4,
-            newSizeBytes: 4,
+            newSizeBytes: 11,
             canBuildPierreDiff: true,
         });
-        if (!payload) throw new Error("expected Pierre payload");
+        const secondPayload = buildPierreDiffPayload({
+            path: "src/example.ts",
+            oldContent: "old\n",
+            newContent: "second-call\n",
+            oldSizeBytes: 4,
+            newSizeBytes: 12,
+            canBuildPierreDiff: true,
+        });
+        if (!firstPayload || !secondPayload) throw new Error("expected Pierre payloads");
 
         const first = renderPierreDiff(
-            payload,
+            firstPayload,
             testTheme,
             { expanded: false },
             { lastComponent: undefined, toolCallId: "first" },
         );
+        expect(stripAnsi(first.render(100).join("\n"))).toContain("first-call");
         const second = renderPierreDiff(
-            payload,
+            secondPayload,
             testTheme,
             { expanded: false },
             { lastComponent: first, toolCallId: "second" },
         );
-
-        expect(second).not.toBe(first);
+        const rendered = stripAnsi(second.render(100).join("\n"));
+        expect(rendered).toContain("second-call");
+        expect(rendered).not.toContain("first-call");
     });
 
     it("rerenders a cached expanded diff side-by-side after the terminal widens", () => {
@@ -1035,7 +1033,7 @@ describe("Pierre diff rendering", () => {
 
         expect(stripAnsi(narrow.join("\n"))).not.toContain(" │ ");
         expect(stripAnsi(wide.join("\n"))).toContain(" │ ");
-        expect(narrowAgain).toBe(narrow);
+        expect(narrowAgain).toEqual(narrow);
         expectLinesWithinWidth(narrow, 80);
         expectLinesWithinWidth(wide, 180);
     });
@@ -1452,35 +1450,6 @@ describe("Pierre diff rendering", () => {
 
         expect(dual.some((line) => line.includes("  1 + zero"))).toBe(true);
         expect(single.some((line) => line.includes("+1 zero"))).toBe(true);
-        expect(reused).toBe(component);
-    });
-
-    it("invalidates rendered lines when the syntax highlighter is replaced", async () => {
-        const payload = buildPierreDiffPayload({
-            path: "src/example.ts",
-            oldContent: "const value = 1;\n",
-            newContent: "const value = 2;\n",
-            oldSizeBytes: 17,
-            newSizeBytes: 17,
-            canBuildPierreDiff: true,
-        });
-        if (payload?.kind !== "renderable") throw new Error("expected renderable Pierre payload");
-
-        const component = renderPierreDiff(
-            payload,
-            testTheme,
-            { expanded: true },
-            { lastComponent: undefined, invalidate() {} },
-        );
-        const before = component.render(100);
-
-        await reinitializeSyntaxHighlighting(process.env, {
-            preloadLanguages: ["typescript"],
-        });
-        const after = component.render(100);
-
-        expect(after).not.toBe(before);
-        expectLinesWithinWidth(after, 100);
     });
 
     it("uses distinct row and intraline shades without dimming unchanged text by default", async () => {

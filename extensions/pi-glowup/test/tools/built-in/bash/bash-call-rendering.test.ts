@@ -223,7 +223,8 @@ describe("bash command rendering", () => {
         expect(collapsed).toContain("• Bash");
         expect(collapsed).toContain("node --input-type=module <<'JS'");
         expect(collapsed).toContain("import assert from 'node:assert/strict';");
-        expect(collapsed).toContain("… +6 lines (to expand)");
+        expect(collapsed).toMatch(/… \+6 lines/u);
+        expect(collapsed).not.toContain("git diff --check");
 
         const expanded = renderBashCommandCall(theme, command, {
             state: "success",
@@ -238,5 +239,6 @@ describe("bash command rendering", () => {
             .join("\n");
 
         expect(expanded).toContain("git diff --check");
+        expect(expanded).not.toMatch(/… \+6 lines/u);
     });
 });

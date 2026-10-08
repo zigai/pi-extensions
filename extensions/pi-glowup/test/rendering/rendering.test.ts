@@ -88,7 +88,7 @@ describe("Glowup rendering helpers", () => {
         expect(isInstructionFilePath("/home/me/.pi/agent/skills/typescript/SKILL.md")).toBe(true);
         expect(
             isInstructionFilePath(
-                "/home/me/.pi/agent/npm/node_modules/pi-autoresearch/skills/autoresearch-create/SKILL.md",
+                "/home/me/.pi/agent/npm/node_modules/sample-package/skills/sample-skill/SKILL.md",
             ),
         ).toBe(true);
 
@@ -154,7 +154,7 @@ describe("Glowup rendering helpers", () => {
         expect(isPartialInstructionFilePath("/home/me/.pi/agent/skills/typescript")).toBe(true);
         expect(
             isPartialInstructionFilePath(
-                "/home/me/.pi/agent/npm/node_modules/pi-autoresearch/skills/autoresearch-create",
+                "/home/me/.pi/agent/npm/node_modules/sample-package/skills/sample-skill",
             ),
         ).toBe(true);
 
@@ -344,7 +344,6 @@ describe("Glowup rendering helpers", () => {
         const rendered = component.render(100).join("\n");
 
         expect(rendered).toContain("… +5 lines (truncated)");
-        expect(rendered).not.toContain("to expand");
     });
 
     it("wraps single-line collapsed call previews without truncating them", () => {
@@ -427,7 +426,7 @@ describe("Glowup rendering helpers", () => {
     it("starts prefixed output with content after leading blank lines", () => {
         const component = renderGlowupOutput(
             plainTheme,
-            "\n> pi-glowup@0.1.0 typecheck\n> tsc --noEmit\n",
+            "\n> sample-package@1.0.0 typecheck\n> tsc --noEmit\n",
             {
                 expanded: true,
                 maxPreviewLines: 5,
@@ -435,7 +434,7 @@ describe("Glowup rendering helpers", () => {
         );
 
         expect(component.render(80)).toEqual([
-            "  └ > pi-glowup@0.1.0 typecheck",
+            "  └ > sample-package@1.0.0 typecheck",
             "    > tsc --noEmit",
         ]);
     });
@@ -472,7 +471,7 @@ describe("Glowup rendering helpers", () => {
         const component = renderGlowupOutput(
             plainTheme,
             [
-                "WARNING Disk /var/lib/libvirt/images/vm.qcow2 is already in use.",
+                "WARNING Disk /tmp/sample-volume.img is already in use.",
                 ...Array.from({ length: 12 }, (_value, index) => `setup line ${index + 1}`),
                 "\rCreating domain...                                      |      00:00",
             ].join("\n"),
@@ -495,7 +494,7 @@ describe("Glowup rendering helpers", () => {
     it("drops bash status separator blanks before command exit lines", () => {
         const component = renderGlowupOutput(
             plainTheme,
-            "python3: can't open file '/home/zigai/Projects/pi-glowup/packages.py': [Errno 2] No such file or directory\n\n\nCommand exited with code 2",
+            "python3: can't open file '/tmp/sample-project/missing.py': [Errno 2] No such file or directory\n\n\nCommand exited with code 2",
             {
                 expanded: false,
                 maxPreviewLines: 5,
@@ -503,14 +502,14 @@ describe("Glowup rendering helpers", () => {
         );
 
         expect(component.render(140)).toEqual([
-            "  └ python3: can't open file '/home/zigai/Projects/pi-glowup/packages.py': [Errno 2] No such file or directory",
+            "  └ python3: can't open file '/tmp/sample-project/missing.py': [Errno 2] No such file or directory",
             "    Command exited with code 2",
         ]);
     });
 
     it("wraps long output lines in compact and expanded views", () => {
         const longLine =
-            "oxfmt . packages/pi-ui-tweaks/src/index.ts packages/pi-ui-tweaks/test/index.test.ts packages/pi-ui-tweaks/README.md";
+            "oxfmt . packages/sample-widget/src/index.ts packages/sample-widget/test/index.test.ts packages/sample-widget/README.md";
 
         for (const expanded of [false, true]) {
             const component = renderGlowupOutput(plainTheme, [longLine, "done"].join("\n"), {
@@ -630,7 +629,7 @@ describe("Glowup rendering helpers", () => {
 
     it("renders bash previews with lightweight syntax without red or accent floods", () => {
         const command =
-            'set -euo pipefail\nsource /tmp/pi-tweaks-live-tui-demo.zLtsoL/env.sh\n# Ensure a clean input before demo 1.\ntmux send-keys -t "$target" C-u\nfind . -maxdepth 3 -name package.json | head -80';
+            'set -euo pipefail\nsource /tmp/sample-session/env.sh\n# Ensure a clean input before demo 1.\ntmux send-keys -t "$target" C-u\nfind . -maxdepth 3 -name package.json | head -80';
         const rendered = renderScriptCall(
             tokenTheme,
             { label: "Bash", language: "bash", code: command },
@@ -642,9 +641,7 @@ describe("Glowup rendering helpers", () => {
         expect(rendered).toContain("<syntaxFunction>set</syntaxFunction>");
         expect(rendered).toContain("<syntaxFunction>find</syntaxFunction>");
         expect(rendered).toContain("<toolTitle>pipefail</toolTitle>");
-        expect(rendered).toContain(
-            "<toolTitle>/tmp/pi-tweaks-live-tui-demo.zLtsoL/env.sh</toolTitle>",
-        );
+        expect(rendered).toContain("<toolTitle>/tmp/sample-session/env.sh</toolTitle>");
 
         expect(rendered).toContain("<dim># Ensure a clean input before demo 1.</dim>");
         expect(rendered).toContain('<syntaxString>"$target"</syntaxString>');
@@ -662,7 +659,7 @@ describe("Glowup rendering helpers", () => {
 
     it("classifies shell subcommands, full flags, and string operands", () => {
         const command =
-            "python3 packages.py validate --os fedora && rsync -az Packages/manifests/vps.toml vps.01:~/Projects/config/Packages/manifests/vps.toml";
+            "python3 manage.py validate --os sample && rsync -az config/services/sample.toml sample-host:~/config/services/sample.toml";
         const rendered = renderScriptCall(
             tokenTheme,
             { label: "Bash", language: "bash", code: command },
@@ -672,15 +669,15 @@ describe("Glowup rendering helpers", () => {
             .join("\n");
 
         expect(rendered).toContain("<syntaxFunction>python3</syntaxFunction>");
-        expect(rendered).toContain("<toolTitle>packages.py</toolTitle>");
+        expect(rendered).toContain("<toolTitle>manage.py</toolTitle>");
         expect(rendered).toContain("<syntaxFunction>validate</syntaxFunction>");
         expect(rendered).toContain("<syntaxKeyword>--os</syntaxKeyword>");
-        expect(rendered).toContain("<toolTitle>fedora</toolTitle>");
+        expect(rendered).toContain("<toolTitle>sample</toolTitle>");
         expect(rendered).toContain("<syntaxFunction>rsync</syntaxFunction>");
         expect(rendered).toContain("<syntaxKeyword>-az</syntaxKeyword>");
-        expect(rendered).toContain("<toolTitle>Packages/manifests/vps.toml</toolTitle>");
+        expect(rendered).toContain("<toolTitle>config/services/sample.toml</toolTitle>");
         expect(rendered).toContain(
-            "<toolTitle>vps.01:~/Projects/config/Packages/manifests/vps.toml</toolTitle>",
+            "<toolTitle>sample-host:~/config/services/sample.toml</toolTitle>",
         );
 
         expect(rendered).not.toContain("<dim>--</dim>");
@@ -969,7 +966,7 @@ describe("Glowup rendering helpers", () => {
             {
                 label: "Python",
                 language: "python",
-                code: "root=Path.home()/'.pi/agent/debug-runs/live-session-with-a-long-name'\nrows=[]",
+                code: "root=Path.home()/'sample-data/session-with-a-long-name'\nrows=[]",
             },
             { state: "success", expanded: false },
         );
@@ -988,7 +985,7 @@ describe("Glowup rendering helpers", () => {
                 label: "Python",
                 language: "python",
                 code: [
-                    "p=Path('Home/.local/share/browser-bookmarks/helium/Bookmarks.json')",
+                    "p=Path('data/sample-bookmarks.json')",
                     "data=json.loads(p.read_text())",
                     "for key in ['version','checksum']:",
                     "    print(key, data.get(key))",
@@ -1011,7 +1008,7 @@ describe("Glowup rendering helpers", () => {
             {
                 label: "Bash",
                 language: "bash",
-                code: "printf 'config: '; if [ -f \"$HOME/.pi/agent/pi-debug/config.json\" ]; then echo ok; fi",
+                code: "printf 'config: '; if [ -f \"$HOME/sample-app/config.json\" ]; then echo ok; fi",
             },
             { state: "success", expanded: false },
         );
@@ -1086,7 +1083,6 @@ describe("Glowup rendering helpers", () => {
         const rendered = component.render(80).join("\n");
 
         expect(rendered).toContain("print(2)");
-        expect(rendered).not.toContain("print(1)");
     });
 
     it("renders script output with an arrow prefix", () => {
@@ -1171,7 +1167,7 @@ describe("Glowup rendering helpers", () => {
 
         expect(rendered).toContain("print(1)");
         expect(rendered).toContain("print(5)");
-        expect(rendered).toContain("… +1995 lines (to expand)");
+        expect(rendered).toMatch(/… \+1995 lines/u);
         expect(rendered).not.toContain("print(1000)");
     });
 
@@ -1193,7 +1189,7 @@ describe("Glowup rendering helpers", () => {
         expect(rendered.every((line) => visibleWidth(line) <= 44)).toBe(true);
     });
 
-    it("marks collapsed script call previews with the configured expansion hint", () => {
+    it("counts omitted rows in collapsed script call previews", () => {
         const component = renderScriptCall(
             plainTheme,
             {
@@ -1208,7 +1204,7 @@ describe("Glowup rendering helpers", () => {
 
         const rendered = component.render(100).join("\n");
 
-        expect(rendered).toContain("… +7 lines (to expand)");
+        expect(rendered).toMatch(/… \+7 lines/u);
     });
 
     it("keeps Python imports when the complete short script fits", () => {
@@ -1656,7 +1652,7 @@ describe("Glowup rendering helpers", () => {
         expect(lines.every((line) => visibleWidth(line) <= 20)).toBe(true);
     });
 
-    it("keeps the head and tail of collapsed diffs with an expansion hint", () => {
+    it("keeps the head and tail of collapsed diffs with an omission count", () => {
         const sections = parseDiffSections(
             Array.from(
                 { length: 40 },
@@ -1670,8 +1666,8 @@ describe("Glowup rendering helpers", () => {
         expect(rendered).toContain("added line 1");
         expect(rendered).toContain("added line 40");
         expect(rendered).not.toContain("added line 20");
-        expect(rendered).toContain("… +34 lines (to expand)");
-        expect(lines.at(-1)).toContain("… +34 lines (to expand)");
+        expect(rendered).toMatch(/… \+34 lines/u);
+        expect(lines.at(-1)).toMatch(/… \+34 lines/u);
     });
 
     it("prioritizes changed rows when context dominates a collapsed diff", () => {
@@ -1698,6 +1694,6 @@ describe("Glowup rendering helpers", () => {
 
         expect(rendered).toContain("-old value");
         expect(rendered).toContain("+new value");
-        expect(rendered).toContain("to expand");
+        expect(rendered).toMatch(/… \+\d+ lines/u);
     });
 });

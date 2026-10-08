@@ -12,6 +12,7 @@ import {
 } from "./contract.ts";
 import { renderProtocolNode } from "./node-renderer.ts";
 import type { ThirdPartyToolRenderContext, ThirdPartyToolRenderer } from "../types.ts";
+import { renderExpandableSection } from "../section-expansion.ts";
 
 const MAX_MUTATION_CALL_SLOTS = 500;
 const mutationCallSlots = new Map<string, ProtocolMutationCallSlot>();
@@ -89,6 +90,7 @@ const rendererSchema = Type.Function([Type.Unknown(), Type.Unknown()], Type.Unkn
 const renderingAdapterSchema = Type.Object(
     {
         version: Type.Literal(3),
+        independentExpansion: Type.Optional(Type.Literal(true)),
         parseArgs: parserSchema,
         parseResult: Type.Optional(parserSchema),
         renderPartialCall: Type.Optional(rendererSchema),
@@ -138,67 +140,95 @@ export function createProtocolRenderer(
     mutationSettings?: MutationSettings,
 ): ThirdPartyToolRenderer {
     return {
-        renderCall(args, theme, context) {
-            if (!context.argsComplete && adapter.renderPartialCall !== undefined) {
-                const partialNode = safelyRender(() =>
-                    decodeGlowupNode(adapter.renderPartialCall?.(args, publicCallContext(context))),
-                );
-                return partialNode === undefined
+        renderCall(args, theme, initialContext) {
+            const render = (context: ThirdPartyToolRenderContext): Component => {
+                if (!context.argsComplete && adapter.renderPartialCall !== undefined) {
+                    const partialNode = safelyRender(() =>
+                        decodeGlowupNode(
+                            adapter.renderPartialCall?.(args, publicCallContext(context)),
+                        ),
+                    );
+                    return partialNode === undefined
+                        ? fallback.renderCall(args, theme, context)
+                        : renderProtocolCallNode(
+                              partialNode,
+                              theme,
+                              context,
+                              labelMode,
+                              mutationSettings,
+                          );
+                }
+
+                if (adapter.renderCall === undefined) {
+                    return fallback.renderCall(args, theme, context);
+                }
+
+                const node = safelyRender(() => {
+                    if (args === undefined) return undefined;
+
+                    const parsedArgs = adapter.parseArgs(args);
+                    return parsedArgs === undefined
+                        ? undefined
+                        : decodeGlowupNode(
+                              adapter.renderCall?.(parsedArgs, publicCallContext(context)),
+                          );
+                });
+
+                return node === undefined
                     ? fallback.renderCall(args, theme, context)
-                    : renderProtocolCallNode(
-                          partialNode,
-                          theme,
-                          context,
-                          labelMode,
-                          mutationSettings,
-                      );
-            }
+                    : renderProtocolCallNode(node, theme, context, labelMode, mutationSettings);
+            };
 
-            if (adapter.renderCall === undefined) {
-                return fallback.renderCall(args, theme, context);
-            }
-
-            const node = safelyRender(() => {
-                if (args === undefined) return undefined;
-
-                const parsedArgs = adapter.parseArgs(args);
-                return parsedArgs === undefined
-                    ? undefined
-                    : decodeGlowupNode(
-                          adapter.renderCall?.(parsedArgs, publicCallContext(context)),
-                      );
-            });
-
-            return node === undefined
-                ? fallback.renderCall(args, theme, context)
-                : renderProtocolCallNode(node, theme, context, labelMode, mutationSettings);
+            return adapter.independentExpansion === true
+                ? renderExpandableSection(initialContext, "call", (expanded) =>
+                      render({ ...initialContext, expanded }),
+                  )
+                : render(initialContext);
         },
-        renderResult(result, options, theme, context) {
-            if (adapter.renderResult === undefined || adapter.parseResult === undefined) {
-                return fallback.renderResult(result, options, theme, context);
-            }
+        renderResult(result, initialOptions, theme, initialContext) {
+            const render = (
+                context: ThirdPartyToolRenderContext,
+                options: { readonly expanded: boolean; readonly isPartial: boolean },
+            ): Component => {
+                if (adapter.renderResult === undefined || adapter.parseResult === undefined) {
+                    return fallback.renderResult(result, options, theme, context);
+                }
 
-            const resultContext = { ...context, result };
-            const node = safelyRender(() => {
-                if (context.args === undefined) return undefined;
+                const resultContext = { ...context, result };
+                const node = safelyRender(() => {
+                    if (context.args === undefined) return undefined;
 
-                const parsedArgs = adapter.parseArgs(context.args);
-                const parsedResult = adapter.parseResult?.(result);
-                if (parsedArgs === undefined || parsedResult === undefined) return undefined;
+                    const parsedArgs = adapter.parseArgs(context.args);
+                    const parsedResult = adapter.parseResult?.(result);
+                    if (parsedArgs === undefined || parsedResult === undefined) return undefined;
 
-                return decodeGlowupNode(
-                    adapter.renderResult?.(parsedResult, {
-                        ...publicCallContext(resultContext),
-                        args: parsedArgs,
-                    }),
-                );
-            });
-            if (node === undefined) {
-                return fallback.renderResult(result, options, theme, context);
-            }
+                    return decodeGlowupNode(
+                        adapter.renderResult?.(parsedResult, {
+                            ...publicCallContext(resultContext),
+                            args: parsedArgs,
+                        }),
+                    );
+                });
+                if (node === undefined) {
+                    return fallback.renderResult(result, options, theme, context);
+                }
 
-            if (node.kind === "mutation") mutationCallSlots.get(context.toolCallId)?.hide();
-            return renderProtocolNode(node, theme, resultContext, labelMode, mutationSettings);
+                if (node.kind === "mutation") {
+                    mutationCallSlots.get(context.toolCallId)?.hide();
+                    mutationCallSlots.delete(context.toolCallId);
+                }
+
+                return renderProtocolNode(node, theme, resultContext, labelMode, mutationSettings);
+            };
+
+            return adapter.independentExpansion === true
+                ? renderExpandableSection(
+                      { ...initialContext, expanded: initialOptions.expanded },
+                      "result",
+                      (expanded) =>
+                          render({ ...initialContext, expanded }, { ...initialOptions, expanded }),
+                  )
+                : render(initialContext, initialOptions);
         },
     };
 }

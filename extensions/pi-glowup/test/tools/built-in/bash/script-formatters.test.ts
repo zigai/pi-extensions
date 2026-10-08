@@ -116,17 +116,29 @@ describe("script formatter settings", () => {
     });
 
     it("skips command formatters for oversized inputs", async () => {
-        const commands = parseScriptFormatterCommands(
-            JSON.stringify({
-                python: [process.execPath, "-e", "process.stdin.pipe(process.stdout)"],
-            }),
-        );
-        const formatter = createCommandScriptFormatter(commands);
-        const code = "print(1)\n".repeat(10_000);
+        const dir = mkdtempSync(join(tmpdir(), "pi-glowup-formatter-limit-"));
+        const marker = join(dir, "started");
+        try {
+            const commands = parseScriptFormatterCommands(
+                JSON.stringify({
+                    python: [
+                        process.execPath,
+                        "-e",
+                        "require('node:fs').writeFileSync(process.argv[1], 'started');process.stdout.write('FORMATTER_RAN')",
+                        marker,
+                    ],
+                }),
+            );
+            const formatter = createCommandScriptFormatter(commands);
+            const code = "print(1)\n".repeat(10_000);
 
-        await expect(
-            formatScriptInvocation({ label: "Python", language: "python", code }, formatter),
-        ).resolves.toEqual({ label: "Python", language: "python", code });
+            await expect(
+                formatScriptInvocation({ label: "Python", language: "python", code }, formatter),
+            ).resolves.toEqual({ label: "Python", language: "python", code });
+            expect(existsSync(marker)).toBe(false);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
     });
 
     it("reuses successful formatting for identical language source", async () => {

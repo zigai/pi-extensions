@@ -157,7 +157,9 @@ terminal safety.
 
 `GlowupCallContext` reports the tool call id, lifecycle phase, argument completeness, partial state,
 expanded state, image preference, error state, and whether a settled or restored result is attached.
-Result rendering receives the original parsed arguments through `GlowupResultContext`.
+Result rendering receives the original parsed arguments through `GlowupResultContext`. An adapter
+may set `independentExpansion: true` to let clicks expand its call and result separately when the
+visible previews differ. Pi's global tool-expand key still expands or collapses both.
 
 Protocol `output` components remain bounded even when expanded. Completed mutation diffs follow
 the `mutations` configuration: the default full view keeps every available row, while preview mode

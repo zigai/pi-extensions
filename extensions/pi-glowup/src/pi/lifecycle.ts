@@ -4,6 +4,7 @@ import {
     isEditToolResult,
     isToolCallEventType,
     type ExtensionAPI,
+    type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import {
     createDefaultGlowupConfig,
@@ -19,7 +20,8 @@ import {
     textByteLength,
     valueKind,
 } from "../diagnostics/snapshot.ts";
-import { jsonValueParser } from "../json-value.ts";
+import { jsonObjectParser, jsonValueParser } from "../json-value.ts";
+import { getString } from "../tools/tool-values.ts";
 import { configureRenderingAppearance, configureToolCallIndicator } from "../rendering/theme.ts";
 import { type ScriptPreviewHeaderLayout } from "../tools/built-in/bash/script-renderer.ts";
 import { clearQueuedDiffHighlights } from "../rendering/diff/pierre-renderer.ts";
@@ -37,6 +39,7 @@ import {
 } from "../tools/built-in/bash/formatter.ts";
 import { parseScriptPreviewHeaderLayout } from "../tools/built-in/bash/settings.ts";
 import { createNativeBashFeature } from "../tools/built-in/bash/preview.ts";
+import { createCodemodePreview } from "../tools/external/codemode.ts";
 import { createNativeDeleteFeature } from "../tools/built-in/delete.ts";
 import { createNativeEditFeature } from "../tools/built-in/edit.ts";
 import { createExplorationFeature, isExplorationToolName } from "../tools/built-in/exploration.ts";
@@ -77,11 +80,15 @@ const PRESERVE_TOOLS_ENV = "PI_GLOWUP_PRESERVE_TOOLS";
 const SCRIPT_FORMATTERS_ENV = "PI_GLOWUP_SCRIPT_FORMATTERS";
 const SCRIPT_HEADER_LAYOUT_ENV = "PI_GLOWUP_SCRIPT_HEADER_LAYOUT";
 
-function thirdPartyToolRenderingOptions(config: GlowupConfig): ThirdPartyToolRenderingOptions {
+function thirdPartyToolRenderingOptions(
+    config: GlowupConfig,
+    codemodePreview: NonNullable<ThirdPartyToolRenderingOptions["codemodePreview"]>,
+): ThirdPartyToolRenderingOptions {
     const preservedFromEnv = process.env[PRESERVE_TOOLS_ENV];
     return {
         labelMode: config.toolLabels.mode,
         mutationSettings: config.mutations,
+        codemodePreview,
         preserveTools:
             preservedFromEnv === undefined
                 ? config.preserveTools
@@ -130,6 +137,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
 
     const edit = createNativeEditFeature();
     const bash = createNativeBashFeature();
+    const codemode = createCodemodePreview();
     const deletion = createNativeDeleteFeature();
     const exploration = createExplorationFeature();
     const { captureNativeEditSnapshot, finishNativeEditSnapshot } = edit;
@@ -148,9 +156,13 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         exploration,
     });
 
+    let restoreAbort: AbortController | undefined;
     const clearSessionState = (): void => {
+        restoreAbort?.abort();
+        restoreAbort = undefined;
         edit.clear();
         bash.clear();
+        codemode.clear();
         deletion.clear();
         exploration.clear();
         clearQueuedDiffHighlights();
@@ -168,6 +180,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
     let headerLayout = scriptPreviewHeaderLayout(config);
     let sessionGeneration = 0;
     let extensionLoadedRecorded = false;
+
     const syntax = createSyntaxLifecycle({
         generation: () => sessionGeneration,
         debugLogger,
@@ -194,7 +207,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         configureThirdPartyToolRendererPatch(
             true,
             config.patches.thirdPartyToolRenderers
-                ? thirdPartyToolRenderingOptions(config)
+                ? thirdPartyToolRenderingOptions(config, codemode)
                 : { enabled: false },
         );
 
@@ -224,6 +237,48 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
             ...configDiagnostics(config),
             ...diagnosticSnapshot(),
         }));
+    };
+
+    const restoreBashPreviews = (ctx: ExtensionContext): void => {
+        if (formatter === undefined) return;
+
+        function* calls(): IterableIterator<{ toolCallId: string; command: string }> {
+            const branch = ctx.sessionManager.getBranch();
+            for (let index = branch.length - 1; index >= 0; index -= 1) {
+                const entry = branch[index];
+                if (entry?.type !== "message" || entry.message.role !== "assistant") continue;
+
+                for (
+                    let blockIndex = entry.message.content.length - 1;
+                    blockIndex >= 0;
+                    blockIndex -= 1
+                ) {
+                    const block = entry.message.content[blockIndex];
+                    if (
+                        block?.type !== "toolCall" ||
+                        (block.name !== "bash" && compatBuiltInToolName(block.name) !== "bash")
+                    ) {
+                        continue;
+                    }
+
+                    const command = commandField(block.arguments);
+                    if (command !== undefined) yield { toolCallId: block.id, command };
+                }
+            }
+        }
+
+        const controller = new AbortController();
+        restoreAbort = controller;
+
+        const generation = sessionGeneration;
+
+        void bash.restore({
+            calls: calls(),
+            formatter,
+            signal: controller.signal,
+            isCurrent: () => sessionGeneration === generation && !controller.signal.aborted,
+            invalidate: () => refreshToolRows(ctx),
+        });
     };
 
     applyConfig(config);
@@ -264,6 +319,23 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
             ...diagnosticSnapshot(),
         }));
 
+        if (event.toolName === "codemode") {
+            const input = jsonValueParser.parse(event.input);
+            const record = jsonObjectParser.parse(input);
+            const code = record === undefined ? undefined : getString(record, "code");
+            if (code !== undefined) {
+                const formatterGeneration = sessionGeneration;
+
+                codemode.schedule({
+                    toolCallId: event.toolCallId,
+                    code,
+                    formatter,
+                    isCurrent: () => sessionGeneration === formatterGeneration,
+                    invalidate: () => refreshToolRows(ctx),
+                });
+            }
+        }
+
         if (
             !isToolCallEventType("bash", event) &&
             compatBuiltInToolName(event.toolName) !== "bash"
@@ -272,7 +344,17 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         }
 
         if (command !== undefined) {
-            bash.remember(event.toolCallId, command);
+            const formatterGeneration = sessionGeneration;
+
+            bash.schedule({
+                toolCallId: event.toolCallId,
+                command,
+                formatter,
+                signal: ctx.signal,
+                isCurrent: () => sessionGeneration === formatterGeneration,
+                invalidate: () => refreshToolRows(ctx),
+            });
+
             debugLogger.record("script_preview_remembered", () => ({
                 toolCallId: event.toolCallId,
                 commandBytes: textByteLength(command),
@@ -287,6 +369,23 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         let scheduledFormattedPreview = false;
         let storedEditPreview = false;
         let persistedEditPierrePayload: PierreDiffPayload | undefined;
+
+        if (event.toolName === "codemode") {
+            const input = jsonValueParser.parse(event.input);
+            const record = jsonObjectParser.parse(input);
+            const code = record === undefined ? undefined : getString(record, "code");
+            if (code !== undefined) {
+                const formatterGeneration = sessionGeneration;
+
+                codemode.schedule({
+                    toolCallId: event.toolCallId,
+                    code,
+                    formatter,
+                    isCurrent: () => sessionGeneration === formatterGeneration,
+                    invalidate: () => refreshToolRows(ctx),
+                });
+            }
+        }
 
         if (event.toolName === "bash" || compatBuiltInToolName(event.toolName) === "bash") {
             const command = commandField(event.input);
@@ -357,10 +456,12 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
             { includeProjectConfig: ctx.isProjectTrusted() },
         );
         debugLogger.configure(nextConfig.debugLog);
+
         if (!extensionLoadedRecorded) {
             debugLogger.record("extension_loaded", diagnosticSnapshot);
             extensionLoadedRecorded = true;
         }
+
         debugLogger.startMemorySampling(diagnosticSnapshot);
         debugLogger.record("session_start", () => ({
             phase: "before_reset",
@@ -375,6 +476,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         }));
 
         applyConfig(nextConfig);
+        restoreBashPreviews(ctx);
         refreshToolRows(ctx);
 
         scheduleSyntaxHighlighting({ config: nextConfig, cwd: ctx.cwd, reportWarning }, ctx);
@@ -382,6 +484,11 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
             phase: "syntax_scheduled",
             ...diagnosticSnapshot(),
         }));
+    });
+
+    pi.on("session_tree", (_event, ctx) => {
+        restoreAbort?.abort();
+        restoreBashPreviews(ctx);
     });
 
     pi.on("agent_start", () => {

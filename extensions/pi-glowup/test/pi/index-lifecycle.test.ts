@@ -443,10 +443,12 @@ describe("extension lifecycle", () => {
         installGlowup(pi);
         await pi.startSession(join(root, "project"), false, "tui");
 
-        expect(pi.toolExpansionRefreshes).toBe(1);
+        const refreshesBeforeSyntax = pi.toolExpansionRefreshes;
         await Promise.all(pi.runBashToolCall("true"));
         await initializeSyntaxHighlighting();
-        await vi.waitFor(() => expect(pi.toolExpansionRefreshes).toBe(2));
+        await vi.waitFor(() =>
+            expect(pi.toolExpansionRefreshes).toBeGreaterThan(refreshesBeforeSyntax),
+        );
     });
 
     it("does not block bash tool-call preflight on configured script formatters", async () => {
@@ -463,6 +465,47 @@ describe("extension lifecycle", () => {
             Promise.all(pi.runBashToolCall("python - <<'PY'\nprint('hi')\nPY")),
         ).resolves.toEqual([undefined]);
 
+        await pi.shutdownSession();
+    });
+
+    it("formats a restored Node call in the transcript", async () => {
+        const root = mkdtempSync(join(tmpdir(), "pi-glowup-restored-node-"));
+        process.env[AGENT_DIR_ENV] = join(root, "agent");
+        process.env[SCRIPT_FORMATTERS_ENV] = JSON.stringify({
+            javascript: [
+                process.execPath,
+                "-e",
+                "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>process.stdout.write(s.replace('; ', ';\\n')))",
+            ],
+        });
+        const command = `node -e 'const item = "RESTORED_NODE"; console.log(item)'`;
+        const call = {
+            type: "toolCall" as const,
+            id: "restored-node",
+            name: "bash",
+            arguments: { command },
+        };
+        const pi = new FakeExtensionApi();
+        pi.branch = [{ type: "message", message: { role: "assistant", content: [call] } }];
+        installGlowup(pi);
+        initTheme("dark");
+
+        await pi.startSession(root, false, "tui");
+        const row = new ToolExecutionComponent(
+            call.name,
+            call.id,
+            call.arguments,
+            undefined,
+            undefined,
+            createTui(),
+            root,
+        );
+        row.updateResult({ content: [], isError: false });
+        await vi.waitFor(() => {
+            const rendered = stripAnsi(row.render(100).join("\n"));
+            expect(rendered).toContain("│ const item");
+            expect(rendered).toContain("│ console.log(item)");
+        });
         await pi.shutdownSession();
     });
 
