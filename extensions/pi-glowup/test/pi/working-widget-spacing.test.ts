@@ -71,36 +71,34 @@ describe("working widget spacing patch", () => {
         expect(unpad(root.render(80))).toEqual(["ordinary widget", "", "chat box"]);
     });
 
-    it("is idempotent for a patched prototype", () => {
-        installWorkingWidgetSpacingPatch();
-        const patchedRenderDescriptor = Object.getOwnPropertyDescriptor(
-            Container.prototype,
-            "render",
-        );
+    it("keeps the loader spacing stable after repeat installation", () => {
+        const root = new Container();
+        const status = new Container();
+        const spacer = new Container();
+        status.addChild(createStaticLoader());
+        spacer.addChild(new Spacer(1));
+        root.addChild(status);
+        root.addChild(spacer);
+        root.addChild(new Text("chat box", 0, 0));
 
         installWorkingWidgetSpacingPatch();
+        installWorkingWidgetSpacingPatch();
 
-        expect(Object.getOwnPropertyDescriptor(Container.prototype, "render")).toEqual(
-            patchedRenderDescriptor,
-        );
+        expect(unpad(root.render(80))).toEqual(["", " ⠋ Working...", "chat box"]);
     });
 
     it("restores the original container render method when disabled", () => {
         class TestContainer extends Container {
-            override render(): string[] {
+            override render(_width: number): string[] {
                 return ["original"];
             }
         }
 
         const prototype = TestContainer.prototype;
-        const originalRenderDescriptor = Object.getOwnPropertyDescriptor(prototype, "render");
-
         configureWorkingWidgetSpacingPatch(true, prototype);
         configureWorkingWidgetSpacingPatch(false, prototype);
 
-        expect(Object.getOwnPropertyDescriptor(prototype, "render")).toEqual(
-            originalRenderDescriptor,
-        );
+        expect(prototype.render(80)).toEqual(["original"]);
     });
 
     it("does not clobber container render wrappers installed later", () => {
@@ -125,13 +123,10 @@ describe("working widget spacing patch", () => {
             this: Container,
             width: number,
         ): string[] {
-            return patchedPrototype.render.call(this, width);
+            return ["foreign", ...patchedPrototype.render.call(this, width)];
         };
-        const laterRenderDescriptor = Object.getOwnPropertyDescriptor(prototype, "render");
-
         configureWorkingWidgetSpacingPatch(false, prototype);
 
-        expect(Object.getOwnPropertyDescriptor(prototype, "render")).toEqual(laterRenderDescriptor);
-        expect(prototype.render(80)).toEqual(["original"]);
+        expect(prototype.render(80)).toEqual(["foreign", "original"]);
     });
 });

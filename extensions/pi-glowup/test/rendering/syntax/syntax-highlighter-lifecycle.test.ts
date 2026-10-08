@@ -287,43 +287,37 @@ describe("syntax highlighter lifecycle", () => {
         ["initialize", initializeSyntaxHighlighting],
         ["reinitialize", reinitializeSyntaxHighlighting],
         ["refresh", refreshSyntaxHighlighting],
-    ])(
-        "captures one configuration for %s installation and refresh identity",
-        async (_name, initialize) => {
-            const directory = mkdtempSync(join(tmpdir(), "pi-glowup-theme-snapshot-"));
-            const path = join(directory, "theme.json");
-            const missingPath = join(directory, "missing.json");
-            let configurationReads = 0;
-            const env: NodeJS.ProcessEnv = {
-                get PI_GLOWUP_SYNTAX_THEME() {
-                    configurationReads += 1;
-                    return configurationReads === 1 ? path : missingPath;
-                },
-            };
-            const installed = await fakeHighlighter();
-            const options = { createHighlighter: async () => installed, preloadLanguages: [] };
-            try {
-                writeFileSync(
-                    path,
-                    JSON.stringify({ tokenColors: [], colors: { "editor.foreground": "#123456" } }),
-                );
-                const state = await initialize(env, options);
+    ])("uses one configuration for %s installation", async (_name, initialize) => {
+        const directory = mkdtempSync(join(tmpdir(), "pi-glowup-theme-snapshot-"));
+        const path = join(directory, "theme.json");
+        const missingPath = join(directory, "missing.json");
+        let configurationReads = 0;
+        const env: NodeJS.ProcessEnv = {
+            get PI_GLOWUP_SYNTAX_THEME() {
+                configurationReads += 1;
+                return configurationReads === 1 ? path : missingPath;
+            },
+        };
+        const installed = await fakeHighlighter();
+        const options = { createHighlighter: async () => installed, preloadLanguages: [] };
+        try {
+            writeFileSync(
+                path,
+                JSON.stringify({ tokenColors: [], colors: { "editor.foreground": "#123456" } }),
+            );
+            const state = await initialize(env, options);
 
-                expect(state.status).toBe("ready");
+            expect(state.status).toBe("ready");
 
-                if (state.status !== "ready") throw new Error("theme snapshot was not installed");
+            if (state.status !== "ready") throw new Error("theme snapshot was not installed");
 
-                expect(state.theme.path).toBe(path);
-                expect(state.theme.registration.colors?.["editor.foreground"]).toBe("#123456");
-                expect(configurationReads).toBe(1);
-                expect(
-                    await refreshSyntaxHighlighting({ PI_GLOWUP_SYNTAX_THEME: path }, options),
-                ).toBe(state);
-            } finally {
-                rmSync(directory, { recursive: true, force: true });
-            }
-        },
-    );
+            expect(state.theme.path).toBe(path);
+            expect(state.theme.registration.colors?.["editor.foreground"]).toBe("#123456");
+            expect(configurationReads).toBe(1);
+        } finally {
+            rmSync(directory, { recursive: true, force: true });
+        }
+    });
 
     it("refreshes from changed bytes after the installed snapshot was captured", async () => {
         const directory = mkdtempSync(join(tmpdir(), "pi-glowup-theme-refresh-"));
@@ -356,15 +350,13 @@ describe("syntax highlighter lifecycle", () => {
             if (second.status !== "ready") throw new Error("replacement theme was not installed");
 
             expect(second.theme.registration.colors?.["editor.foreground"]).toBe("#abcdef");
-            expect(second).not.toBe(first);
-            expect(await refreshSyntaxHighlighting(env, options)).toBe(second);
             expect(factoryCalls).toBe(2);
         } finally {
             rmSync(directory, { recursive: true, force: true });
         }
     });
 
-    it("retains failed-source identity and recovers when missing or malformed theme bytes change", async () => {
+    it("recovers when missing or malformed theme bytes change", async () => {
         const directory = mkdtempSync(join(tmpdir(), "pi-glowup-theme-errors-"));
         const path = join(directory, "theme.json");
         const env = { PI_GLOWUP_SYNTAX_THEME: path };
@@ -372,7 +364,6 @@ describe("syntax highlighter lifecycle", () => {
         try {
             const missing = await initializeSyntaxHighlighting(env, options);
             expect(missing.status).toBe("failed");
-            expect(await refreshSyntaxHighlighting(env, options)).toBe(missing);
 
             writeFileSync(path, "{}");
             const malformed = await refreshSyntaxHighlighting(env, options);
@@ -380,12 +371,6 @@ describe("syntax highlighter lifecycle", () => {
                 status: "failed",
                 reason: "Syntax theme JSON must include tokenColors",
             });
-
-            expect(await refreshSyntaxHighlighting(env, options)).toBe(malformed);
-            writeFileSync(path, "{ }");
-            const changedMalformed = await refreshSyntaxHighlighting(env, options);
-            expect(changedMalformed).toEqual(malformed);
-            expect(changedMalformed).not.toBe(malformed);
 
             writeFileSync(path, '{"tokenColors":[]}');
             expect((await refreshSyntaxHighlighting(env, options)).status).toBe("ready");

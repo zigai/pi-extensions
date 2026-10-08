@@ -29,6 +29,7 @@ assert.ok(
     agentDir !== undefined && agentDir.length > 0,
     "fixture requires its own agent directory",
 );
+
 const before = snapshot(agentDir);
 const { default: glowupExtension } = await import("../../../src/index.ts");
 assert.deepEqual(snapshot(agentDir), before, "module import must not create or migrate settings");

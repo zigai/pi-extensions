@@ -86,18 +86,14 @@ contract:
 security:
     npm exec --no -- vitest run test/tools/built-in/preimage-boundary.test.ts
 
-# Expected-failing acceptance cases for unresolved audit findings; never run implicitly
-regressions:
-    npm run test:regressions
-
 # Check manifest/lock declarations before repairing the lock with npm
 lock-contract:
-    npm run test:regressions -- test/audit/lockfile.regression.ts
+    npm exec --no -- vitest run test/package.test.ts -t "keeps manifest and lockfile root"
 
 # Registration and import isolation, in fresh credential-free processes
 registration-contract:
-    npm run test:regressions -- test/audit/registration.regression.ts
+    npm exec --no -- vitest run test/pi/index-lifecycle.test.ts -t "keeps settings unchanged"
 
-# Deterministic clear-during-await histories, not a thread race detector
+# Deterministic clear-during-await histories
 concurrency:
-    npm run test:regressions -- test/audit/session-preimages.regression.ts
+    npm exec --no -- vitest run test/tools/built-in/preimage-boundary.test.ts -t "does not repopulate session"

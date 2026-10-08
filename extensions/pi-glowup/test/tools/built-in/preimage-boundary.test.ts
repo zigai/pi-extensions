@@ -2,6 +2,8 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
+import { DEFAULT_MUTATION_SETTINGS } from "../../../src/rendering/preview-settings.ts";
+import { createNativeEditFeature } from "../../../src/tools/built-in/edit.ts";
 import {
     captureDeletedTextPreview,
     captureTextFilePreimage,
@@ -19,6 +21,7 @@ async function createSandbox(): Promise<{ readonly project: string; readonly out
     await mkdir(outside);
     await writeFile(join(project, "inside.txt"), "inside\n");
     await writeFile(join(outside, "marker.txt"), "SYNTHETIC_OUTSIDE_MARKER\n");
+
     return { project, outside };
 }
 
@@ -102,6 +105,7 @@ describe("preimage filesystem boundary", () => {
             removed: 3,
             preimage: { lines: ["one", "two", "three"], endsWithNewline: false },
         });
+
         expect(await readFile(join(project, "mixed.txt"), "utf8")).toBe(original);
     });
 
@@ -114,5 +118,77 @@ describe("preimage filesystem boundary", () => {
         for (const filePath of ["missing", "directory", "dangling", "binary"]) {
             expect(await captureTextFilePreimage(project, filePath)).toBeUndefined();
         }
+    });
+});
+
+describe("native edit session preimages", () => {
+    it("does not repopulate session snapshots when a pending capture settles after clear", async () => {
+        const { project } = await createSandbox();
+        const feature = createNativeEditFeature();
+        onTestFinished(() => feature.clear());
+        await feature.captureNativeEditSnapshot(
+            "control",
+            project,
+            "inside.txt",
+            DEFAULT_MUTATION_SETTINGS,
+        );
+        expect(feature.stats().nativeEditSnapshots).toBe(1);
+        feature.clear();
+
+        const capturing = feature.captureNativeEditSnapshot(
+            "old-session",
+            project,
+            "inside.txt",
+            DEFAULT_MUTATION_SETTINGS,
+        );
+        feature.clear();
+        await capturing;
+
+        expect(feature.stats().nativeEditSnapshots).toBe(0);
+        await feature.captureNativeEditSnapshot(
+            "old-session",
+            project,
+            "inside.txt",
+            DEFAULT_MUTATION_SETTINGS,
+        );
+        expect(feature.stats().nativeEditSnapshots).toBe(1);
+    });
+
+    it("does not repopulate session payloads when a pending finish settles after clear", async () => {
+        const { project } = await createSandbox();
+        const feature = createNativeEditFeature();
+        onTestFinished(() => feature.clear());
+        await feature.captureNativeEditSnapshot(
+            "old-session",
+            project,
+            "inside.txt",
+            DEFAULT_MUTATION_SETTINGS,
+        );
+        await writeFile(join(project, "inside.txt"), "AFTER\n");
+
+        const finishing = feature.finishNativeEditSnapshot(
+            "old-session",
+            false,
+            DEFAULT_MUTATION_SETTINGS,
+        );
+        feature.clear();
+        await expect(finishing).resolves.toBeUndefined();
+        expect(feature.stats()).toMatchObject({
+            nativeEditSnapshots: 0,
+            nativeEditPierrePayloads: 0,
+        });
+
+        await feature.captureNativeEditSnapshot(
+            "new-session",
+            project,
+            "inside.txt",
+            DEFAULT_MUTATION_SETTINGS,
+        );
+        await writeFile(join(project, "inside.txt"), "AFTER NEW SESSION\n");
+        expect(
+            await feature.finishNativeEditSnapshot("new-session", false, DEFAULT_MUTATION_SETTINGS),
+        ).toBeDefined();
+
+        expect(feature.stats().nativeEditPierrePayloads).toBe(1);
     });
 });

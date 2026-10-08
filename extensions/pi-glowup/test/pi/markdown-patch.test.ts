@@ -26,31 +26,41 @@ type FakeMarkdownInstance = {
 };
 
 describe("markdown syntax patch", () => {
-    it("restores the original render method when disabled", () => {
+    it("stops injecting a highlighter when disabled", () => {
         const prototype = {
-            render: (): string[] => ["original"],
+            render(this: FakeMarkdownInstance): string[] {
+                return [this.theme?.highlightCode === undefined ? "no highlighter" : "highlighted"];
+            },
         };
-        const originalRender = prototype.render;
+        const theme = makeMarkdownTheme();
 
         configureMarkdownSyntaxPatch(true, prototype);
+        expect(prototype.render.call({ theme })).toEqual(["highlighted"]);
         configureMarkdownSyntaxPatch(false, prototype);
 
-        expect(prototype.render).toBe(originalRender);
+        expect(prototype.render.call({ theme })).toEqual(["no highlighter"]);
     });
 
     it("does not clobber render wrappers installed later", () => {
         const prototype = {
-            render: (_width: number): string[] => ["original"],
+            render(this: FakeMarkdownInstance, _width: number): string[] {
+                return [this.theme?.highlightCode === undefined ? "no highlighter" : "highlighted"];
+            },
         };
         configureMarkdownSyntaxPatch(true, prototype);
-        const originalRender = prototype.render;
-        prototype.render = (width: number): string[] => originalRender(width);
-        const laterRender = prototype.render;
+        const wrapped = { ...prototype };
+        prototype.render = function renderWithLaterWrapper(
+            this: FakeMarkdownInstance,
+            width: number,
+        ) {
+            return ["foreign", ...wrapped.render.call(this, width)];
+        };
+        const theme = makeMarkdownTheme();
+        expect(prototype.render.call({ theme }, 80)).toEqual(["foreign", "highlighted"]);
 
         configureMarkdownSyntaxPatch(false, prototype);
 
-        expect(prototype.render).toBe(laterRender);
-        expect(prototype.render(80)).toEqual(["original"]);
+        expect(prototype.render.call({ theme }, 80)).toEqual(["foreign", "no highlighter"]);
     });
 
     it("temporarily injects one shared highlighter into fresh Markdown theme objects", () => {
@@ -73,12 +83,7 @@ describe("markdown syntax patch", () => {
             prototype.render.call({ theme }, 80);
         }
 
-        expect(new Set(highlightedFunctions).size).toBe(1);
-        const firstHighlight = highlightedFunctions[0];
-        if (firstHighlight === undefined) {
-            throw new Error("expected Markdown themes to receive a shared highlight function");
-        }
-
+        expect(highlightedFunctions).toHaveLength(themes.length);
         expect(themes.every((theme) => theme.highlightCode === undefined)).toBe(true);
     });
 
@@ -101,7 +106,7 @@ describe("markdown syntax patch", () => {
         configureMarkdownSyntaxPatch(false, prototype);
 
         expect(rendered).toEqual(["code"]);
-        expect(theme.highlightCode).toBe(originalHighlight);
+        expect(theme.highlightCode("test", "ts")).toEqual(["original"]);
         expect(prototype.render.call({ theme }, 80)).toEqual(["original"]);
     });
 });

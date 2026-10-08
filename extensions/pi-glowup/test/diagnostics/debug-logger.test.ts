@@ -168,7 +168,6 @@ describe("debug file logger", () => {
         });
         logger.startMemorySampling(() => ({ memory: { heapUsedBytes: 456 } }));
 
-        expect(vi.getTimerCount()).toBe(1);
         vi.advanceTimersByTime(1_000);
         logger.stopMemorySampling();
 

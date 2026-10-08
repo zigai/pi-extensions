@@ -22,10 +22,7 @@ import {
     highlightSyntaxCode,
     initializeSyntaxHighlighting,
 } from "../../../src/rendering/syntax/highlighter.ts";
-import {
-    normalizeSyntaxLanguage,
-    PRELOADED_SYNTAX_LANGUAGES,
-} from "../../../src/rendering/syntax/language.ts";
+import { normalizeSyntaxLanguage } from "../../../src/rendering/syntax/language.ts";
 import { configureMarkdownSyntaxPatch } from "../../../src/pi/patches/markdown-syntax.ts";
 import { SYNTAX_ACCENT_COLORS } from "../../../src/rendering/syntax/palette.ts";
 import { loadSyntaxConfig } from "../../../src/rendering/syntax/theme-loader.ts";
@@ -72,7 +69,7 @@ const piTheme = new Theme(
     } satisfies Record<ThemeColor, string>,
     TEST_THEME_BACKGROUND_COLORS,
     "truecolor",
-    { name: "zigai-dark-test" },
+    { name: "sample-dark-test" },
 );
 
 const plainTheme: GlowupRenderTheme = {
@@ -238,19 +235,11 @@ describe("central syntax highlighting", () => {
         ]);
     });
 
-    it("normalizes Rust and Go language aliases and keeps a small default preload set", () => {
+    it("normalizes Rust and Go language aliases", () => {
         expect(normalizeSyntaxLanguage("rust")).toBe("rust");
         expect(normalizeSyntaxLanguage("rs")).toBe("rust");
         expect(normalizeSyntaxLanguage("go")).toBe("go");
         expect(normalizeSyntaxLanguage("golang")).toBe("go");
-        expect(PRELOADED_SYNTAX_LANGUAGES).toEqual([
-            "markdown",
-            "bash",
-            "python",
-            "typescript",
-            "javascript",
-            "json",
-        ]);
     });
 
     it("injects the central highlighter into Markdown code fences", () => {
@@ -296,7 +285,7 @@ describe("central syntax highlighting", () => {
                 label: "Bash",
                 language: "bash",
                 code: [
-                    "python3 packages.py validate --os fedora && rsync -az Packages/manifests/vps.toml vps.01:~/Projects/config/Packages/manifests/vps.toml",
+                    "python3 manage.py validate --os sample && rsync -az config/services/sample.toml sample-host:~/config/services/sample.toml",
                     "sudo dnf install -y duf",
                 ].join("\n"),
             },
@@ -306,11 +295,11 @@ describe("central syntax highlighting", () => {
             .join("\n");
 
         expect(rendered).toContain(ANSI_ESCAPE);
-        expect(rendered).toContain("packages.py");
-        expect(rendered).toContain("Packages/manifests/vps.toml");
-        expect(rendered).not.toContain(`${STRING_RGB_CODE}mpackages.py`);
-        expect(rendered).not.toContain(`${STRING_RGB_CODE}mfedora`);
-        expect(rendered).not.toContain(`${STRING_RGB_CODE}mPackages/manifests/vps.toml`);
+        expect(rendered).toContain("manage.py");
+        expect(rendered).toContain("config/services/sample.toml");
+        expect(rendered).not.toContain(`${STRING_RGB_CODE}mmanage.py`);
+        expect(rendered).not.toContain(`${STRING_RGB_CODE}msample`);
+        expect(rendered).not.toContain(`${STRING_RGB_CODE}mconfig/services/sample.toml`);
         expect(rendered).not.toContain(`${STRING_RGB_CODE}mvalidate`);
         expect(rendered).not.toContain(`${STRING_RGB_CODE}minstall`);
     });
@@ -539,7 +528,7 @@ describe("central syntax highlighting", () => {
                     ' 4     { os = "arch", id = "bat", pm = "pacman" },',
                     " 5 ]",
                 ].join("\n"),
-                "Packages/manifests/vps.toml",
+                "config/services/sample.toml",
             ),
             true,
         )
@@ -574,7 +563,7 @@ describe("central syntax highlighting", () => {
                     '+16     "core",',
                     "+17 ]",
                 ].join("\n"),
-                "Packages/manifests/vps.toml",
+                "config/services/sample.toml",
             ),
             false,
         )

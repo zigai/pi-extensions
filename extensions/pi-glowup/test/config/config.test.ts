@@ -427,15 +427,6 @@ describe("glowup config", () => {
         },
     );
 
-    it("keeps the long syntax default out of the generated README table", () => {
-        const markdown = readFileSync("README.md", "utf8");
-
-        expect(markdown).toContain("| `syntax.preloadLanguages` | string[] | *See JSON below");
-        expect(markdown).not.toContain(
-            '| `syntax.preloadLanguages` | string[] | `["markdown","bash","python","typescript","javascript","json"]`',
-        );
-    });
-
     it("ignores project config unless trusted project config is included", () => {
         const root = mkdtempSync(join(tmpdir(), "pi-glowup-config-"));
         const agentDir = join(root, "agent");

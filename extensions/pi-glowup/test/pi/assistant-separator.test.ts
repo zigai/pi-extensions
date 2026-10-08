@@ -317,63 +317,51 @@ describe("assistant separator patch", () => {
             },
         };
         configureAssistantSeparatorPatch(true, prototype);
-        const originalDescriptor = Object.getOwnPropertyDescriptor(Container.prototype, "addChild");
         try {
             expect(() => prototype.updateContent.call(instance, assistantMessage([]))).toThrow(
                 failure,
             );
 
-            expect(Object.getOwnPropertyDescriptor(contentContainer, "addChild")?.value).toBe(
-                originalDescriptor?.value,
-            );
-
-            expect(contentContainer.render(20)).toEqual(["before failure"]);
+            contentContainer.addChild(new LabelComponent("after failure"));
+            expect(contentContainer.render(20)).toEqual(["before failure", "after failure"]);
         } finally {
             configureAssistantSeparatorPatch(false, prototype);
         }
     });
 
-    it("is idempotent for a patched prototype", () => {
+    it("renders one separator after repeat installation", () => {
         const prototype = createPrototype();
 
         installAssistantSeparatorPatch(prototype);
-        const patchedRenderDescriptor = Object.getOwnPropertyDescriptor(prototype, "render");
         installAssistantSeparatorPatch(prototype);
 
-        expect(Object.getOwnPropertyDescriptor(prototype, "render")).toEqual(
-            patchedRenderDescriptor,
-        );
+        expect(prototype.render.call({ [ASSISTANT_SEPARATOR_RENDER_KEY]: true }, 6)).toEqual([
+            "",
+            "\u001b[2m──────\u001b[0m",
+            "",
+            "assistant text",
+        ]);
     });
 
-    it("restores original assistant and chat container methods when disabled", () => {
+    it("stops adding separators and thinking spacing when disabled", () => {
         const prototype = createPrototypeWithContentUpdates();
         const containerPrototype: FakeContainerPrototype = {
             addChild(_component: Component): void {},
         };
-        const originalRenderDescriptor = Object.getOwnPropertyDescriptor(prototype, "render");
-        const originalUpdateDescriptor = Object.getOwnPropertyDescriptor(
-            prototype,
-            "updateContent",
-        );
-        const originalAddChildDescriptor = Object.getOwnPropertyDescriptor(
-            containerPrototype,
-            "addChild",
-        );
-
+        const message = assistantMessage([
+            { type: "text", text: "first" },
+            { type: "thinking", thinking: "next" },
+        ]);
         configureAssistantSeparatorPatch(true, prototype, containerPrototype);
+        const enabled = new Container();
+        prototype.updateContent?.call({ contentContainer: enabled }, message);
+        expect(enabled.render(20)).toContain("");
         configureAssistantSeparatorPatch(false, prototype, containerPrototype);
 
-        expect(Object.getOwnPropertyDescriptor(prototype, "render")).toEqual(
-            originalRenderDescriptor,
-        );
-
-        expect(Object.getOwnPropertyDescriptor(prototype, "updateContent")).toEqual(
-            originalUpdateDescriptor,
-        );
-
-        expect(Object.getOwnPropertyDescriptor(containerPrototype, "addChild")).toEqual(
-            originalAddChildDescriptor,
-        );
+        const disabled = new Container();
+        prototype.updateContent?.call({ contentContainer: disabled }, message);
+        expect(disabled.render(20)).toEqual(["initial-spacer", "text:first", "thinking:next"]);
+        expect(prototype.render.call({ [ASSISTANT_SEPARATOR_RENDER_KEY]: true }, 6)).toEqual([]);
     });
 
     it("does not clobber assistant and chat wrappers installed later", () => {
@@ -402,7 +390,7 @@ describe("assistant separator patch", () => {
             this: FakeAssistantInstance,
             width: number,
         ): string[] {
-            return patchedPrototype.render.call(this, width);
+            return ["foreign", ...patchedPrototype.render.call(this, width)];
         };
         containerPrototype.addChild = function addChildWithLaterWrapper(
             this: FakeContainerPrototype,
@@ -410,20 +398,12 @@ describe("assistant separator patch", () => {
         ): void {
             patchedContainerPrototype.addChild.call(this, component);
         };
-        const laterRenderDescriptor = Object.getOwnPropertyDescriptor(prototype, "render");
-        const laterAddChildDescriptor = Object.getOwnPropertyDescriptor(
-            containerPrototype,
-            "addChild",
-        );
-
         configureAssistantSeparatorPatch(false, prototype, containerPrototype);
 
-        expect(Object.getOwnPropertyDescriptor(prototype, "render")).toEqual(laterRenderDescriptor);
-        expect(Object.getOwnPropertyDescriptor(containerPrototype, "addChild")).toEqual(
-            laterAddChildDescriptor,
-        );
+        expect(prototype.render.call({ [ASSISTANT_SEPARATOR_RENDER_KEY]: true }, 6)).toEqual([
+            "foreign",
+        ]);
 
-        expect(prototype.render.call({ [ASSISTANT_SEPARATOR_RENDER_KEY]: true }, 6)).toEqual([]);
         containerPrototype.addChild(new LabelComponent("child"));
         expect(addedChildren.flatMap((child) => child.render(20))).toEqual(["child"]);
 
@@ -444,7 +424,10 @@ describe("assistant separator patch", () => {
             "thinking:next",
         ]);
 
-        expect(Object.getOwnPropertyDescriptor(prototype, "render")).toEqual(laterRenderDescriptor);
+        expect(prototype.render.call({ [ASSISTANT_SEPARATOR_RENDER_KEY]: true }, 6)).toEqual([
+            "foreign",
+        ]);
+
         configureAssistantSeparatorPatch(false, prototype, containerPrototype);
     });
 });

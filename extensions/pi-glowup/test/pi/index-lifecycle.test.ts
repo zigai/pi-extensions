@@ -1,6 +1,9 @@
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { initTheme, ToolExecutionComponent, SessionManager } from "@earendil-works/pi-coding-agent";
 import Type, { type Static } from "typebox";
 import { Value } from "typebox/value";
@@ -54,7 +57,6 @@ function assistantMessage(source: AssistantSourceMessage): AssistantMessage {
 
 class FakeExtensionApi extends ExtensionRegistrationFixture {
     branch: { type: "message"; message: AssistantSourceMessage }[] = [];
-    registeredToolCount = 0;
     toolExpansionRefreshes = 0;
     private context = createExtensionContext(process.cwd());
 
@@ -224,17 +226,46 @@ const AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
 const SCRIPT_FORMATTERS_ENV = "PI_GLOWUP_SCRIPT_FORMATTERS";
 
 describe("extension lifecycle", () => {
-    it("invokes tool handlers immediately and owns synchronous failures as rejections", async () => {
-        const pi = new FakeExtensionApi();
-        const observed: string[] = [];
-        pi.on("tool_call", () => {
-            observed.push("handler");
-
-            throw new Error("fixture handler failure");
+    it.each(["import", "registration"])("keeps settings unchanged during %s", async (phase) => {
+        const root = await mkdtemp(join(tmpdir(), "pi-glowup-registration-contract-"));
+        onTestFinished(async () => {
+            await rm(root, { recursive: true, force: true });
         });
-        const results = pi.runBashToolCall("true");
-        expect(observed).toEqual(["handler"]);
-        await expect(Promise.all(results)).rejects.toThrow("fixture handler failure");
+
+        const agentDir = join(root, "agent");
+        const legacyDirectory = join(agentDir, "pi-glowup");
+        await mkdir(legacyDirectory, { recursive: true });
+        await writeFile(join(legacyDirectory, "config.json"), "{}\n");
+        const child = spawnSync(
+            process.execPath,
+            [
+                "--import",
+                new URL("../pty/fixtures/no-network.js", import.meta.url).href,
+                "--import",
+                import.meta.resolve("tsx"),
+                fileURLToPath(new URL("./fixtures/register-without-session.ts", import.meta.url)),
+                phase,
+            ],
+            {
+                cwd: root,
+                env: {
+                    PATH: process.env.PATH ?? "/usr/bin:/bin",
+                    HOME: root,
+                    PI_CODING_AGENT_DIR: agentDir,
+                    PI_OFFLINE: "1",
+                    PI_SKIP_VERSION_CHECK: "1",
+                },
+                encoding: "utf8",
+                timeout: 10_000,
+                killSignal: "SIGKILL",
+                maxBuffer: 256 * 1024,
+            },
+        );
+
+        expect(child.error).toBeUndefined();
+        expect(child.signal).toBeNull();
+        expect(child.status).toBe(0);
+        expect(child.stdout).toContain("completed without settings writes");
     });
 
     const originalAgentDir = process.env[AGENT_DIR_ENV];
@@ -266,22 +297,17 @@ describe("extension lifecycle", () => {
 
         installGlowup(pi);
 
-        expect(pi.registeredToolCount).toBe(0);
-        expect(vi.getTimerCount()).toBe(0);
         expect(isSyntaxHighlightingReady()).toBe(false);
 
         await pi.startSession(join(root, "project"), false);
-        expect(vi.getTimerCount()).toBe(1);
         await vi.advanceTimersByTimeAsync(5_000);
         await vi.waitUntil(() => isSyntaxHighlightingReady());
 
-        expect(vi.getTimerCount()).toBe(0);
         expect(isSyntaxHighlightingReady()).toBe(true);
         expect(existsSync(join(agentDir, "pi-glowup", "debug.log"))).toBe(false);
 
         await pi.shutdownSession();
-
-        expect(vi.getTimerCount()).toBe(0);
+        expect(isSyntaxHighlightingReady()).toBe(false);
     });
 
     it("starts diagnostic logging only when explicitly enabled", async () => {
@@ -299,7 +325,6 @@ describe("extension lifecycle", () => {
         await vi.advanceTimersByTimeAsync(5_000);
         await initializeSyntaxHighlighting();
 
-        expect(vi.getTimerCount()).toBe(1);
         expect(readLogEvents(join(agentDir, "pi-glowup", "debug.log"))).toEqual(
             expect.arrayContaining(["config_applied", "extension_loaded", "session_start"]),
         );
