@@ -1,5 +1,6 @@
 // oxlint-disable antislop/no-runtime-typeof
 import Type, { type Static, type TProperties, type TObject } from "typebox";
+import { Compile, type Validator } from "typebox/compile";
 import { Value } from "typebox/value";
 import type {
     GlowupCallNode,
@@ -81,6 +82,7 @@ const mutationLineSchema = Type.Object({
     oldLine: Type.Optional(Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })),
     newLine: Type.Optional(Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })),
 });
+const mutationLineValidator = Compile(mutationLineSchema);
 
 // Child fields stay unknown here: only the bounded traversal may inspect them.
 const nodeSchemas = {
@@ -131,6 +133,7 @@ const mutationFileSchema = Type.Object({
     removed: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
     countsKnown: Type.Optional(Type.Boolean()),
 });
+const mutationFileValidator = Compile(mutationFileSchema);
 
 type DecodeState = {
     readonly limits: GlowupNodeDecodeLimits;
@@ -187,6 +190,7 @@ function capture<Properties extends TProperties>(
     value: unknown,
     state: DecodeState,
     textFields: readonly string[] = [],
+    validator?: Pick<Validator<TProperties, TObject<Properties>>, "Check">,
 ): Static<TObject<Properties>> {
     if (!isObjectNotArray(value)) return reject();
 
@@ -199,7 +203,12 @@ function capture<Properties extends TProperties>(
         if (field !== undefined) entries.push([key, field]);
     }
 
-    const captured: unknown = Object.fromEntries(entries);
+    const captured = Object.fromEntries(entries);
+    if (validator !== undefined) {
+        if (!validator.Check(captured)) return reject();
+        return captured;
+    }
+
     if (!Value.Check(schema, captured)) return reject();
     return captured;
 }
@@ -398,6 +407,7 @@ function decodeVariant(value: unknown, state: DecodeState, depth: number): Glowu
                     readField(values, String(index), state),
                     state,
                     ["path", "previousPath"],
+                    mutationFileValidator,
                 );
                 const { values: rows, length: rowCount } = collection(file.lines, remaining, state);
                 remaining -= rowCount;
@@ -405,9 +415,13 @@ function decodeVariant(value: unknown, state: DecodeState, depth: number): Glowu
                 const lines = [];
                 for (let row = 0; row < rowCount; row++)
                     lines.push(
-                        capture(mutationLineSchema, readField(rows, String(row), state), state, [
-                            "text",
-                        ]),
+                        capture(
+                            mutationLineSchema,
+                            readField(rows, String(row), state),
+                            state,
+                            ["text"],
+                            mutationLineValidator,
+                        ),
                     );
 
                 files.push({ ...file, lines });
