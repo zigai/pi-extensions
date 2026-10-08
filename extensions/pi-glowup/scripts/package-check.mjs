@@ -9,6 +9,9 @@ import { checkProtocolPackage } from "./check-protocol-package.mjs";
 
 const packageManifestSchema = Type.Object({
   files: Type.Array(Type.String()),
+  exports: Type.Object({
+    ".": Type.Object({ types: Type.String(), default: Type.String() }),
+  }),
   piExtensionSettings: Type.Object({
     definition: Type.String(),
     prevalidation: Type.String(),
@@ -27,6 +30,10 @@ const [output, schema, sourceSchema, theme, packageManifest] = await Promise.all
 ]);
 
 assert.equal(schema, sourceSchema);
+await Promise.all([
+  readFile(path.join(packageRoot, packageManifest.exports["."].types)),
+  readFile(path.join(packageRoot, packageManifest.exports["."].default)),
+]);
 
 for (const configuredPath of [
   packageManifest.piExtensionSettings.definition,

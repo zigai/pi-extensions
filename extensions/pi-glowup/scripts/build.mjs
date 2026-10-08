@@ -1,8 +1,9 @@
-import { copyFile, mkdir, readFile, rm } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import * as esbuild from "esbuild";
+import ts from "typescript";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const outputRoot = path.join(packageRoot, "dist");
@@ -75,3 +76,13 @@ if (bundledHostInputs.length > 0) {
 
 const output = await readFile(outfile, "utf8");
 if (output.includes(packageRoot)) throw new Error("Bundle contains an absolute workspace path");
+
+const declaration = ts.transpileDeclaration(
+  await readFile(path.join(packageRoot, "src", "index.ts"), "utf8"),
+  { fileName: "src/index.ts", reportDiagnostics: true },
+);
+if (declaration.diagnostics !== undefined && declaration.diagnostics.length > 0) {
+  throw new Error("Public factory declaration generation failed");
+}
+
+await writeFile(path.join(outputRoot, "src", "index.d.ts"), declaration.outputText);
