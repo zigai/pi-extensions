@@ -1,0 +1,17 @@
+node_modules/
+.pi/
+.env
+.env.*
+npm-debug.log*
+*.tsbuildinfo
+coverage/
+dist/
+.artifacts/
+.platform-verification-runs/
+.scratchpad.md
+.DS_Store
+.debug/
+.crabbox/
+
+# CueLoop local/runtime state (do not commit)
+.cueloop/

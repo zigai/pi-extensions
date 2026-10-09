@@ -1,0 +1,15 @@
+node_modules/
+.pi/
+.env
+.env.*
+.artifacts/
+.platform-verification-runs/
+.crabbox/
+.debug/
+dist/
+coverage/
+*.tgz
+*.tsbuildinfo
+npm-debug.log*
+.DS_Store
+.scratchpad.md

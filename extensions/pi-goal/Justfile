@@ -1,0 +1,66 @@
+_:
+    @just help
+
+# List available commands
+help:
+    @just --list
+
+# Install dependencies, then verify the project
+setup:
+    npm install
+    npm run check
+
+
+# Install the extension into Pi
+install:
+    pi install .
+# Type-check the extension
+typecheck:
+    npm run typecheck
+
+# Format code
+format:
+    npm run format
+
+# Check code for lint issues
+lint:
+    npm run lint
+
+# Run tests
+test:
+    npm test
+
+# Run tests with coverage
+coverage:
+    npm run coverage
+
+# Check the platform-verification harness without running remote targets
+platform-check:
+    npm run check:platform-verification
+
+# Check Crabbox platform-verification prerequisites
+platform-doctor:
+    npm run verify:platform:doctor
+
+# Run the complete macOS, Ubuntu, and native Windows platform gate
+platform-verification:
+    npm run verify:platform:all
+
+# Run all local non-mutating quality checks
+check:
+    npm run check
+
+# Apply automatic lint fixes and format the project
+fix:
+    npm run lint:fix
+    npm run format
+
+# Remove coverage and temporary output
+clean:
+    rm -rf coverage dist
+
+alias cov := coverage
+alias verify := check
+alias verification := platform-verification
+alias fmt := format
+alias tsc := typecheck
