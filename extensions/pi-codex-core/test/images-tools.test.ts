@@ -5,7 +5,7 @@ import { deflateSync } from "node:zlib";
 import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionToolContext } from "@earendil-works/pi-coding-agent";
 import { getImageDimensions } from "@earendil-works/pi-tui";
 import { JsonArrayDecoder, JsonObjectDecoder } from "../src/compaction/responses-input.ts";
 import type { JsonObject, JsonValue } from "../src/compaction/types.ts";
@@ -1466,9 +1466,13 @@ test("allocates unique generated image artifact names on retry", async () => {
     }
 });
 
-function makeImageContext(cwd: string): ExtensionContext {
+function makeImageContext(cwd: string): ExtensionToolContext {
     const ctx = {
         cwd,
+        tools: [],
+        async executeTool() {
+            throw new Error("Unexpected nested tool call.");
+        },
         model: {
             provider: "openai-codex",
             api: "openai-codex-responses",
@@ -1481,24 +1485,28 @@ function makeImageContext(cwd: string): ExtensionContext {
         },
     };
 
-    return testDouble<ExtensionContext>(ctx);
+    return testDouble<ExtensionToolContext>(ctx);
 }
 
-type TestContextModel = NonNullable<ExtensionContext["model"]>;
+type TestContextModel = NonNullable<ExtensionToolContext["model"]>;
 
 function makeWebRunContext(
     cwd: string,
     options: {
-        readonly model?: NonNullable<ExtensionContext["model"]> | undefined;
+        readonly model?: NonNullable<ExtensionToolContext["model"]> | undefined;
 
         readonly findModel?: (
             provider: string,
             modelId: string,
-        ) => NonNullable<ExtensionContext["model"]> | undefined;
+        ) => NonNullable<ExtensionToolContext["model"]> | undefined;
     } = {},
-): ExtensionContext {
+): ExtensionToolContext {
     const ctx = {
         cwd,
+        tools: [],
+        async executeTool() {
+            throw new Error("Unexpected nested tool call.");
+        },
         model: options.model ?? {
             name: "GPT-5.5",
             provider: "openai-codex",
@@ -1525,13 +1533,13 @@ function makeWebRunContext(
         },
     };
 
-    return testDouble<ExtensionContext>(ctx);
+    return testDouble<ExtensionToolContext>(ctx);
 }
 
 function makeWebRunContextWithBranch(
     cwd: string,
     branchEntries: readonly JsonObject[],
-): ExtensionContext {
+): ExtensionToolContext {
     const base = makeWebRunContext(cwd);
     const ctx = {
         ...base,
@@ -1541,7 +1549,7 @@ function makeWebRunContextWithBranch(
         },
     };
 
-    return testDouble<ExtensionContext>(ctx);
+    return testDouble<ExtensionToolContext>(ctx);
 }
 
 function solidPngBytes(

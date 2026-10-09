@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "vitest";
 
-import { withFileMutationQueue, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import type { Result as BetterResult } from "better-result";
 
 import {
@@ -26,7 +26,7 @@ import {
     type ApplyPatchFileSystem,
 } from "../src/tools/apply-patch/engine.ts";
 import { createApplyPatchTool } from "../src/tools/apply-patch/tool.ts";
-import { makeExtensionContext, testDouble } from "./helpers.ts";
+import { makeExtensionContext } from "./helpers.ts";
 
 function wrapPatch(body: string): string {
     return `*** Begin Patch\n${body}\n*** End Patch`;
@@ -407,8 +407,7 @@ test("apply_patch tool executes patch argument and formats parser errors", async
             patch: wrapPatch("*** Add File: hello.txt\n+hi"),
         });
         assert.ok(params);
-        const ctx = { cwd: root };
-        const executionContext = testDouble<ExtensionContext>(ctx);
+        const executionContext = makeExtensionContext(root, true);
         const result = await tool.execute("call-1", params, undefined, undefined, executionContext);
         assert.equal(await readFile(join(root, "hello.txt"), "utf8"), "hi\n");
         const firstContent = result.content[0];

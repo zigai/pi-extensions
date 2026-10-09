@@ -9,6 +9,7 @@ import {
     type EventBus,
     type ExtensionAPI,
     type ExtensionContext,
+    type ExtensionToolContext,
     type Theme,
 } from "@earendil-works/pi-coding-agent";
 import { normalizeBuildSystemPromptOptions } from "../node_modules/@earendil-works/pi-coding-agent/dist/core/system-prompt.js";
@@ -352,7 +353,7 @@ export function makeExtensionContext(
     trusted: boolean,
     model: TestExtensionModel = DEFAULT_TEST_EXTENSION_MODEL,
     options: { readonly agentActive?: boolean } = {},
-): ExtensionContext {
+): ExtensionToolContext {
     const sessionManager = {
         getSessionId: () => "extension-session",
         getBranch: () => [],
@@ -369,7 +370,13 @@ export function makeExtensionContext(
           }
         : { cwd, hasUI: false, isProjectTrusted: () => trusted, model, sessionManager };
 
-    return testDouble<ExtensionContext>(ctx);
+    return testDouble<ExtensionToolContext>({
+        ...ctx,
+        tools: [],
+        async executeTool() {
+            throw new Error("Unexpected nested tool call.");
+        },
+    });
 }
 
 export function makeTestRuntime(
