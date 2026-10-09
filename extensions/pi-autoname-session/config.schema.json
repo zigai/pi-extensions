@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/zigai/pi-autoname-session/HEAD/config.schema.json",
+  "title": "Pi Autoname Session settings",
+  "description": "Settings for Pi Autoname Session.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "default": "./schemas/pi-autoname-session.schema.json",
+      "description": "JSON Schema used by editors for this settings file."
+    },
+    "enabled": {
+      "type": "boolean",
+      "default": true,
+      "description": "Enable the extension."
+    },
+    "initialNaming": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically name an otherwise unnamed session once."
+        },
+        "timing": {
+          "type": "string",
+          "enum": [
+            "prompt",
+            "settled"
+          ],
+          "description": "When to first check the naming trigger: before the agent starts on a prompt, or after the agent has settled.",
+          "default": "prompt"
+        },
+        "trigger": {
+          "type": "string",
+          "enum": [
+            "messages",
+            "turns",
+            "tool_calls",
+            "tokens",
+            "minutes"
+          ],
+          "description": "The session activity that starts a naming attempt.",
+          "default": "messages"
+        },
+        "threshold": {
+          "type": "integer",
+          "default": 1,
+          "minimum": 1,
+          "description": "The initial activity threshold."
+        }
+      },
+      "additionalProperties": false,
+      "default": {
+        "enabled": true,
+        "timing": "prompt",
+        "trigger": "messages",
+        "threshold": 1
+      }
+    },
+    "refreshNaming": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Periodically refresh the name as the session develops."
+        },
+        "trigger": {
+          "type": "string",
+          "enum": [
+            "messages",
+            "turns",
+            "tool_calls",
+            "tokens",
+            "minutes"
+          ],
+          "description": "The activity that starts a naming refresh.",
+          "default": "turns"
+        },
+        "threshold": {
+          "type": "integer",
+          "default": 10,
+          "minimum": 1,
+          "description": "The amount of activity between refreshes."
+        }
+      },
+      "additionalProperties": false,
+      "default": {
+        "enabled": false,
+        "trigger": "turns",
+        "threshold": 10
+      }
+    },
+    "model": {
+      "type": "string",
+      "default": "current",
+      "minLength": 1,
+      "pattern": "^(?:current|[^/\\s]+/\\S+)$",
+      "description": "Picker model: provider/model-id, or current for the active model."
+    },
+    "reasoningEffort": {
+      "type": "string",
+      "enum": [
+        "off",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "description": "Reasoning effort used by the session-name picker.",
+      "default": "low"
+    },
+    "timeoutMs": {
+      "type": "integer",
+      "default": 30000,
+      "minimum": 1000,
+      "description": "Maximum time in milliseconds for picker authentication and the model response before the naming attempt is treated as failed."
+    },
+    "conversationScope": {
+      "type": "string",
+      "enum": [
+        "minimized",
+        "full"
+      ],
+      "description": "How much refresh context to send. Minimized sends only user and assistant text; full also includes tool arguments, results, and shell output. Initial naming always uses only the first user request.",
+      "default": "minimized"
+    },
+    "prompt": {
+      "type": "string",
+      "default": "Generate a title that will help the user recognize this coding session weeks later.\n\nBefore answering, silently identify:\n- Subject: the system, feature, or problem the request is really about.\n- Outcome: what the user ultimately wants to understand or change.\n- Incidental instructions: details about tools, process, output, or how the agent should work.\n\nTitle the durable subject and desired outcome. Discard incidental instructions.\nPrioritize user requests over assistant discoveries. Preserve the original subject until the user clearly changes goals.\n\nEditorial rules:\n- Use 3 to 8 words and a compact noun phrase or clear action phrase.\n- Capture the umbrella goal when the request lists several symptoms or steps.\n- Name the product change, not a plan, report, branch, commit, PR, test run, or monitoring step used to produce it.\n- Exclude models, subagents, tools, and output formats unless they are themselves the topic.\n- For reviews, name what is being reviewed and the relevant concern.\n- For research, name the question domain rather than the research process.\n- Do not claim the work is complete or merely copy and truncate the request.\n- Avoid repository names already visible in the workspace metadata, quotes, labels, filler, and trailing punctuation.\n\nWorkspace metadata:\n<workspace>\n{{repository_context}}\n</workspace>\n\nConversation:\n<conversation>\n{{conversation}}\n</conversation>\n\nCurrent title: {{current_name}}\nNaming phase: {{reason}}",
+      "minLength": 1,
+      "x-control": "textarea",
+      "description": "Prompt used by the picker. Available placeholders are {{repository_context}}, {{conversation}}, {{current_name}}, {{cwd}}, and {{reason}}."
+    },
+    "nameConstraints": {
+      "type": "object",
+      "properties": {
+        "minLength": {
+          "type": "integer",
+          "default": 6,
+          "minimum": 1,
+          "description": "Minimum number of characters in a name returned by the picker."
+        },
+        "maxLength": {
+          "type": "integer",
+          "default": 40,
+          "minimum": 1,
+          "description": "Maximum number of characters in a name returned by the picker."
+        }
+      },
+      "additionalProperties": false,
+      "default": {
+        "minLength": 6,
+        "maxLength": 40
+      }
+    }
+  }
+}
