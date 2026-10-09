@@ -1,0 +1,1106 @@
+import { quoteSerializedValue } from "./behavior.js";
+import { resolveTypedCommandRoute, type TypedCommandRoute } from "./command/subcommands.js";
+import {
+    expandGroupedArgumentValues,
+    flattenGroupedArgumentValues,
+    hasArgumentGroups,
+} from "./arguments.js";
+import { compileTypedCommandGrammar } from "./compiler.js";
+import { normalizeFlagName } from "./names.js";
+import {
+    applyArgumentDefault,
+    booleanFromString,
+    createParseIssue,
+    isPositionalArgument,
+} from "./schema.js";
+import type {
+    ArgumentDefinition,
+    ArgumentDefinitions,
+    ArgumentPath,
+    ArgumentValue,
+    CompiledCommand,
+    CoreRegisteredTypedCommand,
+    FlatArgumentDefinitions,
+    InferArguments,
+    ParsedArgumentDraft,
+    ParsedCommandArguments,
+    ParseIssue,
+    RawArgumentOccurrence,
+    SerializableArgumentValues,
+    TypedCommandRefinement,
+    TypedParseResult,
+} from "./types.js";
+
+export { quoteSerializedValue };
+
+/** Token produced from a raw typed-argument string. */
+export type Token = {
+    /** Parsed token value with surrounding quotes removed and supported escapes resolved. */
+    readonly value: string;
+
+    /** Exact source slice that produced the token. */
+    readonly raw: string;
+
+    /** Inclusive UTF-16 offset in the input. */
+    readonly start: number;
+
+    /** Exclusive UTF-16 offset in the input. */
+    readonly end: number;
+
+    /** Quote character used anywhere in the token, when present. */
+    readonly quote?: "'" | '"';
+
+    /** Whether at least one escape sequence was consumed. */
+    readonly escaped: boolean;
+};
+
+/** Token stream produced from a raw typed-argument string. */
+export type TokenizeResult = {
+    /** Parsed tokens with quotes removed and escapes resolved. */
+    readonly tokens: readonly string[];
+
+    /** Whether the input ended before a quoted string was closed. */
+    readonly unterminatedQuote: boolean;
+};
+
+/** Lossless tokenization result used by completions and diagnostics that need source spans. */
+export type LexResult = {
+    readonly tokens: readonly Token[];
+    readonly unterminatedQuote: boolean;
+};
+
+type ParsedFlagToken = {
+    flag: string;
+    inlineValue?: string;
+    isNoFlag?: boolean;
+};
+
+type ParsableTypedCommand<TDefinitions extends ArgumentDefinitions> = {
+    args: FlatArgumentDefinitions;
+    compiled?: CompiledCommand<TDefinitions>;
+    refine?: TypedCommandRefinement<FlatArgumentDefinitions>;
+    subcommands?: Readonly<Record<string, CoreRegisteredTypedCommand>>;
+    hasRootHandler?: boolean;
+};
+
+type TypedCommandGrammar = CompiledCommand;
+
+type MutableParsedCommandArguments = {
+    grammar?: CompiledCommand;
+    values: Record<string, ArgumentValue>;
+    provided: Set<string>;
+    sources?: Map<string, "explicit" | "default">;
+    issues: ParseIssue[];
+    mode: "run" | "help";
+};
+
+const grammarCache = new WeakMap<object, CompiledCommand>();
+
+function commandGrammar<TDefinitions extends ArgumentDefinitions>(
+    command: ParsableTypedCommand<TDefinitions>,
+): TypedCommandGrammar {
+    if (command.compiled !== undefined) {
+        return command.compiled;
+    }
+
+    const cached = grammarCache.get(command);
+    if (cached !== undefined) {
+        return cached;
+    }
+
+    const grammar = compileTypedCommandGrammar({
+        name: "typed-command",
+        description: "",
+        args: command.args,
+    });
+    grammarCache.set(command, grammar);
+
+    return grammar;
+}
+
+function isHelpTokenValue(value: string): boolean {
+    return value === "--help" || value === "-h";
+}
+
+function isHelpToken(token: Token): boolean {
+    return token.quote === undefined && isHelpTokenValue(token.value);
+}
+
+function isOutsideEscapeTarget(char: string): boolean {
+    return /\s/.test(char) || char === "\\" || char === '"' || char === "'" || char === ",";
+}
+
+/** Lex typed-command arguments while preserving raw token spans and quote metadata. */
+export function lexTypedArgumentString(input: string): LexResult {
+    const tokens: Token[] = [];
+    let current = "";
+    let quote: "'" | '"' | undefined;
+    let tokenQuote: "'" | '"' | undefined;
+    let escaping = false;
+    let escaped = false;
+    let tokenStarted = false;
+    let tokenStart = 0;
+
+    const beginToken = (index: number): void => {
+        if (tokenStarted) {
+            return;
+        }
+
+        tokenStarted = true;
+        tokenStart = index;
+        current = "";
+        tokenQuote = undefined;
+        escaped = false;
+    };
+
+    const pushToken = (end: number): void => {
+        if (!tokenStarted) {
+            return;
+        }
+
+        let token: Token = {
+            value: current,
+            raw: input.slice(tokenStart, end),
+            start: tokenStart,
+            end,
+            escaped,
+        };
+        if (tokenQuote !== undefined) {
+            token = { ...token, quote: tokenQuote };
+        }
+
+        tokens.push(token);
+        tokenStarted = false;
+        current = "";
+        tokenQuote = undefined;
+        escaped = false;
+    };
+
+    for (let index = 0; index < input.length; index += 1) {
+        const char = input[index];
+        if (char === undefined) {
+            break;
+        }
+
+        if (escaping) {
+            beginToken(index - 1);
+            current += char;
+            escaping = false;
+            escaped = true;
+            continue;
+        }
+
+        if (quote !== undefined) {
+            beginToken(index);
+
+            if (char === "\\") {
+                escaping = true;
+                continue;
+            }
+
+            if (char === quote) {
+                quote = undefined;
+                continue;
+            }
+
+            current += char;
+            continue;
+        }
+
+        if (/\s/.test(char)) {
+            pushToken(index);
+            continue;
+        }
+
+        if (char === '"' || char === "'") {
+            beginToken(index);
+            quote = char;
+            tokenQuote ??= char;
+            continue;
+        }
+
+        if (char === "\\") {
+            const next = input[index + 1];
+            beginToken(index);
+
+            if (next !== undefined && isOutsideEscapeTarget(next)) {
+                current += next;
+                index += 1;
+                escaped = true;
+                continue;
+            }
+
+            current += char;
+            continue;
+        }
+
+        beginToken(index);
+        current += char;
+    }
+
+    if (escaping) {
+        beginToken(Math.max(0, input.length - 1));
+        current += "\\";
+    }
+
+    pushToken(input.length);
+
+    return {
+        tokens,
+        unterminatedQuote: quote !== undefined,
+    };
+}
+
+/** Tokenize typed-command arguments using the same quote and escape rules as the parser. */
+export function tokenizeTypedArgumentString(input: string): TokenizeResult {
+    const result = lexTypedArgumentString(input);
+
+    return {
+        tokens: result.tokens.map((token) => token.value),
+        unterminatedQuote: result.unterminatedQuote,
+    };
+}
+
+function isFlagToken(token: Token): boolean {
+    if (token.quote !== undefined && !token.raw.startsWith("-")) {
+        return false;
+    }
+
+    if (token.value === "-") {
+        return false;
+    }
+
+    if (token.value === "--") {
+        return false;
+    }
+
+    return token.value.startsWith("-");
+}
+
+type ParsedLongFlag = {
+    flag: string;
+    inlineValue?: string;
+    isNoFlag: boolean;
+};
+
+type ParsedShortFlag = {
+    flag: string;
+    inlineValue?: string;
+};
+
+function parseLongFlag(token: string): ParsedLongFlag {
+    let flag = token.slice(2);
+    let inlineValue: string | undefined;
+    const equalsIndex = flag.indexOf("=");
+    if (equalsIndex >= 0) {
+        inlineValue = flag.slice(equalsIndex + 1);
+        flag = flag.slice(0, equalsIndex);
+    }
+
+    let isNoFlag = false;
+    if (flag.startsWith("no-")) {
+        isNoFlag = true;
+        flag = flag.slice(3);
+    }
+
+    const result: ParsedLongFlag = { flag, isNoFlag };
+    if (inlineValue !== undefined) {
+        result.inlineValue = inlineValue;
+    }
+
+    return result;
+}
+
+function parseShortFlag(token: string): ParsedShortFlag {
+    const body = token.slice(1);
+    const equalsIndex = body.indexOf("=");
+    if (equalsIndex < 0) {
+        return { flag: body };
+    }
+
+    return {
+        flag: body.slice(0, equalsIndex),
+        inlineValue: body.slice(equalsIndex + 1),
+    };
+}
+
+function isNumericToken(token: Token): boolean {
+    if (token.value.trim().length === 0) {
+        return false;
+    }
+
+    return Number.isFinite(Number(token.value));
+}
+
+function tokenCanBeValueForDefinition(token: Token, definition: ArgumentDefinition): boolean {
+    if (!isFlagToken(token)) {
+        return true;
+    }
+
+    return definition.type === "number" && isNumericToken(token);
+}
+
+function isStringArrayValue(value: unknown): value is readonly string[] {
+    return Array.isArray(value) && value.every((item): item is string => typeof item === "string");
+}
+
+function isKeyValueArgumentValue(value: unknown): value is Readonly<Record<string, string>> {
+    return (
+        typeof value === "object" &&
+        value !== null &&
+        !Array.isArray(value) &&
+        Object.values(value).every((item) => typeof item === "string")
+    );
+}
+
+function cloneDefaultValue(value: ArgumentValue): ArgumentValue {
+    if (isStringArrayValue(value)) {
+        return [...value];
+    }
+
+    if (isKeyValueArgumentValue(value)) {
+        return { ...value };
+    }
+
+    return value;
+}
+
+function ownRecordValue<TValue>(
+    values: Readonly<Record<string, TValue>>,
+    name: string,
+): TValue | undefined {
+    if (!Object.hasOwn(values, name)) {
+        return undefined;
+    }
+
+    return values[name];
+}
+
+function serializedArgumentText(value: unknown): string | undefined {
+    if (typeof value === "string") {
+        return value;
+    }
+
+    if (typeof value === "number") {
+        if (Object.is(value, -0)) {
+            return "-0";
+        }
+
+        return String(value);
+    }
+
+    if (typeof value === "boolean") {
+        return String(value);
+    }
+
+    if (isStringArrayValue(value)) {
+        return value.join(",");
+    }
+
+    if (isKeyValueArgumentValue(value)) {
+        return Object.entries(value)
+            .map(([key, entryValue]) => `${key}=${entryValue}`)
+            .join(",");
+    }
+
+    return undefined;
+}
+
+export function getTypedCommandRefinementIssues(
+    command: { refine?: TypedCommandRefinement<FlatArgumentDefinitions> },
+    values: Record<string, ArgumentValue>,
+    provided: ReadonlySet<string>,
+): ParseIssue[] {
+    const refine = command.refine;
+    if (refine === undefined) {
+        return [];
+    }
+
+    const issues = refine(values, { provided });
+
+    return issues.map((issue) => {
+        const name = issue.path?.[0];
+        let parsedIssue: ParseIssue = createParseIssue("invalid-value", issue.message, name);
+        if (issue.code !== undefined) {
+            parsedIssue = { ...parsedIssue, code: issue.code };
+        }
+
+        const relatedNames = issue.relatedPaths
+            ?.map((path) => path[0])
+            .filter((related): related is string => related !== undefined);
+        if (relatedNames !== undefined && relatedNames.length > 0) {
+            return { ...parsedIssue, relatedNames };
+        }
+
+        return parsedIssue;
+    });
+}
+
+class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
+    private readonly command: ParsableTypedCommand<TDefinitions>;
+    private readonly grammar: TypedCommandGrammar;
+    private readonly rawArgs: string;
+    private readonly result: MutableParsedCommandArguments;
+    private readonly occurrencesByName = new Map<string, RawArgumentOccurrence[]>();
+    private tokens: Token[] = [];
+    private index = 0;
+    private positionalIndex = 0;
+    private optionsEnded = false;
+
+    constructor(command: ParsableTypedCommand<TDefinitions>, rawArgs: string) {
+        this.command = command;
+        this.grammar = commandGrammar(command);
+        this.rawArgs = rawArgs;
+        this.result = {
+            values: {},
+            provided: new Set<string>(),
+            sources: new Map<string, "explicit" | "default">(),
+            issues: [],
+            mode: "run",
+        };
+
+        for (const argument of this.grammar.arguments) {
+            if (Object.hasOwn(Object.prototype, argument.key)) {
+                Object.defineProperty(this.result.values, argument.key, {
+                    configurable: true,
+                    value: undefined,
+                    writable: true,
+                });
+            }
+        }
+
+        Object.defineProperty(this.result, "grammar", { value: this.grammar });
+    }
+
+    parse(): ParsedCommandArguments {
+        this.prepareTokens();
+
+        if (this.result.mode === "help") {
+            this.applyDefaults();
+            return this.result;
+        }
+
+        this.consumeTokens();
+        this.decodeOccurrences();
+        this.applyDefaults();
+        this.addValidationIssues();
+        this.addRefinementIssues();
+
+        return this.result;
+    }
+
+    private prepareTokens(): void {
+        const tokenized = lexTypedArgumentString(this.rawArgs);
+        if (tokenized.unterminatedQuote) {
+            this.result.issues.push(
+                createParseIssue("unterminated-quote", "Unterminated quote in arguments"),
+            );
+        }
+
+        this.tokens = [];
+
+        let optionsEnded = false;
+        for (const token of tokenized.tokens) {
+            if (!optionsEnded && token.quote === undefined && token.value === "--") {
+                optionsEnded = true;
+                this.tokens.push(token);
+                continue;
+            }
+
+            if (!optionsEnded && isHelpToken(token)) {
+                this.result.mode = "help";
+                continue;
+            }
+
+            this.tokens.push(token);
+        }
+    }
+
+    private currentPositionalArgument():
+        | { name: string; definition: ArgumentDefinition }
+        | undefined {
+        const name = this.grammar.positionalOrder[this.positionalIndex];
+        if (name === undefined) {
+            return undefined;
+        }
+
+        const argument = this.grammar.argumentByName.get(name);
+        if (argument === undefined) {
+            return undefined;
+        }
+
+        return { name, definition: argument.definition };
+    }
+
+    private consumeTokens(): void {
+        while (this.index < this.tokens.length) {
+            const token = this.tokens[this.index];
+            if (token === undefined) {
+                break;
+            }
+
+            if (!this.optionsEnded && token.quote === undefined && token.value === "--") {
+                this.optionsEnded = true;
+                this.index += 1;
+                continue;
+            }
+
+            if (!this.optionsEnded && isFlagToken(token)) {
+                const positional = this.currentPositionalArgument();
+                if (
+                    (positional?.definition.rest === true &&
+                        this.result.provided.has(positional.name)) ||
+                    (positional?.definition.type === "number" && isNumericToken(token))
+                ) {
+                    this.consumePositionalValue(token);
+                    this.index += 1;
+                    continue;
+                }
+
+                this.consumeFlagToken(token);
+                continue;
+            }
+
+            this.consumePositionalValue(token);
+            this.index += 1;
+        }
+    }
+
+    private findArgumentName(flag: string): string | undefined {
+        return this.grammar.flagToName.get(normalizeFlagName(flag));
+    }
+
+    private argumentDefinition(name: string): ArgumentDefinition | undefined {
+        return this.grammar.argumentByName.get(name)?.definition;
+    }
+
+    private addOccurrence(name: string, occurrence: RawArgumentOccurrence): void {
+        this.markProvided(name);
+
+        const current = this.occurrencesByName.get(name) ?? [];
+        current.push(occurrence);
+        this.occurrencesByName.set(name, current);
+    }
+
+    private addRestStringOccurrence(name: string, token: Token): void {
+        this.markProvided(name);
+
+        const current = this.occurrencesByName.get(name) ?? [];
+        const existing = current[0];
+        if (existing !== undefined) {
+            existing.raw = `${existing.raw ?? ""} ${token.value}`;
+            existing.token = `${existing.token ?? ""} ${token.raw}`;
+            return;
+        }
+
+        current.push({ source: "positional", raw: token.value, token: token.raw });
+        this.occurrencesByName.set(name, current);
+    }
+
+    private consumeFlagToken(token: Token): void {
+        let parsed: ParsedFlagToken;
+        if (token.value.startsWith("--")) {
+            parsed = parseLongFlag(token.value);
+        } else {
+            parsed = parseShortFlag(token.value);
+        }
+
+        const name = this.findArgumentName(parsed.flag);
+        if (name === undefined) {
+            this.result.issues.push(
+                createParseIssue(
+                    "unknown-argument",
+                    `Unknown argument ${token.value}`,
+                    undefined,
+                    token.value,
+                ),
+            );
+            this.index += 1;
+            return;
+        }
+
+        const definition = this.argumentDefinition(name);
+        if (definition === undefined) {
+            this.result.issues.push(
+                createParseIssue(
+                    "unknown-argument",
+                    `Unknown argument ${token.value}`,
+                    name,
+                    token.value,
+                ),
+            );
+            this.index += 1;
+            return;
+        }
+
+        if (parsed.isNoFlag === true) {
+            const occurrence: RawArgumentOccurrence = {
+                source: "flag",
+                negated: true,
+                token: token.value,
+            };
+            if (parsed.inlineValue !== undefined) {
+                occurrence.raw = parsed.inlineValue;
+            }
+
+            this.addOccurrence(name, occurrence);
+            this.index += 1;
+            return;
+        }
+
+        if (parsed.inlineValue !== undefined) {
+            this.addOccurrence(name, {
+                source: "flag",
+                raw: parsed.inlineValue,
+                token: token.value,
+            });
+            this.index += 1;
+            return;
+        }
+
+        if (definition.type === "boolean") {
+            this.consumeBooleanFlagValue(name);
+            return;
+        }
+
+        const valueToken = this.tokens[this.index + 1];
+        if (valueToken === undefined || !tokenCanBeValueForDefinition(valueToken, definition)) {
+            this.addOccurrence(name, { source: "flag", token: token.value });
+            this.index += 1;
+            return;
+        }
+
+        this.addOccurrence(name, {
+            source: "flag",
+            raw: valueToken.value,
+            token: valueToken.raw,
+        });
+        this.index += 2;
+    }
+
+    private consumeBooleanFlagValue(name: string): void {
+        const nextToken = this.tokens[this.index + 1];
+        if (nextToken !== undefined && !isFlagToken(nextToken)) {
+            const parsedBoolean = booleanFromString(nextToken.value);
+            if (parsedBoolean !== undefined) {
+                this.addOccurrence(name, {
+                    source: "flag",
+                    raw: nextToken.value,
+                    token: nextToken.raw,
+                });
+                this.index += 2;
+                return;
+            }
+        }
+
+        this.addOccurrence(name, { source: "flag" });
+        this.index += 1;
+    }
+
+    private markProvided(name: string): void {
+        this.result.provided.add(name);
+        this.result.sources?.set(name, "explicit");
+    }
+
+    private consumePositionalValue(token: Token): void {
+        const entry = this.currentPositionalArgument();
+        if (entry === undefined) {
+            this.result.issues.push(
+                createParseIssue(
+                    "unexpected-positional",
+                    `Unexpected positional argument ${token.value}`,
+                    undefined,
+                    token.value,
+                ),
+            );
+
+            return;
+        }
+
+        const { name, definition } = entry;
+        if (definition.rest === true && definition.type === "string") {
+            this.addRestStringOccurrence(name, token);
+            return;
+        }
+
+        this.addOccurrence(name, {
+            source: "positional",
+            raw: token.value,
+            token: token.raw,
+        });
+
+        if (definition.rest !== true) {
+            this.positionalIndex += 1;
+        }
+    }
+
+    private setResultValue(name: string, value: ArgumentValue): void {
+        Object.defineProperty(this.result.values, name, {
+            configurable: true,
+            enumerable: true,
+            value,
+            writable: true,
+        });
+    }
+
+    private decodeOccurrences(): void {
+        for (const [name, occurrences] of this.occurrencesByName) {
+            const argument = this.grammar.argumentByName.get(name);
+            if (argument === undefined) {
+                continue;
+            }
+
+            const decoded = argument.decode(occurrences);
+            if (decoded.value !== undefined) {
+                this.setResultValue(name, decoded.value);
+            }
+
+            if (!decoded.ok) {
+                this.result.issues.push(...decoded.issues);
+            }
+        }
+    }
+
+    private applyDefaults(): void {
+        for (const argument of this.grammar.arguments) {
+            const name = argument.key;
+            if (
+                ownRecordValue(this.result.values, name) !== undefined ||
+                this.result.provided.has(name)
+            ) {
+                continue;
+            }
+
+            const defaultValue = applyArgumentDefault(argument.definition);
+            if (defaultValue !== undefined) {
+                this.setResultValue(name, cloneDefaultValue(defaultValue));
+
+                if (!this.result.provided.has(name)) {
+                    this.result.sources?.set(name, "default");
+                }
+            }
+        }
+    }
+
+    private addValidationIssues(): void {
+        for (const argument of this.grammar.arguments) {
+            const value = ownRecordValue(this.result.values, argument.key);
+            const validationIssues = argument.validate(value);
+            for (const issue of validationIssues) {
+                if (
+                    issue.kind === "missing-required" &&
+                    value === undefined &&
+                    this.result.provided.has(argument.key)
+                ) {
+                    continue;
+                }
+
+                this.result.issues.push(issue);
+            }
+        }
+    }
+
+    private addRefinementIssues(): void {
+        if (this.result.issues.length > 0) {
+            return;
+        }
+
+        this.result.issues.push(
+            ...getTypedCommandRefinementIssues(
+                this.command,
+                this.result.values,
+                this.result.provided,
+            ),
+        );
+    }
+}
+
+/** Serialize typed argument values into a raw string that `parseTypedCommandArgs` can read. */
+export function serializeTypedCommandArgs<TDefinitions extends ArgumentDefinitions>(
+    command: Pick<ParsableTypedCommand<TDefinitions>, "args" | "compiled">,
+    values: SerializableArgumentValues<TDefinitions>,
+): string {
+    const grammar = commandGrammar(command);
+    let flatValues: Readonly<Record<string, unknown>> = values;
+    if (hasArgumentGroups(grammar.definitions)) {
+        flatValues = flattenGroupedArgumentValues(values, grammar.definitions);
+    }
+
+    const parts: string[] = [];
+    const restArgument = grammar.arguments.find((argument) => argument.definition.rest === true);
+    let serializationOrder = grammar.arguments;
+    if (restArgument !== undefined) {
+        serializationOrder = [
+            ...grammar.arguments.filter((argument) => argument !== restArgument),
+            restArgument,
+        ];
+    }
+
+    for (const argument of serializationOrder) {
+        const value = ownRecordValue(flatValues, argument.key);
+        if (isPositionalArgument(argument.definition)) {
+            if (argument.definition.type === "string" && argument.definition.sensitive === true) {
+                continue;
+            }
+
+            if (value !== undefined) {
+                const issues = argument.validate(value);
+                if (issues.length > 0) {
+                    const issue = issues[0];
+                    if (issue !== undefined) {
+                        throw new TypeError(issue.message);
+                    }
+                }
+
+                const text = serializedArgumentText(value);
+                if (text === undefined) {
+                    throw new TypeError(`${argument.key} has an unsupported serialized value`);
+                }
+
+                parts.push(quoteSerializedValue(text, text.startsWith("-")));
+            }
+        } else {
+            parts.push(...argument.serialize(value));
+        }
+    }
+
+    return parts.join(" ");
+}
+
+/**
+ * Parse raw slash-command arguments without opening UI or invoking handlers.
+ *
+ * The returned shape preserves partial values, defaults, provided argument names, syntax and
+ * validation issues, plus whether the user requested generated help.
+ */
+export function parseTypedCommandArgs<TDefinitions extends ArgumentDefinitions>(
+    command: ParsableTypedCommand<TDefinitions>,
+    rawArgs: string,
+): ParsedCommandArguments {
+    return new ArgumentParser(command, rawArgs).parse();
+}
+
+export type ParsedTypedCommandInvocation<TCommand extends CoreRegisteredTypedCommand> = {
+    readonly route: TypedCommandRoute<TCommand>;
+    readonly parsed: ParsedCommandArguments;
+};
+
+function subcommandRouteIssue<TCommand extends CoreRegisteredTypedCommand>(
+    route: TypedCommandRoute<TCommand>,
+): ParsedCommandArguments {
+    const available = Object.keys(route.root.subcommands ?? {});
+    let issue: ParseIssue = {
+        kind: "missing-subcommand",
+        message: `A subcommand is required. Available subcommands: ${available.join(", ")}`,
+    };
+    if (route.status === "unknown") {
+        issue = {
+            kind: "unknown-subcommand",
+            message: `Unknown subcommand ${route.token ?? ""}. Available subcommands: ${available.join(", ")}`,
+            token: route.token ?? "",
+        };
+    }
+
+    const parsed: ParsedCommandArguments = {
+        values: {},
+        provided: new Set<string>(),
+        sources: new Map<string, "explicit" | "default">(),
+        issues: [issue],
+        mode: "run",
+    };
+    if (route.root.compiled !== undefined) {
+        Object.defineProperty(parsed, "grammar", { value: route.root.compiled });
+    }
+
+    return parsed;
+}
+
+/** Resolve a CLI-style subcommand and parse against only the selected grammar branch. */
+export function parseTypedCommandInvocation<TCommand extends CoreRegisteredTypedCommand>(
+    command: TCommand,
+    rawArgs: string,
+): ParsedTypedCommandInvocation<TCommand> {
+    const route = resolveTypedCommandRoute(command, rawArgs);
+    if (route.status === "missing") {
+        const rootParsed = parseTypedCommandArgs(command, rawArgs);
+        if (rootParsed.mode === "help") {
+            return { route, parsed: rootParsed };
+        }
+    }
+
+    if (route.status === "missing" || route.status === "unknown") {
+        return { route, parsed: subcommandRouteIssue(route) };
+    }
+
+    return {
+        route,
+        parsed: parseTypedCommandArgs(route.command, route.rawArgs),
+    };
+}
+
+function isArgumentValue(value: unknown): value is ArgumentValue {
+    return (
+        value === undefined ||
+        typeof value === "string" ||
+        typeof value === "number" ||
+        typeof value === "boolean" ||
+        isStringArrayValue(value) ||
+        isKeyValueArgumentValue(value)
+    );
+}
+
+function includesIssue(issues: readonly ParseIssue[], candidate: ParseIssue): boolean {
+    return issues.some(
+        (issue) =>
+            issue.kind === candidate.kind &&
+            issue.name === candidate.name &&
+            issue.message === candidate.message,
+    );
+}
+
+type ValidatedParsedValues = {
+    values: Record<string, ArgumentValue>;
+    issues: ParseIssue[];
+    reconstructedDefaults: ReadonlySet<string>;
+};
+
+function validatedParsedValues(
+    grammar: CompiledCommand,
+    parsed: ParsedCommandArguments,
+): ValidatedParsedValues {
+    const values: Record<string, ArgumentValue> = {};
+    const issues = [...parsed.issues];
+    const reconstructedDefaults = new Set<string>();
+    for (const argument of grammar.arguments) {
+        let value = ownRecordValue(parsed.values, argument.key);
+        if (value === undefined) {
+            const defaultValue = applyArgumentDefault(argument.definition);
+            if (defaultValue !== undefined) {
+                value = cloneDefaultValue(defaultValue);
+                reconstructedDefaults.add(argument.key);
+            }
+        }
+
+        const argumentIssues = argument.validate(value);
+        if (argumentIssues.length === 0 && isArgumentValue(value)) {
+            if (value !== undefined) {
+                values[argument.key] = value;
+            }
+            continue;
+        }
+
+        for (const issue of argumentIssues) {
+            if (!includesIssue(issues, issue)) {
+                issues.push(issue);
+            }
+        }
+    }
+
+    return { values, issues, reconstructedDefaults };
+}
+
+function typedDraft<TDefinitions extends ArgumentDefinitions>(
+    grammar: CompiledCommand<TDefinitions>,
+    values: Readonly<Record<string, ArgumentValue>>,
+): ParsedArgumentDraft<TDefinitions> {
+    let grouped: Readonly<Record<string, unknown>> = values;
+    if (hasArgumentGroups(grammar.definitions)) {
+        grouped = expandGroupedArgumentValues(values, grammar.definitions);
+    }
+    // SAFETY: validatedParsedValues retained only leaves accepted by their compiled definitions;
+    // expandGroupedArgumentValues changes paths into the matching source-definition tree only.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: values were validated by the same generic grammar before path expansion.
+    return grouped as ParsedArgumentDraft<TDefinitions>;
+}
+
+function isArgumentPath<TDefinitions extends ArgumentDefinitions>(
+    grammar: CompiledCommand<TDefinitions>,
+    key: string,
+): key is ArgumentPath<TDefinitions> {
+    return Object.hasOwn(grammar.args, key);
+}
+
+function typedProvided<TDefinitions extends ArgumentDefinitions>(
+    grammar: CompiledCommand<TDefinitions>,
+    provided: ReadonlySet<string>,
+): ReadonlySet<ArgumentPath<TDefinitions>> {
+    const paths = new Set<ArgumentPath<TDefinitions>>();
+    for (const key of provided) {
+        if (isArgumentPath(grammar, key)) {
+            paths.add(key);
+        }
+    }
+
+    return paths;
+}
+
+function typedSources<TDefinitions extends ArgumentDefinitions>(
+    grammar: CompiledCommand<TDefinitions>,
+    sources: ReadonlyMap<string, "explicit" | "default"> | undefined,
+    reconstructedDefaults: ReadonlySet<string>,
+): ReadonlyMap<ArgumentPath<TDefinitions>, "explicit" | "default"> {
+    const typed = new Map<ArgumentPath<TDefinitions>, "explicit" | "default">();
+    for (const [key, source] of sources ?? []) {
+        if (isArgumentPath(grammar, key)) {
+            typed.set(key, source);
+        }
+    }
+
+    for (const key of reconstructedDefaults) {
+        if (isArgumentPath(grammar, key) && !typed.has(key)) {
+            typed.set(key, "default");
+        }
+    }
+
+    return typed;
+}
+
+/** Convert parser details using the exact compiled grammar that produced them. */
+export function toTypedParseResult<TDefinitions extends ArgumentDefinitions>(
+    grammar: CompiledCommand<TDefinitions>,
+    parsed: ParsedCommandArguments,
+): TypedParseResult<TDefinitions> {
+    if (parsed.grammar !== grammar) {
+        throw new TypeError("Parsed arguments were produced by a different compiled grammar");
+    }
+
+    if (parsed.mode === "help") {
+        return { status: "help" };
+    }
+
+    const validated = validatedParsedValues(grammar, parsed);
+    const partial = typedDraft(grammar, validated.values);
+    const provided = typedProvided(grammar, parsed.provided);
+    if (validated.issues.length > 0) {
+        return {
+            status: "error",
+            issues: validated.issues,
+            partial,
+            provided,
+        };
+    }
+
+    return {
+        status: "success",
+        // SAFETY: every compiled argument validated successfully, which establishes all required
+        // leaves and defaults represented by InferArguments.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: zero validation issues proves every required/defaulted leaf is present.
+        value: partial as InferArguments<TDefinitions>,
+        provided,
+        sources: typedSources(grammar, parsed.sources, validated.reconstructedDefaults),
+    };
+}
+
+/** Return whether a parsed command result contains at least one issue of the given kinds. */
+export function hasIssuesOfKind(
+    parsed: ParsedCommandArguments,
+    kinds: ParseIssue["kind"][],
+): boolean {
+    for (const issueItem of parsed.issues) {
+        if (kinds.includes(issueItem.kind)) {
+            return true;
+        }
+    }
+
+    return false;
+}

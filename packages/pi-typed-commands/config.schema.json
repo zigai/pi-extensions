@@ -1,0 +1,1140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zigai/pi-typed-commands/config.schema.json",
+  "type": "object",
+  "properties": {
+    "helperPlacement": {
+      "enum": ["aboveEditor", "belowEditor"]
+    },
+    "appearance": {
+      "type": "object",
+      "properties": {
+        "form": {
+          "type": "object",
+          "properties": {
+            "colors": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "enum": [
+                    "accent",
+                    "border",
+                    "borderAccent",
+                    "borderMuted",
+                    "success",
+                    "error",
+                    "warning",
+                    "muted",
+                    "dim",
+                    "text",
+                    "thinkingText",
+                    "userMessageText",
+                    "customMessageText",
+                    "customMessageLabel",
+                    "toolTitle",
+                    "toolOutput",
+                    "mdHeading",
+                    "mdLink",
+                    "mdLinkUrl",
+                    "mdCode",
+                    "mdCodeBlock",
+                    "mdCodeBlockBorder",
+                    "mdQuote",
+                    "mdQuoteBorder",
+                    "mdHr",
+                    "mdListBullet",
+                    "toolDiffAdded",
+                    "toolDiffRemoved",
+                    "toolDiffContext",
+                    "syntaxComment",
+                    "syntaxKeyword",
+                    "syntaxFunction",
+                    "syntaxVariable",
+                    "syntaxString",
+                    "syntaxNumber",
+                    "syntaxType",
+                    "syntaxOperator",
+                    "syntaxPunctuation",
+                    "thinkingOff",
+                    "thinkingMinimal",
+                    "thinkingLow",
+                    "thinkingMedium",
+                    "thinkingHigh",
+                    "thinkingXhigh",
+                    "bashMode"
+                  ]
+                },
+                "focusedLabel": {
+                  "enum": [
+                    "accent",
+                    "border",
+                    "borderAccent",
+                    "borderMuted",
+                    "success",
+                    "error",
+                    "warning",
+                    "muted",
+                    "dim",
+                    "text",
+                    "thinkingText",
+                    "userMessageText",
+                    "customMessageText",
+                    "customMessageLabel",
+                    "toolTitle",
+                    "toolOutput",
+                    "mdHeading",
+                    "mdLink",
+                    "mdLinkUrl",
+                    "mdCode",
+                    "mdCodeBlock",
+                    "mdCodeBlockBorder",
+                    "mdQuote",
+                    "mdQuoteBorder",
+                    "mdHr",
+                    "mdListBullet",
+                    "toolDiffAdded",
+                    "toolDiffRemoved",
+                    "toolDiffContext",
+                    "syntaxComment",
+                    "syntaxKeyword",
+                    "syntaxFunction",
+                    "syntaxVariable",
+                    "syntaxString",
+                    "syntaxNumber",
+                    "syntaxType",
+                    "syntaxOperator",
+                    "syntaxPunctuation",
+                    "thinkingOff",
+                    "thinkingMinimal",
+                    "thinkingLow",
+                    "thinkingMedium",
+                    "thinkingHigh",
+                    "thinkingXhigh",
+                    "bashMode"
+                  ]
+                },
+                "focusedValue": {
+                  "enum": [
+                    "accent",
+                    "border",
+                    "borderAccent",
+                    "borderMuted",
+                    "success",
+                    "error",
+                    "warning",
+                    "muted",
+                    "dim",
+                    "text",
+                    "thinkingText",
+                    "userMessageText",
+                    "customMessageText",
+                    "customMessageLabel",
+                    "toolTitle",
+                    "toolOutput",
+                    "mdHeading",
+                    "mdLink",
+                    "mdLinkUrl",
+                    "mdCode",
+                    "mdCodeBlock",
+                    "mdCodeBlockBorder",
+                    "mdQuote",
+                    "mdQuoteBorder",
+                    "mdHr",
+                    "mdListBullet",
+                    "toolDiffAdded",
+                    "toolDiffRemoved",
+                    "toolDiffContext",
+                    "syntaxComment",
+                    "syntaxKeyword",
+                    "syntaxFunction",
+                    "syntaxVariable",
+                    "syntaxString",
+                    "syntaxNumber",
+                    "syntaxType",
+                    "syntaxOperator",
+                    "syntaxPunctuation",
+                    "thinkingOff",
+                    "thinkingMinimal",
+                    "thinkingLow",
+                    "thinkingMedium",
+                    "thinkingHigh",
+                    "thinkingXhigh",
+                    "bashMode"
+                  ]
+                },
+                "unsetValue": {
+                  "enum": [
+                    "accent",
+                    "border",
+                    "borderAccent",
+                    "borderMuted",
+                    "success",
+                    "error",
+                    "warning",
+                    "muted",
+                    "dim",
+                    "text",
+                    "thinkingText",
+                    "userMessageText",
+                    "customMessageText",
+                    "customMessageLabel",
+                    "toolTitle",
+                    "toolOutput",
+                    "mdHeading",
+                    "mdLink",
+                    "mdLinkUrl",
+                    "mdCode",
+                    "mdCodeBlock",
+                    "mdCodeBlockBorder",
+                    "mdQuote",
+                    "mdQuoteBorder",
+                    "mdHr",
+                    "mdListBullet",
+                    "toolDiffAdded",
+                    "toolDiffRemoved",
+                    "toolDiffContext",
+                    "syntaxComment",
+                    "syntaxKeyword",
+                    "syntaxFunction",
+                    "syntaxVariable",
+                    "syntaxString",
+                    "syntaxNumber",
+                    "syntaxType",
+                    "syntaxOperator",
+                    "syntaxPunctuation",
+                    "thinkingOff",
+                    "thinkingMinimal",
+                    "thinkingLow",
+                    "thinkingMedium",
+                    "thinkingHigh",
+                    "thinkingXhigh",
+                    "bashMode"
+                  ]
+                },
+                "description": {
+                  "enum": [
+                    "accent",
+                    "border",
+                    "borderAccent",
+                    "borderMuted",
+                    "success",
+                    "error",
+                    "warning",
+                    "muted",
+                    "dim",
+                    "text",
+                    "thinkingText",
+                    "userMessageText",
+                    "customMessageText",
+                    "customMessageLabel",
+                    "toolTitle",
+                    "toolOutput",
+                    "mdHeading",
+                    "mdLink",
+                    "mdLinkUrl",
+                    "mdCode",
+                    "mdCodeBlock",
+                    "mdCodeBlockBorder",
+                    "mdQuote",
+                    "mdQuoteBorder",
+                    "mdHr",
+                    "mdListBullet",
+                    "toolDiffAdded",
+                    "toolDiffRemoved",
+                    "toolDiffContext",
+                    "syntaxComment",
+                    "syntaxKeyword",
+                    "syntaxFunction",
+                    "syntaxVariable",
+                    "syntaxString",
+                    "syntaxNumber",
+                    "syntaxType",
+                    "syntaxOperator",
+                    "syntaxPunctuation",
+                    "thinkingOff",
+                    "thinkingMinimal",
+                    "thinkingLow",
+                    "thinkingMedium",
+                    "thinkingHigh",
+                    "thinkingXhigh",
+                    "bashMode"
+                  ]
+                },
+                "instructions": {
+                  "enum": [
+                    "accent",
+                    "border",
+                    "borderAccent",
+                    "borderMuted",
+                    "success",
+                    "error",
+                    "warning",
+                    "muted",
+                    "dim",
+                    "text",
+                    "thinkingText",
+                    "userMessageText",
+                    "customMessageText",
+                    "customMessageLabel",
+                    "toolTitle",
+                    "toolOutput",
+                    "mdHeading",
+                    "mdLink",
+                    "mdLinkUrl",
+                    "mdCode",
+                    "mdCodeBlock",
+                    "mdCodeBlockBorder",
+                    "mdQuote",
+                    "mdQuoteBorder",
+                    "mdHr",
+                    "mdListBullet",
+                    "toolDiffAdded",
+                    "toolDiffRemoved",
+                    "toolDiffContext",
+                    "syntaxComment",
+                    "syntaxKeyword",
+                    "syntaxFunction",
+                    "syntaxVariable",
+                    "syntaxString",
+                    "syntaxNumber",
+                    "syntaxType",
+                    "syntaxOperator",
+                    "syntaxPunctuation",
+                    "thinkingOff",
+                    "thinkingMinimal",
+                    "thinkingLow",
+                    "thinkingMedium",
+                    "thinkingHigh",
+                    "thinkingXhigh",
+                    "bashMode"
+                  ]
+                },
+                "issue": {
+                  "enum": [
+                    "accent",
+                    "border",
+                    "borderAccent",
+                    "borderMuted",
+                    "success",
+                    "error",
+                    "warning",
+                    "muted",
+                    "dim",
+                    "text",
+                    "thinkingText",
+                    "userMessageText",
+                    "customMessageText",
+                    "customMessageLabel",
+                    "toolTitle",
+                    "toolOutput",
+                    "mdHeading",
+                    "mdLink",
+                    "mdLinkUrl",
+                    "mdCode",
+                    "mdCodeBlock",
+                    "mdCodeBlockBorder",
+                    "mdQuote",
+                    "mdQuoteBorder",
+                    "mdHr",
+                    "mdListBullet",
+                    "toolDiffAdded",
+                    "toolDiffRemoved",
+                    "toolDiffContext",
+                    "syntaxComment",
+                    "syntaxKeyword",
+                    "syntaxFunction",
+                    "syntaxVariable",
+                    "syntaxString",
+                    "syntaxNumber",
+                    "syntaxType",
+                    "syntaxOperator",
+                    "syntaxPunctuation",
+                    "thinkingOff",
+                    "thinkingMinimal",
+                    "thinkingLow",
+                    "thinkingMedium",
+                    "thinkingHigh",
+                    "thinkingXhigh",
+                    "bashMode"
+                  ]
+                },
+                "editorBorder": {
+                  "enum": [
+                    "accent",
+                    "border",
+                    "borderAccent",
+                    "borderMuted",
+                    "success",
+                    "error",
+                    "warning",
+                    "muted",
+                    "dim",
+                    "text",
+                    "thinkingText",
+                    "userMessageText",
+                    "customMessageText",
+                    "customMessageLabel",
+                    "toolTitle",
+                    "toolOutput",
+                    "mdHeading",
+                    "mdLink",
+                    "mdLinkUrl",
+                    "mdCode",
+                    "mdCodeBlock",
+                    "mdCodeBlockBorder",
+                    "mdQuote",
+                    "mdQuoteBorder",
+                    "mdHr",
+                    "mdListBullet",
+                    "toolDiffAdded",
+                    "toolDiffRemoved",
+                    "toolDiffContext",
+                    "syntaxComment",
+                    "syntaxKeyword",
+                    "syntaxFunction",
+                    "syntaxVariable",
+                    "syntaxString",
+                    "syntaxNumber",
+                    "syntaxType",
+                    "syntaxOperator",
+                    "syntaxPunctuation",
+                    "thinkingOff",
+                    "thinkingMinimal",
+                    "thinkingLow",
+                    "thinkingMedium",
+                    "thinkingHigh",
+                    "thinkingXhigh",
+                    "bashMode"
+                  ]
+                },
+                "selectedOption": {
+                  "enum": [
+                    "accent",
+                    "border",
+                    "borderAccent",
+                    "borderMuted",
+                    "success",
+                    "error",
+                    "warning",
+                    "muted",
+                    "dim",
+                    "text",
+                    "thinkingText",
+                    "userMessageText",
+                    "customMessageText",
+                    "customMessageLabel",
+                    "toolTitle",
+                    "toolOutput",
+                    "mdHeading",
+                    "mdLink",
+                    "mdLinkUrl",
+                    "mdCode",
+                    "mdCodeBlock",
+                    "mdCodeBlockBorder",
+                    "mdQuote",
+                    "mdQuoteBorder",
+                    "mdHr",
+                    "mdListBullet",
+                    "toolDiffAdded",
+                    "toolDiffRemoved",
+                    "toolDiffContext",
+                    "syntaxComment",
+                    "syntaxKeyword",
+                    "syntaxFunction",
+                    "syntaxVariable",
+                    "syntaxString",
+                    "syntaxNumber",
+                    "syntaxType",
+                    "syntaxOperator",
+                    "syntaxPunctuation",
+                    "thinkingOff",
+                    "thinkingMinimal",
+                    "thinkingLow",
+                    "thinkingMedium",
+                    "thinkingHigh",
+                    "thinkingXhigh",
+                    "bashMode"
+                  ]
+                }
+              },
+              "additionalProperties": true,
+              "default": {
+                "title": "accent",
+                "focusedLabel": "accent",
+                "focusedValue": "accent",
+                "unsetValue": "muted",
+                "description": "dim",
+                "instructions": "dim",
+                "issue": "warning",
+                "editorBorder": "accent",
+                "selectedOption": "accent"
+              }
+            },
+            "symbols": {
+              "type": "object",
+              "properties": {
+                "focusedField": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[^\\r\\n]*$"
+                },
+                "selectedCheckbox": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[^\\r\\n]*$"
+                },
+                "unselectedCheckbox": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[^\\r\\n]*$"
+                },
+                "selectedRadio": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[^\\r\\n]*$"
+                },
+                "unselectedRadio": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[^\\r\\n]*$"
+                }
+              },
+              "additionalProperties": true,
+              "default": {
+                "focusedField": "›",
+                "selectedCheckbox": "■",
+                "unselectedCheckbox": "□",
+                "selectedRadio": "●",
+                "unselectedRadio": "○"
+              }
+            },
+            "layout": {
+              "type": "object",
+              "properties": {
+                "leftPadding": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 12
+                },
+                "fieldGap": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 12
+                },
+                "minNameWidth": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 80
+                },
+                "maxNameWidth": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 120
+                },
+                "minValueWidth": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 80
+                },
+                "maxValueWidth": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 120
+                },
+                "descriptions": {
+                  "enum": ["inline", "focused", "hidden"]
+                },
+                "instructions": {
+                  "enum": ["full", "short", "hidden"]
+                }
+              },
+              "additionalProperties": true,
+              "default": {
+                "leftPadding": 1,
+                "fieldGap": 1,
+                "minNameWidth": 12,
+                "maxNameWidth": 24,
+                "minValueWidth": 12,
+                "maxValueWidth": 32,
+                "descriptions": "inline",
+                "instructions": "full"
+              }
+            }
+          },
+          "additionalProperties": true,
+          "default": {
+            "colors": {
+              "title": "accent",
+              "focusedLabel": "accent",
+              "focusedValue": "accent",
+              "unsetValue": "muted",
+              "description": "dim",
+              "instructions": "dim",
+              "issue": "warning",
+              "editorBorder": "accent",
+              "selectedOption": "accent"
+            },
+            "symbols": {
+              "focusedField": "›",
+              "selectedCheckbox": "■",
+              "unselectedCheckbox": "□",
+              "selectedRadio": "●",
+              "unselectedRadio": "○"
+            },
+            "layout": {
+              "leftPadding": 1,
+              "fieldGap": 1,
+              "minNameWidth": 12,
+              "maxNameWidth": 24,
+              "minValueWidth": 12,
+              "maxValueWidth": 32,
+              "descriptions": "inline",
+              "instructions": "full"
+            }
+          }
+        },
+        "inlineHelp": {
+          "type": "object",
+          "properties": {
+            "layout": {
+              "type": "string",
+              "const": "compact"
+            },
+            "choiceDisplay": {
+              "enum": ["contextual", "inline"]
+            },
+            "order": {
+              "enum": [
+                "active-required-available",
+                "active-available-required",
+                "required-active-available",
+                "required-available-active",
+                "available-active-required",
+                "available-required-active",
+                "definition"
+              ]
+            },
+            "metadata": {
+              "type": "object",
+              "properties": {
+                "types": {
+                  "type": "boolean"
+                },
+                "defaults": {
+                  "type": "boolean"
+                },
+                "required": {
+                  "type": "boolean"
+                },
+                "aliases": {
+                  "type": "boolean"
+                },
+                "descriptions": {
+                  "type": "boolean"
+                },
+                "enumValues": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": true
+            },
+            "colors": {
+              "type": "object",
+              "properties": {
+                "active": {
+                  "enum": [
+                    "accent",
+                    "border",
+                    "borderAccent",
+                    "borderMuted",
+                    "success",
+                    "error",
+                    "warning",
+                    "muted",
+                    "dim",
+                    "text",
+                    "thinkingText",
+                    "userMessageText",
+                    "customMessageText",
+                    "customMessageLabel",
+                    "toolTitle",
+                    "toolOutput",
+                    "mdHeading",
+                    "mdLink",
+                    "mdLinkUrl",
+                    "mdCode",
+                    "mdCodeBlock",
+                    "mdCodeBlockBorder",
+                    "mdQuote",
+                    "mdQuoteBorder",
+                    "mdHr",
+                    "mdListBullet",
+                    "toolDiffAdded",
+                    "toolDiffRemoved",
+                    "toolDiffContext",
+                    "syntaxComment",
+                    "syntaxKeyword",
+                    "syntaxFunction",
+                    "syntaxVariable",
+                    "syntaxString",
+                    "syntaxNumber",
+                    "syntaxType",
+                    "syntaxOperator",
+                    "syntaxPunctuation",
+                    "thinkingOff",
+                    "thinkingMinimal",
+                    "thinkingLow",
+                    "thinkingMedium",
+                    "thinkingHigh",
+                    "thinkingXhigh",
+                    "bashMode"
+                  ]
+                },
+                "required": {
+                  "enum": [
+                    "accent",
+                    "border",
+                    "borderAccent",
+                    "borderMuted",
+                    "success",
+                    "error",
+                    "warning",
+                    "muted",
+                    "dim",
+                    "text",
+                    "thinkingText",
+                    "userMessageText",
+                    "customMessageText",
+                    "customMessageLabel",
+                    "toolTitle",
+                    "toolOutput",
+                    "mdHeading",
+                    "mdLink",
+                    "mdLinkUrl",
+                    "mdCode",
+                    "mdCodeBlock",
+                    "mdCodeBlockBorder",
+                    "mdQuote",
+                    "mdQuoteBorder",
+                    "mdHr",
+                    "mdListBullet",
+                    "toolDiffAdded",
+                    "toolDiffRemoved",
+                    "toolDiffContext",
+                    "syntaxComment",
+                    "syntaxKeyword",
+                    "syntaxFunction",
+                    "syntaxVariable",
+                    "syntaxString",
+                    "syntaxNumber",
+                    "syntaxType",
+                    "syntaxOperator",
+                    "syntaxPunctuation",
+                    "thinkingOff",
+                    "thinkingMinimal",
+                    "thinkingLow",
+                    "thinkingMedium",
+                    "thinkingHigh",
+                    "thinkingXhigh",
+                    "bashMode"
+                  ]
+                },
+                "available": {
+                  "enum": [
+                    "accent",
+                    "border",
+                    "borderAccent",
+                    "borderMuted",
+                    "success",
+                    "error",
+                    "warning",
+                    "muted",
+                    "dim",
+                    "text",
+                    "thinkingText",
+                    "userMessageText",
+                    "customMessageText",
+                    "customMessageLabel",
+                    "toolTitle",
+                    "toolOutput",
+                    "mdHeading",
+                    "mdLink",
+                    "mdLinkUrl",
+                    "mdCode",
+                    "mdCodeBlock",
+                    "mdCodeBlockBorder",
+                    "mdQuote",
+                    "mdQuoteBorder",
+                    "mdHr",
+                    "mdListBullet",
+                    "toolDiffAdded",
+                    "toolDiffRemoved",
+                    "toolDiffContext",
+                    "syntaxComment",
+                    "syntaxKeyword",
+                    "syntaxFunction",
+                    "syntaxVariable",
+                    "syntaxString",
+                    "syntaxNumber",
+                    "syntaxType",
+                    "syntaxOperator",
+                    "syntaxPunctuation",
+                    "thinkingOff",
+                    "thinkingMinimal",
+                    "thinkingLow",
+                    "thinkingMedium",
+                    "thinkingHigh",
+                    "thinkingXhigh",
+                    "bashMode"
+                  ]
+                },
+                "type": {
+                  "enum": [
+                    "accent",
+                    "border",
+                    "borderAccent",
+                    "borderMuted",
+                    "success",
+                    "error",
+                    "warning",
+                    "muted",
+                    "dim",
+                    "text",
+                    "thinkingText",
+                    "userMessageText",
+                    "customMessageText",
+                    "customMessageLabel",
+                    "toolTitle",
+                    "toolOutput",
+                    "mdHeading",
+                    "mdLink",
+                    "mdLinkUrl",
+                    "mdCode",
+                    "mdCodeBlock",
+                    "mdCodeBlockBorder",
+                    "mdQuote",
+                    "mdQuoteBorder",
+                    "mdHr",
+                    "mdListBullet",
+                    "toolDiffAdded",
+                    "toolDiffRemoved",
+                    "toolDiffContext",
+                    "syntaxComment",
+                    "syntaxKeyword",
+                    "syntaxFunction",
+                    "syntaxVariable",
+                    "syntaxString",
+                    "syntaxNumber",
+                    "syntaxType",
+                    "syntaxOperator",
+                    "syntaxPunctuation",
+                    "thinkingOff",
+                    "thinkingMinimal",
+                    "thinkingLow",
+                    "thinkingMedium",
+                    "thinkingHigh",
+                    "thinkingXhigh",
+                    "bashMode"
+                  ]
+                },
+                "metadata": {
+                  "enum": [
+                    "accent",
+                    "border",
+                    "borderAccent",
+                    "borderMuted",
+                    "success",
+                    "error",
+                    "warning",
+                    "muted",
+                    "dim",
+                    "text",
+                    "thinkingText",
+                    "userMessageText",
+                    "customMessageText",
+                    "customMessageLabel",
+                    "toolTitle",
+                    "toolOutput",
+                    "mdHeading",
+                    "mdLink",
+                    "mdLinkUrl",
+                    "mdCode",
+                    "mdCodeBlock",
+                    "mdCodeBlockBorder",
+                    "mdQuote",
+                    "mdQuoteBorder",
+                    "mdHr",
+                    "mdListBullet",
+                    "toolDiffAdded",
+                    "toolDiffRemoved",
+                    "toolDiffContext",
+                    "syntaxComment",
+                    "syntaxKeyword",
+                    "syntaxFunction",
+                    "syntaxVariable",
+                    "syntaxString",
+                    "syntaxNumber",
+                    "syntaxType",
+                    "syntaxOperator",
+                    "syntaxPunctuation",
+                    "thinkingOff",
+                    "thinkingMinimal",
+                    "thinkingLow",
+                    "thinkingMedium",
+                    "thinkingHigh",
+                    "thinkingXhigh",
+                    "bashMode"
+                  ]
+                },
+                "issue": {
+                  "enum": [
+                    "accent",
+                    "border",
+                    "borderAccent",
+                    "borderMuted",
+                    "success",
+                    "error",
+                    "warning",
+                    "muted",
+                    "dim",
+                    "text",
+                    "thinkingText",
+                    "userMessageText",
+                    "customMessageText",
+                    "customMessageLabel",
+                    "toolTitle",
+                    "toolOutput",
+                    "mdHeading",
+                    "mdLink",
+                    "mdLinkUrl",
+                    "mdCode",
+                    "mdCodeBlock",
+                    "mdCodeBlockBorder",
+                    "mdQuote",
+                    "mdQuoteBorder",
+                    "mdHr",
+                    "mdListBullet",
+                    "toolDiffAdded",
+                    "toolDiffRemoved",
+                    "toolDiffContext",
+                    "syntaxComment",
+                    "syntaxKeyword",
+                    "syntaxFunction",
+                    "syntaxVariable",
+                    "syntaxString",
+                    "syntaxNumber",
+                    "syntaxType",
+                    "syntaxOperator",
+                    "syntaxPunctuation",
+                    "thinkingOff",
+                    "thinkingMinimal",
+                    "thinkingLow",
+                    "thinkingMedium",
+                    "thinkingHigh",
+                    "thinkingXhigh",
+                    "bashMode"
+                  ]
+                }
+              },
+              "additionalProperties": true,
+              "default": {
+                "active": "accent",
+                "required": "warning",
+                "available": "dim",
+                "type": "syntaxType",
+                "metadata": "muted",
+                "issue": "error"
+              }
+            },
+            "format": {
+              "type": "object",
+              "properties": {
+                "tokenPrefix": {
+                  "type": "string",
+                  "pattern": "^[^\\r\\n]*$"
+                },
+                "tokenSuffix": {
+                  "type": "string",
+                  "pattern": "^[^\\r\\n]*$"
+                },
+                "groupSeparator": {
+                  "type": "string",
+                  "pattern": "^[^\\r\\n]*$"
+                },
+                "itemSeparator": {
+                  "type": "string",
+                  "pattern": "^[^\\r\\n]*$"
+                },
+                "typeSeparator": {
+                  "type": "string",
+                  "pattern": "^[^\\r\\n]*$"
+                },
+                "valueSeparator": {
+                  "type": "string",
+                  "pattern": "^[^\\r\\n]*$"
+                }
+              },
+              "additionalProperties": true,
+              "default": {
+                "tokenPrefix": "[",
+                "tokenSuffix": "]",
+                "groupSeparator": "  ",
+                "itemSeparator": " ",
+                "typeSeparator": ":",
+                "valueSeparator": "="
+              }
+            }
+          },
+          "additionalProperties": true,
+          "default": {
+            "layout": "compact",
+            "choiceDisplay": "contextual",
+            "order": "active-required-available",
+            "metadata": {
+              "types": false,
+              "defaults": true,
+              "required": false,
+              "aliases": false,
+              "descriptions": false,
+              "enumValues": true
+            },
+            "colors": {
+              "active": "accent",
+              "required": "warning",
+              "available": "dim",
+              "type": "syntaxType",
+              "metadata": "muted",
+              "issue": "error"
+            },
+            "format": {
+              "tokenPrefix": "[",
+              "tokenSuffix": "]",
+              "groupSeparator": "  ",
+              "itemSeparator": " ",
+              "typeSeparator": ":",
+              "valueSeparator": "="
+            }
+          }
+        },
+        "detailedHelp": {
+          "type": "object",
+          "properties": {
+            "metadata": {
+              "type": "object",
+              "properties": {
+                "types": {
+                  "type": "boolean"
+                },
+                "defaults": {
+                  "type": "boolean"
+                },
+                "required": {
+                  "type": "boolean"
+                },
+                "aliases": {
+                  "type": "boolean"
+                },
+                "descriptions": {
+                  "type": "boolean"
+                },
+                "enumValues": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": true
+            },
+            "order": {
+              "enum": ["definition", "required-first"]
+            }
+          },
+          "additionalProperties": true,
+          "default": {
+            "metadata": {
+              "types": true,
+              "defaults": true,
+              "required": true,
+              "aliases": false,
+              "descriptions": true,
+              "enumValues": true
+            },
+            "order": "definition"
+          }
+        }
+      },
+      "additionalProperties": true,
+      "default": {
+        "form": {
+          "colors": {
+            "title": "accent",
+            "focusedLabel": "accent",
+            "focusedValue": "accent",
+            "unsetValue": "muted",
+            "description": "dim",
+            "instructions": "dim",
+            "issue": "warning",
+            "editorBorder": "accent",
+            "selectedOption": "accent"
+          },
+          "symbols": {
+            "focusedField": "›",
+            "selectedCheckbox": "■",
+            "unselectedCheckbox": "□",
+            "selectedRadio": "●",
+            "unselectedRadio": "○"
+          },
+          "layout": {
+            "leftPadding": 1,
+            "fieldGap": 1,
+            "minNameWidth": 12,
+            "maxNameWidth": 24,
+            "minValueWidth": 12,
+            "maxValueWidth": 32,
+            "descriptions": "inline",
+            "instructions": "full"
+          }
+        },
+        "inlineHelp": {
+          "layout": "compact",
+          "choiceDisplay": "contextual",
+          "order": "active-required-available",
+          "metadata": {
+            "types": false,
+            "defaults": true,
+            "required": false,
+            "aliases": false,
+            "descriptions": false,
+            "enumValues": true
+          },
+          "colors": {
+            "active": "accent",
+            "required": "warning",
+            "available": "dim",
+            "type": "syntaxType",
+            "metadata": "muted",
+            "issue": "error"
+          },
+          "format": {
+            "tokenPrefix": "[",
+            "tokenSuffix": "]",
+            "groupSeparator": "  ",
+            "itemSeparator": " ",
+            "typeSeparator": ":",
+            "valueSeparator": "="
+          }
+        },
+        "detailedHelp": {
+          "metadata": {
+            "types": true,
+            "defaults": true,
+            "required": true,
+            "aliases": false,
+            "descriptions": true,
+            "enumValues": true
+          },
+          "order": "definition"
+        }
+      }
+    }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,372 @@
+import assert from "node:assert/strict";
+import { describe, it } from "vitest";
+import {
+    expandGroupedArgumentValues,
+    flattenGroupedArgumentDefinitions,
+    flattenGroupedArgumentValues,
+    group,
+} from "../src/arguments.js";
+import { compileTypedCommandDefinition } from "../src/compiler.js";
+import {
+    applyArgumentDefaults,
+    argumentValueHint,
+    coerceArgumentValue,
+    createArgumentLookup,
+    findArgumentName,
+    orderedArgumentEntries,
+    validateArgumentDefinitions,
+    validateArgumentValue,
+} from "../src/schema.js";
+import type {
+    ArgumentDefinition,
+    ArgumentDefinitions,
+    FlatArgumentDefinitions,
+} from "../src/types.js";
+
+const definitions: FlatArgumentDefinitions = {
+    action: {
+        type: "enum",
+        values: ["create", "delete"],
+        required: true,
+        position: 0,
+    },
+    branchName: {
+        type: "string",
+        required: true,
+        position: 1,
+        minLength: 1,
+        pattern: "^[a-zA-Z0-9/_-]+$",
+    },
+    dryRun: {
+        type: "boolean",
+    },
+    count: {
+        type: "number",
+        integer: true,
+        min: 1,
+        max: 3,
+        default: 1,
+    },
+};
+
+function definitionNamed(name: string): ArgumentDefinition {
+    const definition = definitions[name];
+    assert.ok(definition, `missing ${name} definition`);
+    return definition;
+}
+
+describe("typed command schema", () => {
+    it("orders positional args before flags", () => {
+        assert.deepEqual(
+            orderedArgumentEntries(definitions).map(([name]) => name),
+            ["action", "branchName", "dryRun", "count"],
+        );
+    });
+
+    it("centralizes flag lookup and positional exclusion", () => {
+        const lookup = createArgumentLookup(definitions);
+        assert.equal(findArgumentName(lookup, "--dry-run"), "dryRun");
+        assert.equal(findArgumentName(lookup, "--action"), undefined);
+    });
+
+    it("excludes valid form-only arguments from CLI lookup", () => {
+        const formDefinitions = {
+            task: { type: "string", position: 0 },
+            maximumTimeMinutes: { type: "number", formOnly: true },
+        } satisfies FlatArgumentDefinitions;
+        const diagnostics = validateArgumentDefinitions(formDefinitions);
+        const lookup = createArgumentLookup(formDefinitions);
+        assert.deepEqual(diagnostics, []);
+        assert.equal(findArgumentName(lookup, "--maximum-time-minutes"), undefined);
+    });
+
+    it("rejects form-only requiredness, defaults, and CLI metadata", () => {
+        const diagnostics = validateArgumentDefinitions({
+            requiredValue: { type: "number", formOnly: true, required: true },
+            defaultValue: { type: "number", formOnly: true, default: 1 },
+            flaggedValue: { type: "number", formOnly: true, flag: "minutes" },
+            aliasedValue: { type: "number", formOnly: true, aliases: ["m"] },
+            positionalValue: { type: "number", formOnly: true, position: 0 },
+            restValue: { type: "string", formOnly: true, rest: true },
+        });
+        const codes = diagnostics.map((diagnostic) => diagnostic.code);
+        assert.ok(codes.includes("argument.form-only.required"));
+        assert.ok(codes.includes("argument.form-only.default"));
+        assert.equal(codes.filter((code) => code === "argument.form-only.cli-metadata").length, 4);
+    });
+
+    it("coerces and validates values consistently", () => {
+        const count = definitions.count;
+        assert.equal(count?.type, "number");
+
+        if (count === undefined) {
+            throw new Error("count definition missing");
+        }
+
+        assert.deepEqual(coerceArgumentValue(count, "2", "count"), { ok: true, value: 2 });
+        assert.equal(coerceArgumentValue(count, "4", "count").ok, false);
+        assert.deepEqual(validateArgumentValue("count", count, 2), { ok: true });
+        assert.deepEqual(validateArgumentValue("count", count, 2.5), {
+            ok: false,
+            message: "--count expects an integer",
+        });
+        const branchName = definitionNamed("branchName");
+        assert.deepEqual(validateArgumentValue("branchName", branchName, ""), {
+            ok: false,
+            message: "--branch-name must be at least 1 characters",
+        });
+        assert.deepEqual(validateArgumentValue("branchName", branchName, "bad branch"), {
+            ok: false,
+            message: "--branch-name must match pattern ^[a-zA-Z0-9/_-]+$",
+        });
+        assert.deepEqual(
+            validateArgumentValue("branchName", branchName, "", {
+                nameStyle: "field",
+            }),
+            {
+                ok: false,
+                message: "branch-name must be at least 1 characters",
+            },
+        );
+    });
+
+    it("requires datetime values to use a valid ISO date-time shape", () => {
+        const datetime = { type: "string", format: "datetime" } as const;
+
+        assert.deepEqual(validateArgumentValue("at", datetime, "2024-02-29T23:59:59Z"), {
+            ok: true,
+        });
+        assert.equal(validateArgumentValue("at", datetime, "2024-01-01").ok, false);
+        assert.equal(validateArgumentValue("at", datetime, "December 17, 1995").ok, false);
+        assert.equal(validateArgumentValue("at", datetime, "2023-02-29T12:00:00Z").ok, false);
+        assert.equal(validateArgumentValue("at", datetime, "2024-01-01T24:00:00Z").ok, false);
+    });
+
+    it("applies defaults and derives display hints", () => {
+        assert.deepEqual(applyArgumentDefaults(definitions, {}), { count: 1 });
+        assert.equal(argumentValueHint(definitionNamed("branchName"), "branchName"), "branch-name");
+        assert.equal(argumentValueHint(definitionNamed("action"), "action"), "create|delete");
+    });
+
+    it("compiles arguments into immutable behavior objects", () => {
+        const compiled = compileTypedCommandDefinition({
+            name: "deploy",
+            description: "Deploy",
+            args: definitions,
+        });
+
+        assert.equal(compiled.ok, true);
+
+        if (compiled.ok) {
+            const action = compiled.command.argumentByName.get("action");
+            assert.equal(action?.describe().position, 0);
+            assert.deepEqual(action?.serialize("create"), ["--action=create"]);
+            assert.deepEqual(action?.decode([{ source: "positional", raw: "delete" }]), {
+                ok: true,
+                value: "delete",
+            });
+            assert.equal("set" in compiled.command.argumentByName, false);
+            assert.equal("set" in compiled.command.flagToName, false);
+        }
+    });
+
+    it("validates schema constraints before registration", () => {
+        const diagnostics = validateArgumentDefinitions({
+            range: { type: "number", min: 10, max: 1 },
+            text: { type: "string", minLength: 5, maxLength: 2, pattern: "[" },
+            choice: { type: "enum", values: ["dev", "dev", ""] },
+            choiceDescriptions: {
+                type: "enum",
+                values: ["dev"],
+                optionDescriptions: { prod: "Production", dev: "" },
+            },
+            many: { type: "multi-enum", values: ["a"], minItems: 3, maxItems: 1 },
+            commaMulti: { type: "multi-enum", values: ["a,b"] },
+            duplicateMultiDefault: {
+                type: "multi-enum",
+                values: ["a"],
+                default: ["a", "a"],
+            },
+            badCompletionTimeout: { type: "string", completionTimeoutMs: -1 },
+            defaulted: { type: "string", required: true, default: "main" },
+            first: { type: "string", position: 0 },
+            second: { type: "string", required: true, position: 1 },
+            duplicatePosition: { type: "string", position: 1 },
+            badTitle: { type: "string", title: 123 },
+            badRows: { type: "string", ui: { rows: 0 } },
+            restBeforeOther: { type: "string", position: 2, rest: true },
+            afterRest: { type: "string", position: 3 },
+        });
+        const text = diagnostics.map((diagnostic) => diagnostic.message).join("\n");
+        assert.match(text, /range\.min must be less than or equal to max/);
+        assert.match(text, /text\.minLength must be less than or equal to maxLength/);
+        assert.match(text, /text\.pattern must be a valid regular expression/);
+        assert.match(text, /choice\.values contains duplicate value dev/);
+        assert.match(text, /choice\.values may not contain empty strings/);
+        assert.match(text, /choiceDescriptions\.optionDescriptions\.prod must match an enum value/);
+        assert.match(
+            text,
+            /choiceDescriptions\.optionDescriptions\.dev must be a non-empty string/,
+        );
+        assert.match(text, /many\.minItems must be less than or equal to maxItems/);
+        assert.match(text, /commaMulti\.values may not contain commas/);
+        assert.match(text, /duplicateMultiDefault\.default .* may not contain duplicate values/);
+        assert.match(
+            text,
+            /badCompletionTimeout\.completionTimeoutMs must be a non-negative integer/,
+        );
+        assert.match(text, /defaulted: required arguments may not define a default/);
+        assert.match(
+            text,
+            /second: required positional arguments may not follow optional positional argument first/,
+        );
+        assert.match(text, /duplicatePosition\.position duplicates position 1 from second/);
+        assert.match(text, /badTitle\.title must be a string/);
+        assert.match(text, /badRows\.ui\.rows must be a positive integer/);
+        assert.match(
+            text,
+            /afterRest: positional arguments may not follow rest argument restBeforeOther/,
+        );
+        assert.ok(
+            diagnostics.some(
+                (diagnostic) =>
+                    diagnostic.code === "argument.number.range.invalid" &&
+                    diagnostic.path.join(".") === "range.min",
+            ),
+        );
+    });
+
+    it("rejects a prototype-reserved top-level argument from decoded JSON", () => {
+        const definitions: unknown = JSON.parse('{"__proto__":{"type":"string"}}');
+        const diagnostics = validateArgumentDefinitions(definitions);
+
+        assert.equal(
+            diagnostics.some(
+                (diagnostic) =>
+                    diagnostic.code === "argument.name.reserved-segment" &&
+                    diagnostic.path.join(".") === "__proto__",
+            ),
+            true,
+        );
+    });
+
+    it("applies defaults for valid names inherited by ordinary objects", () => {
+        const inheritedNameDefinitions = {
+            toString: { type: "string" as const, default: "safe" },
+            valueOf: { type: "string" as const },
+        } satisfies ArgumentDefinitions;
+        const defaulted = applyArgumentDefaults(inheritedNameDefinitions, {});
+        assert.equal(Object.getPrototypeOf(defaulted), Object.prototype);
+        assert.equal(Object.hasOwn(defaulted, "toString"), true);
+        assert.equal(Object.hasOwn(defaulted, "valueOf"), true);
+        assert.deepEqual(Object.getOwnPropertyDescriptor(defaulted, "toString"), {
+            configurable: true,
+            enumerable: true,
+            value: "safe",
+            writable: true,
+        });
+        assert.deepEqual(Object.getOwnPropertyDescriptor(defaulted, "valueOf"), {
+            configurable: true,
+            enumerable: false,
+            value: undefined,
+            writable: true,
+        });
+        assert.deepEqual(Object.keys(defaulted), ["toString"]);
+        assert.deepEqual(Object.entries(defaulted), [["toString", "safe"]]);
+    });
+
+    it("preserves prototype-like keys in direct grouping utility results", () => {
+        const runtimeDefinitions = Object.fromEntries([["__proto__", { type: "string" as const }]]);
+        const runtimeValues = Object.fromEntries([["__proto__", "safe"]]);
+
+        const flattenedDefinitions = flattenGroupedArgumentDefinitions(runtimeDefinitions);
+        const flattenedValues = flattenGroupedArgumentValues(runtimeValues, runtimeDefinitions);
+        const expandedValues = expandGroupedArgumentValues(flattenedValues, runtimeDefinitions);
+        assert.equal(Object.hasOwn(flattenedDefinitions, "__proto__"), true);
+        assert.equal(Object.hasOwn(flattenedValues, "__proto__"), true);
+        assert.equal(Object.hasOwn(expandedValues, "__proto__"), true);
+        assert.equal(flattenedValues.__proto__, "safe");
+        assert.equal(expandedValues.__proto__, "safe");
+        assert.equal("safe" in {}, false);
+    });
+
+    it("rejects colliding grouped and literal canonical paths in either insertion order", () => {
+        const nestedRequired = group({
+            port: { type: "number", required: true },
+        });
+        const nestedDefaulted = group({
+            port: { type: "number", default: 5432 },
+        });
+        const literalRequired = { type: "string", required: true } as const;
+        const literalOptional = { type: "string" } as const;
+
+        const cases = [
+            { database: nestedRequired, "database.port": literalRequired },
+            { "database.port": literalRequired, database: nestedRequired },
+            { database: nestedDefaulted, "database.port": literalOptional },
+            { "database.port": literalOptional, database: nestedDefaulted },
+        ];
+
+        for (const args of cases) {
+            const diagnostics = validateArgumentDefinitions(args);
+            const compiled = compileTypedCommandDefinition({
+                name: "canonical-path-collision",
+                description: "Canonical path collision",
+                args,
+            });
+
+            const collisions = diagnostics.filter(
+                (diagnostic) => diagnostic.code === "argument.name.duplicate-path",
+            );
+            assert.equal(collisions.length, 1);
+            assert.match(collisions[0]?.message ?? "", /database > port/);
+            assert.match(collisions[0]?.message ?? "", /database\.port/);
+            assert.equal(compiled.ok, false);
+            assert.throws(
+                () => flattenGroupedArgumentDefinitions(args),
+                /Duplicate canonical argument path database\.port/,
+            );
+        }
+    });
+
+    it("returns diagnostics for malformed runtime definitions instead of throwing", () => {
+        class BehaviorBearingDefinition {
+            readonly type = "string";
+
+            describe(): string {
+                return "unsupported behavior";
+            }
+        }
+
+        const diagnostics = validateArgumentDefinitions({
+            stringValues: { type: "enum", values: "abc" },
+            numericValues: { type: "enum", values: [1, 2] },
+            numericFlag: { type: "string", flag: 123 },
+            stringAliases: { type: "string", aliases: "x" },
+            unknownType: { type: "date" },
+            missingDefinition: null,
+            stringRequired: { type: "string", required: "yes" },
+            stringInteger: { type: "number", integer: "yes" },
+            behaviorBearing: new BehaviorBearingDefinition(),
+        });
+        const text = diagnostics.map((diagnostic) => diagnostic.message).join("\n");
+        assert.match(text, /stringValues\.values must be a list of strings/);
+        assert.match(text, /numericValues\.values\[0\] must be a string/);
+        assert.match(text, /numericFlag\.flag must be a string/);
+        assert.match(text, /stringAliases\.aliases must be a list of strings/);
+        assert.match(text, /unknownType\.type must be one of/);
+        assert.match(text, /missingDefinition: argument definition must be an object/);
+        assert.match(text, /stringRequired\.required must be a boolean/);
+        assert.match(text, /stringInteger\.integer must be a boolean/);
+        assert.match(text, /behaviorBearing: argument definition must be a plain object/);
+
+        assert.deepEqual(validateArgumentDefinitions(null), [
+            {
+                code: "arguments.invalid",
+                message: "arguments must be an object",
+                path: [],
+                severity: "error",
+            },
+        ]);
+    });
+});
