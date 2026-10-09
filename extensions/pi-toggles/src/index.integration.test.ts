@@ -507,10 +507,11 @@ describe("Pi Toggles extension runtime", () => {
                 const before = await created.session.extensionRunner.emitBeforeAgentStart(
                     "Review this",
                     undefined,
-                    created.session.systemPrompt,
                     { cwd, skills },
                 );
-                expect(before?.systemPrompt).not.toContain("<name>review</name>");
+                expect(before.systemPromptOptions.forceSystemPrompt).not.toContain(
+                    "<name>review</name>",
+                );
                 expect(
                     await created.session.extensionRunner.emitInput(
                         "/skill:review focus on security",
@@ -530,10 +531,11 @@ describe("Pi Toggles extension runtime", () => {
                 const userOnly = await created.session.extensionRunner.emitBeforeAgentStart(
                     "Review this",
                     undefined,
-                    created.session.systemPrompt,
                     { cwd, skills },
                 );
-                expect(userOnly?.systemPrompt).not.toContain("<name>review</name>");
+                expect(userOnly.systemPromptOptions.forceSystemPrompt).not.toContain(
+                    "<name>review</name>",
+                );
             } finally {
                 created.session.dispose();
             }

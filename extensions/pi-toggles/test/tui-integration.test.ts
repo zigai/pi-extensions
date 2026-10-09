@@ -1,4 +1,4 @@
-import { TUI } from "@earendil-works/pi-tui";
+import { TuiAltScreen, TuiMainScreen, type TUI } from "@earendil-works/pi-tui";
 import { afterEach, describe, expect, it } from "vitest";
 import { TogglesPanel, type PanelItem, type TogglesPanelStyles } from "../src/toggles-panel.ts";
 import { type ScreenRow, VirtualTerminal } from "./support/virtual-terminal.ts";
@@ -70,14 +70,11 @@ interface TuiMode {
 const tuiModes = [
     {
         name: "main screen",
-        create: (terminal: VirtualTerminal): TUI => new TUI(terminal),
+        create: (terminal: VirtualTerminal): TUI => new TuiMainScreen(terminal),
     },
     {
         name: "alternate screen",
-        create: (terminal: VirtualTerminal): TUI => {
-            terminal.write("\u001b[?1049h");
-            return new TUI(terminal);
-        },
+        create: (terminal: VirtualTerminal): TUI => new TuiAltScreen(terminal),
     },
 ] as const satisfies readonly TuiMode[];
 

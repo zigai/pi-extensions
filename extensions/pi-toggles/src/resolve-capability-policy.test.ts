@@ -279,15 +279,12 @@ describe("resolveCapabilityPolicy", () => {
     });
 
     it("resolves at least one thousand capabilities deterministically", () => {
-        const capabilities = Array.from(
-            { length: 1_000 },
-            (_, index): Capability => ({
-                ...readTool,
-                id: `tool-${index}`,
-                name: `tool-${index}`,
-                source: { ...readTool.source, path: `<builtin:tool-${index}>` },
-            }),
-        );
+        const capabilities = Array.from({ length: 1_000 }, (_, index): Capability => ({
+            ...readTool,
+            id: `tool-${index}`,
+            name: `tool-${index}`,
+            source: { ...readTool.source, path: `<builtin:tool-${index}>` },
+        }));
         const configuration = emptyConfiguration();
 
         const first = resolveCapabilityPolicy(capabilities, configuration, resolveFact);
