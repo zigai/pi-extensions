@@ -6,6 +6,7 @@ import type { SettingsArtifactTargets } from "./artifacts.ts";
 import {
     defineExtensionSettings,
     ExtensionSettingsDefinitionCandidateSchema,
+    InvalidSettingsDefinition,
     type ExtensionSettingsDefinition,
 } from "./definition.ts";
 import { readTextIfPresent } from "./file-system.ts";
@@ -36,9 +37,13 @@ function manifestError(path: string, reason: string): Error {
     return new Error(`Invalid Pi extension settings manifest in ${path}: ${reason}`);
 }
 
-function stringProperty(object: JsonObject, key: string): string | undefined {
+function stringProperty(packagePath: string, object: JsonObject, key: string): string | undefined {
     const value = object[key];
-    return isJsonString(value) && value.trim() !== "" ? value : undefined;
+    if (value === undefined) return undefined;
+    if (!isJsonString(value) || value.trim() === "") {
+        throw manifestError(packagePath, `${key} must be a non-empty string`);
+    }
+    return value;
 }
 
 function parseSettingsManifest(
@@ -58,15 +63,15 @@ function parseSettingsManifest(
         throw manifestError(packagePath, `unknown keys: ${unknownKeys.join(", ")}`);
     }
 
-    const definition = stringProperty(raw, "definition");
+    const definition = stringProperty(packagePath, raw, "definition");
     if (definition === undefined) {
         throw manifestError(packagePath, "definition must be a non-empty relative path");
     }
 
-    const schema = stringProperty(raw, "schema") ?? "config.schema.json";
-    const readme = stringProperty(raw, "readme") ?? "README.md";
-    const prevalidation = stringProperty(raw, "prevalidation");
-    const globalPath = stringProperty(raw, "globalPath");
+    const schema = stringProperty(packagePath, raw, "schema") ?? "config.schema.json";
+    const readme = stringProperty(packagePath, raw, "readme") ?? "README.md";
+    const prevalidation = stringProperty(packagePath, raw, "prevalidation");
+    const globalPath = stringProperty(packagePath, raw, "globalPath");
 
     if (prevalidation === undefined) {
         return globalPath === undefined
@@ -155,6 +160,17 @@ async function importDefinition(path: string): Promise<ExtensionSettingsDefiniti
         // pre-existing definition created through a runtime fast path.
         return defineExtensionSettings(candidateModule.default);
     } catch (cause: unknown) {
+        if (
+            cause instanceof InvalidSettingsDefinition &&
+            candidateModule.default.id !== undefined &&
+            candidateModule.default.title !== undefined &&
+            candidateModule.default.description !== undefined &&
+            candidateModule.default.schema !== undefined
+        ) {
+            throw new Error(`Invalid settings definition module ${path}: ${cause.message}`, {
+                cause,
+            });
+        }
         throw new Error(invalidDefaultMessage, { cause });
     }
 }
@@ -182,6 +198,21 @@ async function loadProject(packagePath: string): Promise<SettingsArtifactProject
         throw manifestError(
             packagePath,
             "definition, schema, readme, and prevalidation paths must stay inside the package",
+        );
+    }
+
+    const outputs = [schemaPath, readmePath];
+    if (prevalidationPath !== undefined) outputs.push(prevalidationPath);
+    if (new Set(outputs).size !== outputs.length) {
+        throw manifestError(
+            packagePath,
+            "schema, readme, and prevalidation paths must be distinct",
+        );
+    }
+    if (outputs.includes(definitionPath) || outputs.includes(packagePath)) {
+        throw manifestError(
+            packagePath,
+            "generated artifact paths cannot overwrite the definition or package manifest",
         );
     }
 

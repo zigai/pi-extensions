@@ -1,5 +1,9 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { realpath } from "node:fs/promises";
+import { resolve } from "node:path";
 import type { TObject } from "typebox";
+
+import { Type, Value } from "./typebox-runtime.ts";
 
 import type { ExtensionSettingsDefinition } from "./definition.ts";
 import { getPiAgentDir, PI_CONFIG_DIR_NAME } from "./pi-host-paths.ts";
@@ -96,12 +100,11 @@ export function getPiProjectSettingsPath(extensionId: string, cwd: string): stri
  * @param context The current Pi extension context.
  * @param options The generated schema bundled with the extension.
  * @returns Decoded settings, encoded layers, source revisions, paths, installation state, and diagnostics.
- * @throws If a custom TypeBox transform decoder throws while decoding the resolved settings.
  *
  * @example
  * ```ts
  * import { loadPiExtensionSettings } from "@zigai/pi-extension-settings/pi";
- * import settingsDefinition from "./settings.ts";
+ * import { settingsDefinition } from "./settings.ts";
  *
  * const loaded = loadPiExtensionSettings(settingsDefinition, ctx, {
  *   bundledSchema: {
@@ -125,6 +128,34 @@ export function loadPiExtensionSettings<const Schema extends TObject>(
             trusted: context.isProjectTrusted(),
         },
     });
+}
+
+const FileSystemErrorSchema = Type.Object({ code: Type.String() }, { additionalProperties: true });
+
+async function mutationQueueIdentity(path: string): Promise<string> {
+    const resolved = resolve(path);
+
+    try {
+        return await realpath(resolved);
+    } catch (cause: unknown) {
+        let code: string;
+
+        try {
+            code = Value.Parse(FileSystemErrorSchema, cause).code;
+        } catch {
+            throw cause;
+        }
+
+        if (code === "ENOENT" || code === "ENOTDIR") return resolved;
+
+        throw cause;
+    }
+}
+
+class QueuedOperationError extends Error {
+    constructor(readonly operationCause: Error) {
+        super("The queued settings operation failed.", { cause: operationCause });
+    }
 }
 
 type FileMutationQueue = <Result>(
@@ -187,14 +218,48 @@ export async function updatePiExtensionSettings<const Schema extends TObject>(
             ? [global.configPath]
             : [global.configPath, project.configPath].sort();
 
-    return withFileMutationQueues(
-        paths,
-        async () =>
-            updateSettingsTransaction(definition, {
-                ...options,
-                paths: { global, project },
-                projectTrusted,
-            }),
-        withFileMutationQueue,
-    );
+    if (options.scope === "project") {
+        try {
+            const identities = await Promise.all(paths.map(mutationQueueIdentity));
+            if (new Set(identities).size !== identities.length) {
+                return {
+                    status: "failed",
+                    message: "The project and global settings resolve to the same file.",
+                };
+            }
+        } catch {
+            return {
+                status: "failed",
+                message: "The project settings transaction could not resolve its file paths.",
+            };
+        }
+    }
+
+    try {
+        return await withFileMutationQueues(
+            paths,
+            async () => {
+                try {
+                    return await updateSettingsTransaction(definition, {
+                        ...options,
+                        paths: { global, project },
+                        projectTrusted,
+                    });
+                } catch (cause: unknown) {
+                    if (cause instanceof Error) throw new QueuedOperationError(cause);
+                    throw new QueuedOperationError(
+                        new Error("The settings operation threw a non-Error value.", { cause }),
+                    );
+                }
+            },
+            withFileMutationQueue,
+        );
+    } catch (cause: unknown) {
+        if (cause instanceof QueuedOperationError) throw cause.operationCause;
+
+        return {
+            status: "failed",
+            message: `The ${options.scope} settings transaction could not acquire its mutation queue.`,
+        };
+    }
 }

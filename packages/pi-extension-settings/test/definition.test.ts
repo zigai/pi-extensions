@@ -8,6 +8,7 @@ import {
 } from "../src/definition.ts";
 import { isJsonObject } from "../src/json-value.ts";
 import { createDefaultSettingsDocument, createSettingsFileSchema } from "../src/schema-document.ts";
+import { Value } from "../src/typebox-runtime.ts";
 import { testDefinition } from "./fixture.ts";
 
 type MetadataOverride = {
@@ -459,6 +460,69 @@ describe("generated schema documents", () => {
         if (!isJsonObject(schema.not)) return;
 
         expect(schema.not.required).toEqual(["legacy"]);
+    });
+
+    it("makes object alternatives partial only at mergeable setting positions", () => {
+        const definition = defineExtensionSettings({
+            id: "pi-nullable-object",
+            title: "Nullable object",
+            description: "Nullable object settings.",
+            schema: Type.Object(
+                {
+                    appearance: Type.Union(
+                        [
+                            Type.Object(
+                                {
+                                    color: Type.String({
+                                        default: "blue",
+                                        description: "Display color.",
+                                    }),
+                                    opacity: Type.Number({
+                                        default: 1,
+                                        description: "Display opacity.",
+                                    }),
+                                },
+                                { additionalProperties: false },
+                            ),
+                            Type.Null(),
+                        ],
+                        {
+                            default: { color: "blue", opacity: 1 },
+                            description: "Optional appearance overrides.",
+                        },
+                    ),
+                },
+                { additionalProperties: false },
+            ),
+        });
+
+        const schema = createSettingsFileSchema(definition);
+        expect(Value.Check(schema, { appearance: { color: "red" } })).toBe(true);
+        expect(Value.Check(schema, { appearance: null })).toBe(true);
+    });
+
+    it("preserves tilde-prefixed user properties and literal default keys", () => {
+        const definition = defineExtensionSettings({
+            id: "pi-tilde-keys",
+            title: "Tilde keys",
+            description: "Tilde-key settings.",
+            schema: Type.Object(
+                {
+                    "~flag": Type.Boolean({ default: true, description: "A tilde setting." }),
+                    metadata: Type.Record(Type.String(), Type.String(), {
+                        default: { "~label": "kept" },
+                        description: "Metadata values.",
+                    }),
+                },
+                { additionalProperties: false },
+            ),
+        });
+
+        const schema = createSettingsFileSchema(definition);
+        expect(schema.properties).toMatchObject({
+            "~flag": { default: true },
+            metadata: { default: { "~label": "kept" } },
+        });
     });
 
     it("creates the exact scaffolded global document", () => {

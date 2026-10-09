@@ -264,6 +264,138 @@ describe("loadSettings", () => {
         expect(loaded.settings.value).toBe("decoded:custom");
     });
 
+    it("ignores a validated layer when the resolved codec rejects it", async () => {
+        const definition = defineExtensionSettings({
+            id: "pi-rejecting-codec",
+            title: "Rejecting codec",
+            description: "Codec rejection settings.",
+            schema: Type.Object(
+                {
+                    value: Codec(Type.String({ default: "default", description: "Encoded value." }))
+                        .Decode((value) => {
+                            if (value === "rejected-secret") throw new Error(value);
+                            return `decoded:${value}`;
+                        })
+                        .Encode((value) => value.replace(/^decoded:/, "")),
+                },
+                { additionalProperties: false },
+            ),
+        });
+        const agentDir = await temporaryDirectory();
+        const paths = resolveGlobalSettingsPaths(agentDir, definition.id);
+        await mkdir(join(agentDir, "extension-settings"), { recursive: true });
+        await writeFile(paths.configPath, JSON.stringify({ value: "rejected-secret" }));
+
+        const loaded = loadSettings(definition, {
+            agentDir,
+            bundledSchema: {
+                kind: "content",
+                content: formatJson(createSettingsFileSchema(definition)),
+            },
+        });
+
+        expect(loaded.settings.value).toBe("decoded:default");
+        expect(loaded.usedGlobalConfig).toBe(false);
+        expect(loaded.globalSettingsLayer).toBeUndefined();
+        expect(loaded.diagnostics).toContainEqual(
+            expect.objectContaining({ code: "config-decode-failed", scope: "global" }),
+        );
+        expect(JSON.stringify(loaded.diagnostics)).not.toContain("rejected-secret");
+        expect(await readFile(paths.configPath, "utf8")).toContain("rejected-secret");
+    });
+
+    it("drops only a project layer when its resolved codec rejects", async () => {
+        const definition = defineExtensionSettings({
+            id: "pi-project-codec",
+            title: "Project codec",
+            description: "Project codec rejection settings.",
+            schema: Type.Object(
+                {
+                    value: Codec(Type.String({ default: "default", description: "Encoded value." }))
+                        .Decode((value) => {
+                            if (value === "rejected") throw new Error("rejected");
+                            return `decoded:${value}`;
+                        })
+                        .Encode((value) => value.replace(/^decoded:/, "")),
+                },
+                { additionalProperties: false },
+            ),
+        });
+        const agentDir = await temporaryDirectory();
+        const project = join(agentDir, "project");
+        const projectPaths = resolveProjectSettingsPaths(project, ".pi", definition.id);
+        await mkdir(join(project, ".pi", "extension-settings"), { recursive: true });
+        await writeFile(projectPaths.configPath, JSON.stringify({ value: "rejected" }));
+
+        const loaded = loadSettings(definition, {
+            agentDir,
+            bundledSchema: {
+                kind: "content",
+                content: formatJson(createSettingsFileSchema(definition)),
+            },
+            project: { cwd: project, configDirName: ".pi", trusted: true },
+        });
+
+        expect(loaded.settings.value).toBe("decoded:default");
+        expect(loaded.usedGlobalConfig).toBe(true);
+        expect(loaded.usedProjectConfig).toBe(false);
+        expect(loaded.diagnostics).toContainEqual(
+            expect.objectContaining({ code: "config-decode-failed", scope: "project" }),
+        );
+    });
+
+    it("treats a codec that rejects validated defaults as a definition defect", async () => {
+        let decodeCalls = 0;
+        const definition = defineExtensionSettings({
+            id: "pi-default-codec-defect",
+            title: "Default codec defect",
+            description: "Stateful codec defect settings.",
+            schema: Type.Object(
+                {
+                    value: Codec(Type.String({ default: "default", description: "Value." }))
+                        .Decode((value) => {
+                            decodeCalls += 1;
+                            if (decodeCalls > 1) throw new Error("stateful failure");
+                            return value;
+                        })
+                        .Encode((value) => value),
+                },
+                { additionalProperties: false },
+            ),
+        });
+        const agentDir = await temporaryDirectory();
+
+        expect(() =>
+            loadSettings(definition, {
+                agentDir,
+                bundledSchema: {
+                    kind: "content",
+                    content: formatJson(createSettingsFileSchema(definition)),
+                },
+            }),
+        ).toThrow("Validated default settings could not be decoded");
+    });
+
+    it("rejects unsupported property names without changing the file", async () => {
+        const agentDir = await temporaryDirectory();
+        const paths = resolveGlobalSettingsPaths(agentDir, "pi-example");
+        await mkdir(join(agentDir, "extension-settings"), { recursive: true });
+        const content = '{"constructor":{"secret":"kept"}}';
+        await writeFile(paths.configPath, content);
+
+        const loaded = loadSettings(testDefinition(), {
+            agentDir,
+            bundledSchema: bundledSchema(),
+        });
+
+        expect(loaded.usedGlobalConfig).toBe(false);
+        expect(loaded.diagnostics).toContainEqual(
+            expect.objectContaining({ code: "config-invalid", scope: "global" }),
+        );
+        expect(JSON.stringify(loaded.diagnostics)).not.toContain("kept");
+        expect(await readFile(paths.configPath, "utf8")).toBe(content);
+    });
+
     it("falls back safely when the config path cannot be read", async () => {
         const agentDir = await temporaryDirectory();
         const paths = resolveGlobalSettingsPaths(agentDir, "pi-example");

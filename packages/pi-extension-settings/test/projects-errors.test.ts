@@ -60,6 +60,37 @@ describe("project discovery failures and options", () => {
         await expect(discoverSettingsProjects(root)).rejects.toThrow();
     });
 
+    it.each(["schema", "readme", "prevalidation", "globalPath"])(
+        "rejects a malformed supplied %s value",
+        async (field) => {
+            const root = await temporaryProject();
+            await writeFile(
+                join(root, "package.json"),
+                JSON.stringify({
+                    piExtensionSettings: { definition: "settings.mjs", [field]: 42 },
+                }),
+            );
+            await expect(discoverSettingsProjects(root)).rejects.toThrow(field);
+        },
+    );
+
+    it.each([
+        { schema: "settings.mjs" },
+        { schema: "package.json" },
+        { schema: "artifact.json", readme: "artifact.json" },
+        { prevalidation: "README.md" },
+    ])("rejects colliding artifact targets %#", async (overrides) => {
+        const root = await temporaryProject();
+        await writeFile(
+            join(root, "package.json"),
+            JSON.stringify({
+                piExtensionSettings: { definition: "settings.mjs", ...overrides },
+            }),
+        );
+        await writeDefinition(join(root, "settings.mjs"));
+        await expect(discoverSettingsProjects(root)).rejects.toThrow(/distinct|overwrite/);
+    });
+
     it("supports object-form workspaces and custom global display paths", async () => {
         const root = await temporaryProject();
         const child = join(root, "packages", "child");

@@ -44,20 +44,36 @@ const SCHEMA_VALUE_KEYWORDS = new Set([
 ]);
 
 function makeSettingsObjectPartial(schema: JsonObject): JsonObject {
+    function makeMergeablePropertyPartial(property: JsonObject): JsonObject {
+        if (property.type === "object" && isJsonObject(property.properties)) {
+            return makeSettingsObjectPartial(property);
+        }
+
+        if (isJsonArray(property.anyOf)) {
+            return {
+                ...cloneJson(property),
+                anyOf: property.anyOf.map((alternative) =>
+                    isJsonObject(alternative)
+                        ? makeMergeablePropertyPartial(alternative)
+                        : alternative,
+                ),
+            };
+        }
+
+        return cloneJson(property);
+    }
+
     const transformed: Record<string, JsonValue> = {};
     for (const [key, value] of Object.entries(schema)) {
         if (key === "required") continue;
 
         if (key === "properties" && isJsonObject(value)) {
-            const properties: Record<string, JsonValue> = {};
-            for (const [name, child] of Object.entries(value)) {
-                properties[name] =
-                    isJsonObject(child) && child.type === "object" && isJsonObject(child.properties)
-                        ? makeSettingsObjectPartial(child)
-                        : cloneJson(child);
-            }
-
-            transformed[key] = properties;
+            transformed[key] = Object.fromEntries(
+                Object.entries(value).map(([name, child]) => [
+                    name,
+                    isJsonObject(child) ? makeMergeablePropertyPartial(child) : cloneJson(child),
+                ]),
+            );
             continue;
         }
 
@@ -67,16 +83,36 @@ function makeSettingsObjectPartial(schema: JsonObject): JsonObject {
     return transformed;
 }
 
-function stripTypeBoxMetadata(value: JsonObject): JsonObject;
-function stripTypeBoxMetadata(value: JsonValue): JsonValue;
-function stripTypeBoxMetadata(value: JsonValue): JsonValue {
-    if (Array.isArray(value)) return value.map(stripTypeBoxMetadata);
-    if (!isJsonObject(value)) return value;
-
+function stripTypeBoxMetadataFromSchema(schema: JsonObject): JsonObject {
     const sanitized: Record<string, JsonValue> = {};
-    for (const [key, child] of Object.entries(value)) {
+    for (const [key, child] of Object.entries(schema)) {
         if (key.startsWith("~")) continue;
-        sanitized[key] = stripTypeBoxMetadata(child);
+
+        if (SCHEMA_MAP_KEYWORDS.has(key) && isJsonObject(child)) {
+            sanitized[key] = Object.fromEntries(
+                Object.entries(child).map(([name, nested]) => [
+                    name,
+                    isJsonObject(nested)
+                        ? stripTypeBoxMetadataFromSchema(nested)
+                        : cloneJson(nested),
+                ]),
+            );
+            continue;
+        }
+
+        if (SCHEMA_ARRAY_KEYWORDS.has(key) && isJsonArray(child)) {
+            sanitized[key] = child.map((nested) =>
+                isJsonObject(nested) ? stripTypeBoxMetadataFromSchema(nested) : cloneJson(nested),
+            );
+            continue;
+        }
+
+        if (SCHEMA_VALUE_KEYWORDS.has(key) && isJsonObject(child)) {
+            sanitized[key] = stripTypeBoxMetadataFromSchema(child);
+            continue;
+        }
+
+        sanitized[key] = cloneJson(child);
     }
 
     return sanitized;
@@ -93,7 +129,7 @@ function schemaRecord(schema: TSchema): JsonObject {
         throw new TypeError("The TypeBox settings schema must serialize to a JSON object.");
     }
 
-    return stripTypeBoxMetadata(parsed);
+    return stripTypeBoxMetadataFromSchema(parsed);
 }
 
 function visitChildSchemas(

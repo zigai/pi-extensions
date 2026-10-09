@@ -40,6 +40,31 @@ describe("artifact filesystem failures", () => {
         ).toThrow();
     });
 
+    it("rejects a missing README during preflight", async () => {
+        const root = await temporaryDirectory();
+        const readmePath = join(root, "README.md");
+
+        expect(() =>
+            generateSettingsArtifacts(testDefinition(), {
+                schemaPath: join(root, "config.schema.json"),
+                readmePath,
+            }),
+        ).toThrow("README does not exist");
+    });
+
+    it("rejects invalid README generation markers during preflight", async () => {
+        const root = await temporaryDirectory();
+        const readmePath = join(root, "README.md");
+        await writeFile(readmePath, `${README_GENERATED_START}\nmissing end marker\n`);
+
+        expect(() =>
+            generateSettingsArtifacts(testDefinition(), {
+                schemaPath: join(root, "config.schema.json"),
+                readmePath,
+            }),
+        ).toThrow("README generation markers are invalid");
+    });
+
     it("throws when schema output cannot be written", async () => {
         const root = await temporaryDirectory();
         const parentFile = join(root, "blocked");

@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -11,6 +11,7 @@ import {
     getPiGlobalSettingsPath,
     getPiProjectSettingsPath,
     loadPiExtensionSettings,
+    updatePiExtensionSettings,
 } from "../src/pi.ts";
 import { createSettingsFileSchema } from "../src/schema-document.ts";
 import { testDefinition } from "./fixture.ts";
@@ -66,6 +67,77 @@ describe("Pi settings adapter", () => {
         expect(loaded.usedProjectConfig).toBe(true);
         expect(loaded.globalConfigPath).toBe(getPiGlobalSettingsPath(definition.id));
         expect(loaded.projectConfigPath).toBe(getPiProjectSettingsPath(definition.id, cwd));
+    });
+
+    it("updates settings through Pi's mutation queue", async () => {
+        const root = await temporaryDirectory();
+        process.env.PI_CODING_AGENT_DIR = join(root, "agent");
+        const definition = testDefinition();
+        const context = { cwd: root, isProjectTrusted: () => true };
+        loadPiExtensionSettings(definition, context, {
+            bundledSchema: {
+                kind: "content",
+                content: formatJson(createSettingsFileSchema(definition)),
+            },
+        });
+
+        const result = await updatePiExtensionSettings(definition, context, {
+            scope: "global",
+            update: (layer) => ({ ...layer, enabled: false }),
+        });
+
+        expect(result.status).toBe("updated");
+        expect(
+            loadPiExtensionSettings(definition, context, {
+                bundledSchema: {
+                    kind: "content",
+                    content: formatJson(createSettingsFileSchema(definition)),
+                },
+            }).settings.enabled,
+        ).toBe(false);
+    });
+
+    it("preserves updater Error identity across Pi's mutation queue", async () => {
+        const root = await temporaryDirectory();
+        process.env.PI_CODING_AGENT_DIR = join(root, "agent");
+        const definition = testDefinition();
+        const context = { cwd: root, isProjectTrusted: () => true };
+        loadPiExtensionSettings(definition, context, {
+            bundledSchema: {
+                kind: "content",
+                content: formatJson(createSettingsFileSchema(definition)),
+            },
+        });
+        const updaterError = new Error("updater failed");
+
+        await expect(
+            updatePiExtensionSettings(definition, context, {
+                scope: "global",
+                update: () => {
+                    throw updaterError;
+                },
+            }),
+        ).rejects.toBe(updaterError);
+    });
+
+    it("fails safely when a mutation queue path cannot be resolved", async () => {
+        const root = await temporaryDirectory();
+        process.env.PI_CODING_AGENT_DIR = join(root, "agent");
+        const definition = testDefinition();
+        const paths = resolveProjectSettingsPaths(root, CONFIG_DIR_NAME, definition.id);
+        await mkdir(join(root, CONFIG_DIR_NAME, "extension-settings"), { recursive: true });
+        await symlink(paths.configPath, paths.configPath);
+
+        const result = await updatePiExtensionSettings(
+            definition,
+            { cwd: root, isProjectTrusted: () => true },
+            { scope: "project", update: (layer) => layer },
+        );
+
+        expect(result).toEqual({
+            status: "failed",
+            message: "The project settings transaction could not resolve its file paths.",
+        });
     });
 
     it("does not read project settings when Pi marks the project untrusted", async () => {

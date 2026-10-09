@@ -22,6 +22,13 @@ export type RenderedSettingsArtifacts = {
     readonly prevalidation?: string;
 };
 
+export type PreparedSettingsArtifacts = {
+    readonly targets: SettingsArtifactTargets;
+    readonly schema: string;
+    readonly readme: string;
+    readonly prevalidation?: string;
+};
+
 export type GeneratedSettingsArtifacts = {
     readonly changedPaths: readonly string[];
 };
@@ -73,38 +80,53 @@ function expectedReadme(readmePath: string, section: string): string {
     return expected;
 }
 
+export function prepareSettingsArtifacts(
+    definition: ExtensionSettingsDefinition,
+    targets: SettingsArtifactTargets,
+): PreparedSettingsArtifacts {
+    const rendered = renderSettingsArtifacts(definition, targets);
+    const prepared = {
+        targets,
+        schema: rendered.schema,
+        readme: expectedReadme(targets.readmePath, rendered.readmeSection),
+    };
+    return rendered.prevalidation === undefined
+        ? prepared
+        : { ...prepared, prevalidation: rendered.prevalidation };
+}
+
+export function generatePreparedSettingsArtifacts(
+    prepared: PreparedSettingsArtifacts,
+): GeneratedSettingsArtifacts {
+    const { targets } = prepared;
+    const changedPaths: string[] = [];
+    if (writeTextAtomically(targets.schemaPath, prepared.schema) !== "unchanged") {
+        changedPaths.push(targets.schemaPath);
+    }
+    if (writeTextAtomically(targets.readmePath, prepared.readme) !== "unchanged") {
+        changedPaths.push(targets.readmePath);
+    }
+    if (
+        targets.prevalidationPath !== undefined &&
+        prepared.prevalidation !== undefined &&
+        writeTextAtomically(targets.prevalidationPath, prepared.prevalidation) !== "unchanged"
+    ) {
+        changedPaths.push(targets.prevalidationPath);
+    }
+    return { changedPaths };
+}
+
 export function generateSettingsArtifacts(
     definition: ExtensionSettingsDefinition,
     targets: SettingsArtifactTargets,
 ): GeneratedSettingsArtifacts {
-    const rendered = renderSettingsArtifacts(definition, targets);
-    const readme = expectedReadme(targets.readmePath, rendered.readmeSection);
-    const changedPaths: string[] = [];
-    if (writeTextAtomically(targets.schemaPath, rendered.schema) !== "unchanged") {
-        changedPaths.push(targets.schemaPath);
-    }
-
-    if (writeTextAtomically(targets.readmePath, readme) !== "unchanged") {
-        changedPaths.push(targets.readmePath);
-    }
-
-    if (
-        targets.prevalidationPath !== undefined &&
-        rendered.prevalidation !== undefined &&
-        writeTextAtomically(targets.prevalidationPath, rendered.prevalidation) !== "unchanged"
-    ) {
-        changedPaths.push(targets.prevalidationPath);
-    }
-
-    return { changedPaths };
+    return generatePreparedSettingsArtifacts(prepareSettingsArtifacts(definition, targets));
 }
 
-export function checkSettingsArtifacts(
-    definition: ExtensionSettingsDefinition,
-    targets: SettingsArtifactTargets,
+export function checkPreparedSettingsArtifacts(
+    prepared: PreparedSettingsArtifacts,
 ): CheckedSettingsArtifacts {
-    const rendered = renderSettingsArtifacts(definition, targets);
-    const readme = expectedReadme(targets.readmePath, rendered.readmeSection);
+    const { targets } = prepared;
     const schemaCurrent = readTextIfPresent(targets.schemaPath);
     const readmeCurrent = readTextIfPresent(targets.readmePath);
     const prevalidationCurrent =
@@ -113,15 +135,20 @@ export function checkSettingsArtifacts(
             : readTextIfPresent(targets.prevalidationPath);
 
     const stalePaths: string[] = [];
-    if (schemaCurrent !== rendered.schema) stalePaths.push(targets.schemaPath);
-    if (readmeCurrent !== readme) stalePaths.push(targets.readmePath);
-
+    if (schemaCurrent !== prepared.schema) stalePaths.push(targets.schemaPath);
+    if (readmeCurrent !== prepared.readme) stalePaths.push(targets.readmePath);
     if (
         targets.prevalidationPath !== undefined &&
-        prevalidationCurrent !== rendered.prevalidation
+        prevalidationCurrent !== prepared.prevalidation
     ) {
         stalePaths.push(targets.prevalidationPath);
     }
-
     return { current: stalePaths.length === 0, stalePaths };
+}
+
+export function checkSettingsArtifacts(
+    definition: ExtensionSettingsDefinition,
+    targets: SettingsArtifactTargets,
+): CheckedSettingsArtifacts {
+    return checkPreparedSettingsArtifacts(prepareSettingsArtifacts(definition, targets));
 }

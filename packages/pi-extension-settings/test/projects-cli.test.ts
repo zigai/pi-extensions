@@ -188,6 +188,28 @@ describe("CLI", () => {
         expect(output.stdout.join("")).toContain("artifacts are current (1 package(s))");
     });
 
+    it("preflights every workspace before publishing any artifact", async () => {
+        const root = await temporaryProject();
+        await writeFile(
+            join(root, "package.json"),
+            JSON.stringify({ name: "root", private: true, workspaces: ["packages/*"] }),
+        );
+        const first = join(root, "packages", "first");
+        const second = join(root, "packages", "second");
+        await writeConfiguredPackage(first, "pi-first");
+        await writeConfiguredPackage(second, "pi-second");
+        await writeFile(join(first, "config.schema.json"), "first-original\n");
+        await writeFile(
+            join(second, "README.md"),
+            `# Invalid\n\n${README_GENERATED_START}\nmissing end\n`,
+        );
+
+        const output = recordingIo();
+        expect(await runCli(["generate", "--root", root], output.io)).toBe(1);
+        expect(output.stderr.join("")).toContain("markers");
+        expect(await readFile(join(first, "config.schema.json"), "utf8")).toBe("first-original\n");
+    });
+
     it("generates deterministic prevalidation artifacts and checks drift", async () => {
         const root = await temporaryProject();
         await writeConfiguredPackage(root, "pi-runtime-fixture", true);

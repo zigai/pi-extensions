@@ -1,11 +1,13 @@
+import type { TLocalizedValidationError } from "typebox/error";
 import type { TObject, TSchema } from "typebox";
 
 import { Value } from "./typebox-runtime.ts";
 
 import {
+    isJsonArray,
     isJsonObject,
     isJsonString,
-    JsonValueSchema,
+    cloneJson,
     parseJson,
     type JsonObject,
     type JsonValue,
@@ -81,14 +83,110 @@ export type ParsedSettingsLayer = {
     readonly diagnostics: readonly SettingsDiagnostic[];
 };
 
+function validationMessage(keyword: string): string {
+    switch (keyword) {
+        case "additionalProperties":
+            return "Unexpected setting";
+        case "anyOf":
+            return "Setting does not match an allowed form";
+        case "const":
+            return "Setting does not match the required value";
+        case "enum":
+            return "Setting is not one of the allowed values";
+        case "maximum":
+            return "Number is above the allowed maximum";
+        case "maxItems":
+            return "Array has too many items";
+        case "maxLength":
+            return "Text is longer than allowed";
+        case "minimum":
+            return "Number is below the allowed minimum";
+        case "minItems":
+            return "Array has too few items";
+        case "minLength":
+            return "Text is shorter than allowed";
+        case "pattern":
+            return "Text does not match the required format";
+        case "required":
+            return "Required setting is missing";
+        case "type":
+            return "Setting has the wrong type";
+        default:
+            return "Setting failed validation";
+    }
+}
+
+function collectDeclaredPropertyNames(value: JsonValue, names: Set<string>): void {
+    if (isJsonArray(value)) {
+        for (const item of value) collectDeclaredPropertyNames(item, names);
+
+        return;
+    }
+    if (!isJsonObject(value)) return;
+
+    if (isJsonObject(value.properties)) {
+        for (const name of Object.keys(value.properties)) names.add(name);
+    }
+
+    for (const [key, child] of Object.entries(value)) {
+        if (["default", "const", "enum", "examples"].includes(key)) continue;
+        collectDeclaredPropertyNames(child, names);
+    }
+}
+
+function declaredPropertyNames(schema: TSchema): ReadonlySet<string> {
+    const names = new Set<string>();
+    const serialized = JSON.stringify(schema);
+    if (serialized === undefined) return names;
+
+    const parsed = parseJson(serialized);
+    if (parsed !== undefined) collectDeclaredPropertyNames(parsed, names);
+
+    return names;
+}
+
+function safeIssuePath(instancePath: string, names: ReadonlySet<string>): string {
+    if (instancePath === "") return "/";
+    const segments = instancePath.slice(1).split("/");
+    return `/${segments
+        .map((segment) => {
+            const decoded = segment.replaceAll("~1", "/").replaceAll("~0", "~");
+            if (/^\d+$/.test(decoded)) return "<index>";
+            return names.has(decoded) ? segment : "<key>";
+        })
+        .join("/")}`;
+}
+
 export function settingsValidationIssues(
     schema: TSchema,
     value: JsonValue,
 ): readonly SettingsValidationIssue[] {
-    return [...Value.Errors(schema, value)].map((issue) => ({
-        path: issue.instancePath === "" ? "/" : issue.instancePath,
-        message: issue.message,
+    const names = declaredPropertyNames(schema);
+    return [...Value.Errors(schema, value)].map((issue: TLocalizedValidationError) => ({
+        path: safeIssuePath(issue.instancePath, names),
+        message: validationMessage(issue.keyword),
     }));
+}
+
+const UNSUPPORTED_SETTING_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+export function unsupportedSettingsKeyPath(value: JsonValue, path = ""): string | undefined {
+    if (isJsonArray(value)) {
+        for (const [index, child] of value.entries()) {
+            const result = unsupportedSettingsKeyPath(child, `${path}/${index}`);
+            if (result !== undefined) return result;
+        }
+        return undefined;
+    }
+    if (!isJsonObject(value)) return undefined;
+
+    for (const [key, child] of Object.entries(value)) {
+        const childPath = `${path}/${key.replaceAll("~", "~0").replaceAll("/", "~1")}`;
+        if (UNSUPPORTED_SETTING_KEYS.has(key)) return childPath;
+        const result = unsupportedSettingsKeyPath(child, childPath);
+        if (result !== undefined) return result;
+    }
+    return undefined;
 }
 
 export function parseSettingsLayer(
@@ -114,7 +212,25 @@ export function parseSettingsLayer(
         };
     }
 
-    if (!Value.Check(layerSchema, parsed)) {
+    const unsupportedPath = unsupportedSettingsKeyPath(parsed);
+    if (unsupportedPath !== undefined) {
+        return {
+            settings: undefined,
+            schemaReference: undefined,
+            diagnostics: [
+                {
+                    code: "config-invalid",
+                    severity: "error",
+                    scope,
+                    path,
+                    message: `${scope} settings contain an unsupported property name and were ignored`,
+                    issues: [{ path: unsupportedPath, message: "Unsupported property name" }],
+                },
+            ],
+        };
+    }
+
+    if (!isJsonObject(parsed) || !Value.Check(layerSchema, parsed)) {
         return {
             settings: undefined,
             schemaReference: undefined,
@@ -134,41 +250,11 @@ export function parseSettingsLayer(
     const schemaReference =
         isJsonObject(parsed) && isJsonString(parsed.$schema) ? parsed.$schema : undefined;
 
-    try {
-        const decoded: unknown = Value.Decode(layerSchema, parsed);
-        const decodedJson = Value.Parse(JsonValueSchema, decoded);
-        if (!isJsonObject(decodedJson)) {
-            return {
-                settings: undefined,
-                schemaReference,
-                diagnostics: [
-                    {
-                        code: "config-decode-failed",
-                        severity: "error",
-                        scope,
-                        path,
-                        message: `${scope} settings did not decode to a JSON object and were ignored`,
-                    },
-                ],
-            };
-        }
-
-        return { settings: settingsLayerFromFile(decodedJson), schemaReference, diagnostics: [] };
-    } catch {
-        return {
-            settings: undefined,
-            schemaReference,
-            diagnostics: [
-                {
-                    code: "config-decode-failed",
-                    severity: "error",
-                    scope,
-                    path,
-                    message: `${scope} settings could not be decoded and were ignored`,
-                },
-            ],
-        };
-    }
+    return {
+        settings: settingsLayerFromFile(cloneJson(parsed)),
+        schemaReference,
+        diagnostics: [],
+    };
 }
 
 export type AppliedSettingsLayer = {

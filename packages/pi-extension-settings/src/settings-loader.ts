@@ -234,6 +234,10 @@ export function loadSettings<const Schema extends TObject>(
     if (globalApplied.diagnostic !== undefined) diagnostics.push(globalApplied.diagnostic);
 
     let resolved = globalApplied.settings;
+    let globalSettingsLayer =
+        globalApplied.diagnostic === undefined ? globalLayer.settings : undefined;
+    let usedGlobalConfig =
+        globalLayer.settings !== undefined && globalApplied.diagnostic === undefined;
     let projectSettingsLayer: JsonObject | undefined;
     let usedProjectConfig = false;
     let projectRevision: PiSettingsRevision | undefined;
@@ -268,10 +272,52 @@ export function loadSettings<const Schema extends TObject>(
         }
     }
 
+    const decodeResolved = (value: JsonObject): StaticDecode<Schema> =>
+        Value.Decode(Value.Clone(definition.schema), value);
+    let settings: StaticDecode<Schema>;
+    try {
+        settings = decodeResolved(resolved);
+    } catch {
+        if (usedProjectConfig && projectPaths !== undefined) {
+            diagnostics.push({
+                code: "config-decode-failed",
+                severity: "error",
+                scope: "project",
+                path: projectPaths.configPath,
+                message: "project settings could not be decoded and were ignored",
+            });
+            projectSettingsLayer = undefined;
+            usedProjectConfig = false;
+            resolved = globalApplied.settings;
+        }
+
+        try {
+            settings = decodeResolved(resolved);
+        } catch {
+            if (usedGlobalConfig) {
+                diagnostics.push({
+                    code: "config-decode-failed",
+                    severity: "error",
+                    scope: "global",
+                    path: globalPaths.configPath,
+                    message: "global settings could not be decoded and were ignored",
+                });
+                globalSettingsLayer = undefined;
+                usedGlobalConfig = false;
+                resolved = definition.defaultSettings;
+            }
+
+            try {
+                settings = decodeResolved(resolved);
+            } catch (cause: unknown) {
+                throw new TypeError("Validated default settings could not be decoded.", { cause });
+            }
+        }
+    }
+
     return {
-        settings: Value.Decode(Value.Clone(definition.schema), resolved),
-        globalSettingsLayer:
-            globalApplied.diagnostic === undefined ? globalLayer.settings : undefined,
+        settings,
+        globalSettingsLayer,
         projectSettingsLayer,
         diagnostics,
         globalConfigPath: globalPaths.configPath,
@@ -281,8 +327,7 @@ export function loadSettings<const Schema extends TObject>(
                 ? createSettingsRevision(globalLayer.source.content)
                 : undefined,
         projectRevision,
-        usedGlobalConfig:
-            globalLayer.settings !== undefined && globalApplied.diagnostic === undefined,
+        usedGlobalConfig,
         usedProjectConfig,
         scaffoldedGlobalConfig,
         schemaStatus,

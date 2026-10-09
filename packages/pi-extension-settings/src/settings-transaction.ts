@@ -21,6 +21,7 @@ import {
     applySettingsLayer,
     parseSettingsLayer,
     settingsValidationIssues,
+    unsupportedSettingsKeyPath,
     type SettingsDiagnostic,
     type SettingsScope,
     type SettingsValidationIssue,
@@ -164,19 +165,26 @@ function invalidUpdate(
     return { status: "invalid-update", message, issues };
 }
 
+type InterprocessLockState = { compromised: boolean };
+
 async function withInterprocessLocks<Result>(
     paths: readonly string[],
-    operation: () => Promise<Result>,
+    operation: (state: InterprocessLockState) => Promise<Result>,
     index = 0,
+    state?: InterprocessLockState,
 ): Promise<Result> {
+    const lockState = state ?? { compromised: false };
     const path = paths[index];
-    if (path === undefined) return operation();
+    if (path === undefined) return operation(lockState);
 
     await persistently(async () => mkdir(dirname(path), { recursive: true }));
 
     const release = await persistently(async () =>
         lockfile.lock(path, {
             realpath: false,
+            onCompromised: () => {
+                lockState.compromised = true;
+            },
             retries: {
                 retries: 20,
                 factor: 1.25,
@@ -188,15 +196,20 @@ async function withInterprocessLocks<Result>(
     );
 
     try {
-        return await withInterprocessLocks(paths, operation, index + 1);
+        return await withInterprocessLocks(paths, operation, index + 1, lockState);
     } finally {
-        await persistently(release);
+        try {
+            await release();
+        } catch {
+            // The operation outcome (including an updater Error or committed revision) is primary.
+        }
     }
 }
 
 async function runSettingsTransaction<Schema extends TObject>(
     definition: ExtensionSettingsDefinition<Schema>,
     options: SettingsTransactionOptions<Schema>,
+    lockState: InterprocessLockState,
 ): Promise<UpdatePiExtensionSettingsResult> {
     const layerSchema = createSettingsFileSchema(definition);
     const expectedSchema = formatJson(layerSchema);
@@ -253,6 +266,7 @@ async function runSettingsTransaction<Schema extends TObject>(
 
     let currentLayer = globalResult;
     let validationBase = definition.defaultSettings;
+    let currentResolved = globalApplied.settings;
     if (options.scope === "project") {
         const projectResult = parseExistingLayer(
             options.paths.project.configPath,
@@ -275,6 +289,32 @@ async function runSettingsTransaction<Schema extends TObject>(
 
         currentLayer = projectResult;
         validationBase = globalApplied.settings;
+        currentResolved = projectApplied.settings;
+    }
+
+    try {
+        Value.Decode(Value.Clone(definition.schema), currentResolved);
+    } catch {
+        let scope: SettingsScope = "global";
+        let path = options.paths.global.configPath;
+        if (options.scope === "project") {
+            try {
+                Value.Decode(Value.Clone(definition.schema), globalApplied.settings);
+                scope = "project";
+                path = options.paths.project.configPath;
+            } catch {
+                // The global resolved value is already invalid without the project layer.
+            }
+        }
+        return invalidExisting([
+            {
+                code: "config-decode-failed",
+                severity: "error",
+                scope,
+                path,
+                message: `${scope} settings could not be decoded and were ignored`,
+            },
+        ]);
     }
 
     const currentForUpdate = cloneJson(currentLayer.settings);
@@ -295,6 +335,13 @@ async function runSettingsTransaction<Schema extends TObject>(
     if (!isJsonObject(candidateJson)) {
         return invalidUpdate("The settings updater must return a JSON object.", [
             { path: "/", message: "Expected a JSON object" },
+        ]);
+    }
+
+    const unsupportedPath = unsupportedSettingsKeyPath(candidateJson);
+    if (unsupportedPath !== undefined) {
+        return invalidUpdate("The settings updater returned an unsupported property name.", [
+            { path: unsupportedPath, message: "Unsupported property name" },
         ]);
     }
 
@@ -338,6 +385,13 @@ async function runSettingsTransaction<Schema extends TObject>(
         (options.scope === "global" ? targetPaths.schemaReference : definition.schemaId);
     const content = formatJson(createSettingsDocument(definition.id, nextLayer, schemaReference));
 
+    if (lockState.compromised) {
+        return {
+            status: "failed",
+            message: `The ${options.scope} settings lock was lost before publication.`,
+        };
+    }
+
     await persistently(async () => writeTextAtomicallyAsync(targetPaths.configPath, content));
 
     const nextRevision =
@@ -365,8 +419,8 @@ export async function updateSettingsTransaction<Schema extends TObject>(
             : [options.paths.global.configPath, options.paths.project.configPath].sort();
 
     try {
-        return await withInterprocessLocks(lockPaths, async () =>
-            runSettingsTransaction(definition, options),
+        return await withInterprocessLocks(lockPaths, async (lockState) =>
+            runSettingsTransaction(definition, options, lockState),
         );
     } catch (cause: unknown) {
         if (cause instanceof SettingsPersistenceError) {

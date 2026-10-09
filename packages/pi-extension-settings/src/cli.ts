@@ -1,6 +1,10 @@
 import { resolve } from "node:path";
 
-import { checkSettingsArtifacts, generateSettingsArtifacts } from "./artifacts.ts";
+import {
+    checkPreparedSettingsArtifacts,
+    generatePreparedSettingsArtifacts,
+    prepareSettingsArtifacts,
+} from "./artifacts.ts";
 import { discoverSettingsProjects } from "./projects.ts";
 
 const HELP = `Usage: pi-extension-settings <command> [--root PATH]
@@ -65,9 +69,13 @@ async function runCommand(parsed: ParsedArguments, io: CliIo): Promise<number> {
         return 1;
     }
 
+    const preparedProjects = projects.map((project) =>
+        prepareSettingsArtifacts(project.definition, project.targets),
+    );
+
     if (parsed.command === "generate") {
-        for (const project of projects) {
-            const generated = generateSettingsArtifacts(project.definition, project.targets);
+        for (const prepared of preparedProjects) {
+            const generated = generatePreparedSettingsArtifacts(prepared);
             for (const path of generated.changedPaths) io.stdout(line(`updated ${path}`));
         }
 
@@ -75,8 +83,8 @@ async function runCommand(parsed: ParsedArguments, io: CliIo): Promise<number> {
     }
 
     let stale = false;
-    for (const project of projects) {
-        const checked = checkSettingsArtifacts(project.definition, project.targets);
+    for (const prepared of preparedProjects) {
+        const checked = checkPreparedSettingsArtifacts(prepared);
         for (const path of checked.stalePaths) {
             stale = true;
             io.stderr(line(`stale ${path}`));

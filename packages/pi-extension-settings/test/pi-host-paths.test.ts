@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
@@ -27,5 +28,18 @@ describe("Pi host paths", () => {
         expect(getPiAgentDir({ PI_CODING_AGENT_DIR: "~/.config/pi" }, HOME_DIRECTORY)).toBe(
             join(HOME_DIRECTORY, ".config", "pi"),
         );
+    });
+
+    it("normalizes supported file URL and Windows shell forms", () => {
+        const localPath = join(process.cwd(), "agent dir");
+        expect(getPiAgentDir({ PI_CODING_AGENT_DIR: pathToFileURL(localPath).href })).toBe(
+            localPath,
+        );
+        expect(
+            getPiAgentDir({ PI_CODING_AGENT_DIR: "/mnt/c/Users/pi" }, "C:\\Users\\home", "win32"),
+        ).toBe("C:\\Users\\pi");
+        expect(
+            getPiAgentDir({ PI_CODING_AGENT_DIR: "/cygdrive/d/pi" }, "C:\\Users\\home", "win32"),
+        ).toBe("D:\\pi");
     });
 });

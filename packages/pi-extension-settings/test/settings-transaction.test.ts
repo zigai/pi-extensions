@@ -212,6 +212,23 @@ describe("settings transactions", () => {
         expect(await readFile(setup.loaded.globalConfigPath, "utf8")).toBe(before);
     });
 
+    it("rejects prototype-sensitive property names returned by an updater", async () => {
+        const setup = await testSetup();
+        const result = await updatePiExtensionSettings(setup.definition, setup.context, {
+            scope: "global",
+            update: (current) =>
+                Object.defineProperty({ ...current }, "constructor", {
+                    value: true,
+                    enumerable: true,
+                }),
+        });
+
+        expect(result).toMatchObject({
+            status: "invalid-update",
+            issues: [{ path: "/constructor", message: "Unsupported property name" }],
+        });
+    });
+
     it("rejects reserved metadata returned by an updater", async () => {
         const setup = await testSetup();
         const result = await updatePiExtensionSettings(setup.definition, setup.context, {
@@ -287,6 +304,45 @@ describe("settings transactions", () => {
         });
 
         expect(result).toMatchObject({ status: "invalid-update" });
+    });
+
+    it("does not invoke the updater when an existing resolved codec rejects", async () => {
+        const definition = defineExtensionSettings({
+            id: "pi-existing-codec",
+            title: "Existing codec",
+            description: "Existing codec settings.",
+            schema: Type.Object(
+                {
+                    value: Decode(
+                        Type.String({ default: "valid", description: "Encoded value." }),
+                        (value) => {
+                            if (value === "rejected") throw new Error("private rejected value");
+                            return value;
+                        },
+                    ),
+                },
+                { additionalProperties: false },
+            ),
+        });
+        const setup = await definitionSetup(definition);
+        await writeFile(
+            setup.loaded.globalConfigPath,
+            formatJson({ $schema: definition.schemaId, value: "rejected" }),
+        );
+        let calls = 0;
+
+        const result = await updatePiExtensionSettings(setup.definition, setup.context, {
+            scope: "global",
+            update: (current) => {
+                calls += 1;
+                return current;
+            },
+        });
+
+        expect(result.status).toBe("invalid-existing");
+        expect(calls).toBe(0);
+        expect(JSON.stringify(result)).not.toContain("private rejected value");
+        expect(await readFile(setup.loaded.globalConfigPath, "utf8")).toContain("rejected");
     });
 
     it("returns unchanged without normalizing an equivalent document", async () => {
@@ -433,6 +489,34 @@ describe("settings transactions", () => {
             enabled: false,
             mode: "expanded",
         });
+    });
+
+    it("rejects aliased global and project settings before invoking the updater", async () => {
+        const root = await temporaryDirectory();
+        process.env.PI_CODING_AGENT_DIR = join(root, CONFIG_DIR_NAME);
+        const definition = testDefinition();
+        const context: PiSettingsContext = {
+            cwd: root,
+            isProjectTrusted: () => true,
+        };
+        loadPiExtensionSettings(definition, context, {
+            bundledSchema: {
+                kind: "content",
+                content: formatJson(createSettingsFileSchema(definition)),
+            },
+        });
+        let calls = 0;
+
+        const result = await updatePiExtensionSettings(definition, context, {
+            scope: "project",
+            update: (current) => {
+                calls += 1;
+                return current;
+            },
+        });
+
+        expect(result).toMatchObject({ status: "failed" });
+        expect(calls).toBe(0);
     });
 
     it("blocks untrusted project updates without creating a file", async () => {
