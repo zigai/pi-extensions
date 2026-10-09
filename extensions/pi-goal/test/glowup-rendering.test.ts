@@ -1,4 +1,15 @@
-import { initTheme, ToolExecutionComponent, defineTool } from "@earendil-works/pi-coding-agent";
+import assert from "node:assert/strict";
+import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
+import {
+  createAgentSession,
+  DefaultResourceLoader,
+  initTheme,
+  ModelRuntime,
+  SessionManager,
+  SettingsManager,
+  ToolExecutionComponent,
+  type AgentSession,
+} from "@earendil-works/pi-coding-agent";
 import {
   getCapabilities,
   setCapabilities,
@@ -8,67 +19,13 @@ import {
   type TUI,
 } from "@earendil-works/pi-tui";
 import glowupExtension from "@zigai/pi-glowup";
-import { withGlowupRendering } from "@zigai/pi-glowup/protocol";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Type } from "typebox";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import {
-  createGoalGlowupRendering,
-  getGoalGlowupRendering,
-  updateGoalGlowupRendering,
-} from "../src/glowup-rendering.js";
+import goalExtension from "../src/index.js";
 import { VirtualTerminal } from "./support/virtual-terminal.js";
-
-interface GlowupHarnessEvent {
-  type: string;
-  reason?: string;
-}
-
-type GlowupHarnessContext = Readonly<Record<string, never>>;
-type ExtensionHandler = (
-  event: GlowupHarnessEvent,
-  context: GlowupHarnessContext,
-) => void | Promise<void>;
-type GlowupConsumerApi = {
-  readonly on: (eventName: string, handler: ExtensionHandler) => void;
-};
-type GlowupInstaller = (api: GlowupConsumerApi) => Promise<void>;
-
-function isGlowupInstaller(value: unknown): value is GlowupInstaller {
-  return typeof value === "function";
-}
-
-class GlowupConsumerHarness {
-  private readonly handlers = new Map<string, ExtensionHandler[]>();
-  private readonly api: GlowupConsumerApi;
-
-  constructor() {
-    const boundary = {
-      on: (eventName: string, handler: ExtensionHandler): void => {
-        const eventHandlers = this.handlers.get(eventName) ?? [];
-        eventHandlers.push(handler);
-        this.handlers.set(eventName, eventHandlers);
-      },
-    };
-    this.api = boundary;
-  }
-
-  async install(): Promise<void> {
-    const installer: unknown = glowupExtension;
-    if (!isGlowupInstaller(installer)) throw new TypeError("Glowup extension must be callable");
-
-    await installer(this.api);
-  }
-
-  async shutdown(): Promise<void> {
-    for (const handler of this.handlers.get("session_shutdown") ?? []) {
-      await handler({ type: "session_shutdown", reason: "quit" }, {});
-    }
-  }
-}
 
 class LinesComponent implements Component {
   constructor(private readonly lines: readonly string[]) {}
@@ -81,46 +38,11 @@ class LinesComponent implements Component {
   invalidate(): void {}
 }
 
-const createGoalDefinition = withGlowupRendering(
-  defineTool({
-    name: "create_goal",
-    label: "Create Goal",
-    description: "Create a goal.",
-    parameters: Type.Object({ objective: Type.String() }),
-    async execute() {
-      return { content: [{ type: "text" as const, text: "unused" }], details: {} };
-    },
-  }),
-  createGoalGlowupRendering,
-);
-
-const updateGoalDefinition = withGlowupRendering(
-  defineTool({
-    name: "update_goal",
-    label: "Update Goal",
-    description: "Update a goal.",
-    parameters: Type.Object({
-      status: Type.Union([Type.Literal("complete"), Type.Literal("blocked")]),
-    }),
-    async execute() {
-      return { content: [{ type: "text" as const, text: "unused" }], details: {} };
-    },
-  }),
-  updateGoalGlowupRendering,
-);
-
-const getGoalDefinition = withGlowupRendering(
-  defineTool({
-    name: "get_goal",
-    label: "Get Goal",
-    description: "Get a goal.",
-    parameters: Type.Object({}),
-    async execute() {
-      return { content: [{ type: "text" as const, text: "unused" }], details: {} };
-    },
-  }),
-  getGoalGlowupRendering,
-);
+function getRegisteredGoalTool(name: string) {
+  const definition = session?.extensionRunner.getToolDefinition(name);
+  assert.ok(definition);
+  return definition;
+}
 
 function goalResult(objective: string, status: "active" | "complete" = "active") {
   const goal = {
@@ -145,7 +67,7 @@ function goalResult(objective: string, status: "active" | "complete" = "active")
 const originalCapabilities = getCapabilities();
 const originalAgentDirectory = process.env.PI_CODING_AGENT_DIR;
 const agentDirectory = mkdtempSync(join(tmpdir(), "pi-goal-tui-"));
-const consumer = new GlowupConsumerHarness();
+let session: AgentSession | undefined;
 let activeTerminal: VirtualTerminal | undefined;
 let activeTui: TUI | undefined;
 
@@ -157,7 +79,52 @@ beforeAll(async () => {
     JSON.stringify({ toolLabels: { mode: "lifecycle" } }),
   );
   process.env.PI_CODING_AGENT_DIR = agentDirectory;
-  await consumer.install();
+  const modelRuntime = await ModelRuntime.create({
+    credentials: new InMemoryCredentialStore(),
+    modelsPath: null,
+  });
+  modelRuntime.registerProvider("goal-rendering-test", {
+    baseUrl: "http://localhost",
+    apiKey: "test-key",
+    api: "openai-completions",
+    models: [
+      {
+        id: "synthetic",
+        name: "Synthetic renderer",
+        reasoning: false,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 1_000,
+        maxTokens: 100,
+      },
+    ],
+  });
+  const model = modelRuntime.getModel("goal-rendering-test", "synthetic");
+  assert.ok(model);
+  const loader = new DefaultResourceLoader({
+    cwd: agentDirectory,
+    agentDir: agentDirectory,
+    settingsManager: SettingsManager.inMemory(),
+    noExtensions: true,
+    noSkills: true,
+    noPromptTemplates: true,
+    noThemes: true,
+    noContextFiles: true,
+    extensionFactories: [goalExtension, glowupExtension],
+  });
+  await loader.reload();
+  expect(loader.getExtensions().errors).toEqual([]);
+  ({ session } = await createAgentSession({
+    cwd: agentDirectory,
+    agentDir: agentDirectory,
+    model,
+    modelRuntime,
+    noTools: "builtin",
+    resourceLoader: loader,
+    sessionManager: SessionManager.inMemory(agentDirectory),
+    settingsManager: SettingsManager.inMemory(),
+  }));
+  await session.bindExtensions({});
 });
 
 beforeEach(() => {
@@ -175,7 +142,8 @@ afterEach(async () => {
 });
 
 afterAll(async () => {
-  await consumer.shutdown();
+  await session?.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+  session?.dispose();
   setCapabilities(originalCapabilities);
   rmSync(agentDirectory, { recursive: true, force: true });
 
@@ -204,9 +172,9 @@ describe.each(variants)("goal tool rendering through Pi's $mode TUI", ({ columns
     const tool = new ToolExecutionComponent(
       "create_goal",
       "create-goal-tui",
-      {},
+      { objective: "" },
       undefined,
-      createGoalDefinition,
+      getRegisteredGoalTool("create_goal"),
       tui,
       process.cwd(),
     );
@@ -281,9 +249,9 @@ describe.each(variants)("goal tool rendering through Pi's $mode TUI", ({ columns
     const tool = new ToolExecutionComponent(
       "update_goal",
       "update-goal-tui",
-      {},
+      { status: "blocked" },
       undefined,
-      updateGoalDefinition,
+      getRegisteredGoalTool("update_goal"),
       tui,
       process.cwd(),
     );
@@ -340,7 +308,7 @@ describe.each(variants)("goal tool rendering through Pi's $mode TUI", ({ columns
       "restored-get-goal-tui",
       {},
       undefined,
-      getGoalDefinition,
+      getRegisteredGoalTool("get_goal"),
       tui,
       process.cwd(),
     );
@@ -351,7 +319,7 @@ describe.each(variants)("goal tool rendering through Pi's $mode TUI", ({ columns
       "failed-update-goal-tui",
       { status: "blocked" },
       undefined,
-      updateGoalDefinition,
+      getRegisteredGoalTool("update_goal"),
       tui,
       process.cwd(),
     );

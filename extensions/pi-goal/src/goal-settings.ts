@@ -8,6 +8,8 @@ import {
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 
+import type { JsonValue } from "@earendil-works/pi-ai";
+
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 
@@ -90,7 +92,7 @@ export function getGoalGlobalConfigSchemaPath(agentDir: string = getAgentDir()):
   return join(agentDir, EXTENSION_ID, CONFIG_SCHEMA_BASENAME);
 }
 
-function writeJsonIfMissing<Value>(path: string, value: Value): void {
+function writeJsonIfMissing(path: string, value: JsonValue): void {
   if (existsSync(path)) {
     return;
   }

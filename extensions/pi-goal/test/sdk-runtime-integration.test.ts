@@ -64,14 +64,14 @@ test("SDK runtime emits a continuation after willRetry compaction when no retry 
   });
   await loader.reload();
 
-  modelRuntime.registerProvider("sdk-smoke", {
+  modelRuntime.registerProvider("sdk-verification", {
     baseUrl: "http://localhost",
     apiKey: "test-key",
     api: "openai-completions",
     models: [
       {
         id: "mini",
-        name: "SDK Smoke",
+        name: "SDK Verification",
         reasoning: false,
         input: ["text"],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -80,7 +80,7 @@ test("SDK runtime emits a continuation after willRetry compaction when no retry 
       },
     ],
   });
-  const model = modelRuntime.getModel("sdk-smoke", "mini");
+  const model = modelRuntime.getModel("sdk-verification", "mini");
   assert.ok(model);
   const { session } = await createAgentSession({
     cwd: process.cwd(),
@@ -109,7 +109,7 @@ test("SDK runtime emits a continuation after willRetry compaction when no retry 
       { objective: "ship it" },
       undefined,
       undefined,
-      runner.createContext(),
+      runner.createToolContext("tool-call", undefined),
     );
     const goalId = goalIdFromToolResult(result);
 

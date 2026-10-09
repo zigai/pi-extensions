@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "vitest";
 
+import type { JsonValue } from "@earendil-works/pi-ai";
+
 import {
   createGoalCreationPrompt,
   renderGoalCreationTemplate,
@@ -21,7 +23,7 @@ function writeText(path: string, content: string): void {
   writeFileSync(path, content, "utf8");
 }
 
-function writeJson<Value>(path: string, value: Value): void {
+function writeJson(path: string, value: JsonValue): void {
   writeText(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 

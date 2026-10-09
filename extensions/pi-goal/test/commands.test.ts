@@ -15,7 +15,7 @@ import {
 import { createThreadGoal } from "../src/state.js";
 import type { ThreadGoal } from "../src/types.js";
 
-function parseText<Value>(value: Value): string {
+function parseText(value: Parameters<GoalCommandPi["sendUserMessage"]>[0]): string {
   return Value.Parse(Type.String(), value);
 }
 

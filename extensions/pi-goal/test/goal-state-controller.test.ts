@@ -28,7 +28,7 @@ function createStateControllerTestHarness(goal: ThreadGoal | null = activeGoal) 
   const recoveryState = createGoalRecoveryMachine();
   const entries: GoalCustomEntry[] = [];
   const pi = {
-    appendEntry<Data>(_type: string, data: Data) {
+    appendEntry(_type, data) {
       assert.ok(isGoalCustomEntry(data));
       entries.push(data);
     },

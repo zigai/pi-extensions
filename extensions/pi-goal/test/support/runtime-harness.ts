@@ -8,6 +8,7 @@ import type {
   ExtensionAPI,
   ExtensionCommandContext,
   ExtensionContext,
+  ExtensionToolContext,
 } from "@earendil-works/pi-coding-agent";
 
 import goalExtension, { __testHooks } from "../../src/index.js";
@@ -205,7 +206,7 @@ export function createRuntimeHarness(
   };
 
   const pi: ExtensionAPI = {
-    appendEntry<Data>(customType: string, data: Data) {
+    appendEntry(customType, data) {
       entries.push({
         type: "custom",
         id: `entry-${++entryIndex}`,
@@ -235,6 +236,12 @@ export function createRuntimeHarness(
     },
     getCommands: () => [],
     getFlag: () => undefined,
+    getSettings() {
+      unsupportedHarnessMethod("pi.getSettings");
+    },
+    getMcpServers() {
+      unsupportedHarnessMethod("pi.getMcpServers");
+    },
     getSessionName: () => undefined,
     getThinkingLevel: () => "medium",
     on,
@@ -254,11 +261,31 @@ export function createRuntimeHarness(
     registerProvider() {
       unsupportedHarnessMethod("pi.registerProvider");
     },
+    registerMcpServer() {
+      unsupportedHarnessMethod("pi.registerMcpServer");
+    },
+    unregisterMcpServer() {
+      unsupportedHarnessMethod("pi.unregisterMcpServer");
+    },
+    registerVirtualModel() {
+      unsupportedHarnessMethod("pi.registerVirtualModel");
+    },
+    unregisterVirtualModel() {
+      unsupportedHarnessMethod("pi.unregisterVirtualModel");
+    },
     registerShortcut() {},
     registerTool(tool) {
       availableToolNames.add(tool.name);
       activeToolNames.add(tool.name);
       tools.set(tool.name, async (params) => {
+        const toolContext: ExtensionToolContext = {
+          ...ctx,
+          tools: [],
+          async executeTool() {
+            unsupportedHarnessMethod("ctx.executeTool");
+          },
+        };
+
         // SAFETY: this harness loads only pi-codex-goal, and runTool callers pair each registered
         // goal-tool name with input derived from that tool's exported schema.
         const result = await tool.execute(
@@ -266,7 +293,7 @@ export function createRuntimeHarness(
           params as Parameters<typeof tool.execute>[1],
           undefined,
           undefined,
-          ctx,
+          toolContext,
         );
 
         // SAFETY: all three goal tools return textResult, whose details are the shared
@@ -306,6 +333,9 @@ export function createRuntimeHarness(
 
   const sessionManager: ExtensionCommandContext["sessionManager"] = {
     buildContextEntries: () => entries,
+    buildSessionProjection() {
+      unsupportedHarnessMethod("sessionManager.buildSessionProjection");
+    },
     getBranch: () => entries,
     getCwd: () => cwd,
     getEntries: () => entries,
@@ -427,8 +457,8 @@ export function createRuntimeHarness(
 
   goalExtension(pi);
 
-  async function emit<Event extends HarnessEvent>(
-    event: string,
+  async function emit<const Event extends HarnessEvent>(
+    event: Event["type"],
     payload: Event,
   ): Promise<HarnessEventResult[]> {
     if (isHarnessUserMessageStart(payload) && payload.message.role === "user") {
