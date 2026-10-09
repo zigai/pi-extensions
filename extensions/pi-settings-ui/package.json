@@ -1,0 +1,99 @@
+{
+  "name": "@zigai/pi-settings-ui",
+  "version": "1.0.0",
+  "description": "Schema-driven TUI editor for Pi extension settings.",
+  "keywords": [
+    "pi",
+    "pi-coding-agent",
+    "pi-extension",
+    "pi-package",
+    "settings-ui"
+  ],
+  "homepage": "https://github.com/zigai/pi-settings-ui#readme",
+  "bugs": {
+    "url": "https://github.com/zigai/pi-settings-ui/issues"
+  },
+  "license": "MIT",
+  "author": "zigai",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zigai/pi-settings-ui.git"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "config.schema.json",
+    "LICENSE"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "lint": "oxlint -c ./oxlint.config.ts .",
+    "lint:fix": "oxlint -c ./oxlint.config.ts . --fix",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "test": "vitest run --passWithNoTests",
+    "coverage": "vitest run --coverage --passWithNoTests",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run config:check && npm run format:check && npm run lint && npm run typecheck && npm test",
+    "verify": "npm run check",
+    "config:generate": "pi-extension-settings generate",
+    "config:check": "pi-extension-settings check",
+    "release": "release --root .",
+    "release:dry-run": "release --dry --root ."
+  },
+  "dependencies": {
+    "@zigai/pi-extension-settings": "0.5.3",
+    "proper-lockfile": "4.1.2"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-agent-core": "*",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "@types/node": "^24.13.3",
+    "@types/proper-lockfile": "4.1.4",
+    "@vitest/coverage-v8": "^4.1.10",
+    "@xterm/headless": "^6.0.0",
+    "oxfmt": "^0.71.0",
+    "oxlint": "^1.86.0",
+    "oxlint-rules": "0.4.3",
+    "oxlint-tsgolint": "^7.0.2003",
+    "typebox": "*",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-agent-core": "*",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "typebox": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=22.19.0 <27"
+  },
+  "packageManager": "npm@11.18.0",
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "piExtensionSettings": {
+    "definition": "./src/settings-input.ts",
+    "prevalidation": "./src/settings.prevalidated.ts",
+    "schema": "./config.schema.json",
+    "readme": "./README.md"
+  }
+}
