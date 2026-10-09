@@ -1,40 +1,26 @@
 # AGENTS.md
 
-## Pi Extension Workflow
+## Work and Verify
 
-- This repository is a Pi package. Keep resources declared explicitly in `package.json` under the `pi` manifest.
-- The extension entrypoint is `src/index.ts` and should export a default factory that receives Pi's `ExtensionAPI`.
-- Do not edit Pi's installed source code to implement package behavior. Use Pi's extension API instead.
-- Keep Pi-bundled imports (`@earendil-works/pi-ai`, `@earendil-works/pi-agent-core`, `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`, and `typebox`) in `peerDependencies` with `"*"` and in `devDependencies` only for local typechecking.
-- Put the package description in the top-level `package.json` `description` field. Pi does not have extension-level description metadata.
+Keep Pi resources in `package.json.pi`, descriptions in `package.json.description`, and the default `ExtensionAPI` factory in `src/index.ts`. Use Pi's extension APIs without modifying installed Pi source. Keep Pi-host packages and TypeBox as `"*"` peers and development dependencies, never bundled.
+
+Run `just setup` after cloning, `just check` before handoff, and `just coverage` when needed. Keep pre-commit enabled with `config:check` first; verify visual changes in a real tmux/TTY, not only snapshots.
 
 ## Extension Settings
 
-This scaffold includes extension-owned settings. Keep the generated settings artifacts current as options are added or changed.
+- **Author:** edit TypeBox schema/metadata in `src/settings-input.ts`; no Pi runtime, generated-artifact imports, I/O, or feature initialization. Use a closed root (`additionalProperties: false`), user-facing descriptions, valid defaults, codecs for transformations, and `StaticDecode` for resolved types—not duplicate interfaces/casts. Add realistic, secret-free partial `exampleSettings` only when useful; give complex array-item/record-value objects PascalCase titles for readable docs.
+- **Generate:** declare and publish `src/settings-input.ts`, `src/settings.prevalidated.ts`, `config.schema.json`, and `README.md` through `package.json.piExtensionSettings`. Run `npm run config:generate` after authoring changes; commit outputs, never hand-edit generated artifacts/README region. Gate pre-commit/CI with `npm run config:check`.
+- **Load:** keep `@zigai/pi-extension-settings` a normal runtime dependency, not bundled. Use its root for authoring, `/runtime` for `definePrevalidatedExtensionSettings` hydration in `src/settings.ts`, and `/pi` for `loadPiExtensionSettings`/updates. Features call the existing `load<ExtensionName>Settings` boundary; no duplicate parsing or hardcoded Pi paths. Keep settings in `settings` modules, not parallel `config.ts`/one-file `config/` modules.
+- **Resolve:** defaults → global → trusted project; objects merge, arrays/scalars replace. The loader owns paths/trust, schema refresh, and missing-global scaffolding; never overwrites settings or auto-creates project settings. Invalid layers are ignored, untouched, and diagnosed without values/secrets. Environment variables are only for secrets, CI/session or explicit path overrides; JSON is not secret storage.
+- **Update:** load first, then use `updatePiExtensionSettings()` with a synchronous, deterministic, side-effect-free callback over the latest encoded layer. Pass `globalRevision`/`projectRevision` as `expectedRevision` for snapshot edits; omit for semantic updates. Handle every typed outcome. Explicit trusted-project updates may create project settings; invalid files remain untouched. No direct writers or extra mutation queue.
+- **Document:** the generator owns the single README settings region: global path, editable-key table, complete defaults including `$schema` (no invented optional values). Keep library/lifecycle mechanics out. For details, read the installed package's `docs/manual-setup.md`, `docs/runtime.md`, and `docs/generation.md`.
 
-- Use `@zigai/pi-extension-settings` for extension-owned JSON settings. The template bundles it so published extensions remain independently installable.
-- Keep the TypeBox source of truth and runtime settings boundary together in a flat `src/settings.ts` module using `defineExtensionSettings`.
-- Use “settings” for the extension capability and source module; reserve “config” for concrete persisted-file concepts such as config paths and `config.schema.json`. Do not create a one-file `src/config/` directory or a parallel `config.ts`; split `settings.ts` only when a substantial domain capability earns its own specifically named module.
-- Register `src/settings.ts`, `config.schema.json`, and the README in the package's `piExtensionSettings` manifest field.
-- Expose the package-facing loader as `load<ExtensionName>Settings`, such as `loadExampleSettings`. This function owns the shared loader call and returns the extension's typed, resolved settings; ordinary extension code should call it rather than the definition or shared adapter directly.
-- Implement that loader with `loadPiExtensionSettings`. It uses `getAgentDir()` and `CONFIG_DIR_NAME`; never hardcode `~/.pi/agent` or `.pi` in runtime code.
-- Global settings live at `getAgentDir()/extension-settings/pi-toggles.json`; editor schemas live at `getAgentDir()/extension-settings/schemas/pi-toggles.schema.json`.
-- Trusted project overrides live at `ctx.cwd/CONFIG_DIR_NAME/extension-settings/pi-toggles.json`. Never read project settings for an untrusted project or create project settings automatically.
-- Parse settings at the boundary: `JSON.parse` to `unknown`, validate/decode with TypeBox, then pass typed settings inward. Never cast `JSON.parse` output to settings types or scatter hand-written shape checks.
-- Run the shared generator after changing the TypeBox definition. Check in `config.schema.json` and the generated README region; pre-commit and CI must run the shared artifact check.
-- The shared loader may scaffold default global settings only when missing, never overwrite existing or malformed user settings, and refresh missing or stale installed schemas from the checked-in bundled schema.
-- Use environment variables only for secrets, CI/session overrides, or explicit settings-path overrides, not normal persisted options.
-- Keep secrets out of ordinary JSON settings unless the extension deliberately designs secure storage and permissions.
-- Keep lifecycle, trust, and malformed-file policy in `AGENTS.md` and tests, not in generated README documentation.
+## Settings Lifecycle
 
-## README Settings Documentation
-
-Keep the declared `piExtensionSettings` artifacts and generated README region synchronized with the settings definition.
-
-- Put `<!-- pi-extension-settings:start -->` and `<!-- pi-extension-settings:end -->` in the README exactly once.
-- Do not hand-edit content between those markers. The shared generator owns the settings path, option table, and complete default JSON document.
-- Put user-facing descriptions on TypeBox properties in `src/settings.ts`; wording changes flow into README documentation through generation.
-- Do not document alternate paths, layering, TypeBox mechanics, schema refresh, trust, user-owned terminology, or malformed-file policy in the generated region.
+- Keep import and the synchronous factory free of settings I/O. Session activation owns policy loading and service replacement/cleanup; retain the recovery command when policy is disabled.
+- Keep activation results, including disabled/rejected settings, session-owned and report settings diagnostics once per activation when `ctx.hasUI`. Preserve effective-policy refreshes on input and explicit edits, plus session policy restoration across reload/resume; do not replace this with a reload-only cache.
+- Dispose owned resources before clearing state on shutdown/reload. Add cancellation/stale-result protection for actual async work, not a generic lifecycle framework. `pi config` prevents import and registration entirely.
+- Renderers receive `ToolRenderContext`, not `ExtensionContext`: use arguments, results, and presentation state, never settings I/O, notifications, or a retained execution context. Always return a component, including history rendered before activation.
 
 ## Implementation Notes
 
@@ -45,7 +31,3 @@ Keep the declared `piExtensionSettings` artifacts and generated README region sy
 - Custom tools must truncate large output and tell the model where any full output was saved.
 - Use `StringEnum` from `@earendil-works/pi-ai` for model-facing string enums instead of `Type.Union` of literals.
 - Use `ctx.mode === "tui"` before terminal-only UI work and `ctx.hasUI` before dialogs/notifications.
-- Run `just setup` after cloning to install dependencies and Git hooks and verify the project.
-- Keep pre-commit enabled. Its first hook must run `config:check` so stale `config.schema.json` or generated README documentation cannot be committed.
-- Validate later changes with `just check` before handing off; use `just coverage` when coverage output is needed.
-- For visual/TUI changes, verify in a real tmux/TTY session instead of only relying on snapshots or non-interactive output.
