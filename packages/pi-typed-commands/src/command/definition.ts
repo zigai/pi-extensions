@@ -41,18 +41,18 @@ export function defineTypedCommand<
                 throw new TypeError("Selected typed-command grammar is unavailable");
             }
 
-            const parsed = toTypedParseResult(grammar, invocation.parsed);
             if (invocation.route.status !== "subcommand") {
-                // SAFETY: root parsing used the root generic grammar compiled from TDefinitions.
-                // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: route status proves the root grammar.
-                return parsed as TypedCommandParseResult<TDefinitions, TSubcommands>;
+                return toTypedParseResult(command.compiled, invocation.parsed);
             }
+
+            const parsed = toTypedParseResult(grammar, invocation.parsed);
+
             // SAFETY: normalizeRegisteredCommand compiled every named TSubcommands branch from its
             // exact merged shared/local definitions; the route supplies that same canonical name.
-            // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: selected route and grammar are compiled from the same subcommand entry.
             return {
                 ...parsed,
                 subcommand: invocation.route.subcommand,
+                // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: validated canonical branch grammar proves the result; TypeScript cannot correlate dynamic keys with the mapped return type.
             } as TypedCommandParseResult<TDefinitions, TSubcommands>;
         },
         serialize(values: SerializableArgumentValues<TDefinitions>) {

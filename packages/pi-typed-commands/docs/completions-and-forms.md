@@ -196,9 +196,7 @@ Command-level content options:
 const command = defineTypedCommand({
   name: "deploy",
   description: "Deploy",
-  args: {
-    /* ... */
-  },
+  args: {/* ... */},
   formTitle: "Deploy",
   formSymbols: {
     selectedCheckbox: "■",
