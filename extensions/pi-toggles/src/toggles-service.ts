@@ -1,4 +1,9 @@
-import type { ExtensionAPI, ExtensionContext, Skill } from "@earendil-works/pi-coding-agent";
+import type {
+    ExtensionAPI,
+    ExtensionContext,
+    Skill,
+    ToolInfo,
+} from "@earendil-works/pi-coding-agent";
 import type { ExtensionActivationProposal } from "./activation-coordination.ts";
 import { buildCapabilityCatalog, LAZY_SEARCH_TOOL_NAME } from "./capability-catalog.ts";
 import {
@@ -491,7 +496,7 @@ export class TogglesService {
         );
         const active = new Set(this.pi.getActiveTools());
         for (const entry of plan.capabilities) {
-            if (entry.capability.kind !== "tool") {
+            if (entry.capability.kind !== "tool" || entry.desiredState === "inherit") {
                 continue;
             }
             if (entry.effectiveState === "active") {
@@ -604,6 +609,40 @@ export class TogglesService {
         return { matches, added };
     }
 
+    getDiscoverableTools(): ToolInfo[] {
+        this.refreshCatalogAndPlan();
+        return this.pi.getAllTools().filter((tool) => this.canDiscoverTool(tool.name));
+    }
+
+    private canDiscoverTool(name: string): boolean {
+        const entry = this.#plan.capabilities.find(
+            (candidate) =>
+                candidate.capability.kind === "tool" && candidate.capability.name === name,
+        );
+        return (
+            entry !== undefined &&
+            entry.capability.exposure !== "hidden" &&
+            (entry.desiredState === "inherit" ||
+                entry.effectiveState === "active" ||
+                entry.effectiveState === "lazy")
+        );
+    }
+
+    activateDiscoveredTools(names: readonly string[]): void {
+        const allowed = names.filter((name) => this.canDiscoverTool(name));
+        for (const entry of this.#plan.capabilities) {
+            if (
+                entry.capability.kind === "tool" &&
+                entry.effectiveState === "lazy" &&
+                allowed.includes(entry.capability.name)
+            ) {
+                this.#lazyActivated.add(entry.capability.name);
+            }
+        }
+        this.pi.setActiveTools(allowed);
+        this.refreshCatalogAndPlan();
+    }
+
     canInvokeTool(
         name: string,
     ): { readonly allowed: true } | { readonly allowed: false; readonly reason: string } {
@@ -624,6 +663,12 @@ export class TogglesService {
         const lines = [
             `Capability: ${capability.id}`,
             `Observed: ${capability.observedState}`,
+            ...(capability.exposure === undefined
+                ? []
+                : [
+                      `Exposure: ${capability.exposure}`,
+                      `Declared: ${capability.declared ? "yes" : "no"}`,
+                  ]),
             `Desired: ${entry.desiredState}`,
             `Effective: ${entry.effectiveState}`,
             `Supported: ${capability.supported ? "yes" : "no"}`,

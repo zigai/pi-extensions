@@ -1,5 +1,9 @@
 import { StringEnum } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import {
+    createToolSearchExtension,
+    type ExtensionAPI,
+    type ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import {
     ACTIVATION_COORDINATION_VERSION,
@@ -32,7 +36,7 @@ function notifyDiagnostics(service: TogglesService, ctx: ExtensionContext): void
 }
 
 /** Register the Pi Toggles capability-policy extension. */
-export default function extension(pi: ExtensionAPI): void {
+export default function extension(pi: ExtensionAPI): void | Promise<void> {
     let service: TogglesService | undefined;
     const eventUnsubscribers: Array<() => void> = [];
 
@@ -229,5 +233,19 @@ export default function extension(pi: ExtensionAPI): void {
         for (const unsubscribe of eventUnsubscribers) {
             unsubscribe();
         }
+    });
+
+    if (typeof createToolSearchExtension !== "function") return;
+
+    return createToolSearchExtension()({
+        ...pi,
+        getAllTools: () => service?.getDiscoverableTools() ?? pi.getAllTools(),
+        setActiveTools: (names) => {
+            if (service === undefined) {
+                pi.setActiveTools(names);
+            } else {
+                service.activateDiscoveredTools(names);
+            }
+        },
     });
 }

@@ -1,4 +1,4 @@
-import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
+import type { SlashCommandInfo, ToolExposure } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 import { buildCapabilityCatalog } from "./capability-catalog.ts";
 
@@ -10,6 +10,32 @@ const sourceInfo = {
 } as const;
 
 describe("buildCapabilityCatalog", () => {
+    it.each([
+        ["direct", "inactive", true],
+        ["model-only", "inactive", true],
+        ["codemode", "active", true],
+        ["deferred", "active", true],
+        ["hidden", "unavailable", false],
+    ] as const)(
+        "reports undeclared %s tools by reachability",
+        (exposure: ToolExposure, observedState, supported) => {
+            const catalog = buildCapabilityCatalog({
+                tools: [
+                    { name: "probe", description: "Probe", parameters: {}, exposure, sourceInfo },
+                ],
+                activeToolNames: new Set(),
+                commands: [],
+                promptFragments: [],
+            });
+
+            expect(catalog[0]).toMatchObject({
+                observedState,
+                supported,
+                exposure,
+                declared: false,
+            });
+        },
+    );
     it("includes skills and extension slash commands but excludes prompt templates", () => {
         const commands: SlashCommandInfo[] = [
             { name: "deploy", source: "extension", sourceInfo },

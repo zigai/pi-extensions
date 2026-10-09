@@ -1,5 +1,5 @@
 import { isAbsolute, relative } from "node:path";
-import type { SourceInfo } from "@earendil-works/pi-coding-agent";
+import type { SourceInfo, ToolExposure } from "@earendil-works/pi-coding-agent";
 import type { CapabilityKind, CapabilitySelector, DesiredState } from "./settings.ts";
 
 export type ObservedState = "active" | "inactive" | "unavailable";
@@ -20,6 +20,8 @@ export type Capability = {
     readonly searchText?: string;
     readonly source: CapabilitySource;
     readonly observedState: ObservedState;
+    readonly exposure?: ToolExposure;
+    readonly declared?: boolean;
     readonly supported: boolean;
     readonly protected: boolean;
 };

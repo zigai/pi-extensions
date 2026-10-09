@@ -32,6 +32,7 @@ function toolSearchText(tool: ToolInfo): string {
 
 function toolCapability(tool: ToolInfo, activeToolNames: ReadonlySet<string>): Capability {
     const source = normalizeSourceInfo(tool.sourceInfo);
+    const declared = activeToolNames.has(tool.name);
     return {
         id: createCapabilityId("tool", tool.name, source),
         kind: "tool",
@@ -39,8 +40,15 @@ function toolCapability(tool: ToolInfo, activeToolNames: ReadonlySet<string>): C
         description: tool.description,
         searchText: toolSearchText(tool),
         source,
-        observedState: activeToolNames.has(tool.name) ? "active" : "inactive",
-        supported: true,
+        observedState:
+            tool.exposure === "hidden"
+                ? "unavailable"
+                : declared || tool.exposure === "codemode" || tool.exposure === "deferred"
+                  ? "active"
+                  : "inactive",
+        exposure: tool.exposure,
+        declared,
+        supported: tool.exposure !== "hidden",
         protected: tool.name === LAZY_SEARCH_TOOL_NAME,
     };
 }
