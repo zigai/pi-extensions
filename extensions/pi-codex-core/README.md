@@ -13,6 +13,14 @@ Everything GPT models need to feel at home in Pi.
 pi install npm:@zigai/pi-codex-core
 ```
 
+## Quick start
+
+Run `/login openai-codex` and select **OpenAI Codex (legacy)**, then choose an `openai-codex` model with `/model` for the full legacy-backed feature set.
+
+Pi's newer `/login openai` does not authorize Core's ChatGPT-backed `web_run`, image descriptions, or image generation. Keep the separate legacy login for those features, even when using an `openai` GPT model. `imagegen` also retains support for compatible active Responses endpoints with their own credentials.
+
+Tool activation follows model and scope settings; authentication is checked when a tool runs. Local image viewing and `apply_patch` do not require the legacy login. Native compaction, usage/reset credits, and turn recovery require an active `openai-codex` model; selecting an `openai` model does not enable them, and Pi compaction remains the fallback.
+
 ## Features
 
 ### Tools

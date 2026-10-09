@@ -18,6 +18,8 @@ const JWT_CLAIM_PATH = "https://api.openai.com/auth";
 const CODEX_ORIGINATOR = "codex_cli_rs";
 const OPENAI_CODEX_PROVIDER = "openai-codex";
 const PI_CODEX_CORE_VERSION = "0.1.0";
+const CODEX_TOOL_AUTH_REQUIREMENT =
+    "Codex tools require /login openai-codex (OpenAI Codex (legacy)) or an OpenAI Codex-compatible token. /login openai is not sufficient for ChatGPT-backed Codex tools.";
 
 export type CodexToolProvider = {
     readonly baseUrl: string;
@@ -122,8 +124,7 @@ export async function resolveCodexToolProvider(
     if (model.isErr()) return fail(model.error);
     return resolveCodexProviderForModel(ctx, model.value, {
         requireAccountId: options.requireAccountId ?? isChatGptBackend(model.value.baseUrl),
-        tokenUnavailableMessage:
-            "Codex tools require /login openai-codex or an OpenAI Codex-compatible token.",
+        tokenUnavailableMessage: CODEX_TOOL_AUTH_REQUIREMENT,
     });
 }
 
@@ -201,7 +202,7 @@ async function resolveCodexProviderForModel(
         return fail(
             new CodexAuthUnavailable({
                 operation: "codexAuth",
-                message: "OpenAI Codex auth is unavailable.",
+                message: options.tokenUnavailableMessage,
                 cause: auth.error,
             }),
         );
@@ -274,8 +275,7 @@ function resolveCodexToolAuthModel(ctx: ExtensionContext): CodexResult<RuntimeMo
     return fail(
         new CodexUnsupportedModel({
             operation: "codexAuth",
-            message:
-                "Codex tools require /login openai-codex or an available OpenAI Codex Responses model.",
+            message: `No legacy OpenAI Codex Responses model is registered. ${CODEX_TOOL_AUTH_REQUIREMENT}`,
         }),
     );
 }
