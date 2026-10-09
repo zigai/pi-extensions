@@ -1,8 +1,8 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-import { timeLimitPrompt } from "./prompts.js";
-import { applyUsage } from "./state.js";
-import { CUSTOM_ENTRY_TYPE, type ThreadGoal } from "./types.js";
+import { timeLimitPrompt } from "./prompts.ts";
+import { applyUsage } from "./state.ts";
+import { CUSTOM_ENTRY_TYPE, type ThreadGoal } from "./types.ts";
 
 export interface AccountingState {
   activeGoalId: string | null;
@@ -99,9 +99,11 @@ export function createGoalAccounting(deps: GoalAccountingDeps) {
     const elapsed =
       accounting.lastAccountedAt === null
         ? 0
-        : Math.floor((now - accounting.lastAccountedAt) / 1000);
-
-    accounting.lastAccountedAt = now;
+        : Math.max(0, Math.floor((now - accounting.lastAccountedAt) / 1000));
+    accounting.lastAccountedAt =
+      accounting.lastAccountedAt === null
+        ? now
+        : Math.min(now, accounting.lastAccountedAt + elapsed * 1000);
 
     const result = applyUsage(goal, completedTurnTokens, elapsed, {
       expectedGoalId: accounting.activeGoalId,
