@@ -85,12 +85,17 @@ function decodeDocument(sourceText: string): JsonObject | undefined {
 function setNestedValue(
     document: JsonObject,
     path: readonly string[],
-    value: JsonValue,
+    value: JsonValue | undefined,
 ): JsonObject {
     const [key, ...remainingPath] = path;
 
     if (key === undefined) return document;
-    if (remainingPath.length === 0) return { ...document, [key]: structuredClone(value) };
+
+    if (remainingPath.length === 0) {
+        return value === undefined
+            ? Object.fromEntries(Object.entries(document).filter(([name]) => name !== key))
+            : { ...document, [key]: structuredClone(value) };
+    }
 
     const existing = document[key];
     const child = isJsonObject(existing) ? existing : {};
@@ -138,11 +143,11 @@ export async function loadPiProjectSettings(
     return { _tag: "ReadyProjectSettings", path, sourceText, document };
 }
 
-/** Atomically update one Pi project setting while preserving unrelated fields. */
+/** Atomically update or remove one Pi project setting while preserving unrelated fields. */
 export async function savePiProjectSetting(
     snapshot: PiProjectSettingsSnapshot,
     path: readonly string[],
-    value: JsonValue,
+    value: JsonValue | undefined,
 ): Promise<SavePiProjectSettingOutcome> {
     if (snapshot._tag !== "ReadyProjectSettings") {
         return { _tag: "ProjectSettingSaveFailed", message: snapshot.message };

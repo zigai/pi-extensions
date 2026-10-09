@@ -43,6 +43,7 @@ describe("Pi settings tab", () => {
                 setShowHardwareCursor() {},
             },
             model: undefined,
+            availableDefaultModels: [],
             terminalTheme: "dark",
             onCancel: () => {
                 cancelled = true;
@@ -54,8 +55,8 @@ describe("Pi settings tab", () => {
         expect(rendered).toContain("Auto-compact");
         expect(rendered).toContain("Auto-resize images");
         expect(rendered).toContain("Terminal progress");
-        expect(rendered.split("\n").find((line) => line.includes(">"))).toMatch(/\(1\/28\)$/);
-        expect(rendered.match(/\(1\/28\)/g)).toHaveLength(1);
+        expect(rendered.split("\n").find((line) => line.includes(">"))).toMatch(/\(1\/32\)$/);
+        expect(rendered.match(/\(1\/32\)/g)).toHaveLength(1);
         expect(tab.activeScope).toBe("global");
         expect(tab.selectScope("project")).toBe(false);
 
@@ -91,6 +92,7 @@ describe("Pi settings tab", () => {
                 setShowHardwareCursor() {},
             },
             model: undefined,
+            availableDefaultModels: [],
             terminalTheme: "dark",
             onCancel() {},
             requestRender() {},
@@ -136,6 +138,7 @@ describe("Pi settings tab", () => {
                 setShowHardwareCursor() {},
             },
             model: undefined,
+            availableDefaultModels: [],
             terminalTheme: "dark",
             onCancel() {},
             requestRender() {},

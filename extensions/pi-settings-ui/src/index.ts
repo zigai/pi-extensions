@@ -38,7 +38,7 @@ async function openSettingsEditor(pi: ExtensionAPI, ctx: ExtensionContext): Prom
     let piSettings: PiSettingsTab | undefined;
 
     await ctx.ui.custom<void>(async (tui, theme, keybindings, done) => {
-        const terminalTheme = (await tui.queryTerminalColorScheme({ timeoutMs: 100 })) ?? "dark";
+        const terminalTheme = ctx.ui.getTheme("system")?.appearance ?? "dark";
         const globalSettings = SettingsManager.create(ctx.cwd, getAgentDir(), {
             projectTrusted: false,
         });
@@ -59,6 +59,7 @@ async function openSettingsEditor(pi: ExtensionAPI, ctx: ExtensionContext): Prom
             ui: ctx.ui,
             runtime: tui,
             model: ctx.model,
+            availableDefaultModels: ctx.modelRegistry.getAvailable(),
             terminalTheme,
             onCancel: () => editor?.requestClose(),
             requestRender: () => tui.requestRender(),

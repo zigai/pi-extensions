@@ -1,5 +1,4 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import {
     SettingsSelectorComponent,
     type ExtensionAPI,
@@ -58,6 +57,7 @@ export type PiSettingsTabOptions = {
     readonly ui: PiSettingsUi;
     readonly runtime: PiSettingsRuntime;
     readonly model: ExtensionContext["model"];
+    readonly availableDefaultModels: SettingsConfig["availableDefaultModels"];
     readonly terminalTheme: TerminalColorScheme;
     readonly onCancel: () => void;
     readonly requestRender: () => void;
@@ -124,8 +124,8 @@ export class PiSettingsTab implements PiSettingsPane {
     constructor(private readonly options: PiSettingsTabOptions) {
         this.projectSnapshot = options.projectSnapshot;
         this.savedThemes = {
-            global: options.globalSettings.getThemeSetting() ?? "dark",
-            project: options.projectSettings.getThemeSetting() ?? "dark",
+            global: options.globalSettings.getThemeSetting() ?? "system",
+            project: options.projectSettings.getThemeSetting() ?? "system",
         };
         this.reportSettingsErrors();
         this.selector = this.createSelector();
@@ -193,18 +193,18 @@ export class PiSettingsTab implements PiSettingsPane {
     }
 
     private createConfig(): SettingsConfig {
-        const { pi, ui, model, terminalTheme } = this.options;
+        const { ui, model, terminalTheme } = this.options;
         const settings = this.currentSettings();
-        const availableThinkingLevels = model
-            ? getSupportedThinkingLevels(model)
-            : [...ALL_THINKING_LEVELS];
-        const thinkingLevel =
-            this.activeScopeValue === "global"
-                ? pi.getThinkingLevel()
-                : (settings.getDefaultThinkingLevel() ?? pi.getThinkingLevel());
+        const defaultProvider = settings.getDefaultProvider();
+        const defaultModelId = settings.getDefaultModel();
 
-        return {
+        const config: SettingsConfig = {
             autoCompact: settings.getCompactionEnabled(),
+            defaultModel:
+                defaultProvider && defaultModelId
+                    ? `${defaultProvider}/${defaultModelId}`
+                    : "not set",
+            availableDefaultModels: this.options.availableDefaultModels,
             showImages: settings.getShowImages(),
             imageWidthCells: settings.getImageWidthCells(),
             autoResizeImages: settings.getImageAutoResize(),
@@ -214,8 +214,10 @@ export class PiSettingsTab implements PiSettingsPane {
             followUpMode: settings.getFollowUpMode(),
             transport: settings.getTransport(),
             httpIdleTimeoutMs: settings.getHttpIdleTimeoutMs(),
-            thinkingLevel,
-            availableThinkingLevels,
+            cacheWarmingMode: this.options.globalSettings.getCacheWarmingMode(),
+            thinkingLevel: settings.getDefaultThinkingLevel() ?? "medium",
+            availableThinkingLevels: [...ALL_THINKING_LEVELS],
+            modelThinkingLevels: settings.getAllModelThinkingLevels(),
             currentTheme: this.savedThemes[this.activeScopeValue],
             terminalTheme,
             availableThemes: ui.getAllThemes().map(({ name }) => name),
@@ -238,9 +240,15 @@ export class PiSettingsTab implements PiSettingsPane {
                 this.activeScopeValue === "global"
                     ? this.options.runtime.mode
                     : settings.getTuiMode(),
+            fullscreenExitOutput: settings.getFullscreenExitOutput(),
             fullscreenScrollbar: settings.getFullscreenScrollbar(),
+            fullscreenCopyOnSelect: settings.getFullscreenCopyOnSelect(),
+            fullscreenWheelScrollLines: settings.getFullscreenWheelScrollLines(),
             warnings: settings.getWarnings(),
         };
+        if (model !== undefined) config.currentModel = model;
+
+        return config;
     }
 
     private createCallbacks(): SettingsCallbacks {
@@ -281,9 +289,48 @@ export class PiSettingsTab implements PiSettingsPane {
                 this.persist(["httpIdleTimeoutMs"], timeoutMs, () =>
                     settings.setHttpIdleTimeoutMs(timeoutMs),
                 ),
-            onThinkingLevelChange: (level) => {
-                if (this.activeScopeValue === "global") pi.setThinkingLevel(level);
-                else this.persistProject(["defaultThinkingLevel"], level);
+            onCacheWarmingModeChange: (mode) => {
+                if (this.activeScopeValue === "project") {
+                    this.selector
+                        .getSettingsList()
+                        .updateValue("cache-warming-mode", settings.getCacheWarmingMode());
+                    this.options.ui.notify(
+                        "Cache warming can only be changed in global Pi settings.",
+                        "info",
+                    );
+
+                    return;
+                }
+
+                this.persist(["cacheWarming"], mode, () => settings.setCacheWarmingMode(mode));
+            },
+            onModelThinkingLevelChange: (provider, modelId, level) => {
+                this.persist(["modelThinkingLevels", `${provider}/${modelId}`], level, () =>
+                    settings.setModelThinkingLevel(provider, modelId, level),
+                );
+
+                const current = this.options.model;
+                if (
+                    this.activeScopeValue === "global" &&
+                    current?.provider === provider &&
+                    current.id === modelId
+                ) {
+                    pi.setThinkingLevel(level);
+                }
+            },
+            onModelThinkingLevelRemove: (provider, modelId) => {
+                this.persist(["modelThinkingLevels", `${provider}/${modelId}`], undefined, () =>
+                    settings.removeModelThinkingLevel(provider, modelId),
+                );
+
+                const current = this.options.model;
+                if (
+                    this.activeScopeValue === "global" &&
+                    current?.provider === provider &&
+                    current.id === modelId
+                ) {
+                    pi.setThinkingLevel(settings.getDefaultThinkingLevel() ?? "medium");
+                }
             },
             onThemeChange: (setting) => {
                 this.savedThemes[this.activeScopeValue] = setting;
@@ -363,6 +410,30 @@ export class PiSettingsTab implements PiSettingsPane {
                     );
                 }
             },
+            onFullscreenExitOutputChange: (output) =>
+                this.persist(["fullscreenExitOutput"], output, () =>
+                    settings.setFullscreenExitOutput(output),
+                ),
+            onFullscreenCopyOnSelectChange: (enabled) => {
+                this.persist(["fullscreenCopyOnSelect"], enabled, () =>
+                    settings.setFullscreenCopyOnSelect(enabled),
+                );
+
+                this.options.ui.notify(
+                    "Fullscreen copy on select changes apply in the next Pi session.",
+                    "info",
+                );
+            },
+            onFullscreenWheelScrollLinesChange: (lines) => {
+                this.persist(["fullscreenWheelScrollLines"], lines, () =>
+                    settings.setFullscreenWheelScrollLines(lines),
+                );
+
+                this.options.ui.notify(
+                    "Fullscreen wheel scrolling changes apply in the next Pi session.",
+                    "info",
+                );
+            },
             onFullscreenScrollbarChange: (mode) => {
                 this.persist(["fullscreenScrollbar"], mode, () =>
                     settings.setFullscreenScrollbar(mode),
@@ -381,7 +452,11 @@ export class PiSettingsTab implements PiSettingsPane {
         };
     }
 
-    private persist(path: readonly string[], value: JsonValue, globalChange: () => void): void {
+    private persist(
+        path: readonly string[],
+        value: JsonValue | undefined,
+        globalChange: () => void,
+    ): void {
         if (this.activeScopeValue === "project") {
             this.persistProject(path, value);
             return;
@@ -401,7 +476,7 @@ export class PiSettingsTab implements PiSettingsPane {
         this.writeTail = this.writeTail.then(async () => this.flushGlobalSettings());
     }
 
-    private persistProject(path: readonly string[], value: JsonValue): void {
+    private persistProject(path: readonly string[], value: JsonValue | undefined): void {
         this.writeTail = this.writeTail.then(async () => {
             const outcome = await savePiProjectSetting(this.projectSnapshot, path, value);
             if (outcome._tag === "ProjectSettingSaveFailed") {
