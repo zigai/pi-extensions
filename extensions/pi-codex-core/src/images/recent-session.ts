@@ -93,8 +93,9 @@ function extractImagegenArtifactRefs(message: unknown): RecentImageRef[] {
     const parsed = ImagegenArtifactDetailsSchema.decode(message);
 
     return parsed
-        ? parsed.details.images.map(
-              (image): RecentImageRef => ({ kind: "artifact", path: image.path }),
-          )
+        ? parsed.details.images.map((image): RecentImageRef => ({
+              kind: "artifact",
+              path: image.path,
+          }))
         : [];
 }

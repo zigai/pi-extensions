@@ -111,9 +111,10 @@ function updateLines(
 
 function mutationFileFromHunk(hunk: ApplyPatchHunk): GlowupMutationFile {
     if (hunk.type === "add") {
-        const lines = splitContentLines(hunk.contents).map(
-            (line): GlowupMutationLine => ({ kind: "addition", text: line }),
-        );
+        const lines = splitContentLines(hunk.contents).map((line): GlowupMutationLine => ({
+            kind: "addition",
+            text: line,
+        }));
         return {
             path: hunk.path,
             lines,
