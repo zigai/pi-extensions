@@ -18,15 +18,15 @@ function createModel(id: string): Model<Api> {
 }
 
 describe("picker request", () => {
-    it("applies the request shape required by Codex Luna", () => {
+    it("applies the request shape required by Codex Luna and Astra", () => {
         const payload = {
-            model: "gpt-5.6-luna",
+            model: "gpt-6-astra",
             parallel_tool_calls: true,
             reasoning: { effort: "low", summary: "auto" },
         };
 
-        expect(preparePickerPayload(createModel("gpt-5.6-luna"), payload)).toEqual({
-            model: "gpt-5.6-luna",
+        expect(preparePickerPayload(createModel("gpt-6-astra"), payload)).toEqual({
+            model: "gpt-6-astra",
             parallel_tool_calls: false,
             reasoning: { effort: "low", summary: "auto", context: "all_turns" },
         });
@@ -35,9 +35,9 @@ describe("picker request", () => {
     });
 
     it("leaves ordinary picker model payloads unchanged", () => {
-        const payload = { model: "gpt-5.6-sol", parallel_tool_calls: true };
+        const payload = { model: "gpt-5.4", parallel_tool_calls: true };
 
-        expect(preparePickerPayload(createModel("gpt-5.6-sol"), payload)).toBeUndefined();
+        expect(preparePickerPayload(createModel("gpt-5.4"), payload)).toBeUndefined();
     });
 
     it("rewrites payloads that carry undefined property values", () => {
@@ -65,20 +65,20 @@ describe("picker request", () => {
     });
 
     it("rewrites payloads when request headers opt the model into Responses Lite", () => {
-        const payload = { model: "gpt-5.6-sol", parallel_tool_calls: true };
+        const payload = { model: "gpt-5.4", parallel_tool_calls: true };
 
         expect(
-            preparePickerPayload(createModel("gpt-5.6-sol"), payload, {
+            preparePickerPayload(createModel("gpt-5.4"), payload, {
                 "X-OpenAI-Internal-Codex-Responses-Lite": "true",
             }),
         ).toEqual({
-            model: "gpt-5.6-sol",
+            model: "gpt-5.4",
             parallel_tool_calls: false,
             reasoning: { context: "all_turns" },
         });
 
         expect(
-            preparePickerPayload(createModel("gpt-5.6-sol"), payload, {
+            preparePickerPayload(createModel("gpt-5.4"), payload, {
                 authorization: "Bearer token",
             }),
         ).toBeUndefined();

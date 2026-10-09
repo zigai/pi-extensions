@@ -71,7 +71,14 @@ function requiresResponsesLitePayload(
         return false;
     }
 
-    return hasResponsesLiteHeader(requestHeaders) || model.id.toLowerCase().includes("luna");
+    const id = model.id.toLowerCase();
+    return (
+        hasResponsesLiteHeader(requestHeaders) ||
+        id.includes("luna") ||
+        id.includes("astra") ||
+        id.includes("sol") ||
+        id.includes("terra")
+    );
 }
 
 /** Return a replacement payload when a picker model requires one, or undefined to keep it. */
