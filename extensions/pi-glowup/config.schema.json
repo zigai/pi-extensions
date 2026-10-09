@@ -1,0 +1,532 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zigai/pi-glowup/config.schema.json",
+  "title": "Pi Glowup settings",
+  "description": "High-signal rendering for Pi tool calls and results.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "default": "./schemas/pi-glowup.schema.json",
+      "description": "JSON Schema used by editors for this settings file."
+    },
+    "preserveTools": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "Keep selected third-party tools on their original renderer."
+    },
+    "mutations": {
+      "type": "object",
+      "properties": {
+        "defaultView": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "full"
+            },
+            {
+              "type": "string",
+              "const": "preview"
+            }
+          ],
+          "description": "Show every available completed-mutation row or a bounded semantic preview."
+        },
+        "previewLines": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Changed/content rows retained per file in preview view."
+        },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "maxDiffBytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Maximum combined diff snapshot or metadata bytes; null disables this limit."
+            },
+            "maxDiffLines": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Maximum diff rows before rendering a summary; null disables this limit."
+            },
+            "maxWritePreviewBytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Maximum native-write content bytes retained for rendering; null disables this limit."
+            },
+            "maxDeletePreimageBytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Maximum file bytes captured before deletion; null disables this limit."
+            }
+          },
+          "additionalProperties": false,
+          "default": {
+            "maxDiffBytes": 524288,
+            "maxDiffLines": 5000,
+            "maxWritePreviewBytes": 65536,
+            "maxDeletePreimageBytes": 262144
+          }
+        }
+      },
+      "additionalProperties": false,
+      "default": {
+        "defaultView": "full",
+        "previewLines": 6,
+        "limits": {
+          "maxDiffBytes": 524288,
+          "maxDiffLines": 5000,
+          "maxWritePreviewBytes": 65536,
+          "maxDeletePreimageBytes": 262144
+        }
+      }
+    },
+    "appearance": {
+      "type": "object",
+      "properties": {
+        "diffBackgroundStyle": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "changed-spans"
+            },
+            {
+              "type": "string",
+              "const": "two-tone"
+            },
+            {
+              "type": "string",
+              "const": "full-row"
+            }
+          ],
+          "description": "Background treatment for changed diff rows and intraline spans."
+        },
+        "diffLineNumberStyle": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "single"
+            },
+            {
+              "type": "string",
+              "const": "dual"
+            }
+          ],
+          "description": "Show one relevant line number or aligned old and new line-number columns."
+        },
+        "narrowDiffLayout": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "paired"
+            },
+            {
+              "type": "string",
+              "const": "traditional"
+            }
+          ],
+          "description": "Order similar deletion/addition rows together or in traditional blocks."
+        },
+        "sideBySideLayout": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "content-aware"
+            },
+            {
+              "type": "string",
+              "const": "fixed"
+            }
+          ],
+          "description": "Choose split diffs from content fit or a fixed terminal-width threshold."
+        },
+        "addedRowBackground": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Subtle addition-row background; null derives it from the active Pi theme."
+        },
+        "deletedRowBackground": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Subtle deletion-row background; null derives it from the active Pi theme."
+        },
+        "addedContentBackground": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Stronger added intraline-span background; null derives a contrasting shade."
+        },
+        "deletedContentBackground": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Stronger deleted intraline-span background; null derives a contrasting shade."
+        },
+        "instructionPathColor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Instruction-file path foreground; null inherits the active Pi theme."
+        },
+        "dimUnchangedDiffText": {
+          "type": "boolean",
+          "description": "Dim unchanged text around changed intraline spans."
+        }
+      },
+      "additionalProperties": false,
+      "default": {
+        "diffBackgroundStyle": "two-tone",
+        "diffLineNumberStyle": "dual",
+        "narrowDiffLayout": "paired",
+        "sideBySideLayout": "content-aware",
+        "addedRowBackground": "#213A2B",
+        "deletedRowBackground": "#4A221D",
+        "addedContentBackground": "#0D5728",
+        "deletedContentBackground": "#762925",
+        "instructionPathColor": null,
+        "dimUnchangedDiffText": false
+      }
+    },
+    "debugLog": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Write bounded renderer and lifecycle diagnostics."
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Diagnostics path relative to the pi-glowup data directory unless absolute."
+        },
+        "maxBytes": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Rotate diagnostics after this size; null disables rotation."
+        },
+        "memorySampleIntervalMs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Memory sampling interval; 0 disables sampling."
+        }
+      },
+      "additionalProperties": false,
+      "default": {
+        "enabled": false,
+        "path": "debug.log",
+        "maxBytes": null,
+        "memorySampleIntervalMs": 10000
+      }
+    },
+    "renderCache": {
+      "type": "object",
+      "properties": {
+        "maxBytes": {
+          "type": "integer",
+          "minimum": 65536,
+          "maximum": 536870912,
+          "description": "Maximum bytes retained for completed rendered tool output."
+        },
+        "maxEntries": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000,
+          "description": "Maximum completed tool components retained in the render cache."
+        }
+      },
+      "additionalProperties": false,
+      "default": {
+        "maxBytes": 67108864,
+        "maxEntries": 10000
+      }
+    },
+    "toolCallIndicator": {
+      "type": "object",
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8,
+          "pattern": "\\S",
+          "description": "Prefix shown before compact tool calls."
+        },
+        "bold": {
+          "type": "boolean",
+          "description": "Render the tool-call indicator in bold."
+        }
+      },
+      "additionalProperties": false,
+      "default": {
+        "symbol": "•",
+        "bold": true
+      }
+    },
+    "toolLabels": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "static"
+            },
+            {
+              "type": "string",
+              "const": "lifecycle"
+            }
+          ],
+          "description": "Use stable or lifecycle-aware tool labels."
+        }
+      },
+      "additionalProperties": false,
+      "default": {
+        "mode": "static"
+      }
+    },
+    "writePreview": {
+      "type": "object",
+      "properties": {
+        "movingViewport": {
+          "type": "boolean",
+          "description": "Follow the newest rows while writes stream."
+        }
+      },
+      "additionalProperties": false,
+      "default": {
+        "movingViewport": true
+      }
+    },
+    "syntax": {
+      "type": "object",
+      "properties": {
+        "preloadLanguages": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Language ids or aliases to preload for synchronous syntax highlighting."
+        },
+        "bracketPairColoring": {
+          "type": "boolean",
+          "description": "Color matching bracket pairs; false preserves the syntax theme color."
+        },
+        "projectLanguageDetection": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Add languages inferred from project filenames to the preload set."
+            }
+          },
+          "additionalProperties": false,
+          "default": {
+            "enabled": true
+          }
+        }
+      },
+      "additionalProperties": false,
+      "default": {
+        "preloadLanguages": [
+          "markdown",
+          "bash",
+          "python",
+          "typescript",
+          "javascript",
+          "json"
+        ],
+        "bracketPairColoring": true,
+        "projectLanguageDetection": {
+          "enabled": true
+        }
+      }
+    },
+    "patches": {
+      "type": "object",
+      "properties": {
+        "assistantSeparator": {
+          "type": "boolean",
+          "description": "Add spacing and separators around assistant messages."
+        },
+        "workingWidgetSpacing": {
+          "type": "boolean",
+          "description": "Remove one blank line near the working indicator."
+        },
+        "autocompleteCleanup": {
+          "type": "boolean",
+          "description": "Redraw after slash autocomplete closes."
+        },
+        "markdownSyntax": {
+          "type": "boolean",
+          "description": "Highlight Markdown code fences."
+        },
+        "thirdPartyToolRenderers": {
+          "type": "boolean",
+          "description": "Apply compact renderers to compatible third-party tools."
+        }
+      },
+      "additionalProperties": false,
+      "default": {
+        "assistantSeparator": true,
+        "workingWidgetSpacing": false,
+        "autocompleteCleanup": true,
+        "markdownSyntax": true,
+        "thirdPartyToolRenderers": true
+      }
+    },
+    "scriptPreview": {
+      "type": "object",
+      "properties": {
+        "headerLayout": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "auto"
+            },
+            {
+              "type": "string",
+              "const": "inline"
+            },
+            {
+              "type": "string",
+              "const": "block"
+            }
+          ],
+          "description": "Choose auto, inline, or block script headers."
+        },
+        "maxCodePreviewLines": {
+          "type": "integer",
+          "minimum": 4,
+          "description": "Collapsed script content rows before a separate omission row."
+        },
+        "showPrologueOmission": {
+          "type": "boolean",
+          "description": "Show a count row when collapsed previews omit leading setup imports."
+        },
+        "shellLayout": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "preserve"
+            },
+            {
+              "type": "string",
+              "const": "auto"
+            },
+            {
+              "type": "string",
+              "const": "always"
+            }
+          ],
+          "description": "Choose when composed Bash commands are reflowed at safe syntax boundaries."
+        },
+        "shellOperatorPosition": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "trailing"
+            },
+            {
+              "type": "string",
+              "const": "leading"
+            }
+          ],
+          "description": "Place Bash chain operators before or after reflowed line breaks."
+        },
+        "formatters": {
+          "type": "object",
+          "patternProperties": {
+            "^.*$": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1
+            }
+          },
+          "description": "Commands that format script previews through stdin/stdout."
+        }
+      },
+      "additionalProperties": false,
+      "default": {
+        "headerLayout": "auto",
+        "maxCodePreviewLines": 8,
+        "showPrologueOmission": false,
+        "shellLayout": "auto",
+        "shellOperatorPosition": "trailing",
+        "formatters": {}
+      }
+    }
+  }
+}
