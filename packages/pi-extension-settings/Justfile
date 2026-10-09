@@ -11,10 +11,6 @@ setup:
     pre-commit install
     npm run check
 
-
-# Install the extension into Pi
-install:
-    pi install .
 # Format code
 format:
     npm run format
