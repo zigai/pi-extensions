@@ -32,6 +32,7 @@
     "eqeqeq": "error",
     "no-array-constructor": "error",
     "no-duplicate-imports": "warn",
+    "no-unreachable-loop": "error",
     "no-use-before-define": "warn",
     "no-unused-expressions": "error",
     "no-var": "error",
@@ -63,6 +64,7 @@
     "typescript/related-getter-setter-pairs": "error",
     "typescript/strict-boolean-expressions": "error",
     "typescript/switch-exhaustiveness-check": "error",
+    "unicorn/no-confusing-array-with": "error",
     "unicorn/no-object-as-default-parameter": "error",
     "unicorn/prefer-date-now": "error",
     "unicorn/prefer-math-trunc": "error"
