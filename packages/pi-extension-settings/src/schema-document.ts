@@ -1,0 +1,266 @@
+import type { TSchema } from "typebox";
+
+import {
+    cloneJson,
+    isJsonArray,
+    isJsonObject,
+    isJsonString,
+    type JsonObject,
+    type JsonValue,
+    parseJson,
+} from "./json-value.ts";
+
+export const JSON_SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema";
+
+export type SchemaDocumentInput = {
+    readonly id: string;
+    readonly title: string;
+    readonly description: string;
+    readonly schemaId: string;
+    readonly schema: TSchema;
+};
+
+const SCHEMA_MAP_KEYWORDS = new Set([
+    "$defs",
+    "definitions",
+    "dependentSchemas",
+    "patternProperties",
+    "properties",
+]);
+
+const SCHEMA_ARRAY_KEYWORDS = new Set(["allOf", "anyOf", "oneOf", "prefixItems"]);
+
+const SCHEMA_VALUE_KEYWORDS = new Set([
+    "additionalProperties",
+    "contains",
+    "else",
+    "if",
+    "items",
+    "not",
+    "propertyNames",
+    "then",
+    "unevaluatedItems",
+    "unevaluatedProperties",
+]);
+
+function makeSettingsObjectPartial(schema: JsonObject): JsonObject {
+    function makeMergeablePropertyPartial(property: JsonObject): JsonObject {
+        if (property.type === "object" && isJsonObject(property.properties)) {
+            return makeSettingsObjectPartial(property);
+        }
+
+        if (isJsonArray(property.anyOf)) {
+            return {
+                ...cloneJson(property),
+                anyOf: property.anyOf.map((alternative) =>
+                    isJsonObject(alternative)
+                        ? makeMergeablePropertyPartial(alternative)
+                        : alternative,
+                ),
+            };
+        }
+
+        return cloneJson(property);
+    }
+
+    const transformed: Record<string, JsonValue> = {};
+    for (const [key, value] of Object.entries(schema)) {
+        if (key === "required") continue;
+
+        if (key === "properties" && isJsonObject(value)) {
+            transformed[key] = Object.fromEntries(
+                Object.entries(value).map(([name, child]) => [
+                    name,
+                    isJsonObject(child) ? makeMergeablePropertyPartial(child) : cloneJson(child),
+                ]),
+            );
+            continue;
+        }
+
+        transformed[key] = cloneJson(value);
+    }
+
+    return transformed;
+}
+
+function stripTypeBoxMetadataFromSchema(schema: JsonObject): JsonObject {
+    const sanitized: Record<string, JsonValue> = {};
+    for (const [key, child] of Object.entries(schema)) {
+        if (key.startsWith("~")) continue;
+
+        if (SCHEMA_MAP_KEYWORDS.has(key) && isJsonObject(child)) {
+            sanitized[key] = Object.fromEntries(
+                Object.entries(child).map(([name, nested]) => [
+                    name,
+                    isJsonObject(nested)
+                        ? stripTypeBoxMetadataFromSchema(nested)
+                        : cloneJson(nested),
+                ]),
+            );
+            continue;
+        }
+
+        if (SCHEMA_ARRAY_KEYWORDS.has(key) && isJsonArray(child)) {
+            sanitized[key] = child.map((nested) =>
+                isJsonObject(nested) ? stripTypeBoxMetadataFromSchema(nested) : cloneJson(nested),
+            );
+            continue;
+        }
+
+        if (SCHEMA_VALUE_KEYWORDS.has(key) && isJsonObject(child)) {
+            sanitized[key] = stripTypeBoxMetadataFromSchema(child);
+            continue;
+        }
+
+        sanitized[key] = cloneJson(child);
+    }
+
+    return sanitized;
+}
+
+function schemaRecord(schema: TSchema): JsonObject {
+    const serialized = JSON.stringify(schema);
+    if (serialized === undefined) {
+        throw new TypeError("The TypeBox schema is not JSON serializable.");
+    }
+
+    const parsed = parseJson(serialized);
+    if (!isJsonObject(parsed)) {
+        throw new TypeError("The TypeBox settings schema must serialize to a JSON object.");
+    }
+
+    return stripTypeBoxMetadataFromSchema(parsed);
+}
+
+function visitChildSchemas(
+    schema: JsonObject,
+    path: string,
+    visit: (schema: JsonObject, path: string) => void,
+): void {
+    for (const [key, value] of Object.entries(schema)) {
+        if (SCHEMA_MAP_KEYWORDS.has(key) && isJsonObject(value)) {
+            for (const [name, child] of Object.entries(value)) {
+                if (isJsonObject(child)) visit(child, `${path}/${key}/${name}`);
+            }
+            continue;
+        }
+
+        if (SCHEMA_ARRAY_KEYWORDS.has(key) && isJsonArray(value)) {
+            for (const [index, child] of value.entries()) {
+                if (isJsonObject(child)) visit(child, `${path}/${key}/${index}`);
+            }
+            continue;
+        }
+
+        if (SCHEMA_VALUE_KEYWORDS.has(key) && isJsonObject(value)) {
+            visit(value, `${path}/${key}`);
+        }
+    }
+}
+
+export function hasReservedSchemaProperty(schema: TSchema): boolean {
+    const root = schemaRecord(schema);
+    return isJsonObject(root.properties) && "$schema" in root.properties;
+}
+
+export function findUndocumentedSettings(schema: TSchema): readonly string[] {
+    const root = schemaRecord(schema);
+    if (!isJsonObject(root.properties)) return ["<root>"];
+
+    const issues: string[] = [];
+
+    function visit(properties: JsonObject, prefix: string): void {
+        for (const [key, value] of Object.entries(properties)) {
+            const path = prefix === "" ? key : `${prefix}.${key}`;
+            if (isJsonObject(value) && value.type === "object" && isJsonObject(value.properties)) {
+                visit(value.properties, path);
+                continue;
+            }
+
+            if (
+                !isJsonObject(value) ||
+                !isJsonString(value.description) ||
+                value.description.trim() === ""
+            ) {
+                issues.push(path);
+            }
+        }
+    }
+
+    visit(root.properties, "");
+
+    return issues;
+}
+
+export function findNonStrictObjectSchemas(schema: TSchema): readonly string[] {
+    const issues: string[] = [];
+
+    function visit(value: JsonObject, path: string): void {
+        if (value.type === "object" && isJsonObject(value.properties)) {
+            if (value.additionalProperties !== false) issues.push(path);
+        }
+
+        visitChildSchemas(value, path, visit);
+    }
+
+    visit(schemaRecord(schema), "#");
+
+    return issues;
+}
+
+export function createSettingsFileSchema(input: SchemaDocumentInput): JsonObject {
+    const partial = makeSettingsObjectPartial(schemaRecord(input.schema));
+    if (!isJsonObject(partial.properties)) {
+        throw new TypeError("The TypeBox settings schema must be an object with properties.");
+    }
+
+    const properties: Record<string, JsonValue> = {};
+    properties.$schema = {
+        type: "string",
+        default: `./schemas/${input.id}.schema.json`,
+        description: "JSON Schema used by editors for this settings file.",
+    };
+    for (const [key, value] of Object.entries(partial.properties)) {
+        properties[key] = cloneJson(value);
+    }
+
+    const schemaKeywords: Record<string, JsonValue> = {};
+    for (const [key, value] of Object.entries(partial)) {
+        if (["$schema", "$id", "title", "description", "properties", "required"].includes(key)) {
+            continue;
+        }
+
+        schemaKeywords[key] = cloneJson(value);
+    }
+
+    return {
+        $schema: JSON_SCHEMA_DIALECT,
+        $id: input.schemaId,
+        title: `${input.title} settings`,
+        description: input.description,
+        ...schemaKeywords,
+        type: "object",
+        properties,
+        additionalProperties: false,
+    } satisfies JsonObject;
+}
+
+export function createSettingsDocument(
+    id: string,
+    settings: JsonObject,
+    schemaReference = `./schemas/${id}.schema.json`,
+): JsonObject {
+    const settingsEntries = Object.entries(settings).map(
+        ([key, value]) => [key, cloneJson(value)] as const,
+    );
+    return {
+        $schema: schemaReference,
+        ...Object.fromEntries(settingsEntries),
+    } satisfies JsonObject;
+}
+
+export function createDefaultSettingsDocument(
+    input: SchemaDocumentInput & { readonly defaultSettings: JsonObject },
+): JsonObject {
+    return createSettingsDocument(input.id, input.defaultSettings);
+}

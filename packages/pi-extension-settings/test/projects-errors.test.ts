@@ -1,0 +1,181 @@
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+
+import { afterEach, describe, expect, it } from "vitest";
+
+import { runCli, type CliIo } from "../src/cli.ts";
+import { discoverSettingsProjects } from "../src/projects.ts";
+
+const temporaryDirectories: string[] = [];
+const definitionImport = pathToFileURL(resolve("src/definition.ts")).href;
+
+async function temporaryProject(): Promise<string> {
+    const path = await mkdtemp(join(process.cwd(), ".tmp-settings-errors-"));
+    temporaryDirectories.push(path);
+    return path;
+}
+
+function recordingIo() {
+    const out: string[] = [];
+    const err: string[] = [];
+    const io: CliIo = {
+        stdout: (message) => out.push(message),
+        stderr: (message) => err.push(message),
+    };
+
+    return { io, out, err };
+}
+
+async function writeDefinition(path: string): Promise<void> {
+    await writeFile(
+        path,
+        `import { Type } from "typebox";\nimport { defineExtensionSettings } from ${JSON.stringify(definitionImport)};\nexport default defineExtensionSettings({ id: "pi-errors", title: "Errors", description: "Error fixture settings.", schema: Type.Object({ enabled: Type.Boolean({ default: true, description: "Enable it." }) }, { additionalProperties: false }) });\n`,
+    );
+}
+
+afterEach(async () => {
+    await Promise.all(
+        temporaryDirectories.splice(0).map(async (path) => rm(path, { recursive: true })),
+    );
+});
+
+describe("project discovery failures and options", () => {
+    it("reports missing and malformed root package files", async () => {
+        const missingRoot = await temporaryProject();
+        await expect(discoverSettingsProjects(missingRoot)).rejects.toThrow("file does not exist");
+
+        const malformedRoot = await temporaryProject();
+        await writeFile(join(malformedRoot, "package.json"), "not json");
+        await expect(discoverSettingsProjects(malformedRoot)).rejects.toThrow("not valid JSON");
+    });
+
+    it.each([
+        ["non-object manifest", { piExtensionSettings: true }],
+        ["missing definition", { piExtensionSettings: { schema: "config.schema.json" } }],
+        ["absolute definition", { piExtensionSettings: { definition: "/tmp/settings.mjs" } }],
+    ])("rejects %s", async (_label, packageJson) => {
+        const root = await temporaryProject();
+        await writeFile(join(root, "package.json"), JSON.stringify(packageJson));
+        await expect(discoverSettingsProjects(root)).rejects.toThrow();
+    });
+
+    it.each(["schema", "readme", "prevalidation", "globalPath"])(
+        "rejects a malformed supplied %s value",
+        async (field) => {
+            const root = await temporaryProject();
+            await writeFile(
+                join(root, "package.json"),
+                JSON.stringify({
+                    piExtensionSettings: { definition: "settings.mjs", [field]: 42 },
+                }),
+            );
+            await expect(discoverSettingsProjects(root)).rejects.toThrow(field);
+        },
+    );
+
+    it.each([
+        { schema: "settings.mjs" },
+        { schema: "package.json" },
+        { schema: "artifact.json", readme: "artifact.json" },
+        { prevalidation: "README.md" },
+    ])("rejects colliding artifact targets %#", async (overrides) => {
+        const root = await temporaryProject();
+        await writeFile(
+            join(root, "package.json"),
+            JSON.stringify({
+                piExtensionSettings: { definition: "settings.mjs", ...overrides },
+            }),
+        );
+        await writeDefinition(join(root, "settings.mjs"));
+        await expect(discoverSettingsProjects(root)).rejects.toThrow(/distinct|overwrite/);
+    });
+
+    it("supports object-form workspaces and custom global display paths", async () => {
+        const root = await temporaryProject();
+        const child = join(root, "packages", "child");
+        await mkdir(child, { recursive: true });
+        await writeFile(
+            join(root, "package.json"),
+            JSON.stringify({ workspaces: { packages: ["packages/*"] } }),
+        );
+        await writeFile(
+            join(child, "package.json"),
+            JSON.stringify({
+                piExtensionSettings: {
+                    definition: "settings.mjs",
+                    globalPath: "$PI_AGENT_DIR/extension-settings/pi-errors.json",
+                },
+            }),
+        );
+        await writeDefinition(join(child, "settings.mjs"));
+
+        const discovered = await discoverSettingsProjects(root);
+
+        expect(discovered[0]?.targets.globalPath).toBe(
+            "$PI_AGENT_DIR/extension-settings/pi-errors.json",
+        );
+    });
+
+    it("reports definition import failures", async () => {
+        const root = await temporaryProject();
+        await writeFile(
+            join(root, "package.json"),
+            JSON.stringify({ piExtensionSettings: { definition: "settings.mjs" } }),
+        );
+        await writeFile(join(root, "settings.mjs"), 'throw new Error("module failed");\n');
+
+        await expect(discoverSettingsProjects(root)).rejects.toThrow("could not be imported");
+        await expect(discoverSettingsProjects(root)).rejects.not.toThrow("module failed");
+    });
+});
+
+describe("CLI failure behavior", () => {
+    it("accepts explicit help and rejects incomplete root options", async () => {
+        const help = recordingIo();
+        expect(await runCli(["check", "--help"], help.io)).toBe(0);
+        expect(help.out.join("")).toContain("Usage:");
+
+        const invalid = recordingIo();
+        expect(await runCli(["check", "--root"], invalid.io)).toBe(2);
+    });
+
+    it("reports discovery and artifact failures", async () => {
+        const missing = await temporaryProject();
+        const discoveryOutput = recordingIo();
+        expect(await runCli(["check", "--root", missing], discoveryOutput.io)).toBe(1);
+        expect(discoveryOutput.err.join("")).toContain("package.json");
+
+        const root = await temporaryProject();
+        await writeFile(
+            join(root, "package.json"),
+            JSON.stringify({ piExtensionSettings: { definition: "settings.mjs" } }),
+        );
+        await writeDefinition(join(root, "settings.mjs"));
+        await writeFile(join(root, "README.md"), "# No markers\n");
+
+        const checkOutput = recordingIo();
+        expect(await runCli(["check", "--root", root], checkOutput.io)).toBe(1);
+        expect(checkOutput.err.join("")).toContain("stale");
+
+        const generateOutput = recordingIo();
+        expect(await runCli(["generate", "--root", root], generateOutput.io)).toBe(0);
+        expect(generateOutput.err).toEqual([]);
+
+        const currentOutput = recordingIo();
+        expect(await runCli(["check", "--root", root], currentOutput.io)).toBe(0);
+        expect(currentOutput.out.join("")).toContain("current");
+
+        await writeFile(
+            join(root, "README.md"),
+            "# Invalid\n\n<!-- pi-extension-settings:start -->\n",
+        );
+        const invalidGenerate = recordingIo();
+        expect(await runCli(["generate", "--root", root], invalidGenerate.io)).toBe(1);
+        expect(invalidGenerate.err.join("")).toContain("markers");
+
+        const invalidCheck = recordingIo();
+        expect(await runCli(["check", "--root", root], invalidCheck.io)).toBe(1);
+        expect(invalidCheck.err.join("")).toContain("markers");
+    });
+});

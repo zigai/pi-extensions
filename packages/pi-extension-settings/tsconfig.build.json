@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "declaration": true,
+    "declarationMap": true,
+    "inlineSources": true,
+    "noEmit": false,
+    "outDir": "dist",
+    "rewriteRelativeImportExtensions": true,
+    "rootDir": "src",
+    "sourceMap": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["test/**/*.ts", "vitest.config.ts"]
+}

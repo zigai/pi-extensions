@@ -1,0 +1,265 @@
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+
+import { afterEach, describe, expect, it } from "vitest";
+
+import { runCli, type CliIo } from "../src/cli.ts";
+import { discoverSettingsProjects } from "../src/projects.ts";
+import { README_GENERATED_END, README_GENERATED_START } from "../src/settings-documentation.ts";
+
+const temporaryDirectories: string[] = [];
+const definitionImport = pathToFileURL(resolve("src/definition.ts")).href;
+
+async function temporaryProject(): Promise<string> {
+    const path = await mkdtemp(join(process.cwd(), ".tmp-settings-project-"));
+    temporaryDirectories.push(path);
+    return path;
+}
+
+async function writeConfiguredPackage(
+    root: string,
+    packageName = "fixture",
+    prevalidation = false,
+): Promise<void> {
+    await mkdir(root, { recursive: true });
+    const piExtensionSettings = prevalidation
+        ? {
+              definition: "./settings.mjs",
+              schema: "./config.schema.json",
+              readme: "./README.md",
+              prevalidation: "./settings.prevalidated.ts",
+          }
+        : {
+              definition: "./settings.mjs",
+              schema: "./config.schema.json",
+              readme: "./README.md",
+          };
+    await writeFile(
+        join(root, "package.json"),
+        `${JSON.stringify(
+            {
+                name: packageName,
+                type: "module",
+                piExtensionSettings,
+            },
+            undefined,
+            2,
+        )}\n`,
+    );
+    await writeFile(
+        join(root, "settings.mjs"),
+        `import { Type } from "typebox";\nimport { defineExtensionSettings } from ${JSON.stringify(definitionImport)};\nexport default defineExtensionSettings({ id: ${JSON.stringify(packageName)}, title: "Fixture", description: "Fixture settings.", schema: Type.Object({ enabled: Type.Boolean({ default: true, description: "Enable it." }) }, { additionalProperties: false }) });\n`,
+    );
+    await writeFile(
+        join(root, "README.md"),
+        `# Fixture\n\n${README_GENERATED_START}\nold\n${README_GENERATED_END}\n`,
+    );
+}
+
+afterEach(async () => {
+    await Promise.all(
+        temporaryDirectories.splice(0).map(async (path) => rm(path, { recursive: true })),
+    );
+});
+
+describe("project discovery", () => {
+    it("discovers a configured standalone package", async () => {
+        const root = await temporaryProject();
+        await writeConfiguredPackage(root, "pi-fixture");
+
+        const discovered = await discoverSettingsProjects(root);
+
+        expect(discovered).toHaveLength(1);
+        expect(discovered[0]?.definition.id).toBe("pi-fixture");
+        expect(discovered[0]?.targets.schemaPath).toBe(join(root, "config.schema.json"));
+    });
+
+    it("accepts a raw definition input and discovers a prevalidation target", async () => {
+        const root = await temporaryProject();
+        await writeConfiguredPackage(root, "pi-input-fixture", true);
+        await writeFile(
+            join(root, "settings.mjs"),
+            `import { Type } from "typebox";\nexport default { id: "pi-input-fixture", title: "Fixture", description: "Fixture settings.", schema: Type.Object({ enabled: Type.Boolean({ default: true, description: "Enable it." }) }, { additionalProperties: false }) };\n`,
+        );
+
+        const discovered = await discoverSettingsProjects(root);
+
+        expect(discovered).toHaveLength(1);
+        expect(discovered[0]?.definition.id).toBe("pi-input-fixture");
+        expect(discovered[0]?.targets.prevalidationPath).toBe(
+            join(root, "settings.prevalidated.ts"),
+        );
+    });
+
+    it("discovers configured npm workspace packages", async () => {
+        const root = await temporaryProject();
+        await writeFile(
+            join(root, "package.json"),
+            JSON.stringify({ name: "root", private: true, workspaces: ["packages/*"] }),
+        );
+        await writeConfiguredPackage(join(root, "packages", "first"), "pi-first");
+        await writeConfiguredPackage(join(root, "packages", "second"), "pi-second");
+
+        const discovered = await discoverSettingsProjects(root);
+
+        expect(discovered.map((project) => project.definition.id)).toEqual([
+            "pi-first",
+            "pi-second",
+        ]);
+    });
+
+    it("rejects unknown manifest keys", async () => {
+        const root = await temporaryProject();
+        await writeFile(
+            join(root, "package.json"),
+            JSON.stringify({
+                piExtensionSettings: { definition: "./settings.mjs", unsupported: true },
+            }),
+        );
+
+        await expect(discoverSettingsProjects(root)).rejects.toThrow("unknown keys");
+    });
+
+    it("rejects artifact paths outside the package", async () => {
+        const root = await temporaryProject();
+        await writeFile(
+            join(root, "package.json"),
+            JSON.stringify({ piExtensionSettings: { definition: "../settings.mjs" } }),
+        );
+
+        await expect(discoverSettingsProjects(root)).rejects.toThrow("must stay inside");
+    });
+
+    it("rejects prevalidation paths outside the package", async () => {
+        const root = await temporaryProject();
+        await writeFile(
+            join(root, "package.json"),
+            JSON.stringify({
+                piExtensionSettings: {
+                    definition: "./settings.mjs",
+                    prevalidation: "../settings.prevalidated.ts",
+                },
+            }),
+        );
+
+        await expect(discoverSettingsProjects(root)).rejects.toThrow("must stay inside");
+    });
+
+    it("rejects modules that do not export a definition", async () => {
+        const root = await temporaryProject();
+        await writeFile(
+            join(root, "package.json"),
+            JSON.stringify({ piExtensionSettings: { definition: "./settings.mjs" } }),
+        );
+        await writeFile(join(root, "settings.mjs"), "export default {};\n");
+
+        await expect(discoverSettingsProjects(root)).rejects.toThrow(
+            "default export must be created by defineExtensionSettings",
+        );
+    });
+});
+
+describe("CLI", () => {
+    function recordingIo() {
+        const stdout: string[] = [];
+        const stderr: string[] = [];
+        const io: CliIo = {
+            stdout: (message) => stdout.push(message),
+            stderr: (message) => stderr.push(message),
+        };
+
+        return { io, stdout, stderr };
+    }
+
+    it("generates and checks configured projects", async () => {
+        const root = await temporaryProject();
+        await writeConfiguredPackage(root, "pi-fixture");
+        const output = recordingIo();
+
+        expect(await runCli(["generate", "--root", root], output.io)).toBe(0);
+        expect(output.stdout.join("")).toContain("updated");
+        expect(await readFile(join(root, "config.schema.json"), "utf8")).toContain(
+            '"title": "Fixture settings"',
+        );
+
+        output.stdout.length = 0;
+        expect(await runCli(["check", "--root", root], output.io)).toBe(0);
+        expect(output.stdout.join("")).toContain("artifacts are current (1 package(s))");
+    });
+
+    it("preflights every workspace before publishing any artifact", async () => {
+        const root = await temporaryProject();
+        await writeFile(
+            join(root, "package.json"),
+            JSON.stringify({ name: "root", private: true, workspaces: ["packages/*"] }),
+        );
+        const first = join(root, "packages", "first");
+        const second = join(root, "packages", "second");
+        await writeConfiguredPackage(first, "pi-first");
+        await writeConfiguredPackage(second, "pi-second");
+        await writeFile(join(first, "config.schema.json"), "first-original\n");
+        await writeFile(
+            join(second, "README.md"),
+            `# Invalid\n\n${README_GENERATED_START}\nmissing end\n`,
+        );
+
+        const output = recordingIo();
+        expect(await runCli(["generate", "--root", root], output.io)).toBe(1);
+        expect(output.stderr.join("")).toContain("markers");
+        expect(await readFile(join(first, "config.schema.json"), "utf8")).toBe("first-original\n");
+    });
+
+    it("generates deterministic prevalidation artifacts and checks drift", async () => {
+        const root = await temporaryProject();
+        await writeConfiguredPackage(root, "pi-runtime-fixture", true);
+        const output = recordingIo();
+        const artifactPath = join(root, "settings.prevalidated.ts");
+
+        expect(await runCli(["generate", "--root", root], output.io)).toBe(0);
+        const first = await readFile(artifactPath, "utf8");
+        expect(first).toContain("Generated by pi-extension-settings");
+        expect(first).toContain('"formatVersion": 1');
+        expect(first).toContain('"fingerprint": "json-sha256-v1:');
+        expect(first).toContain('"semanticFingerprint": "typebox-value-hash-v1:');
+        expect(first).toContain('"enabled": true');
+
+        output.stdout.length = 0;
+        expect(await runCli(["generate", "--root", root], output.io)).toBe(0);
+        expect(await readFile(artifactPath, "utf8")).toBe(first);
+        expect(output.stdout).toEqual([]);
+
+        await writeFile(artifactPath, `${first}// stale\n`);
+        expect(await runCli(["check", "--root", root], output.io)).toBe(1);
+        expect(output.stderr.join("")).toContain("settings.prevalidated.ts");
+    });
+
+    it("fails checks for stale artifacts", async () => {
+        const root = await temporaryProject();
+        await writeConfiguredPackage(root, "pi-fixture");
+        const output = recordingIo();
+
+        expect(await runCli(["check", "--root", root], output.io)).toBe(1);
+        expect(output.stderr.join("")).toContain("stale");
+        expect(output.stderr.join("")).toContain("Run pi-extension-settings generate");
+    });
+
+    it("prints help and rejects invalid arguments", async () => {
+        const help = recordingIo();
+        expect(await runCli([], help.io)).toBe(0);
+        expect(help.stdout.join("")).toContain("Usage: pi-extension-settings");
+
+        const invalid = recordingIo();
+        expect(await runCli(["unknown"], invalid.io)).toBe(2);
+        expect(invalid.stderr.join("")).toContain("Invalid arguments");
+    });
+
+    it("reports when no configured package exists", async () => {
+        const root = await temporaryProject();
+        await writeFile(join(root, "package.json"), JSON.stringify({ name: "empty" }));
+        const output = recordingIo();
+
+        expect(await runCli(["check", "--root", root], output.io)).toBe(1);
+        expect(output.stderr.join("")).toContain("No package.json");
+    });
+});
