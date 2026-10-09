@@ -1,4 +1,4 @@
-/** Repository hygiene checks shared by platform smoke doctor and run preflight. */
+/** Repository hygiene checks shared by platform verification doctor and run preflight. */
 
 import { execSync } from "node:child_process";
 import { readdirSync, statSync } from "node:fs";

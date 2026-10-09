@@ -1,4 +1,4 @@
-/** Platform smoke doctor. Fails before target runs when Crabbox/platform setup is missing. */
+/** Platform verification doctor. Fails before target runs when Crabbox/platform setup is missing. */
 
 import { execFileSync, execSync } from "node:child_process";
 import { accessSync, constants, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
@@ -251,22 +251,22 @@ export async function runDoctor(config, options = {}) {
   const failures = { count: 0 };
   const skipWindowsDisposableProbe = options.skipWindowsDisposableProbe === true;
   const packageName = config?.packageName ?? "pi-codex-goal";
-  const artifactRoot = config?.artifactRoot ?? ".artifacts/platform-smoke";
+  const artifactRoot = config?.artifactRoot ?? ".artifacts/platform-verification";
   const nodeMajor = config?.nodeValidationMajor ?? 24;
-  console.log("\n── Platform smoke config ──");
+  console.log("\n── Platform verification config ──");
   ok(`package: ${packageName}`);
   ok(`targets: ${(config?.requiredTargets ?? []).join(", ")}`);
   ok(`suites: ${(config?.requiredSuites ?? []).join(", ")}`);
   console.log("\n── Crabbox binary ──");
-  const cbox = env("PLATFORM_SMOKE_CRABBOX") || "crabbox";
-  const cboxPath = env("PLATFORM_SMOKE_CRABBOX") || commandPath("crabbox");
+  const cbox = env("PLATFORM_VERIFICATION_CRABBOX") || "crabbox";
+  const cboxPath = env("PLATFORM_VERIFICATION_CRABBOX") || commandPath("crabbox");
   if (!cboxPath) {
     fail(
-      "crabbox not found on PATH; install with Homebrew or set PLATFORM_SMOKE_CRABBOX",
+      "crabbox not found on PATH; install with Homebrew or set PLATFORM_VERIFICATION_CRABBOX",
       failures,
     );
   } else {
-    if (env("PLATFORM_SMOKE_CRABBOX")) {
+    if (env("PLATFORM_VERIFICATION_CRABBOX")) {
       try {
         accessSync(cboxPath, constants.X_OK);
         ok(`binary: ${cboxPath}`);
@@ -293,11 +293,11 @@ export async function runDoctor(config, options = {}) {
     }
   }
 
-  console.log("\n── Model smoke configuration ──");
-  const model = process.env.PLATFORM_SMOKE_MODEL || config?.defaultModel || "zai/glm-5.2";
+  console.log("\n── Model verification configuration ──");
+  const model = process.env.PLATFORM_VERIFICATION_MODEL || config?.defaultModel || "zai/glm-5.2";
   const authEnv = (
-    process.env.PLATFORM_SMOKE_AUTH_ENV
-      ? process.env.PLATFORM_SMOKE_AUTH_ENV.split(",")
+    process.env.PLATFORM_VERIFICATION_AUTH_ENV
+      ? process.env.PLATFORM_VERIFICATION_AUTH_ENV.split(",")
       : (config?.defaultAuthEnv ?? ["ZAI_API_KEY", "Z_AI_API_KEY"])
   )
     .map((name) => String(name).trim())
@@ -305,7 +305,7 @@ export async function runDoctor(config, options = {}) {
 
   ok(`model: ${model}`);
 
-  if ((config?.requiredSuites ?? []).includes("goal-runtime-smoke")) {
+  if ((config?.requiredSuites ?? []).includes("goal-runtime-verification")) {
     const presentAuth = authEnv.filter((name) => env(name).length > 0);
     if (presentAuth.length > 0)
       ok(
@@ -313,7 +313,7 @@ export async function runDoctor(config, options = {}) {
       );
     else
       fail(
-        `no model auth env present; set one of ${authEnv.join(", ")} or PLATFORM_SMOKE_AUTH_ENV`,
+        `no model auth env present; set one of ${authEnv.join(", ")} or PLATFORM_VERIFICATION_AUTH_ENV`,
         failures,
       );
   }
@@ -356,8 +356,8 @@ export async function runDoctor(config, options = {}) {
   else fail("Docker is not available or not running", failures);
 
   console.log("\n── macOS SSH ──");
-  const sshUser = env("PLATFORM_SMOKE_MAC_USER") || env("USER");
-  const sshHost = env("PLATFORM_SMOKE_MAC_HOST") || config?.macosStaticSsh?.host || "localhost";
+  const sshUser = env("PLATFORM_VERIFICATION_MAC_USER") || env("USER");
+  const sshHost = env("PLATFORM_VERIFICATION_MAC_HOST") || config?.macosStaticSsh?.host || "localhost";
   const sshProbe = shell(
     `ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no ${sshUser}@${sshHost} 'node --version && npm --version && git --version'`,
   );
@@ -374,12 +374,12 @@ export async function runDoctor(config, options = {}) {
 
       const windows = config?.windowsParallels ?? {};
       const vmName =
-        env("PLATFORM_SMOKE_WINDOWS_VM") || windows.sourceVm || "pi-extension-windows-template";
+        env("PLATFORM_VERIFICATION_WINDOWS_VM") || windows.sourceVm || "pi-extension-windows-template";
       const snapshot =
-        env("PLATFORM_SMOKE_WINDOWS_SNAPSHOT") || windows.snapshot || "crabbox-ready";
-      const user = env("PLATFORM_SMOKE_WINDOWS_USER") || windows.user || env("USER");
+        env("PLATFORM_VERIFICATION_WINDOWS_SNAPSHOT") || windows.snapshot || "crabbox-ready";
+      const user = env("PLATFORM_VERIFICATION_WINDOWS_USER") || windows.user || env("USER");
       const workRoot =
-        env("PLATFORM_SMOKE_WINDOWS_WORK_ROOT") ||
+        env("PLATFORM_VERIFICATION_WINDOWS_WORK_ROOT") ||
         windows.workRoot ||
         `C:\\crabbox\\${packageName}`;
       const list = shell("prlctl list -a --no-header 2>/dev/null");
@@ -504,16 +504,16 @@ export async function runDoctor(config, options = {}) {
   console.log("\n── Repository hygiene ──");
   const status = shell("git status --short");
   if (status)
-    warn(`${status.split(/\r?\n/).length} uncommitted change(s) recorded for smoke evidence`);
+    warn(`${status.split(/\r?\n/).length} uncommitted change(s) recorded for verification evidence`);
   else ok("git status clean");
 
   checkForbiddenProjectFiles(failures);
   console.log(`\n=== Results: ${failures.count} failure(s) ===`);
 
   if (failures.count > 0) {
-    console.log("Fix doctor failures before running smoke:platform:all.");
+    console.log("Fix doctor failures before running verify:platform:all.");
     process.exitCode = 1;
   } else {
-    console.log("Platform smoke setup is ready.");
+    console.log("Platform verification setup is ready.");
   }
 }

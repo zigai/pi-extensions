@@ -43,7 +43,7 @@ function parseArgs(argv) {
     const arg = argv[i];
     if (arg === "--help" || arg === "-h") {
       console.log(
-        `Usage: node scripts/platform-smoke/goal-runtime-smoke.mjs --model <model> --package-name <name>`,
+        `Usage: node scripts/platform-verification/goal-runtime-verification.mjs --model <model> --package-name <name>`,
       );
 
       process.exit(0);
@@ -223,16 +223,16 @@ function observedSuccessfulReadTool(sessionJsonl, expectedPath, expectedContent)
 
 const args = parseArgs(process.argv);
 const sourceRoot = process.cwd();
-const runId = `goal-runtime-smoke-${new Date()
+const runId = `goal-runtime-verification-${new Date()
   .toISOString()
   .replace(/[-:.TZ]/g, "")
   .slice(0, 14)}-${process.pid}`;
-const runRoot = resolve(sourceRoot, ".platform-smoke-runs", runId);
+const runRoot = resolve(sourceRoot, ".platform-verification-runs", runId);
 const packDir = join(runRoot, "pack");
 const piProject = join(runRoot, "pi-project");
 const sessionDir = join(runRoot, "session");
 const agentDir = join(runRoot, "agent-config");
-const smokeFile = join(piProject, "goal-runtime-smoke.txt");
+const verificationFile = join(piProject, "goal-runtime-verification.txt");
 
 mkdirSync(packDir, { recursive: true });
 mkdirSync(piProject, { recursive: true });
@@ -285,16 +285,16 @@ const piList = run(piCommand, [...piPrefixArgs, "list", "--approve"], {
 commands.push({ name: "pi-list", ...piList });
 
 const expectedContent = "PI_CODEX_GOAL_RUNTIME_OK";
-const prompt = `You are running a real cross-platform smoke test for the pi-codex-goal extension.
+const prompt = `You are running a real cross-platform verification test for the pi-codex-goal extension.
 Do not use slash commands. Use the available goal tools and filesystem tools.
 Required steps:
-1. Call create_goal with an objective that requires creating ${smokeFile} containing ${expectedContent}, verifying the file content from the filesystem, inspecting the current goal, and marking it complete only after verification.
-2. Create ${smokeFile} with exactly ${expectedContent}.
+1. Call create_goal with an objective that requires creating ${verificationFile} containing ${expectedContent}, verifying the file content from the filesystem, inspecting the current goal, and marking it complete only after verification.
+2. Create ${verificationFile} with exactly ${expectedContent}.
 3. Verify the file content by reading it from the filesystem with the built-in read tool, not with shell cat/type.
 4. Call get_goal and confirm the goal is active before completion.
 5. Call update_goal with status complete only after the file content is verified.
 6. Call get_goal again and confirm the final status is complete.
-Final answer exactly: GOAL_RUNTIME_SMOKE_OK status=complete file=${expectedContent}`;
+Final answer exactly: GOAL_RUNTIME_VERIFICATION_OK status=complete file=${expectedContent}`;
 
 const piRun = run(
   piCommand,
@@ -316,7 +316,7 @@ commands.push({ name: "pi-run", ...piRun });
 let fileContent = "";
 
 try {
-  fileContent = readFileSync(smokeFile, "utf8").trim();
+  fileContent = readFileSync(verificationFile, "utf8").trim();
 } catch {}
 
 const sessionJsonlPath = findSessionJsonl(sessionDir);
@@ -327,12 +327,12 @@ try {
 } catch {}
 
 const finalMarkerObserved = piRun.stdout.includes(
-  `GOAL_RUNTIME_SMOKE_OK status=complete file=${expectedContent}`,
+  `GOAL_RUNTIME_VERIFICATION_OK status=complete file=${expectedContent}`,
 );
 const customGoalObserved = sessionJsonl.includes("pi-codex-goal");
 const completeGoalObserved =
   sessionJsonl.includes('"status":"complete"') || sessionJsonl.includes('"status": "complete"');
-const readToolObserved = observedSuccessfulReadTool(sessionJsonl, smokeFile, expectedContent);
+const readToolObserved = observedSuccessfulReadTool(sessionJsonl, verificationFile, expectedContent);
 const fileVerified = fileContent === expectedContent;
 const ok =
   pack.status === 0 &&
@@ -356,7 +356,7 @@ const result = {
   sessionDir,
   agentDir,
   sessionJsonlPath,
-  smokeFile,
+  verificationFile,
   packedTarball,
   checks: {
     npmPack: pack.status === 0,
@@ -401,8 +401,8 @@ section("PI_RUN_STDERR", piRun.stderr);
 section("SESSION_JSONL_B64", b64(sessionJsonl));
 
 if (ok) {
-  console.log("GOAL_RUNTIME_SMOKE_OK");
+  console.log("GOAL_RUNTIME_VERIFICATION_OK");
 } else {
-  console.log("GOAL_RUNTIME_SMOKE_FAILED");
+  console.log("GOAL_RUNTIME_VERIFICATION_FAILED");
   process.exit(1);
 }

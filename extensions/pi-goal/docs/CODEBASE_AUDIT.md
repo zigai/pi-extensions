@@ -1,11 +1,11 @@
 # Codebase Audit — pi-codex-goal
 
 **Date:** 2026-07-01
-**Scope:** Full repository (`src/`, `test/`, package metadata, docs, platform-smoke operability)
+**Scope:** Full repository (`src/`, `test/`, package metadata, docs, platform-verification operability)
 **Baseline:** `0.1.33` checkout against Pi `0.80.3`
 **Local gate:** `npm run verify`
 **Hosted CI:** GitHub Actions runs `npm ci` and `npm run verify` on Node 24 for `push` and `pull_request`
-**Release platform gate:** local Crabbox `npm run smoke:platform:all`
+**Release platform gate:** local Crabbox `npm run verify:platform:all`
 
 > Historical record: this audit describes the 0.1.33 command contract. The current command surface
 > has since consolidated creation into `/goal`, removed `copy`, `clear`, `resume cancel`, and token
@@ -15,11 +15,11 @@
 
 ## Executive summary
 
-The package remains in **good structural health**. The core runtime is split across focused modules for command/tool API, state transitions, runtime events, stale queued-work cleanup, recovery, persistence, and platform-smoke tooling. No critical or high-severity defects were found in this audit.
+The package remains in **good structural health**. The core runtime is split across focused modules for command/tool API, state transitions, runtime events, stale queued-work cleanup, recovery, persistence, and platform-verification tooling. No critical or high-severity defects were found in this audit.
 
-This pass fixed the low-risk drift and code-judo findings that had clear, behavior-preserving remedies: runtime boundary/resume consolidation, stale queued-work simplification, platform-smoke script consolidation, prompt contract consolidation, duplicate prompt budget rendering, command discoverability gaps, redundant transition validation, one dead export, a double-cloning goal lookup, and the minimal hosted CI workflow.
+This pass fixed the low-risk drift and code-judo findings that had clear, behavior-preserving remedies: runtime boundary/resume consolidation, stale queued-work simplification, platform-verification script consolidation, prompt contract consolidation, duplicate prompt budget rendering, command discoverability gaps, redundant transition validation, one dead export, a double-cloning goal lookup, and the minimal hosted CI workflow.
 
-The ordinary hosted CI workflow is intentionally smaller than the release gate: it runs `npm run verify` on Node 24 only. The full local Crabbox `npm run smoke:platform:all` matrix remains the release-sensitive proof and passed in this release pass.
+The ordinary hosted CI workflow is intentionally smaller than the release gate: it runs `npm run verify` on Node 24 only. The full local Crabbox `npm run verify:platform:all` matrix remains the release-sensitive proof and passed in this release pass.
 
 ## Coverage map
 
@@ -34,7 +34,7 @@ The ordinary hosted CI workflow is intentionally smaller than the release gate: 
 | Continuations             | Inspected                     | `continuation-scheduler.ts`, `queued-goal-work.ts`, `queued-goal-messages.ts`                                    |
 | Stale queued-work cleanup | Inspected and partially fixed | `stale-queued-work-*`, stale queued-work tests                                                                   |
 | Recovery                  | Inspected                     | `recovery*.ts`, recovery tests                                                                                   |
-| Platform smoke            | Inspected and fixed           | `scripts/platform-smoke*`, `platform-smoke.config.mjs`, `docs/platform-smoke.md`, `test/platform-smoke.check.ts` |
+| Platform verification            | Inspected and fixed           | `scripts/platform-verification*`, `platform-verification.config.mjs`, `docs/platform-verification.md`, `test/platform-verification.check.ts` |
 | Hosted CI                 | Added                         | `.github/workflows/verify.yml` runs Node 24 `npm ci` and `npm run verify` on `push` and `pull_request`           |
 | Security/performance      | Sampled only                  | Secret/artifact hygiene checks inspected; no dedicated threat model or profiling performed                       |
 
@@ -59,10 +59,10 @@ The ordinary hosted CI workflow is intentionally smaller than the release gate: 
 ```
 
 ```text
-[🟡 Medium] [Platform operability] scripts/platform-smoke/targets.mjs, scripts/platform-smoke/platform-build-windows.ps1, test/platform-smoke.check.ts
-- Problem: Platform-build behavior was maintained in separate POSIX shell and PowerShell implementations, while smoke script inventories and marker expectations were repeated in tests/scripts.
-- Evidence: `scripts/platform-smoke/platform-build.mjs` now owns the suite body for all targets, the Windows PowerShell file is a thin wrapper, `script-inventory.mjs` feeds the cheap checks, and `package.json` delegates `check:platform-smoke` to `check.mjs`.
-- Impact: Platform smoke has one build-suite path and less source-text drift in the cheap check.
+[🟡 Medium] [Platform operability] scripts/platform-verification/targets.mjs, scripts/platform-verification/platform-build-windows.ps1, test/platform-verification.check.ts
+- Problem: Platform-build behavior was maintained in separate POSIX shell and PowerShell implementations, while verification script inventories and marker expectations were repeated in tests/scripts.
+- Evidence: `scripts/platform-verification/platform-build.mjs` now owns the suite body for all targets, the Windows PowerShell file is a thin wrapper, `script-inventory.mjs` feeds the cheap checks, and `package.json` delegates `check:platform-verification` to `check.mjs`.
+- Impact: Platform verification has one build-suite path and less source-text drift in the cheap check.
 - Blast radius: Release validation on macOS, Ubuntu, and native Windows.
 - Fix: Fixed in this session.
 ```
@@ -130,7 +130,7 @@ The ordinary hosted CI workflow is intentionally smaller than the release gate: 
 - [x] Simplify stale queued-work lifecycle and anonymous terminal-consumer duplication.
 - [x] Remove unused `terminalCleanupFromObserving` export.
 - [x] Consolidate platform-build POSIX/PowerShell behavior into one Node orchestrator with a thin Windows wrapper.
-- [x] Single-source platform-smoke script inventory for cheap checks.
+- [x] Single-source platform-verification script inventory for cheap checks.
 - [x] Consolidate completion-audit prompt contract text for runtime prompt surfaces.
 - [x] Consolidate repeated prompt Budget lines behind one helper.
 - [x] Remove redundant runtime-accounting validation branch.
@@ -142,12 +142,12 @@ The ordinary hosted CI workflow is intentionally smaller than the release gate: 
 
 ### Release-sensitive verification
 
-- [x] Run full local Crabbox `npm run smoke:platform:all` before release-sensitive platform claims.
+- [x] Run full local Crabbox `npm run verify:platform:all` before release-sensitive platform claims.
 
 ## Validation evidence
 
-- `npm run verify` passed under Node/Pi local dev setup: TypeScript typecheck, 6 platform-smoke checks, and 318 regular tests.
-- `npm run smoke:platform:all` passed under Pi 0.80.3: doctor, macOS, Ubuntu, and native Windows target suites.
+- `npm run verify` passed under Node/Pi local dev setup: TypeScript typecheck, 6 platform-verification checks, and 318 regular tests.
+- `npm run verify:platform:all` passed under Pi 0.80.3: doctor, macOS, Ubuntu, and native Windows target suites.
 - `.github/workflows/verify.yml` was added for ordinary hosted CI: Node 24, `npm ci`, `npm run verify`, `push`, and `pull_request`.
 
 ## Assumptions, gaps, and blocked checks

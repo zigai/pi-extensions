@@ -4,5 +4,5 @@ param(
 )
 
 $ErrorActionPreference = "Continue"
-& node .\scripts\platform-smoke\platform-build.mjs --package-name $PackageName --node-validation-major $NodeValidationMajor
+& node .\scripts\platform-verification\platform-build.mjs --package-name $PackageName --node-validation-major $NodeValidationMajor
 exit $LASTEXITCODE

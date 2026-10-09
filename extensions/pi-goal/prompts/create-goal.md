@@ -27,7 +27,7 @@ The goal must require:
 
 2. Verification evidence
    - Name the concrete evidence required before completion.
-   - Include relevant tests, lint, type checks, builds, smoke checks, diffs, docs, generated outputs, rendered UI inspection, or artifact checks when applicable.
+   - Include relevant tests, lint, type checks, builds, verification checks, diffs, docs, generated outputs, rendered UI inspection, or artifact checks when applicable.
    - If the repository has an existing local CI or validation command, require it unless clearly irrelevant.
 
 3. Constraints and boundaries

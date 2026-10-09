@@ -29,7 +29,7 @@ pi install -l npm:pi-codex-goal
 pi install -l https://github.com/fitchmultz/pi-codex-goal@vX.Y.Z
 ```
 
-Those write duplicate package entries under `.pi/` for the current project, causing `get_goal`, `create_goal`, and `update_goal` tool-registration conflicts with the global local-checkout install. For install-path release verification, use an isolated temp project/config directory or remove the project-local entries immediately after the check. With Pi 0.79+ project trust, pass `--approve` for isolated project-local package install/list/non-interactive smoke commands when those commands must load `.pi/settings.json`. If conflicts appear, inspect `pi list --approve` and `.pi/settings.json`, then remove any project-local `pi-codex-goal` npm/GitHub installs so only the global local-checkout package remains active.
+Those write duplicate package entries under `.pi/` for the current project, causing `get_goal`, `create_goal`, and `update_goal` tool-registration conflicts with the global local-checkout install. For install-path release verification, use an isolated temp project/config directory or remove the project-local entries immediately after the check. With Pi 0.79+ project trust, pass `--approve` for isolated project-local package install/list/non-interactive verification commands when those commands must load `.pi/settings.json`. If conflicts appear, inspect `pi list --approve` and `.pi/settings.json`, then remove any project-local `pi-codex-goal` npm/GitHub installs so only the global local-checkout package remains active.
 
 ## Verify before finishing
 
@@ -37,18 +37,18 @@ Those write duplicate package entries under `.pi/` for the current project, caus
 npm run verify
 ```
 
-Runs `tsc --noEmit`, the platform-smoke harness checks, and the full Vitest suite (`test/*.test.ts`).
+Runs `tsc --noEmit`, the platform-verification harness checks, and the full Vitest suite (`test/*.test.ts`).
 
-For release-sensitive changes, also use the local Crabbox platform gate documented in `docs/platform-smoke.md`:
+For release-sensitive changes, also use the local Crabbox platform gate documented in `docs/platform-verification.md`:
 
 ```sh
-npm run check:platform-smoke
-npm run smoke:platform:all
+npm run check:platform-verification
+npm run verify:platform:all
 ```
 
-`smoke:platform:all` runs `smoke:platform:doctor` before any target suite starts.
+`verify:platform:all` runs `verify:platform:doctor` before any target suite starts.
 
-The required gate runs the full suite plus a real model-backed goal-tool smoke on macOS, Ubuntu Linux, and native Windows. The default smoke model is `zai/glm-5.2`; override with `PLATFORM_SMOKE_MODEL` when needed.
+The required gate runs the full suite plus a real model-backed goal-tool verification on macOS, Ubuntu Linux, and native Windows. The default verification model is `zai/glm-5.2`; override with `PLATFORM_VERIFICATION_MODEL` when needed.
 
 ## Layout
 

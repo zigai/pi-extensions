@@ -1,4 +1,4 @@
-/** Thin Crabbox CLI wrapper for cross-platform smoke tests. */
+/** Thin Crabbox CLI wrapper for cross-platform verification tests. */
 
 import { spawn } from "node:child_process";
 
@@ -7,11 +7,11 @@ function env(name) {
 }
 
 export function crabboxBin() {
-  return process.env.PLATFORM_SMOKE_CRABBOX || "crabbox";
+  return process.env.PLATFORM_VERIFICATION_CRABBOX || "crabbox";
 }
 
 function packageSlug(config = {}) {
-  return config.packageName || process.env.PLATFORM_SMOKE_PACKAGE_SLUG || "pi-codex-goal";
+  return config.packageName || process.env.PLATFORM_VERIFICATION_PACKAGE_SLUG || "pi-codex-goal";
 }
 
 function expandUser(value, user) {
@@ -21,11 +21,11 @@ function expandUser(value, user) {
 export function buildTargetBaseArgs(targetName, config = {}) {
   switch (targetName) {
     case "macos": {
-      const user = env("PLATFORM_SMOKE_MAC_USER") || env("USER");
-      const host = env("PLATFORM_SMOKE_MAC_HOST") || config.macosStaticSsh?.host || "localhost";
+      const user = env("PLATFORM_VERIFICATION_MAC_USER") || env("USER");
+      const host = env("PLATFORM_VERIFICATION_MAC_HOST") || config.macosStaticSsh?.host || "localhost";
       const configuredRoot = config.macosStaticSsh?.workRoot;
       const workRoot =
-        env("PLATFORM_SMOKE_MAC_WORK_ROOT") ||
+        env("PLATFORM_VERIFICATION_MAC_WORK_ROOT") ||
         (configuredRoot
           ? expandUser(configuredRoot, user)
           : `/Users/${user}/crabbox/${packageSlug(config)}`);
@@ -46,7 +46,7 @@ export function buildTargetBaseArgs(targetName, config = {}) {
     }
     case "ubuntu": {
       const image =
-        env("PLATFORM_SMOKE_UBUNTU_IMAGE") || config.ubuntuContainerImage || "cimg/node:24.16";
+        env("PLATFORM_VERIFICATION_UBUNTU_IMAGE") || config.ubuntuContainerImage || "cimg/node:24.16";
       return [
         "--provider",
         "local-container",
@@ -59,12 +59,12 @@ export function buildTargetBaseArgs(targetName, config = {}) {
     case "windows-native": {
       const windows = config.windowsParallels ?? {};
       const vm =
-        env("PLATFORM_SMOKE_WINDOWS_VM") || windows.sourceVm || "pi-extension-windows-template";
+        env("PLATFORM_VERIFICATION_WINDOWS_VM") || windows.sourceVm || "pi-extension-windows-template";
       const snapshot =
-        env("PLATFORM_SMOKE_WINDOWS_SNAPSHOT") || windows.snapshot || "crabbox-ready";
-      const user = env("PLATFORM_SMOKE_WINDOWS_USER") || windows.user || env("USER");
+        env("PLATFORM_VERIFICATION_WINDOWS_SNAPSHOT") || windows.snapshot || "crabbox-ready";
+      const user = env("PLATFORM_VERIFICATION_WINDOWS_USER") || windows.user || env("USER");
       const workRoot =
-        env("PLATFORM_SMOKE_WINDOWS_WORK_ROOT") ||
+        env("PLATFORM_VERIFICATION_WINDOWS_WORK_ROOT") ||
         windows.workRoot ||
         `C:\\crabbox\\${packageSlug(config)}`;
       return [
@@ -85,7 +85,7 @@ export function buildTargetBaseArgs(targetName, config = {}) {
       ];
     }
     default:
-      throw new Error(`unknown platform smoke target: ${targetName}`);
+      throw new Error(`unknown platform verification target: ${targetName}`);
   }
 }
 
@@ -144,7 +144,7 @@ export async function execCrabbox(args, options = {}) {
     if (options.timeout) {
       timeout = setTimeout(() => {
         stderr.push(
-          Buffer.from(`\n[platform-smoke] crabbox timed out after ${options.timeout}ms\n`),
+          Buffer.from(`\n[platform-verification] crabbox timed out after ${options.timeout}ms\n`),
         );
 
         try {

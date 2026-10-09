@@ -7,7 +7,7 @@ npm-debug.log*
 coverage/
 dist/
 .artifacts/
-.platform-smoke-runs/
+.platform-verification-runs/
 .scratchpad.md
 .DS_Store
 .debug/

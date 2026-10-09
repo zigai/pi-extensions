@@ -10,7 +10,7 @@ function parseArgs(argv) {
     const arg = argv[i];
     if (arg === "--help" || arg === "-h") {
       console.log(
-        "Usage: node scripts/platform-smoke/platform-build.mjs --package-name <name> --node-validation-major <major>",
+        "Usage: node scripts/platform-verification/platform-build.mjs --package-name <name> --node-validation-major <major>",
       );
 
       process.exit(0);
@@ -70,7 +70,7 @@ const stamp = new Date()
   .toISOString()
   .replace(/[-:.TZ]/g, "")
   .slice(0, 14);
-const runRoot = join(".platform-smoke-runs", `platform-build-${stamp}-${process.pid}`);
+const runRoot = join(".platform-verification-runs", `platform-build-${stamp}-${process.pid}`);
 const packDir = resolve(sourceRoot, runRoot, "pack");
 const testWorkspace = resolve(sourceRoot, runRoot, "test-workspace");
 const piProject = resolve(sourceRoot, runRoot, "pi-project");

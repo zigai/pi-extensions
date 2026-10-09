@@ -112,7 +112,7 @@ In bridged MCP environments, Pi may expose these tools with names such as `pi__g
 
 - [Goal commands and lifecycle](docs/usage.md)
 - [Configuration](docs/configuration.md)
-- [Platform smoke testing](docs/platform-smoke.md)
+- [Platform verification testing](docs/platform-verification.md)
 
 ## License
 

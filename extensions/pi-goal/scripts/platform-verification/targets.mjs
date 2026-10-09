@@ -1,4 +1,4 @@
-/** Target/suite runner for pi-codex-goal platform smoke. */
+/** Target/suite runner for pi-codex-goal platform verification. */
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -38,12 +38,12 @@ function psSingleQuote(value) {
   return `'${String(value).replace(/'/g, "''")}'`;
 }
 
-function smokeModel(config) {
-  return process.env.PLATFORM_SMOKE_MODEL || config.defaultModel || "zai/glm-5.2";
+function verificationModel(config) {
+  return process.env.PLATFORM_VERIFICATION_MODEL || config.defaultModel || "zai/glm-5.2";
 }
 
 function authEnvAllowList(config) {
-  const raw = process.env.PLATFORM_SMOKE_AUTH_ENV;
+  const raw = process.env.PLATFORM_VERIFICATION_AUTH_ENV;
   const names = raw ? raw.split(",") : (config.defaultAuthEnv ?? ["ZAI_API_KEY", "Z_AI_API_KEY"]);
 
   return names.map((name) => String(name).trim()).filter(Boolean);
@@ -197,7 +197,7 @@ function writeAssertions(suiteDir, checks) {
     writeFileSync(
       resolve(suiteDir, "failures.md"),
       [
-        `# Platform smoke failures`,
+        `# Platform verification failures`,
         "",
         ...assertions.checks
           .filter((check) => !check.ok)
@@ -438,14 +438,14 @@ export function createLeaseCleanupFailureResult(config, targetName, leaseId, sto
   return createLeaseCleanupResult(config, targetName, leaseId, stopResult);
 }
 
-export function buildGoalRuntimeSmokeCommand(config, targetName) {
-  const model = smokeModel(config);
+export function buildGoalRuntimeVerificationCommand(config, targetName) {
+  const model = verificationModel(config);
   const packageName = config.packageName ?? "pi-codex-goal";
   if (platformFor(targetName) === "powershell") {
-    return `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "node .\\scripts\\platform-smoke\\goal-runtime-smoke.mjs --model ${model.replace(/"/g, '`"')} --package-name ${packageName.replace(/"/g, '`"')}"`;
+    return `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "node .\\scripts\\platform-verification\\goal-runtime-verification.mjs --model ${model.replace(/"/g, '`"')} --package-name ${packageName.replace(/"/g, '`"')}"`;
   }
 
-  return `node scripts/platform-smoke/goal-runtime-smoke.mjs --model ${shellQuote(model)} --package-name ${shellQuote(packageName)}`;
+  return `node scripts/platform-verification/goal-runtime-verification.mjs --model ${shellQuote(model)} --package-name ${shellQuote(packageName)}`;
 }
 
 export function buildPlatformBuildCommand(
@@ -454,18 +454,18 @@ export function buildPlatformBuildCommand(
   nodeValidationMajor = 24,
 ) {
   if (platformFor(targetName) === "powershell") {
-    return `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\platform-smoke\\platform-build-windows.ps1 -PackageName ${psSingleQuote(packageName)} -NodeValidationMajor ${nodeValidationMajor}`;
+    return `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\platform-verification\\platform-build-windows.ps1 -PackageName ${psSingleQuote(packageName)} -NodeValidationMajor ${nodeValidationMajor}`;
   }
 
-  return `node scripts/platform-smoke/platform-build.mjs --package-name ${shellQuote(packageName)} --node-validation-major ${nodeValidationMajor}`;
+  return `node scripts/platform-verification/platform-build.mjs --package-name ${shellQuote(packageName)} --node-validation-major ${nodeValidationMajor}`;
 }
 
-async function runGoalRuntimeSmokeSuite(config, targetName, suiteName, leaseSession) {
+async function runGoalRuntimeVerificationSuite(config, targetName, suiteName, leaseSession) {
   const runId = makeRunId();
   const suiteDir = createSuiteDir(config.artifactRoot, runId, targetName, suiteName);
   const startedAt = Date.now();
   const slug = `${config.packageName}-${targetName}`;
-  const command = buildGoalRuntimeSmokeCommand(config, targetName);
+  const command = buildGoalRuntimeVerificationCommand(config, targetName);
 
   writeFileSync(
     resolve(suiteDir, "target.json"),
@@ -474,7 +474,7 @@ async function runGoalRuntimeSmokeSuite(config, targetName, suiteName, leaseSess
 
   writeFileSync(
     resolve(suiteDir, "suite.json"),
-    JSON.stringify({ suiteName, modelCalls: 1, model: smokeModel(config) }, null, 2),
+    JSON.stringify({ suiteName, modelCalls: 1, model: verificationModel(config) }, null, 2),
   );
 
   writeCommand(suiteDir, command);
@@ -620,10 +620,10 @@ async function runGoalRuntimeSmokeSuite(config, targetName, suiteName, leaseSess
       id: "runtime-marker",
       fn: () =>
         result.stdout.includes("PLATFORM_GOAL_RUNTIME_OK=1") &&
-        result.stdout.includes("GOAL_RUNTIME_SMOKE_OK"),
+        result.stdout.includes("GOAL_RUNTIME_VERIFICATION_OK"),
     },
     { id: "runtime-result-ok", fn: () => runtimeResult.ok === true },
-    { id: "model-configured", fn: () => runtimeResult.model === smokeModel(config) },
+    { id: "model-configured", fn: () => runtimeResult.model === verificationModel(config) },
     { id: "pi-run-exit-zero", fn: () => runtimeResult.checks?.piRun === true },
     { id: "final-marker", fn: () => runtimeResult.checks?.finalMarkerObserved === true },
     { id: "file-verified", fn: () => runtimeResult.checks?.fileVerified === true },
@@ -692,7 +692,7 @@ async function runGoalRuntimeSmokeSuite(config, targetName, suiteName, leaseSess
       elapsedMs,
       exitCode: result.code,
       signal: result.signal,
-      model: smokeModel(config),
+      model: verificationModel(config),
     },
     expectedFiles,
   );
@@ -701,8 +701,8 @@ async function runGoalRuntimeSmokeSuite(config, targetName, suiteName, leaseSess
 }
 
 export async function runTargetSuite(config, targetName, suiteName, leaseSession) {
-  if (suiteName === "goal-runtime-smoke")
-    return runGoalRuntimeSmokeSuite(config, targetName, suiteName, leaseSession);
+  if (suiteName === "goal-runtime-verification")
+    return runGoalRuntimeVerificationSuite(config, targetName, suiteName, leaseSession);
   if (suiteName !== "platform-build") throw new Error(`unknown suite: ${suiteName}`);
 
   const runId = makeRunId();

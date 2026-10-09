@@ -2,7 +2,7 @@
 
 import { spawnSync } from "node:child_process";
 
-import { platformSmokeCheckTest, platformSmokeSyntaxScripts } from "./script-inventory.mjs";
+import { platformVerificationCheckTest, platformVerificationSyntaxScripts } from "./script-inventory.mjs";
 
 function run(command, args) {
   const result = spawnSync(command, args, {
@@ -13,7 +13,7 @@ function run(command, args) {
   return result.status ?? 1;
 }
 
-for (const script of platformSmokeSyntaxScripts) {
+for (const script of platformVerificationSyntaxScripts) {
   const status = run(process.execPath, ["--check", script]);
   if (status !== 0) process.exit(status);
 }
@@ -26,7 +26,7 @@ process.exit(
     "vitest",
     "run",
     "--config",
-    "scripts/platform-smoke/vitest.config.mjs",
-    platformSmokeCheckTest,
+    "scripts/platform-verification/vitest.config.mjs",
+    platformVerificationCheckTest,
   ]),
 );

@@ -1,4 +1,4 @@
-/** Artifact helpers for platform smoke suites. */
+/** Artifact helpers for platform verification suites. */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { relative, resolve } from "node:path";

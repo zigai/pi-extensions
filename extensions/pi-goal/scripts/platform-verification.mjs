@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import {
   forbiddenArtifactMessage,
   localForbiddenProjectArtifacts,
-} from "./platform-smoke/hygiene.mjs";
+} from "./platform-verification/hygiene.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -15,22 +15,22 @@ const repoRoot = resolve(__dirname, "..");
 const require = createRequire(import.meta.url);
 let config;
 try {
-  config = require(resolve(repoRoot, "platform-smoke.config.mjs"));
+  config = require(resolve(repoRoot, "platform-verification.config.mjs"));
   if (config.default) config = config.default;
 } catch {
   config = null;
 }
 
 function printHelp() {
-  console.log(`Usage: node scripts/platform-smoke.mjs <command> [options]
+  console.log(`Usage: node scripts/platform-verification.mjs <command> [options]
 
 Commands:
   doctor                     Validate Crabbox and platform prerequisites; spends no model tokens
   run --target <names>       Run one or more comma-separated targets concurrently
 
 Package scripts:
-  check:platform-smoke       Syntax-check harness scripts and run cheap harness invariant tests
-  smoke:platform:all         Runs doctor first, then the full macOS/Ubuntu/Windows matrix
+  check:platform-verification       Syntax-check harness scripts and run cheap harness invariant tests
+  verify:platform:all         Runs doctor first, then the full macOS/Ubuntu/Windows matrix
   run --suite <name>         Run one suite on all or specified targets
 
 Targets:
@@ -38,7 +38,7 @@ Targets:
 
 Suites:
   platform-build             npm ci, npm run verify, npm pack, packed pi install/list with project trust approval
-  goal-runtime-smoke         real model run through packed pi-codex-goal install
+  goal-runtime-verification         real model run through packed pi-codex-goal install
 
 Options:
   --target <names>           Comma-separated target names
@@ -48,26 +48,26 @@ Options:
   --help, -h                 Show this help
 
 Examples:
-  npm run check:platform-smoke
-  npm run smoke:platform:doctor
-  npm run smoke:platform:all
-  node scripts/platform-smoke.mjs doctor
-  node scripts/platform-smoke.mjs run --target macos
-  node scripts/platform-smoke.mjs run --target ubuntu --suite platform-build
-  node scripts/platform-smoke.mjs run --target macos,ubuntu,windows-native
+  npm run check:platform-verification
+  npm run verify:platform:doctor
+  npm run verify:platform:all
+  node scripts/platform-verification.mjs doctor
+  node scripts/platform-verification.mjs run --target macos
+  node scripts/platform-verification.mjs run --target ubuntu --suite platform-build
+  node scripts/platform-verification.mjs run --target macos,ubuntu,windows-native
 
 Environment:
-  PLATFORM_SMOKE_CRABBOX              Optional Crabbox binary override; defaults to crabbox on PATH
-  PLATFORM_SMOKE_MAC_HOST             macOS SSH host; default localhost
-  PLATFORM_SMOKE_MAC_USER             macOS SSH user; default $USER
-  PLATFORM_SMOKE_MAC_WORK_ROOT        macOS Crabbox work root
-  PLATFORM_SMOKE_UBUNTU_IMAGE         Ubuntu local-container image
-  PLATFORM_SMOKE_WINDOWS_VM           Parallels Windows template VM
-  PLATFORM_SMOKE_WINDOWS_SNAPSHOT     Parallels snapshot name
-  PLATFORM_SMOKE_WINDOWS_USER         Windows SSH user
-  PLATFORM_SMOKE_WINDOWS_WORK_ROOT    Windows work root, for example C:\\crabbox\\pi-codex-goal
-  PLATFORM_SMOKE_MODEL                Model for real runtime smoke; default zai/glm-5.2
-  PLATFORM_SMOKE_AUTH_ENV             Comma-separated auth env names to forward; default ZAI_API_KEY,Z_AI_API_KEY
+  PLATFORM_VERIFICATION_CRABBOX              Optional Crabbox binary override; defaults to crabbox on PATH
+  PLATFORM_VERIFICATION_MAC_HOST             macOS SSH host; default localhost
+  PLATFORM_VERIFICATION_MAC_USER             macOS SSH user; default $USER
+  PLATFORM_VERIFICATION_MAC_WORK_ROOT        macOS Crabbox work root
+  PLATFORM_VERIFICATION_UBUNTU_IMAGE         Ubuntu local-container image
+  PLATFORM_VERIFICATION_WINDOWS_VM           Parallels Windows template VM
+  PLATFORM_VERIFICATION_WINDOWS_SNAPSHOT     Parallels snapshot name
+  PLATFORM_VERIFICATION_WINDOWS_USER         Windows SSH user
+  PLATFORM_VERIFICATION_WINDOWS_WORK_ROOT    Windows work root, for example C:\\crabbox\\pi-codex-goal
+  PLATFORM_VERIFICATION_MODEL                Model for real runtime verification; default zai/glm-5.2
+  PLATFORM_VERIFICATION_AUTH_ENV             Comma-separated auth env names to forward; default ZAI_API_KEY,Z_AI_API_KEY
 `);
 }
 
@@ -126,10 +126,10 @@ async function main() {
     process.exit(args.command === "help" ? 0 : 1);
   }
 
-  if (!config) throw new Error("platform-smoke.config.mjs not found or invalid");
+  if (!config) throw new Error("platform-verification.config.mjs not found or invalid");
 
   if (args.command === "doctor") {
-    const { runDoctor } = await import("./platform-smoke/doctor.mjs");
+    const { runDoctor } = await import("./platform-verification/doctor.mjs");
     await runDoctor(config, { skipWindowsDisposableProbe: args.skipWindowsDisposableProbe });
     return;
   }
@@ -138,11 +138,11 @@ async function main() {
     const localForbidden = localForbiddenProjectArtifacts();
     if (localForbidden.length > 0) {
       throw new Error(
-        `${forbiddenArtifactMessage(localForbidden)}. Remove them before platform sync or run smoke:platform:doctor for full setup checks.`,
+        `${forbiddenArtifactMessage(localForbidden)}. Remove them before platform sync or run verify:platform:doctor for full setup checks.`,
       );
     }
 
-    const { runTargetSuite, runTargetSuites } = await import("./platform-smoke/targets.mjs");
+    const { runTargetSuite, runTargetSuites } = await import("./platform-verification/targets.mjs");
     const targets = args.target
       ? args.target
           .split(",")
@@ -165,7 +165,7 @@ async function main() {
     const failed = results.filter(({ result }) => !result.ok);
     if (failed.length > 0) {
       console.error(
-        `\nPlatform smoke failed for ${failed.map(({ targetName }) => targetName).join(", ")}. See ${config.artifactRoot}.`,
+        `\nPlatform verification failed for ${failed.map(({ targetName }) => targetName).join(", ")}. See ${config.artifactRoot}.`,
       );
       process.exitCode = 1;
     }

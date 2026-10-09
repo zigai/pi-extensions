@@ -3,7 +3,7 @@ node_modules/
 .env
 .env.*
 .artifacts/
-.platform-smoke-runs/
+.platform-verification-runs/
 .crabbox/
 .debug/
 dist/
