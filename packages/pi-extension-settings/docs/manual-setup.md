@@ -60,7 +60,7 @@ Add the settings manifest and commands to `package.json`:
 
 The generated schema and README paths default to `config.schema.json` and `README.md`. Set `schema` or `readme` in the manifest only when those defaults do not fit the package.
 
-If `package.json` uses a `files` allowlist, publish both manifest targets. Including `src` is sufficient; a bundled package can include `src/settings-input.ts` and `src/settings.prevalidated.ts` explicitly.
+If `package.json` uses a `files` allowlist, publish every runtime artifact: `src/settings-input.ts`, `src/settings.prevalidated.ts`, and the root `config.schema.json` used by the file-URL loader. Including `src` covers the two TypeScript files, but it does not include the root schema automatically.
 
 Generate the initial artifacts:
 

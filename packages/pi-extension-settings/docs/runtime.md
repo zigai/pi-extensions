@@ -12,7 +12,7 @@ Pi Extension Settings separates authoring-time schema work from the code loaded 
 
 ```ts
 import { loadPiExtensionSettings } from "@zigai/pi-extension-settings/pi";
-import settingsDefinition from "./settings.ts";
+import { settingsDefinition } from "./settings.ts";
 
 const loaded = loadPiExtensionSettings(settingsDefinition, ctx, {
   bundledSchema: {
