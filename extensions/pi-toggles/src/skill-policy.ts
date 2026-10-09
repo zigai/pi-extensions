@@ -3,7 +3,7 @@ import { createCapabilityId, normalizeSourceInfo } from "./capability.ts";
 import type { PolicyPlan } from "./resolve-capability-policy.ts";
 
 const STANDARD_SKILL_SECTION =
-    /\n\nThe following skills provide specialized instructions for specific tasks\.[\s\S]*?<\/available_skills>/;
+    /(?:\n\n)?The following skills provide specialized instructions for specific tasks\.[\s\S]*?<\/available_skills>/;
 
 function skillEntry(plan: PolicyPlan, skill: Skill) {
     const source = normalizeSourceInfo(skill.sourceInfo);

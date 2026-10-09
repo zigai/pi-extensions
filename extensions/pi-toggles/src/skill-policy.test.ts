@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Skill } from "@earendil-works/pi-coding-agent";
+import { formatSkillsForPrompt, type Skill } from "@earendil-works/pi-coding-agent";
 import { createPolicyConfiguration } from "./capability-policy.ts";
 import { buildCapabilityCatalog } from "./capability-catalog.ts";
 import { resolveCapabilityPolicy } from "./resolve-capability-policy.ts";
@@ -58,6 +58,17 @@ function planFor(state: "off" | "on" | "name-only" | "user-only") {
 }
 
 describe("skill policy", () => {
+    it.each(["read", "bash"] as const)(
+        "removes off skills from the native structured prompt with %s",
+        (tool) => {
+            const base = `<rules>Existing rules</rules>\n\n<skills>\n${formatSkillsForPrompt([skill], tool).trimStart()}\n</skills>`;
+            const filtered = applySkillPolicyToPrompt(base, [skill], planFor("off"));
+
+            expect(base).toContain("<name>review</name>");
+            expect(filtered).not.toContain("<name>review</name>");
+            expect(filtered).toContain("<rules>");
+        },
+    );
     it("removes off and user-only skills from the model prompt", () => {
         const base = `Base\n\nThe following skills provide specialized instructions for specific tasks.\nUse the read tool to load a skill's file when the task matches its description.\nWhen a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.\n\n<available_skills>\n  <skill>\n    <name>review</name>\n    <description>Review code carefully</description>\n    <location>/agent/skills/review/SKILL.md</location>\n  </skill>\n</available_skills>`;
         expect(applySkillPolicyToPrompt(base, [skill], planFor("off"))).toBe("Base");
