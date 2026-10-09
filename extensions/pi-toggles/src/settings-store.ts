@@ -1,11 +1,12 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
-import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
-import type { LoadedPiExtensionSettings, PiSettingsContext } from "@zigai/pi-extension-settings/pi";
+import {
+    updatePiExtensionSettings,
+    type LoadedPiExtensionSettings,
+    type PiSettingsContext,
+} from "@zigai/pi-extension-settings/pi";
 import { Compile } from "typebox/compile";
 import { selectorKey } from "./capability.ts";
 import {
+    extensionSettingsDefinition,
     loadTogglesSettings,
     settingsDocumentSchema,
     settingsSchema,
@@ -13,10 +14,6 @@ import {
     type PolicyDecision,
     type SettingsDocument,
 } from "./settings.ts";
-
-const GLOBAL_SCHEMA_REFERENCE = "./schemas/pi-toggles.schema.json";
-const PROJECT_SCHEMA_REFERENCE =
-    "https://raw.githubusercontent.com/zigai/pi-toggles/HEAD/config.schema.json";
 
 const settingsDocumentValidator = Compile(settingsDocumentSchema);
 
@@ -116,62 +113,6 @@ function applyPatch(document: SettingsDocument, patch: SettingsPatch): SettingsD
     return { ...document, overrides: [...decisionsBySelector.values()] };
 }
 
-async function readDocument(path: string): Promise<SettingsDocument | SettingsWriteResult> {
-    let text: string;
-    try {
-        text = await readFile(path, "utf8");
-    } catch (cause: unknown) {
-        if (cause instanceof Error && "code" in cause && cause.code === "ENOENT") {
-            return {};
-        }
-        return { status: "failed", message: `Could not read ${path}.`, cause };
-    }
-
-    let raw: unknown;
-    try {
-        raw = JSON.parse(text);
-    } catch (cause: unknown) {
-        return {
-            status: "invalid",
-            message: `Refusing to overwrite malformed settings ${path}: ${cause instanceof Error ? cause.message : String(cause)}`,
-        };
-    }
-    const parsed = parseDocument(raw);
-    return parsed.status === "ok"
-        ? parsed.document
-        : {
-              status: "invalid",
-              message: `Refusing to overwrite invalid settings ${path}: ${parsed.message}`,
-          };
-}
-
-async function writeDocument(
-    path: string,
-    document: SettingsDocument,
-): Promise<SettingsWriteResult | undefined> {
-    const parsed = parseDocument(document);
-    if (parsed.status === "invalid") {
-        return { status: "invalid", message: `Generated settings are invalid: ${parsed.message}` };
-    }
-    const temporaryPath = `${path}.${randomUUID()}.tmp`;
-    try {
-        await mkdir(dirname(path), { recursive: true });
-        await writeFile(temporaryPath, `${JSON.stringify(parsed.document, null, 2)}\n`, {
-            encoding: "utf8",
-            mode: 0o600,
-        });
-        await rename(temporaryPath, path);
-        return undefined;
-    } catch (cause: unknown) {
-        try {
-            await unlink(temporaryPath);
-        } catch {
-            // The temporary file may not have been created or may already have been renamed.
-        }
-        return { status: "failed", message: `Could not write ${path}.`, cause };
-    }
-}
-
 export class SettingsStore {
     #snapshot: SettingsSnapshot;
 
@@ -226,19 +167,22 @@ export class SettingsStore {
             return { status: "blocked", message: `No ${scope} settings path is available.` };
         }
 
-        const result = await withFileMutationQueue(path, async () => {
-            const current = await readDocument(path);
-            if ("status" in current) {
-                return current;
-            }
-            const schemaReference =
-                current.$schema ??
-                (scope === "global" ? GLOBAL_SCHEMA_REFERENCE : PROJECT_SCHEMA_REFERENCE);
-            return writeDocument(path, { ...applyPatch(current, patch), $schema: schemaReference });
+        const result = await updatePiExtensionSettings(extensionSettingsDefinition, this.context, {
+            scope,
+            update: (current) => applyPatch(current, patch),
         });
-        if (result !== undefined) {
-            return result;
+        switch (result.status) {
+            case "updated":
+            case "unchanged":
+                return { status: "saved", snapshot: this.reload() };
+            case "blocked":
+                return { status: "blocked", message: result.message };
+            case "invalid-existing":
+            case "invalid-update":
+                return { status: "invalid", message: result.message };
+            case "conflict":
+            case "failed":
+                return { status: "failed", message: result.message, cause: result };
         }
-        return { status: "saved", snapshot: this.reload() };
     }
 }
