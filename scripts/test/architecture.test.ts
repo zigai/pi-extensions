@@ -19,7 +19,7 @@ function fixture(): string {
     roots.push(root);
     write(
         root,
-        "tsconfig.json",
+        "tsconfig.architecture.json",
         JSON.stringify({
             compilerOptions: { allowJs: true, noEmit: true },
             include: ["packages/**/*.ts", "packages/**/*.js"],
@@ -221,4 +221,82 @@ test.each([
     expect(diagnostics).toHaveLength(1);
     expect(diagnostics[0]).toContain(message);
     expect(diagnostics[0]).toContain("schema-input.ts -> src/thinking-levels.ts");
+});
+
+test("discovers mixed workspace roots and conditional exports without flattening contracts", () => {
+    const root = fixture();
+    write(
+        root,
+        "package.json",
+        JSON.stringify({
+            workspaces: ["extensions/*", "packages/*"],
+            pi: { extensions: ["./packages/b/src/index.ts", "./packages/a/src/index.ts"] },
+        }),
+    );
+    write(
+        root,
+        "extensions/library/package.json",
+        JSON.stringify({
+            name: "@test/library",
+            exports: { ".": { types: "./dist/index.d.ts", import: ["./dist/index.js", null] } },
+        }),
+    );
+    const inventory = loadWorkspacePackages(root);
+    expect(inventory.packages.map((workspace) => workspace.manifest.name)).toEqual([
+        "@test/library",
+        "@test/a",
+        "@test/b",
+    ]);
+    expect(inventory.packages[0]?.manifest.exports).toEqual({
+        ".": { types: "./dist/index.d.ts", import: ["./dist/index.js", null] },
+    });
+    expect(checkArchitecture(inventory)).toEqual([]);
+});
+
+test("collection is an alternative resource inventory, not another root activation", () => {
+    const root = fixture();
+    for (const name of ["a", "b"]) {
+        write(
+            root,
+            `packages/${name}/package.json`,
+            JSON.stringify({
+                name: `@test/${name}`,
+                version: "1.0.0",
+                exports: { ".": "./src/index.ts" },
+                pi: { extensions: ["./src/index.ts"] },
+            }),
+        );
+    }
+    write(
+        root,
+        "packages/collection/package.json",
+        JSON.stringify({
+            name: "@test/collection",
+            exports: { ".": "./package.json" },
+            dependencies: { "@test/b": "1.0.0", "@test/a": "1.0.0" },
+            bundleDependencies: ["@test/b", "@test/a"],
+            piCollection: ["@test/b", "@test/a"],
+            pi: {
+                extensions: [
+                    "./node_modules/@test/b/src/index.ts",
+                    "./node_modules/@test/a/src/index.ts",
+                ],
+            },
+        }),
+    );
+    const inventory = loadWorkspacePackages(root);
+    expect(inventory.extensions.map(({ workspace }) => workspace.manifest.name)).toEqual([
+        "@test/b",
+        "@test/a",
+    ]);
+    write(
+        root,
+        "packages/collection/package.json",
+        JSON.stringify({
+            name: "@test/collection",
+            exports: { ".": "./package.json" },
+            piCollection: ["@test/a", "@test/b"],
+        }),
+    );
+    expect(() => loadWorkspacePackages(root)).toThrow("ordered root extension inventory");
 });

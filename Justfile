@@ -61,7 +61,7 @@ fix:
     npm run format
 # Remove coverage and temporary output
 clean:
-    rm -rf coverage dist
+    node scripts/workspace-tasks.ts clean
 
 alias cov := coverage
 alias fmt := format

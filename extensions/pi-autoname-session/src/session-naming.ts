@@ -240,6 +240,7 @@ export function measureSession(entries: readonly SessionEntry[]): SessionMetrics
                 }
                 break;
             }
+            case "system":
             case "toolResult":
             case "bashExecution":
             case "branchSummary":
@@ -576,6 +577,8 @@ function renderMessage(
     scope: ConversationScope,
 ): string {
     switch (message.role) {
+        case "system":
+            return "";
         case "bashExecution":
             return scope === "minimized" ? "" : `Ran: ${message.command}\n${message.output}`.trim();
         case "branchSummary":

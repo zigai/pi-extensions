@@ -10,7 +10,7 @@ import {
     type GlowupRenderer,
 } from "@zigai/pi-glowup/protocol";
 
-import { parseApplyPatch, type ApplyPatchHunk } from "./engine.js";
+import { parseApplyPatch, type ApplyPatchHunk } from "./engine.ts";
 import { compileSchema } from "../../schema-parsing.ts";
 
 const PATCH_LABELS = {

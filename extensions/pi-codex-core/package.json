@@ -12,15 +12,16 @@
     "pi-package",
     "pi-web-search"
   ],
-  "homepage": "https://github.com/zigai/pi-codex-core#readme",
+  "homepage": "https://github.com/zigai/pi-tweaks/tree/master/extensions/pi-codex-core#readme",
   "bugs": {
-    "url": "https://github.com/zigai/pi-codex-core/issues"
+    "url": "https://github.com/zigai/pi-tweaks/issues"
   },
   "license": "MIT",
   "author": "zigai",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/zigai/pi-codex-core.git"
+    "url": "git+https://github.com/zigai/pi-tweaks.git",
+    "directory": "extensions/pi-codex-core"
   },
   "files": [
     "src",
@@ -30,6 +31,9 @@
   ],
   "type": "module",
   "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "publishConfig": {
     "access": "public"
   },
@@ -45,20 +49,21 @@
     "typecheck": "tsc --noEmit",
     "check": "npm run config:check && npm run format:check && npm run lint && npm run typecheck && npm test",
     "verify": "npm run check",
-    "release": "release --root .",
-    "release:dry-run": "release --dry --root ."
+    "release": "release --root ../..",
+    "release:dry-run": "release --dry --root ../.."
   },
   "dependencies": {
-    "@zigai/pi-glowup": "^1.0.0",
+    "@zigai/pi-extension-settings": "0.5.3",
+    "@zigai/pi-glowup": "1.0.0",
     "better-result": "^2.9.2",
     "js-tiktoken": "^1.0.21"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "^0.99.2",
-    "@earendil-works/pi-coding-agent": "^0.99.2",
-    "@earendil-works/pi-tui": "^0.99.2",
+    "@earendil-works/pi-ai": "1.0.0",
+    "@earendil-works/pi-coding-agent": "1.0.0",
+    "@earendil-works/pi-tui": "1.0.0",
     "@types/node": "^24.10.1",
-    "@vitest/coverage-v8": "^4.1.9",
+    "@vitest/coverage-v8": "4.1.9",
     "oxfmt": "^0.71.0",
     "oxlint": "^1.86.0",
     "oxlint-rules": "0.4.3",
@@ -90,7 +95,7 @@
   "engines": {
     "node": ">=22.19.0 <27"
   },
-  "packageManager": "npm@11.0.0",
+  "packageManager": "npm@11.19.0",
   "pi": {
     "extensions": [
       "./src/index.ts"
@@ -98,6 +103,8 @@
   },
   "piExtensionSettings": {
     "definition": "./src/settings-input.ts",
-    "prevalidation": "./src/settings.prevalidated.ts"
+    "prevalidation": "./src/settings.prevalidated.ts",
+    "schema": "./config.schema.json",
+    "readme": "./README.md"
   }
 }

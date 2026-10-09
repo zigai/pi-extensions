@@ -5,6 +5,7 @@ on:
   push:
     tags:
       - "@zigai/pi-*@*"
+      - "pi-*@*"
   workflow_dispatch:
     inputs:
       tag:
@@ -44,44 +45,7 @@ jobs:
         env:
           INPUT_TAG: ${{ inputs.tag }}
           REF_NAME: ${{ github.ref_name }}
-        run: |
-          tag="${INPUT_TAG:-$REF_NAME}"
-          package="${tag%@*}"
-          version="${tag##*@}"
-
-          case "$tag" in
-            @zigai/pi-*@*) ;;
-            *)
-              echo "Unsupported package tag: $tag" >&2
-              exit 1
-              ;;
-          esac
-
-          if [ "$package" = "$tag" ] || [ "$version" = "$tag" ]; then
-            echo "Could not determine package and version from tag: $tag" >&2
-            exit 1
-          fi
-
-          if [[ ! "$package" =~ ^@zigai/pi-[a-z0-9-]+$ ]]; then
-            echo "Invalid workspace package name: $package" >&2
-            exit 1
-          fi
-
-          manifest="packages/${package#@zigai/}/package.json"
-          if [ ! -f "$manifest" ]; then
-            echo "Workspace manifest does not exist: $manifest" >&2
-            exit 1
-          fi
-
-          manifest_version="$(jq -r '.version' "$manifest")"
-          if [ "$manifest_version" != "$version" ]; then
-            echo "Tag version $version does not match $package manifest version $manifest_version" >&2
-            exit 1
-          fi
-
-          echo "name=$package" >> "$GITHUB_OUTPUT"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+        run: node scripts/release-package.ts
 
       - name: Publish package and missing workspace prerequisites
         env:

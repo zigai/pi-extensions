@@ -8,6 +8,7 @@ const StringDictionarySchema = Type.Record(Type.String(), Type.String());
 const PackageManifestSchema = Type.Object(
   {
     bundledDependencies: Type.Optional(Type.Array(Type.String())),
+    bundleDependencies: Type.Optional(Type.Array(Type.String())),
     dependencies: Type.Optional(StringDictionarySchema),
     devDependencies: Type.Optional(StringDictionarySchema),
     files: Type.Optional(Type.Array(Type.String())),
@@ -31,12 +32,13 @@ test("package keeps the bundled creation template without exposing /create-goal"
   assert.ok(packageJson.files?.includes("prompts"));
   assert.deepEqual(packageJson.pi?.extensions, ["./src/index.ts"]);
   assert.equal(packageJson.pi?.prompts, undefined);
-  assert.equal(packageJson.dependencies?.["pi-typed-args"], "file:../pi-typed-commands");
-  assert.deepEqual(packageJson.bundledDependencies, ["pi-typed-args"]);
+  assert.equal(packageJson.dependencies?.["pi-typed-args"], "0.1.1");
+  assert.equal(packageJson.dependencies?.["@zigai/pi-glowup"], "1.0.0");
+  assert.equal(packageJson.bundledDependencies, undefined);
+  assert.equal(packageJson.bundleDependencies, undefined);
   assert.equal(packageJson.scripts?.test, "vitest run");
   assert.equal(packageJson.devDependencies?.tsx, undefined);
   assert.match(packageJson.devDependencies?.vitest ?? "", /^\^4\./);
-  assert.match(readFileSync(".npmrc", "utf8"), /^install-links=true\s*$/);
 });
 
 test("bundled creation prompt is a dynamic settings template", () => {

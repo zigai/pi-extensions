@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/zigai/pi-glowup/config.schema.json",
+  "$id": "https://raw.githubusercontent.com/zigai/pi-tweaks/master/extensions/pi-glowup/config.schema.json",
   "title": "Pi Glowup settings",
   "description": "High-signal rendering for Pi tool calls and results.",
   "type": "object",

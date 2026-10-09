@@ -21,25 +21,34 @@
     "url": "git+https://github.com/zigai/pi-tweaks.git"
   },
   "workspaces": [
+    "extensions/*",
     "packages/*"
   ],
   "type": "module",
   "scripts": {
-    "lint": "oxlint -c ./oxlint.config.ts .",
-    "lint:fix": "oxlint -c ./oxlint.config.ts . --fix",
-    "format": "oxfmt .",
-    "format:check": "oxfmt --check .",
-    "check": "npm run build:internals && npm run architecture:check && npm run config:check && npm run format:check && npm run lint && npm run typecheck && npm test && npm run test:package",
+    "lint": "node scripts/workspace-tasks.ts lint",
+    "lint:fix": "node scripts/workspace-tasks.ts lint:fix",
+    "format": "node scripts/workspace-tasks.ts format",
+    "format:check": "node scripts/workspace-tasks.ts format:check",
+    "check": "npm run build && npm run check:root && npm run check:workspaces",
     "build:internals": "npm run build -w @zigai/pi-extension-internals",
     "architecture:check": "node scripts/architecture-check.ts",
-    "test": "npm run build:internals && vitest run --maxWorkers=8",
-    "coverage": "npm test -- --coverage",
-    "test:package": "npm run build:internals && node scripts/package-check.mjs",
-    "typecheck": "npm run build:internals && tsc --noEmit",
+    "test": "npm run build && node scripts/workspace-tasks.ts test",
+    "coverage": "npm run build && node scripts/workspace-tasks.ts coverage",
+    "test:package": "npm run build && npm run test:package:built",
+    "typecheck": "npm run build && node scripts/workspace-tasks.ts typecheck",
     "release": "release --root .",
     "release:dry-run": "release --dry --root .",
-    "config:generate": "pi-extension-settings generate",
-    "config:check": "pi-extension-settings check"
+    "config:generate": "npm run build -w @zigai/pi-extension-settings && node packages/pi-extension-settings/dist/cli-entry.js generate",
+    "config:check": "npm run build -w @zigai/pi-extension-settings && node packages/pi-extension-settings/dist/cli-entry.js check",
+    "build": "node scripts/workspace-tasks.ts build",
+    "check:workspaces": "node scripts/workspace-tasks.ts check:workspaces",
+    "check:root": "npm run architecture:check && npm run config:check && npm run format:check:root && npm run lint:root && npm run typecheck:root && npm run test:root && npm run test:package:built",
+    "format:check:root": "node scripts/workspace-tasks.ts format:check:root",
+    "lint:root": "node scripts/workspace-tasks.ts lint:root",
+    "typecheck:root": "node scripts/workspace-tasks.ts typecheck:root",
+    "test:root": "node scripts/workspace-tasks.ts test:root",
+    "test:package:built": "node scripts/package-check.mjs"
   },
   "dependencies": {
     "@zigai/pi-extension-settings": "0.5.3"
@@ -66,24 +75,36 @@
     "@earendil-works/pi-tui": "^1.0.0",
     "typebox": "*"
   },
+  "allowScripts": {
+    "node-pty@1.1.0": true,
+    "esbuild@0.28.1": true
+  },
   "pi": {
     "extensions": [
-      "./packages/pi-model-filter/src/index.ts",
-      "./packages/pi-ui-tweaks/src/index.ts",
-      "./packages/pi-model-alias/src/index.ts",
-      "./packages/pi-tree/src/index.ts",
-      "./packages/pi-footer/src/index.ts",
-      "./packages/pi-response-renderer/src/index.ts",
-      "./packages/pi-plain-user-messages/src/index.ts",
-      "./packages/pi-message-highlights/src/index.ts",
-      "./packages/pi-status-bar/src/index.ts",
-      "./packages/pi-keymap-tweaks/src/index.ts",
-      "./packages/pi-model-modes/src/index.ts",
-      "./packages/pi-prompt-history/src/index.ts",
-      "./packages/pi-mention-anything/src/index.ts",
-      "./packages/pi-mention-skill/src/index.ts",
-      "./packages/pi-mention-project/src/index.ts",
-      "./packages/pi-trust-all-folders/src/index.ts"
+      "./extensions/pi-model-filter/src/index.ts",
+      "./extensions/pi-ui-tweaks/src/index.ts",
+      "./extensions/pi-model-alias/src/index.ts",
+      "./extensions/pi-tree/src/index.ts",
+      "./extensions/pi-footer/src/index.ts",
+      "./extensions/pi-response-renderer/src/index.ts",
+      "./extensions/pi-plain-user-messages/src/index.ts",
+      "./extensions/pi-message-highlights/src/index.ts",
+      "./extensions/pi-status-bar/src/index.ts",
+      "./extensions/pi-keymap-tweaks/src/index.ts",
+      "./extensions/pi-model-modes/src/index.ts",
+      "./extensions/pi-prompt-history/src/index.ts",
+      "./extensions/pi-mention-anything/src/index.ts",
+      "./extensions/pi-mention-skill/src/index.ts",
+      "./extensions/pi-mention-project/src/index.ts",
+      "./extensions/pi-trust-all-folders/src/index.ts",
+      "./extensions/pi-branch/index.ts",
+      "./extensions/pi-codex-core/src/index.ts",
+      "./extensions/pi-glowup/dist/src/index.ts",
+      "./extensions/pi-goal/src/index.ts",
+      "./extensions/pi-autoname-session/src/index.ts",
+      "./extensions/pi-toggles/src/index.ts",
+      "./extensions/pi-settings-ui/src/index.ts",
+      "./extensions/pi-expanded-skills/src/index.ts"
     ]
   }
 }

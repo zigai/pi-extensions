@@ -4,7 +4,7 @@
 
 This Pi package declares resources in `package.json`; `src/index.ts` exports its default `ExtensionAPI` factory. Use Pi's extension APIs without modifying installed Pi source. Put package descriptions in `package.json`, not invented extension metadata.
 
-Run `just setup` after cloning and `just check` before handing off changes (`just coverage` for coverage output). Preserve pre-commit's first `config:check` hook. Verify visual changes in a real tmux/TTY session.
+Run `just setup` and `npm run build` from the monorepo root after cloning and `just check` from this workspace before handing off changes (`just coverage` for coverage output). Preserve pre-commit's first `config:check` hook. Verify visual changes in a real tmux/TTY session.
 
 Keep Pi-host packages (`pi-ai`, `pi-agent-core`, `pi-coding-agent`, `pi-tui` under `@earendil-works`, and `typebox`) as `"*"` peers and development dependencies for local checking. Extension-owned libraries belong in runtime dependencies.
 

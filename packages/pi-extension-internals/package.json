@@ -8,7 +8,7 @@
     "pi-extension",
     "prototype-patching"
   ],
-  "homepage": "https://github.com/zigai/pi-tweaks/tree/main/packages/pi-extension-internals#readme",
+  "homepage": "https://github.com/zigai/pi-tweaks/tree/master/packages/pi-extension-internals#readme",
   "bugs": {
     "url": "https://github.com/zigai/pi-tweaks/issues"
   },

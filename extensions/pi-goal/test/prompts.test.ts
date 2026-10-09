@@ -12,8 +12,8 @@ import {
   goalToolReference,
   supersededContinuationMessage,
   timeLimitPrompt,
-} from "../src/prompts.js";
-import { createGoal } from "../src/state.js";
+} from "../src/prompts.ts";
+import { createGoal } from "../src/state.ts";
 
 test("tool prompt guidelines include exposed and namespaced goal tool guidance", () => {
   assert.match(GOAL_TOOL_NAME_GUIDANCE, /available tool list/);

@@ -11,5 +11,25 @@
     "checkJs": true,
     "types": ["node"]
   },
-  "include": ["packages/**/*.ts", "packages/**/*.mjs", "scripts/**/*.ts", "scripts/**/*.mjs"]
+  "include": [
+    "extensions/**/*.ts",
+    "extensions/**/*.mjs",
+    "packages/pi-extension-internals/**/*.ts",
+    "scripts/**/*.ts",
+    "scripts/**/*.mjs",
+    "vitest.config.ts",
+    "oxlint.config.ts"
+  ],
+  "exclude": [
+    "extensions/pi-branch/**",
+    "extensions/pi-codex-core/**",
+    "extensions/pi-glowup/**",
+    "extensions/pi-goal/**",
+    "extensions/pi-autoname-session/**",
+    "extensions/pi-toggles/**",
+    "extensions/pi-settings-ui/**",
+    "extensions/pi-expanded-skills/**",
+    "**/dist/**",
+    "**/node_modules/**"
+  ]
 }

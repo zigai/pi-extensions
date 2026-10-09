@@ -11,19 +11,19 @@ import type {
   ExtensionToolContext,
 } from "@earendil-works/pi-coding-agent";
 
-import goalExtension, { __testHooks } from "../../src/index.js";
-import type { GoalToolResponse } from "../../src/format.js";
-import type { CreateGoalArgs, GetGoalArgs, UpdateGoalArgs } from "../../src/glowup-rendering.js";
-import { isContextOverflowError } from "../../src/recovery.js";
-import { isGoalCustomEntry, reconstructGoal } from "../../src/state.js";
+import goalExtension, { __testHooks } from "../../src/index.ts";
+import type { GoalToolResponse } from "../../src/format.ts";
+import type { CreateGoalArgs, GetGoalArgs, UpdateGoalArgs } from "../../src/glowup-rendering.ts";
+import { isContextOverflowError } from "../../src/recovery.ts";
+import { isGoalCustomEntry, reconstructGoal } from "../../src/state.ts";
 import {
   toQueuedGoalContextCarrier,
   type ActiveGoalQueuedDetails,
   type QueuedGoalContextCarrier,
   type QueuedGoalContextInput,
   type QueuedGoalUserContent,
-} from "../../src/queued-goal-messages.js";
-import { CUSTOM_ENTRY_TYPE } from "../../src/types.js";
+} from "../../src/queued-goal-messages.ts";
+import { CUSTOM_ENTRY_TYPE } from "../../src/types.ts";
 
 interface HarnessEvent {
   type: string;

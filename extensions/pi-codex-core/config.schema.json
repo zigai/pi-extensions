@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/zigai/pi-codex-core/config.schema.json",
+  "$id": "https://raw.githubusercontent.com/zigai/pi-tweaks/master/extensions/pi-codex-core/config.schema.json",
   "title": "Pi Codex Core settings",
   "description": "Everything GPT models need to feel at home in Pi.",
   "type": "object",

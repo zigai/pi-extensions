@@ -12,7 +12,7 @@ Pi Toggles is a central control panel for deciding which tools and skills Pi exp
 ## Install
 
 ```sh
-pi install git:github.com/zigai/pi-toggles
+pi install npm:@zigai/pi-toggles
 ```
 
 ## Quick start

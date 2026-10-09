@@ -2,7 +2,7 @@
 
 Everything GPT models need to feel at home in Pi.
 
-[![CI](https://github.com/zigai/pi-codex-core/actions/workflows/ci.yml/badge.svg)](https://github.com/zigai/pi-codex-core/actions/workflows/ci.yml)
+[![CI](https://github.com/zigai/pi-tweaks/actions/workflows/ci.yml/badge.svg)](https://github.com/zigai/pi-tweaks/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/@zigai/pi-codex-core?color=blue)](https://www.npmjs.com/package/@zigai/pi-codex-core)
 [![npm downloads](https://img.shields.io/npm/dm/@zigai/pi-codex-core?color=blue)](https://www.npmjs.com/package/@zigai/pi-codex-core)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)

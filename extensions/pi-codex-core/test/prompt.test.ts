@@ -6,7 +6,7 @@ import type { BuildSystemPromptOptions, Skill } from "@earendil-works/pi-coding-
 
 // Pi does not export its renderer publicly. Exercise the installed implementation
 // here so a host format change cannot silently invalidate our interoperability tests.
-import { buildSystemPrompt } from "../node_modules/@earendil-works/pi-coding-agent/dist/core/system-prompt.js";
+import { buildSystemPrompt } from "./pi-system-prompt.ts";
 import { supportsCodexPromptPersonality } from "../src/prompt/personality.ts";
 import {
     buildCodexCoreSystemPrompt,

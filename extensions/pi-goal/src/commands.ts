@@ -1,17 +1,17 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { defineTypedCommand, installTypedCommandUx, registerTypedCommand } from "pi-typed-args/pi";
 
-import { createGoalCreationPrompt, type GoalCreationPromptInput } from "./goal-creation-prompt.js";
-import { formatGoalSummary } from "./format.js";
-import type { GoalStartTurnStrategy } from "./recovery-machine.js";
-import { compactContinuationPrompt, continuationPrompt } from "./prompts.js";
-import { adjustGoal, goalsEquivalent, replaceGoal, updateGoalStatus } from "./state.js";
+import { createGoalCreationPrompt, type GoalCreationPromptInput } from "./goal-creation-prompt.ts";
+import { formatGoalSummary } from "./format.ts";
+import type { GoalStartTurnStrategy } from "./recovery-machine.ts";
+import { compactContinuationPrompt, continuationPrompt } from "./prompts.ts";
+import { adjustGoal, goalsEquivalent, replaceGoal, updateGoalStatus } from "./state.ts";
 import {
   CUSTOM_ENTRY_TYPE,
   type GoalEntrySource,
   type GoalTimeConstraints,
   type ThreadGoal,
-} from "./types.js";
+} from "./types.ts";
 
 export interface CommandHost {
   getGoal(): ThreadGoal | null;

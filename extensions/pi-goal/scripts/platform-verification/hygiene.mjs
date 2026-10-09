@@ -27,8 +27,8 @@ export function isForbiddenLocalArtifactPath(path) {
   return /(^|\/)\.env(?:\..*)?$/.test(path) || /(^|\/)[^/]+\.tgz$/.test(path);
 }
 
-export function trackedForbiddenProjectPaths() {
-  const tracked = shell("git ls-files")?.split(/\r?\n/).filter(Boolean) ?? [];
+export function trackedForbiddenProjectPaths(root = ".") {
+  const tracked = shell("git ls-files", { cwd: root })?.split(/\r?\n/).filter(Boolean) ?? [];
   return tracked.filter(isForbiddenProjectPath);
 }
 
@@ -36,7 +36,19 @@ function scanLocalForbiddenArtifacts(dir, depth, maxDepth, results) {
   if (depth > maxDepth) return;
 
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (depth === 0 && entry.name === "node_modules") continue;
+    if (
+      [
+        "node_modules",
+        ".git",
+        "dist",
+        "coverage",
+        ".artifacts",
+        ".platform-verification-runs",
+        ".crabbox",
+        ".debug",
+      ].includes(entry.name)
+    )
+      continue;
 
     const relative = dir === "." ? `./${entry.name}` : `${dir}/${entry.name}`;
     const projectPath = relative.replace(/^\.\//, "");
@@ -58,9 +70,9 @@ function scanLocalForbiddenArtifacts(dir, depth, maxDepth, results) {
   }
 }
 
-export function localForbiddenProjectArtifacts() {
+export function localForbiddenProjectArtifacts(root = ".") {
   const results = [];
-  scanLocalForbiddenArtifacts(".", 0, 2, results);
+  scanLocalForbiddenArtifacts(root, 0, 6, results);
   return results;
 }
 

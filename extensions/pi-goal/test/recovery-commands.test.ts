@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
-import { continuationGoalIdFromPrompt, continuationPrompt } from "../src/prompts.js";
-import { isGoalCustomEntry } from "../src/state.js";
-import { CUSTOM_ENTRY_TYPE } from "../src/types.js";
+import { continuationGoalIdFromPrompt, continuationPrompt } from "../src/prompts.ts";
+import { isGoalCustomEntry } from "../src/state.ts";
+import { CUSTOM_ENTRY_TYPE } from "../src/types.ts";
 import {
   createRuntimeHarness,
   emitPersistentAssistantError,
   sentUserMessageText,
   sessionShutdownEvent,
-} from "./support/runtime-harness.js";
-import { givenOverflowPausedGoal, replaceGoalAfterOverflowPause } from "./support/scenarios.js";
+} from "./support/runtime-harness.ts";
+import { givenOverflowPausedGoal, replaceGoalAfterOverflowPause } from "./support/scenarios.ts";
 
 test("/goal resume after non-retryable pause resets recovery counters", async () => {
   const harness = createRuntimeHarness();

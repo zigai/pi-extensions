@@ -4,7 +4,7 @@ import { Value } from "typebox/value";
 import { ToolExecutionComponent, type AgentToolResult } from "@earendil-works/pi-coding-agent";
 import type { GlowupRenderTheme } from "../../src/rendering/theme.ts";
 import { call, text } from "../../src/tools/protocol/contract.ts";
-import { jsonValueParser, type JsonValue } from "../../src/json-value.js";
+import { jsonValueParser, type JsonValue } from "../../src/json-value.ts";
 import { stringField } from "../../src/unknown-values.ts";
 import type { ThirdPartyToolRendererPlugin, ThirdPartyToolResult } from "../../src/tools/types.ts";
 import {

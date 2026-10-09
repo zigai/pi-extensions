@@ -12,11 +12,11 @@ import {
   clearActiveHostOverflowRecovery,
   recoveryPhaseBlocksContinuation,
   type GoalRecoveryMachineState,
-} from "./recovery-machine.js";
-import { isRecoveryPendingAttention, reasonFromRecoveryPendingAttention } from "./recovery.js";
-import { applyStaleQueuedWorkEffects, runStaleQueuedWorkPlan } from "./goal-runtime-event-utils.js";
-import type { GoalRuntimeSessionHandlerContext } from "./goal-runtime-event-handler-types.js";
-import type { ThreadGoal } from "./types.js";
+} from "./recovery-machine.ts";
+import { isRecoveryPendingAttention, reasonFromRecoveryPendingAttention } from "./recovery.ts";
+import { applyStaleQueuedWorkEffects, runStaleQueuedWorkPlan } from "./goal-runtime-event-utils.ts";
+import type { GoalRuntimeSessionHandlerContext } from "./goal-runtime-event-handler-types.ts";
+import type { ThreadGoal } from "./types.ts";
 
 interface PendingRecoveryShutdownContext {
   recoveryState: Pick<GoalRecoveryMachineState, "attention">;

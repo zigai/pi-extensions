@@ -17,7 +17,7 @@ import {
   normalizeActiveGoalToolPolicy,
   validateActiveGoalToolPolicy,
   type ActiveGoalToolPolicy,
-} from "./goal-tool-policy.js";
+} from "./goal-tool-policy.ts";
 
 const EXTENSION_ID = "pi-codex-goal";
 const CONFIG_BASENAME = "config.json";

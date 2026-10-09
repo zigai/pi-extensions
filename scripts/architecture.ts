@@ -7,6 +7,7 @@ import { API, type Program } from "typescript/unstable/sync";
 
 import {
     isWithinDirectory,
+    exportTargets,
     type WorkspacePackage,
     type WorkspacePackages,
 } from "./workspace-packages.ts";
@@ -129,9 +130,9 @@ function checkSettingsClosure(
 
     const forbidden = new Set([
         path.resolve(workspace.directory, settings.prevalidation),
-        ...Object.values(workspace.manifest.exports).map((entry) =>
-            path.resolve(workspace.directory, entry),
-        ),
+        ...Object.values(workspace.manifest.exports)
+            .flatMap(exportTargets)
+            .map((entry) => path.resolve(workspace.directory, entry)),
         ...(workspace.manifest.pi?.extensions ?? []).map((entry) =>
             path.resolve(workspace.directory, entry),
         ),
@@ -211,9 +212,16 @@ function checkProjectArchitecture(workspaces: WorkspacePackages, program: Progra
             diagnostics.add(`${manifest.name}: the package must export its root explicitly`);
         }
 
-        const files = globSync("src/**/*.{ts,tsx,mts,cts,js,mjs,cjs}", {
-            cwd: workspace.directory,
-        });
+        const files = new Set(
+            globSync("src/**/*.{ts,tsx,mts,cts,js,mjs,cjs}", {
+                cwd: workspace.directory,
+                exclude: ["**/*.test.*", "**/*.spec.*"],
+            }),
+        );
+        for (const entry of workspace.manifest.pi?.extensions ?? []) {
+            if (!entry.startsWith("./node_modules/") && !entry.startsWith("./dist/"))
+                files.add(entry);
+        }
         for (const relative of files) {
             const file = path.resolve(workspace.directory, relative);
             for (const dependency of load(file).imports) {
@@ -252,7 +260,10 @@ function checkProjectArchitecture(workspaces: WorkspacePackages, program: Progra
                 let exportKey = ".";
                 if (specifier !== name) exportKey = `.${specifier.slice(name.length)}`;
 
-                if (!Object.hasOwn(target.manifest.exports, exportKey)) {
+                if (
+                    !Object.hasOwn(target.manifest.exports, exportKey) ||
+                    exportTargets(target.manifest.exports[exportKey] ?? null).length === 0
+                ) {
                     report(
                         file,
                         dependency,
@@ -287,7 +298,7 @@ export function checkArchitecture(workspaces: WorkspacePackages): string[] {
     const compiler = new API({ cwd: workspaces.root });
 
     try {
-        const config = path.join(workspaces.root, "tsconfig.json");
+        const config = path.join(workspaces.root, "tsconfig.architecture.json");
         const snapshot = compiler.updateSnapshot({ openProjects: [config] });
 
         try {

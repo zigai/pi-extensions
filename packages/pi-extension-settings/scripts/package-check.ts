@@ -9,7 +9,7 @@ import {
     rm,
     writeFile,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -23,10 +23,9 @@ const PackDescriptionSchema = Type.Object({
     files: Type.Array(Type.Object({ path: Type.String() })),
 });
 
-const PackOutputSchema = Type.Union([
-    Type.Array(PackDescriptionSchema, { minItems: 1 }),
-    Type.Record(Type.String(), PackDescriptionSchema),
-]);
+const PackOutputSchema = Type.Object({
+    "@zigai/pi-extension-settings": PackDescriptionSchema,
+});
 const PackageVersionSchema = Type.Object({ version: Type.String() });
 
 type CommandResult = {
@@ -102,7 +101,9 @@ async function assertMissing(pathname: string, message: string): Promise<void> {
     throw new Error(message);
 }
 
-const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pi-extension-settings-package-"));
+const cacheDirectory = path.join(homedir(), ".cache", "pi-tweaks", "package-tests");
+await mkdir(cacheDirectory, { recursive: true });
+const temporaryRoot = await mkdtemp(path.join(cacheDirectory, "settings-"));
 
 try {
     const packDirectory = path.join(temporaryRoot, "pack");
@@ -115,15 +116,16 @@ try {
             "pack",
             "--dry-run=false",
             "--ignore-scripts",
+            "--workspaces=false",
             "--json",
             "--pack-destination",
             packDirectory,
         ],
         packageRoot,
     );
-    const packOutput = Value.Parse(PackOutputSchema, JSON.parse(packedCommand.stdout));
-    const packed = Array.isArray(packOutput) ? packOutput[0] : Object.values(packOutput)[0];
-    if (packed === undefined) throw new Error("npm pack did not return an artifact");
+    const packed = Value.Parse(PackOutputSchema, JSON.parse(packedCommand.stdout))[
+        "@zigai/pi-extension-settings"
+    ];
 
     const packedFiles = new Set(packed.files.map((file) => file.path));
     for (const required of [
@@ -174,10 +176,10 @@ try {
     );
 
     const piVersion = await installedVersion(
-        path.join(packageRoot, "node_modules", "@earendil-works", "pi-coding-agent"),
+        fileURLToPath(new URL("..", import.meta.resolve("@earendil-works/pi-coding-agent"))),
     );
     const typeboxVersion = await installedVersion(
-        path.join(packageRoot, "node_modules", "typebox"),
+        fileURLToPath(new URL("..", import.meta.resolve("typebox"))),
     );
     const tarballPath = path.join(packDirectory, packed.filename);
     await runCommand(

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { packageRoot, piCliPath, packRuntimeDependencies } from "./workspace-packages.mjs";
 
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -222,7 +223,7 @@ function observedSuccessfulReadTool(sessionJsonl, expectedPath, expectedContent)
 }
 
 const args = parseArgs(process.argv);
-const sourceRoot = process.cwd();
+const sourceRoot = packageRoot;
 const runId = `goal-runtime-verification-${new Date()
   .toISOString()
   .replace(/[-:.TZ]/g, "")
@@ -240,22 +241,8 @@ mkdirSync(sessionDir, { recursive: true });
 mkdirSync(agentDir, { recursive: true });
 
 const npm = commandName("npm");
-const piCli = resolve(
-  sourceRoot,
-  "node_modules",
-  ".bin",
-  process.platform === "win32" ? "pi.cmd" : "pi",
-);
-const piJs = resolve(
-  sourceRoot,
-  "node_modules",
-  "@earendil-works",
-  "pi-coding-agent",
-  "dist",
-  "cli.js",
-);
-const piCommand = existsSync(piJs) ? process.execPath : existsSync(piCli) ? piCli : "pi";
-const piPrefixArgs = existsSync(piJs) ? [piJs] : [];
+const piCommand = process.execPath;
+const piPrefixArgs = [piCliPath];
 const piEnv = { PI_CODING_AGENT_DIR: agentDir, PI_OFFLINE: "1" };
 const commands = [];
 const pack = run(npm, ["pack", "--silent", "--pack-destination", packDir], { cwd: sourceRoot });
@@ -268,7 +255,11 @@ const packedTarball =
 const npmInit = run(npm, ["init", "-y"], { cwd: piProject });
 commands.push({ name: "npm-init", ...npmInit });
 
-const npmInstall = run(npm, ["install", "--no-save", packedTarball], { cwd: piProject });
+const npmInstall = run(
+  npm,
+  ["install", "--ignore-scripts", "--no-save", packedTarball, ...packRuntimeDependencies(packDir)],
+  { cwd: piProject },
+);
 commands.push({ name: "npm-install-packed", ...npmInstall });
 
 const installPath = `.${process.platform === "win32" ? "\\" : "/"}node_modules${process.platform === "win32" ? "\\" : "/"}${args.packageName}`;
@@ -332,7 +323,11 @@ const finalMarkerObserved = piRun.stdout.includes(
 const customGoalObserved = sessionJsonl.includes("pi-codex-goal");
 const completeGoalObserved =
   sessionJsonl.includes('"status":"complete"') || sessionJsonl.includes('"status": "complete"');
-const readToolObserved = observedSuccessfulReadTool(sessionJsonl, verificationFile, expectedContent);
+const readToolObserved = observedSuccessfulReadTool(
+  sessionJsonl,
+  verificationFile,
+  expectedContent,
+);
 const fileVerified = fileContent === expectedContent;
 const ok =
   pack.status === 0 &&

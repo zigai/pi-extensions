@@ -10,15 +10,16 @@
     "typebox",
     "typescript"
   ],
-  "homepage": "https://github.com/zigai/pi-extension-settings#readme",
+  "homepage": "https://github.com/zigai/pi-tweaks/tree/master/packages/pi-extension-settings#readme",
   "bugs": {
-    "url": "https://github.com/zigai/pi-extension-settings/issues"
+    "url": "https://github.com/zigai/pi-tweaks/issues"
   },
   "license": "MIT",
   "author": "zigai",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/zigai/pi-extension-settings.git"
+    "url": "git+https://github.com/zigai/pi-tweaks.git",
+    "directory": "packages/pi-extension-settings"
   },
   "bin": {
     "pi-extension-settings": "dist/cli-entry.js"
@@ -68,16 +69,16 @@
     "proper-lockfile": "4.1.2"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.84.2",
-    "@types/node": "^22.19.0",
+    "@earendil-works/pi-coding-agent": "1.0.0",
+    "@types/node": "^24.10.1",
     "@types/proper-lockfile": "4.1.4",
-    "@vitest/coverage-v8": "^4.1.9",
+    "@vitest/coverage-v8": "4.1.9",
     "esbuild": "^0.28.1",
     "oxfmt": "^0.71.0",
     "oxlint": "^1.86.0",
     "oxlint-rules": "0.4.3",
     "oxlint-tsgolint": "^7.0.2003",
-    "typebox": "^1.3.11",
+    "typebox": "^1.3.8",
     "typescript": "^7.0.2",
     "vitest": "^4.1.9"
   },

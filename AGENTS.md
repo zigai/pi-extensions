@@ -2,7 +2,9 @@
 
 ## Work and verification
 
-This is a strict TypeScript ESM npm-workspaces monorepo. Independently installable Pi extensions live under `packages/*`; each package declares its TypeScript entrypoints in `pi.extensions`. Extensions run with user-level permissions: settings persistence and patches of Pi internals require particular care.
+This is a strict TypeScript ESM npm-workspaces monorepo. Independently installable Pi extensions live under `extensions/*`; shared libraries and the published collection live under `packages/*`; each package declares its TypeScript entrypoints in `pi.extensions`. Extensions run with user-level permissions: settings persistence and patches of Pi internals require particular care.
+
+Packages retain independent versions, licenses, published exports, and strict workspace checks. The root task runner runs imported-package tests/checks from their own working directories; do not flatten their configurations or suppress failures. The collection uses bundled published dependencies and Pi resource paths, never a combined extension factory. Root development loading and collection loading are alternatives, not simultaneous activations.
 
 Run `just setup` after cloning and `npm run check` before handing off changes. The check covers architecture, generated settings, formatting, lint, types, tests, and npm packaging. Keep pre-commit enabled, including its generated-settings check.
 

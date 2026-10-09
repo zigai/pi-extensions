@@ -4,7 +4,7 @@
 **Scope:** Full repository (`src/`, `test/`, package metadata, docs, platform-verification operability)
 **Baseline:** `0.1.33` checkout against Pi `0.80.3`
 **Local gate:** `npm run verify`
-**Hosted CI:** GitHub Actions runs `npm ci` and `npm run verify` on Node 24 for `push` and `pull_request`
+**Hosted CI:** The monorepo root owns GitHub Actions, its shared lockfile, and per-workspace verification on Node 24 for `push` and `pull_request`. The standalone workflow references below describe the pre-import audit.
 **Release platform gate:** local Crabbox `npm run verify:platform:all`
 
 > Historical record: this audit describes the 0.1.33 command contract. The current command surface
@@ -23,20 +23,20 @@ The ordinary hosted CI workflow is intentionally smaller than the release gate: 
 
 ## Coverage map
 
-| Area                      | Status                        | Evidence                                                                                                         |
-| ------------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Entry/package metadata    | Inspected                     | `package.json`, `src/index.ts`, `README.md`, `AGENTS.md`                                                         |
-| Commands/tools            | Inspected and fixed           | `src/commands.ts`, `src/tools.ts`, `src/format.ts`, `test/commands.test.ts`, `test/state.test.ts`                |
-| Prompt contracts          | Inspected and fixed           | `src/prompts.ts`, `prompts/create-goal.md`, `test/prompts.test.ts`                                               |
-| Domain/persistence        | Inspected                     | `src/state.ts`, `src/types.ts`, `src/goal-persistence.ts`, persistence/state tests                               |
-| Runtime lifecycle         | Inspected and partially fixed | `goal-runtime-*`, `goal-state-controller.ts`, runtime/recovery tests                                             |
-| Transitions               | Inspected and fixed           | `goal-transition.ts`, `goal-transition-effects.ts`, `test/goal-transition.test.ts`                               |
-| Continuations             | Inspected                     | `continuation-scheduler.ts`, `queued-goal-work.ts`, `queued-goal-messages.ts`                                    |
-| Stale queued-work cleanup | Inspected and partially fixed | `stale-queued-work-*`, stale queued-work tests                                                                   |
-| Recovery                  | Inspected                     | `recovery*.ts`, recovery tests                                                                                   |
-| Platform verification            | Inspected and fixed           | `scripts/platform-verification*`, `platform-verification.config.mjs`, `docs/platform-verification.md`, `test/platform-verification.check.ts` |
-| Hosted CI                 | Added                         | `.github/workflows/verify.yml` runs Node 24 `npm ci` and `npm run verify` on `push` and `pull_request`           |
-| Security/performance      | Sampled only                  | Secret/artifact hygiene checks inspected; no dedicated threat model or profiling performed                       |
+| Area                      | Status                        | Evidence                                                                                                                                     |
+| ------------------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Entry/package metadata    | Inspected                     | `package.json`, `src/index.ts`, `README.md`, `AGENTS.md`                                                                                     |
+| Commands/tools            | Inspected and fixed           | `src/commands.ts`, `src/tools.ts`, `src/format.ts`, `test/commands.test.ts`, `test/state.test.ts`                                            |
+| Prompt contracts          | Inspected and fixed           | `src/prompts.ts`, `prompts/create-goal.md`, `test/prompts.test.ts`                                                                           |
+| Domain/persistence        | Inspected                     | `src/state.ts`, `src/types.ts`, `src/goal-persistence.ts`, persistence/state tests                                                           |
+| Runtime lifecycle         | Inspected and partially fixed | `goal-runtime-*`, `goal-state-controller.ts`, runtime/recovery tests                                                                         |
+| Transitions               | Inspected and fixed           | `goal-transition.ts`, `goal-transition-effects.ts`, `test/goal-transition.test.ts`                                                           |
+| Continuations             | Inspected                     | `continuation-scheduler.ts`, `queued-goal-work.ts`, `queued-goal-messages.ts`                                                                |
+| Stale queued-work cleanup | Inspected and partially fixed | `stale-queued-work-*`, stale queued-work tests                                                                                               |
+| Recovery                  | Inspected                     | `recovery*.ts`, recovery tests                                                                                                               |
+| Platform verification     | Inspected and fixed           | `scripts/platform-verification*`, `platform-verification.config.mjs`, `docs/platform-verification.md`, `test/platform-verification.check.ts` |
+| Hosted CI                 | Added                         | `.github/workflows/verify.yml` runs Node 24 `npm ci` and `npm run verify` on `push` and `pull_request`                                       |
+| Security/performance      | Sampled only                  | Secret/artifact hygiene checks inspected; no dedicated threat model or profiling performed                                                   |
 
 ## Findings by priority
 

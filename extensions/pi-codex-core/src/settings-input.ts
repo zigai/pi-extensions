@@ -229,7 +229,8 @@ const settingsInput = {
     id: "pi-codex-core",
     title: "Pi Codex Core",
     description: "Everything GPT models need to feel at home in Pi.",
-    schemaId: "https://github.com/zigai/pi-codex-core/config.schema.json",
+    schemaId:
+        "https://raw.githubusercontent.com/zigai/pi-tweaks/master/extensions/pi-codex-core/config.schema.json",
     schema: settingsSchema,
 } as const satisfies ExtensionSettingsDefinitionInput<typeof settingsSchema>;
 

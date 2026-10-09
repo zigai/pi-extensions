@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { test, vi } from "vitest";
 
-import { formatFooterStatus } from "../src/format.js";
-import { isGoalCustomEntry, setEntry } from "../src/state.js";
-import { CUSTOM_ENTRY_TYPE } from "../src/types.js";
+import { formatFooterStatus } from "../src/format.ts";
+import { isGoalCustomEntry, setEntry } from "../src/state.ts";
+import { CUSTOM_ENTRY_TYPE } from "../src/types.ts";
 import {
   assistantMessage,
   createRuntimeHarness,
@@ -14,7 +14,7 @@ import {
   sentUserMessageText,
   sessionCompactEvent,
   sessionShutdownEvent,
-} from "./support/runtime-harness.js";
+} from "./support/runtime-harness.ts";
 
 test("aborted turns pause goals and do not queue continuation", async () => {
   const harness = createRuntimeHarness();

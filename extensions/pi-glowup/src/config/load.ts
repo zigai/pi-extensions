@@ -140,7 +140,10 @@ function migrateLegacySettingsFile(
 function configSchemaErrorSummary(input: JsonValue): string {
     const errors = [...Value.Errors(settingsSchema, input)];
     const messages = errors.slice(0, 3).map((error) => {
-        const path = error.instancePath.length > 0 ? error.instancePath : "/";
+        const path =
+            error.schemaPath.endsWith("/additionalProperties") || error.instancePath.length === 0
+                ? "/"
+                : error.instancePath;
         return `${path} ${error.message}`;
     });
     if (errors.length > messages.length) {

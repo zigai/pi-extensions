@@ -1,4 +1,3 @@
-import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionSettingsDefinitionInput } from "@zigai/pi-extension-settings";
 import { Type, type StaticDecode } from "typebox";
 
@@ -6,17 +5,20 @@ const NAMING_TRIGGERS = ["messages", "turns", "tool_calls", "tokens", "minutes"]
 const INITIAL_NAMING_TIMINGS = ["prompt", "settled"] as const;
 const CONVERSATION_SCOPES = ["minimized", "full"] as const;
 
-const initialTriggerSchema = StringEnum(NAMING_TRIGGERS, {
+const initialTriggerSchema = Type.Enum(NAMING_TRIGGERS, {
+    type: "string",
     description: "The session activity that starts a naming attempt.",
     default: "messages",
 });
 
-const refreshTriggerSchema = StringEnum(NAMING_TRIGGERS, {
+const refreshTriggerSchema = Type.Enum(NAMING_TRIGGERS, {
+    type: "string",
     description: "The activity that starts a naming refresh.",
     default: "turns",
 });
 
-const conversationScopeSchema = StringEnum(CONVERSATION_SCOPES, {
+const conversationScopeSchema = Type.Enum(CONVERSATION_SCOPES, {
+    type: "string",
     description:
         "How much refresh context to send. Minimized sends only user and assistant text; full also includes tool arguments, results, and shell output. Initial naming always uses only the first user request.",
     default: "minimized",
@@ -34,7 +36,8 @@ export const settingsSchema = Type.Object(
                     default: true,
                     description: "Automatically name an otherwise unnamed session once.",
                 }),
-                timing: StringEnum(INITIAL_NAMING_TIMINGS, {
+                timing: Type.Enum(INITIAL_NAMING_TIMINGS, {
+                    type: "string",
                     default: "prompt",
                     description:
                         "When to first check the naming trigger: before the agent starts on a prompt, or after the agent has settled.",
@@ -75,9 +78,10 @@ export const settingsSchema = Type.Object(
             pattern: "^(?:current|[^/\\s]+/\\S+)$",
             description: "Picker model: provider/model-id, or current for the active model.",
         }),
-        reasoningEffort: StringEnum(
+        reasoningEffort: Type.Enum(
             ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const,
             {
+                type: "string",
                 description: "Reasoning effort used by the session-name picker.",
                 default: "low",
             },
@@ -157,7 +161,8 @@ export const settingsInput = {
     id: "pi-autoname-session",
     title: "Pi Autoname Session",
     description: "Settings for Pi Autoname Session.",
-    schemaId: "https://raw.githubusercontent.com/zigai/pi-autoname-session/HEAD/config.schema.json",
+    schemaId:
+        "https://raw.githubusercontent.com/zigai/pi-tweaks/master/extensions/pi-autoname-session/config.schema.json",
     schema: settingsSchema,
 } as const satisfies ExtensionSettingsDefinitionInput<typeof settingsSchema>;
 

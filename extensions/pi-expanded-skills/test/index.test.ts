@@ -106,6 +106,13 @@ describe("OpenAI sidecar metadata", () => {
             systemPromptOptions: {
                 cwd: process.cwd(),
                 skills: [skill],
+                selectedTools: [],
+                toolSnippets: {},
+                toolGuidelines: {},
+                promptGuidelines: [],
+                appendSystemPrompt: "",
+                sections: {},
+                contextFiles: [],
             },
         });
 
@@ -138,6 +145,13 @@ describe("OpenAI sidecar metadata", () => {
             systemPromptOptions: {
                 cwd: process.cwd(),
                 skills: [skill],
+                selectedTools: [],
+                toolSnippets: {},
+                toolGuidelines: {},
+                promptGuidelines: [],
+                appendSystemPrompt: "",
+                sections: {},
+                contextFiles: [],
             },
         });
 

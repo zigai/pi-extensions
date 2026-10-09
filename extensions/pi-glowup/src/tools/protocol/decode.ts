@@ -12,7 +12,7 @@ import type {
     GlowupNode,
     GlowupOutputNode,
     GlowupPreview,
-} from "./nodes.js";
+} from "./nodes.ts";
 
 export type GlowupNodeDecodeLimits = {
     readonly maxDepth: number;

@@ -9,14 +9,17 @@ import { Value } from "typebox/value";
 const projectRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const packDirectory = mkdtempSync(path.join(tmpdir(), "pi-branch-pack-"));
 const NpmPackResultSchema = Type.Object({ filename: Type.String() });
-const NpmPackOutputSchema = Type.Union([
-    Type.Array(NpmPackResultSchema),
-    Type.Record(Type.String(), NpmPackResultSchema),
-]);
-const DependencyManifestSchema = Type.Object({ name: Type.String() });
+const NpmPackOutputSchema = Type.Object({ "@zigai/pi-branch": NpmPackResultSchema });
+const PackageManifestSchema = Type.Object({
+    name: Type.Literal("@zigai/pi-branch"),
+    dependencies: Type.Object({ "pi-typed-args": Type.Literal("0.1.1") }),
+    exports: Type.Object({ ".": Type.Literal("./index.ts") }),
+    bundledDependencies: Type.Optional(Type.Array(Type.String())),
+    bundleDependencies: Type.Optional(Type.Array(Type.String())),
+});
 
 type NpmPackOutput = Static<typeof NpmPackOutputSchema>;
-type DependencyManifest = Static<typeof DependencyManifestSchema>;
+type PackageManifest = Static<typeof PackageManifestSchema>;
 
 function fail(message: string): never {
     throw new Error(`Package verification failed: ${message}`);
@@ -27,29 +30,21 @@ function parseNpmPackOutput(text: string): NpmPackOutput {
     return Value.Parse(NpmPackOutputSchema, parsed);
 }
 
-function parseDependencyManifest(text: string): DependencyManifest {
+function parsePackageManifest(text: string): PackageManifest {
     const parsed: unknown = JSON.parse(text);
-    return Value.Parse(DependencyManifestSchema, parsed);
+    return Value.Parse(PackageManifestSchema, parsed);
 }
 
 try {
-    const output = execFileSync("npm", ["pack", "--json", "--pack-destination", packDirectory], {
-        cwd: projectRoot,
-        encoding: "utf8",
-    });
-    const parsed = parseNpmPackOutput(output);
-    let result;
-    if (Array.isArray(parsed)) {
-        result = parsed[0];
-    } else {
-        result = Object.values(parsed)[0];
-    }
-
-    if (result === undefined) {
-        fail("npm pack returned no result");
-    }
-
-    const { filename } = result;
+    const output = execFileSync(
+        "npm",
+        ["pack", "--workspaces=false", "--json", "--pack-destination", packDirectory],
+        {
+            cwd: projectRoot,
+            encoding: "utf8",
+        },
+    );
+    const { filename } = parseNpmPackOutput(output)["@zigai/pi-branch"];
     const archive = path.join(packDirectory, filename);
     const files = new Set(
         execFileSync("tar", ["-tzf", archive], { encoding: "utf8" }).trim().split("\n"),
@@ -59,8 +54,6 @@ try {
         "package/config.schema.json",
         "package/README.md",
         "package/LICENSE",
-        "package/node_modules/pi-typed-args/package.json",
-        "package/node_modules/yaml/package.json",
     ]) {
         if (!files.has(required)) fail(`missing ${required}`);
     }
@@ -75,13 +68,14 @@ try {
         if (files.has(excluded)) fail(`unexpectedly included ${excluded}`);
     }
 
-    const dependencyManifest = parseDependencyManifest(
-        execFileSync("tar", ["-xOf", archive, "package/node_modules/pi-typed-args/package.json"], {
-            encoding: "utf8",
-        }),
+    const manifest = parsePackageManifest(
+        execFileSync("tar", ["-xOf", archive, "package/package.json"], { encoding: "utf8" }),
     );
-    if (dependencyManifest.name !== "pi-typed-args") {
-        fail("bundled dependency has the wrong package name");
+    if (manifest.bundleDependencies !== undefined || manifest.bundledDependencies !== undefined) {
+        fail("runtime libraries must be independently installed, not bundled");
+    }
+    for (const file of files) {
+        if (file.startsWith("package/node_modules/")) fail(`bundled dependency: ${file}`);
     }
 
     process.stdout.write("package verification passed\n");

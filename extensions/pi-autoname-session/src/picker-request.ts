@@ -1,4 +1,4 @@
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Api, Model, ProviderHeaders } from "@earendil-works/pi-ai";
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 
@@ -49,13 +49,17 @@ type LitePickerPayload = PickerPayload & {
     readonly reasoning: PickerPayload;
 };
 
-function hasResponsesLiteHeader(headers: Readonly<Record<string, string>> | undefined): boolean {
+function hasResponsesLiteHeader(headers: Readonly<ProviderHeaders> | undefined): boolean {
     if (headers === undefined) {
         return false;
     }
 
     for (const [name, value] of Object.entries(headers)) {
-        if (name.trim().toLowerCase() === CODEX_RESPONSES_LITE_HEADER && value.trim() !== "") {
+        if (
+            name.trim().toLowerCase() === CODEX_RESPONSES_LITE_HEADER &&
+            value !== null &&
+            value.trim() !== ""
+        ) {
             return true;
         }
     }
@@ -65,7 +69,7 @@ function hasResponsesLiteHeader(headers: Readonly<Record<string, string>> | unde
 
 function requiresResponsesLitePayload(
     model: Model<Api>,
-    requestHeaders: Readonly<Record<string, string>> | undefined,
+    requestHeaders: Readonly<ProviderHeaders> | undefined,
 ): boolean {
     if (model.provider !== "openai-codex" || model.api !== "openai-codex-responses") {
         return false;
@@ -85,7 +89,7 @@ function requiresResponsesLitePayload(
 export function preparePickerPayload(
     model: Model<Api>,
     payload: unknown,
-    requestHeaders?: Readonly<Record<string, string>>,
+    requestHeaders?: Readonly<ProviderHeaders>,
 ): LitePickerPayload | undefined {
     try {
         const parsedPayload = pickerPayloadParser.parse(payload);

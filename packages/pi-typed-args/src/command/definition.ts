@@ -1,0 +1,91 @@
+import { compileTypedCommandDefinition } from "../compiler.ts";
+import {
+    parseTypedCommandInvocation,
+    serializeTypedCommandArgs,
+    toTypedParseResult,
+} from "../parser.ts";
+import { formatCommandUsage, formatDetailedHelp } from "../usage.ts";
+import type { ArgumentDefinitions, SerializableArgumentValues } from "../types.ts";
+import type {
+    DefinedTypedCommand,
+    SerializableSubcommandInvocation,
+    TypedCommandParseResult,
+    TypedCommandDefinition,
+    TypedSubcommandDefinitions,
+} from "../pi/command-types.ts";
+import { definitionError, normalizeRegisteredCommand } from "./registered-command.ts";
+
+/** Define a typed command once, preserving literal argument inference and exposing pure helpers. */
+export function defineTypedCommand<
+    const TDefinitions extends ArgumentDefinitions,
+    const TSubcommands extends TypedSubcommandDefinitions<TDefinitions>,
+>(
+    definition: TypedCommandDefinition<TDefinitions, TSubcommands>,
+): DefinedTypedCommand<TDefinitions, TSubcommands> {
+    const compiled = compileTypedCommandDefinition(definition);
+    if (!compiled.ok) {
+        throw definitionError(definition.name, compiled.diagnostics);
+    }
+
+    const normalizedDefinition: TypedCommandDefinition<TDefinitions, TSubcommands> = {
+        ...definition,
+        args: compiled.command.definitions,
+    };
+    const command = normalizeRegisteredCommand(normalizedDefinition);
+    const defined = {
+        ...normalizedDefinition,
+        parse(rawArgs: string) {
+            const invocation = parseTypedCommandInvocation(command, rawArgs);
+            const grammar = invocation.route.command.compiled;
+            if (grammar === undefined) {
+                throw new TypeError("Selected typed-command grammar is unavailable");
+            }
+
+            if (invocation.route.status !== "subcommand") {
+                return toTypedParseResult(command.compiled, invocation.parsed);
+            }
+
+            const parsed = toTypedParseResult(grammar, invocation.parsed);
+
+            // SAFETY: normalizeRegisteredCommand compiled every named TSubcommands branch from its
+            // exact merged shared/local definitions; the route supplies that same canonical name.
+            return {
+                ...parsed,
+                subcommand: invocation.route.subcommand,
+                // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: validated canonical branch grammar proves the result; TypeScript cannot correlate dynamic keys with the mapped return type.
+            } as TypedCommandParseResult<TDefinitions, TSubcommands>;
+        },
+        serialize(values: SerializableArgumentValues<TDefinitions>) {
+            return serializeTypedCommandArgs(command, values);
+        },
+        serializeSubcommand(
+            invocation: SerializableSubcommandInvocation<TDefinitions, TSubcommands>,
+        ) {
+            const name = String(invocation.subcommand);
+            const subcommands = command.subcommands;
+            if (subcommands === undefined || !Object.hasOwn(subcommands, name)) {
+                throw new TypeError(`Unknown subcommand ${name}`);
+            }
+
+            const subcommand = subcommands[name];
+            if (subcommand === undefined) {
+                throw new TypeError(`Unknown subcommand ${name}`);
+            }
+
+            const serialized = serializeTypedCommandArgs(subcommand, invocation.args);
+            if (serialized.length === 0) {
+                return name;
+            }
+
+            return `${name} ${serialized}`;
+        },
+        formatUsage() {
+            return formatCommandUsage(command);
+        },
+        formatHelp() {
+            return formatDetailedHelp(command);
+        },
+    };
+
+    return Object.freeze(defined);
+}

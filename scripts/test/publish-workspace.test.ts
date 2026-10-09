@@ -272,5 +272,9 @@ test("loads real workspace release metadata without tightening architecture fixt
         planWorkspacePublish(workspaces, "@zigai/pi-mention-anything").map(
             (workspace) => workspace.name,
         ),
-    ).toEqual(["@zigai/pi-extension-internals", "@zigai/pi-mention-anything"]);
+    ).toEqual([
+        "@zigai/pi-extension-internals",
+        "@zigai/pi-extension-settings",
+        "@zigai/pi-mention-anything",
+    ]);
 });

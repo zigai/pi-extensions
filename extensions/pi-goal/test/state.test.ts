@@ -7,8 +7,8 @@ import {
   formatGoalSummary,
   formatTokenValue,
   goalToolResponse,
-} from "../src/format.js";
-import { continuationPrompt, timeLimitPrompt, TOOL_PROMPT_GUIDELINES } from "../src/prompts.js";
+} from "../src/format.ts";
+import { continuationPrompt, timeLimitPrompt, TOOL_PROMPT_GUIDELINES } from "../src/prompts.ts";
 import {
   adjustGoal,
   applyUsage,
@@ -22,8 +22,8 @@ import {
   runtimeUsageEntry,
   setEntry,
   updateGoalStatus,
-} from "../src/state.js";
-import { CUSTOM_ENTRY_TYPE, type GoalTimeConstraints } from "../src/types.js";
+} from "../src/state.ts";
+import { CUSTOM_ENTRY_TYPE, type GoalTimeConstraints } from "../src/types.ts";
 
 const unconstrained: GoalTimeConstraints = {
   minimumActiveSeconds: null,

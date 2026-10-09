@@ -19,7 +19,7 @@ Preserve the current configuration owner; these instructions do not require a se
 On this machine, the canonical active install is the global/user package pointing at this local checkout:
 
 ```text
-../../Projects/AI/pi-codex-goal
+../../Projects/pi-tweaks
 ```
 
 Do not leave project-local installs of this package in this repo. In particular, avoid release verification commands such as:
@@ -34,6 +34,7 @@ Those write duplicate package entries under `.pi/` for the current project, caus
 ## Verify before finishing
 
 ```sh
+npm run build --prefix ../..
 npm run verify
 ```
 

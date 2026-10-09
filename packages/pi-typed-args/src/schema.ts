@@ -1,0 +1,2303 @@
+import {
+    flattenGroupedArgumentDefinitions,
+    collectUnknownGroupedArgumentDefinitions,
+} from "./arguments.ts";
+import { createDefinitionDiagnostic } from "./diagnostics.ts";
+import { casesHandled } from "./exhaustive.ts";
+import { formatFlagName, normalizeFlagName, toKebabCase } from "./names.ts";
+import type {
+    ArgumentDefinition,
+    ArgumentDefinitions,
+    ArgumentValue,
+    DefinitionDiagnostic,
+    FlatArgumentDefinitions,
+    ParseIssue,
+    CoreRegisteredTypedCommand,
+    StringArgumentDefinition,
+} from "./types.ts";
+
+const ARGUMENT_NAME_PATTERN = /^[A-Za-z0-9_.-]+$/;
+
+const RESERVED_ARGUMENT_NAME_SEGMENTS: ReadonlySet<string> = new Set([
+    "__proto__",
+    "constructor",
+    "prototype",
+]);
+
+const ARGUMENT_TYPES: ReadonlySet<string> = new Set([
+    "string",
+    "number",
+    "boolean",
+    "enum",
+    "multi-enum",
+    "string-list",
+    "key-value",
+]);
+
+/** Parser lookup for non-positional flags, keyed by canonical flag name without leading dashes. */
+export type ArgumentLookup = {
+    byFlag: Map<string, string>;
+    definitions: FlatArgumentDefinitions;
+};
+
+/** Result of turning one raw CLI token into a typed argument value. */
+export type CoercedArgumentValue =
+    | { ok: true; value: ArgumentValue }
+    | { ok: false; issue: ParseIssue };
+
+/** Validation result for an already-coerced, defaulted, or form-collected value. */
+export type ArgumentValueValidation = { ok: true } | { ok: false; message: string };
+
+/** Presentation options for human-readable argument error messages. */
+export type ArgumentMessageOptions = {
+    nameStyle?: "flag" | "field";
+};
+
+/** Create a parse issue while omitting absent optional fields from the result object. */
+export function createParseIssue(
+    kind: ParseIssue["kind"],
+    message: string,
+    name?: string,
+    token?: string,
+): ParseIssue {
+    const result: ParseIssue = { kind, message };
+    if (name !== undefined) {
+        result.name = name;
+    }
+
+    if (token !== undefined) {
+        result.token = token;
+    }
+
+    return result;
+}
+
+/** Parse the boolean spellings accepted by CLI values, such as `yes`, `no`, `on`, and `off`. */
+export function booleanFromString(value: string): boolean | undefined {
+    const normalized = value.toLowerCase();
+    if (["1", "true", "yes", "y", "on"].includes(normalized)) {
+        return true;
+    }
+
+    if (["0", "false", "no", "n", "off"].includes(normalized)) {
+        return false;
+    }
+
+    return undefined;
+}
+
+/** Return whether a definition is parsed positionally instead of as a named flag. */
+export function isPositionalArgument(definition: ArgumentDefinition): boolean {
+    return definition.position !== undefined;
+}
+
+/** Return whether an argument is intentionally available only in Pi's expanded form. */
+export function isFormOnlyArgument(definition: ArgumentDefinition): boolean {
+    return definition.formOnly === true;
+}
+
+/** Return the canonical no-leading-dash flag name for an argument definition. */
+export function argumentFlagName(name: string, definition: ArgumentDefinition): string {
+    return normalizeFlagName(definition.flag ?? name);
+}
+
+/** Return the canonical primary flag and all aliases for an argument definition. */
+export function argumentFlagNames(name: string, definition: ArgumentDefinition): string[] {
+    const names = [argumentFlagName(name, definition)];
+    for (const alias of definition.aliases ?? []) {
+        names.push(normalizeFlagName(alias));
+    }
+
+    return names;
+}
+
+/** Format an argument definition's primary flag with leading `--`. */
+export function formatArgumentFlagName(name: string, definition: ArgumentDefinition): string {
+    return `--${argumentFlagName(name, definition)}`;
+}
+
+function formatArgumentMessageName(
+    name: string,
+    definition?: ArgumentDefinition,
+    options?: ArgumentMessageOptions,
+): string {
+    if (options?.nameStyle === "field") {
+        return toKebabCase(name);
+    }
+
+    if (definition !== undefined) {
+        return formatArgumentFlagName(name, definition);
+    }
+
+    return formatFlagName(name);
+}
+
+/** Order flattened arguments as the parser and help output see them: positionals first, then flags. */
+export function orderedArgumentEntries(
+    definitions: ArgumentDefinitions,
+): Array<[string, ArgumentDefinition]> {
+    const flatDefinitions = flattenGroupedArgumentDefinitions(definitions);
+
+    return Object.entries(flatDefinitions)
+        .map(([name, definition], index) => ({ name, definition, index }))
+        .sort((left, right) => {
+            const leftIsPositional = isPositionalArgument(left.definition);
+            const rightIsPositional = isPositionalArgument(right.definition);
+            if (leftIsPositional !== rightIsPositional) {
+                if (leftIsPositional) {
+                    return -1;
+                }
+
+                return 1;
+            }
+
+            let leftPosition = left.index;
+            if (typeof left.definition.position === "number") {
+                leftPosition = left.definition.position;
+            }
+
+            let rightPosition = right.index;
+            if (typeof right.definition.position === "number") {
+                rightPosition = right.definition.position;
+            }
+
+            return leftPosition - rightPosition;
+        })
+        .map((entry) => [entry.name, entry.definition]);
+}
+
+/** Return a registered command's arguments in parser/help order. */
+export function orderedCommandArgumentEntries<TDefinitions extends ArgumentDefinitions>(
+    command: CoreRegisteredTypedCommand<TDefinitions>,
+): Array<[string, ArgumentDefinition]> {
+    return orderedArgumentEntries(command.args).filter(
+        ([, definition]) => !isFormOnlyArgument(definition),
+    );
+}
+
+/** Return only positional arguments after applying the same flattening and ordering rules. */
+export function positionalArgumentEntries(
+    definitions: ArgumentDefinitions,
+): Array<[string, ArgumentDefinition]> {
+    return orderedArgumentEntries(definitions).filter(([, definition]) =>
+        isPositionalArgument(definition),
+    );
+}
+
+function reservedArgumentNameSegment(name: string): string | undefined {
+    for (const segment of name.split(".")) {
+        if (RESERVED_ARGUMENT_NAME_SEGMENTS.has(segment)) {
+            return segment;
+        }
+    }
+
+    return undefined;
+}
+
+const FLAG_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9-]*$/;
+
+const SUPPORTED_WIDGETS: ReadonlySet<string> = new Set([
+    "text",
+    "textarea",
+    "number",
+    "toggle",
+    "select",
+    "radio",
+    "multiselect",
+    "path",
+    "file",
+    "directory",
+    "command",
+    "secret",
+    "list",
+    "key-value",
+    "duration",
+    "date",
+    "time",
+    "datetime",
+    "url",
+    "email",
+    "json",
+    "code",
+    "stepper",
+    "readonly",
+    "computed",
+    "confirm",
+    "custom",
+]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+    if (!isRecord(value)) {
+        return false;
+    }
+
+    const prototype: unknown = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+}
+
+function isStringArrayValue(value: unknown): value is readonly string[] {
+    return Array.isArray(value) && value.every((item): item is string => typeof item === "string");
+}
+
+function isArgumentType(value: unknown): value is ArgumentDefinition["type"] {
+    return typeof value === "string" && ARGUMENT_TYPES.has(value);
+}
+
+function isRegExp(value: unknown): value is RegExp {
+    return value instanceof RegExp;
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+    return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+function isPositiveInteger(value: unknown): value is number {
+    return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function addDefinitionDiagnostic(
+    diagnostics: DefinitionDiagnostic[],
+    code: string,
+    message: string,
+    path: readonly (string | number)[],
+): void {
+    diagnostics.push(createDefinitionDiagnostic({ code, message, path }));
+}
+
+function addArgumentDiagnostic(
+    diagnostics: DefinitionDiagnostic[],
+    name: string,
+    field: string,
+    code: string,
+    message: string,
+): void {
+    addDefinitionDiagnostic(diagnostics, code, message, [name, ...field.split(".")]);
+}
+
+function validateOptionalStringField(
+    name: string,
+    raw: Record<string, unknown>,
+    field: string,
+    diagnostics: DefinitionDiagnostic[],
+): boolean {
+    if (!Object.hasOwn(raw, field) || raw[field] === undefined) {
+        return true;
+    }
+
+    if (typeof raw[field] === "string") {
+        return true;
+    }
+
+    addArgumentDiagnostic(
+        diagnostics,
+        name,
+        field,
+        `argument.${field}.invalid`,
+        `${name}.${field} must be a string`,
+    );
+
+    return false;
+}
+
+function validateOptionalBooleanField(
+    name: string,
+    raw: Record<string, unknown>,
+    field: string,
+    diagnostics: DefinitionDiagnostic[],
+): boolean {
+    if (!Object.hasOwn(raw, field) || raw[field] === undefined) {
+        return true;
+    }
+
+    if (typeof raw[field] === "boolean") {
+        return true;
+    }
+
+    addArgumentDiagnostic(
+        diagnostics,
+        name,
+        field,
+        `argument.${field}.invalid`,
+        `${name}.${field} must be a boolean`,
+    );
+
+    return false;
+}
+
+function validateAliases(
+    name: string,
+    raw: Record<string, unknown>,
+    diagnostics: DefinitionDiagnostic[],
+): boolean {
+    if (!Object.hasOwn(raw, "aliases") || raw.aliases === undefined) {
+        return true;
+    }
+
+    if (!Array.isArray(raw.aliases)) {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "aliases",
+            "argument.aliases.invalid",
+            `${name}.aliases must be a list of strings`,
+        );
+        return false;
+    }
+
+    let valid = true;
+    for (const [index, alias] of raw.aliases.entries()) {
+        if (typeof alias === "string") {
+            continue;
+        }
+
+        addDefinitionDiagnostic(
+            diagnostics,
+            "argument.aliases.item.invalid",
+            `${name}.aliases[${index}] must be a string`,
+            [name, "aliases", index],
+        );
+        valid = false;
+    }
+
+    return valid;
+}
+
+function validateEnumValues(
+    name: string,
+    raw: Record<string, unknown>,
+    diagnostics: DefinitionDiagnostic[],
+): boolean {
+    if (!Array.isArray(raw.values)) {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "values",
+            "argument.values.invalid",
+            `${name}.values must be a list of strings`,
+        );
+        return false;
+    }
+
+    let valid = true;
+    for (const [index, value] of raw.values.entries()) {
+        if (typeof value === "string") {
+            continue;
+        }
+
+        addDefinitionDiagnostic(
+            diagnostics,
+            "argument.values.item.invalid",
+            `${name}.values[${index}] must be a string`,
+            [name, "values", index],
+        );
+        valid = false;
+    }
+
+    return valid;
+}
+
+function validateEnumOptionDescriptions(
+    name: string,
+    raw: Record<string, unknown>,
+    diagnostics: DefinitionDiagnostic[],
+): boolean {
+    if (!Object.hasOwn(raw, "optionDescriptions") || raw.optionDescriptions === undefined) {
+        return true;
+    }
+
+    const optionDescriptions = raw.optionDescriptions;
+    if (!isRecord(optionDescriptions) || !isPlainRecord(optionDescriptions)) {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "optionDescriptions",
+            "argument.enum.option-descriptions.invalid",
+            `${name}.optionDescriptions must be a plain object of enum values to descriptions`,
+        );
+        return false;
+    }
+
+    let values: Set<string> | undefined;
+    if (isStringArrayValue(raw.values)) {
+        values = new Set(raw.values);
+    }
+
+    let valid = true;
+    for (const [value, description] of Object.entries(optionDescriptions)) {
+        if (values === undefined || !values.has(value)) {
+            addDefinitionDiagnostic(
+                diagnostics,
+                "argument.enum.option-description.unknown-value",
+                `${name}.optionDescriptions.${value} must match an enum value`,
+                [name, "optionDescriptions", value],
+            );
+            valid = false;
+        }
+
+        if (typeof description !== "string" || description.length === 0) {
+            addDefinitionDiagnostic(
+                diagnostics,
+                "argument.enum.option-description.invalid",
+                `${name}.optionDescriptions.${value} must be a non-empty string`,
+                [name, "optionDescriptions", value],
+            );
+            valid = false;
+        }
+    }
+
+    return valid;
+}
+
+function validateCustomWidget(
+    name: string,
+    custom: unknown,
+    diagnostics: DefinitionDiagnostic[],
+): boolean {
+    if (custom === undefined) {
+        return true;
+    }
+
+    if (!isRecord(custom)) {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "ui.custom",
+            "argument.ui.custom.invalid",
+            `${name}.ui.custom must be an object`,
+        );
+        return false;
+    }
+
+    if (!isPlainRecord(custom)) {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "ui.custom",
+            "argument.ui.custom.unsupported-object",
+            `${name}.ui.custom must be a plain object`,
+        );
+        return false;
+    }
+
+    let valid = true;
+    for (const field of ["renderValue", "handleInput"] as const) {
+        const value = custom[field];
+        if (value === undefined || typeof value === "function") {
+            continue;
+        }
+
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            `ui.custom.${field}`,
+            "argument.ui.custom-field.invalid",
+            `${name}.ui.custom.${field} must be a function`,
+        );
+        valid = false;
+    }
+
+    return valid;
+}
+
+function validateUiOptions(
+    name: string,
+    ui: unknown,
+    diagnostics: DefinitionDiagnostic[],
+): boolean {
+    if (ui === undefined) {
+        return true;
+    }
+
+    if (!isRecord(ui)) {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "ui",
+            "argument.ui.invalid",
+            `${name}.ui must be an object`,
+        );
+        return false;
+    }
+
+    if (!isPlainRecord(ui)) {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "ui",
+            "argument.ui.unsupported-object",
+            `${name}.ui must be a plain object`,
+        );
+        return false;
+    }
+
+    let valid = true;
+    if (ui.title !== undefined && typeof ui.title !== "string") {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "ui.title",
+            "argument.ui.title.invalid",
+            `${name}.ui.title must be a string`,
+        );
+        valid = false;
+    }
+
+    for (const field of [
+        "readOnly",
+        "hidden",
+        "disabled",
+        "visibleWhen",
+        "enabledWhen",
+        "requiredWhen",
+    ] as const) {
+        const value = ui[field];
+        if (value === undefined || typeof value === "boolean" || typeof value === "function") {
+            continue;
+        }
+
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            `ui.${field}`,
+            "argument.ui.boolean-option.invalid",
+            `${name}.ui.${field} must be a boolean or function`,
+        );
+        valid = false;
+    }
+
+    for (const field of ["section", "copyFrom"] as const) {
+        const value = ui[field];
+        if (value === undefined || typeof value === "string") {
+            continue;
+        }
+
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            `ui.${field}`,
+            "argument.ui.string-option.invalid",
+            `${name}.ui.${field} must be a string`,
+        );
+        valid = false;
+    }
+
+    if (ui.advanced !== undefined && typeof ui.advanced !== "boolean") {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "ui.advanced",
+            "argument.ui.advanced.invalid",
+            `${name}.ui.advanced must be a boolean`,
+        );
+        valid = false;
+    }
+
+    if (ui.compute !== undefined && typeof ui.compute !== "function") {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "ui.compute",
+            "argument.ui.compute.invalid",
+            `${name}.ui.compute must be a function`,
+        );
+        valid = false;
+    }
+
+    return validateCustomWidget(name, ui.custom, diagnostics) && valid;
+}
+
+function validateArgumentDefinition(
+    name: string,
+    definition: unknown,
+    diagnostics: DefinitionDiagnostic[],
+): definition is ArgumentDefinition {
+    if (!isRecord(definition)) {
+        addDefinitionDiagnostic(
+            diagnostics,
+            "argument.definition.invalid",
+            `${name}: argument definition must be an object`,
+            [name],
+        );
+        return false;
+    }
+
+    if (!isPlainRecord(definition)) {
+        addDefinitionDiagnostic(
+            diagnostics,
+            "argument.definition.unsupported-object",
+            `${name}: argument definition must be a plain object`,
+            [name],
+        );
+        return false;
+    }
+
+    let valid = true;
+    if (!isArgumentType(definition.type)) {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "type",
+            "argument.type.invalid",
+            `${name}.type must be one of: ${[...ARGUMENT_TYPES].join(", ")}`,
+        );
+        valid = false;
+    }
+
+    for (const field of ["description", "flag", "title", "placeholder"] as const) {
+        valid = validateOptionalStringField(name, definition, field, diagnostics) && valid;
+    }
+
+    if (
+        definition.examples !== undefined &&
+        (!Array.isArray(definition.examples) ||
+            !definition.examples.every((example) => typeof example === "string"))
+    ) {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "examples",
+            "argument.examples.invalid",
+            `${name}.examples must be a list of strings`,
+        );
+        valid = false;
+    }
+
+    for (const field of ["required", "rest", "formOnly"] as const) {
+        valid = validateOptionalBooleanField(name, definition, field, diagnostics) && valid;
+    }
+
+    valid = validateAliases(name, definition, diagnostics) && valid;
+    valid = validateUiOptions(name, definition.ui, diagnostics) && valid;
+
+    if (definition.complete !== undefined && typeof definition.complete !== "function") {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "complete",
+            "argument.complete.invalid",
+            `${name}.complete must be a function`,
+        );
+        valid = false;
+    }
+
+    if (definition.type === "string") {
+        const pattern = definition.pattern;
+        if (pattern !== undefined && typeof pattern !== "string" && !isRegExp(pattern)) {
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "pattern",
+                "argument.string.pattern.invalid",
+                `${name}.pattern must be a string or RegExp`,
+            );
+            valid = false;
+        }
+
+        if (
+            definition.format !== undefined &&
+            (typeof definition.format !== "string" ||
+                !["email", "url", "date", "time", "datetime", "duration", "json"].includes(
+                    definition.format,
+                ))
+        ) {
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "format",
+                "argument.string.format.invalid",
+                `${name}.format is unsupported`,
+            );
+            valid = false;
+        }
+
+        if (definition.sensitive !== undefined && typeof definition.sensitive !== "boolean") {
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "sensitive",
+                "argument.string.sensitive.invalid",
+                `${name}.sensitive must be a boolean`,
+            );
+            valid = false;
+        }
+    }
+
+    if (definition.type === "number" && definition.integer !== undefined) {
+        valid = validateOptionalBooleanField(name, definition, "integer", diagnostics) && valid;
+    }
+
+    if (definition.type === "enum" || definition.type === "multi-enum") {
+        valid = validateEnumValues(name, definition, diagnostics) && valid;
+    }
+
+    if (definition.type === "enum") {
+        valid = validateEnumOptionDescriptions(name, definition, diagnostics) && valid;
+    }
+
+    return valid;
+}
+
+function validateFlagName(
+    owner: string,
+    flag: string,
+    flags: Map<string, string>,
+    diagnostics: DefinitionDiagnostic[],
+    path: readonly (string | number)[],
+): void {
+    if (!FLAG_NAME_PATTERN.test(flag)) {
+        addDefinitionDiagnostic(
+            diagnostics,
+            "argument.flag.invalid",
+            `${owner}: flag --${flag} must contain only letters, numbers, and hyphens`,
+            path,
+        );
+
+        return;
+    }
+
+    if (flag === "help") {
+        addDefinitionDiagnostic(
+            diagnostics,
+            "argument.flag.reserved",
+            `${owner}: argument flag --help is reserved for generated help`,
+            path,
+        );
+    }
+
+    if (flag.startsWith("no-")) {
+        addDefinitionDiagnostic(
+            diagnostics,
+            "argument.flag.negated-prefix",
+            `${owner}: argument flags may not start with no-`,
+            path,
+        );
+    }
+
+    const existing = flags.get(flag);
+    if (existing === owner) {
+        addDefinitionDiagnostic(
+            diagnostics,
+            "argument.flag.duplicate",
+            `${owner}: flag --${flag} is defined more than once`,
+            path,
+        );
+
+        return;
+    }
+
+    if (existing !== undefined) {
+        addDefinitionDiagnostic(
+            diagnostics,
+            "argument.flag.collision",
+            `${owner}: flag --${flag} collides with ${existing}`,
+            path,
+        );
+
+        return;
+    }
+
+    flags.set(flag, owner);
+}
+
+function supportsAppendOccurrence(definition: ArgumentDefinition): boolean {
+    switch (definition.type) {
+        case "string":
+        case "number":
+        case "boolean":
+        case "enum":
+            return false;
+        case "multi-enum":
+        case "string-list":
+        case "key-value":
+            return true;
+        default:
+            return casesHandled(definition);
+    }
+}
+
+function supportsRestPosition(definition: ArgumentDefinition): boolean {
+    switch (definition.type) {
+        case "string":
+        case "multi-enum":
+        case "string-list":
+            return true;
+        case "number":
+        case "boolean":
+        case "enum":
+        case "key-value":
+            return false;
+        default:
+            return casesHandled(definition);
+    }
+}
+
+function isValidCalendarDate(value: string): boolean {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    if (match === null) {
+        return false;
+    }
+
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const date = new Date(0);
+    date.setUTCFullYear(year, month - 1, day);
+
+    return (
+        date.getUTCFullYear() === year &&
+        date.getUTCMonth() === month - 1 &&
+        date.getUTCDate() === day
+    );
+}
+
+function isValidIsoDateTime(value: string): boolean {
+    const match =
+        /^(\d{4}-\d{2}-\d{2})T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)?$/.exec(
+            value,
+        );
+    const date = match?.[1];
+    return date !== undefined && isValidCalendarDate(date);
+}
+
+function validateStringFormat(
+    format: NonNullable<StringArgumentDefinition["format"]>,
+    value: string,
+): string | undefined {
+    switch (format) {
+        case "email":
+            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+                return "expects an email address";
+            }
+
+            return undefined;
+        case "url": {
+            try {
+                new URL(value);
+                return undefined;
+            } catch {
+                return "expects an absolute URL";
+            }
+        }
+        case "date":
+            if (!isValidCalendarDate(value)) {
+                return "expects a date in YYYY-MM-DD form";
+            }
+
+            return undefined;
+        case "time":
+            if (!/^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(value)) {
+                return "expects a time in HH:MM or HH:MM:SS form";
+            }
+
+            return undefined;
+        case "datetime":
+            if (!isValidIsoDateTime(value)) {
+                return "expects an ISO date-time";
+            }
+
+            return undefined;
+        case "duration":
+            if (!/^(?:\d+(?:\.\d+)?(?:ms|s|m|h|d|w))+$/.test(value)) {
+                return "expects a duration such as 30s, 5m, or 2h";
+            }
+
+            return undefined;
+        case "json":
+            try {
+                JSON.parse(value);
+                return undefined;
+            } catch {
+                return "expects valid JSON";
+            }
+        default:
+            return casesHandled(format);
+    }
+}
+
+/** Validate a parsed, defaulted, or form-collected argument value against its full definition. */
+export function validateArgumentValue(
+    name: string,
+    definition: ArgumentDefinition,
+    value: unknown,
+    options?: ArgumentMessageOptions,
+): ArgumentValueValidation {
+    const displayName = formatArgumentMessageName(name, definition, options);
+
+    if (definition.required === true && value === undefined) {
+        return { ok: false, message: `${displayName} is required` };
+    }
+
+    if (value === undefined) {
+        return { ok: true };
+    }
+
+    switch (definition.type) {
+        case "string": {
+            if (typeof value !== "string") {
+                return { ok: false, message: `${displayName} expects text` };
+            }
+
+            if (definition.minLength !== undefined && value.length < definition.minLength) {
+                return {
+                    ok: false,
+                    message: `${displayName} must be at least ${definition.minLength} characters`,
+                };
+            }
+
+            if (definition.maxLength !== undefined && value.length > definition.maxLength) {
+                return {
+                    ok: false,
+                    message: `${displayName} must be at most ${definition.maxLength} characters`,
+                };
+            }
+
+            if (definition.pattern !== undefined) {
+                let pattern: RegExp;
+                try {
+                    if (typeof definition.pattern === "string") {
+                        pattern = new RegExp(definition.pattern);
+                    } else {
+                        pattern = new RegExp(definition.pattern.source, definition.pattern.flags);
+                    }
+                } catch {
+                    return {
+                        ok: false,
+                        message: `${displayName} has an invalid pattern`,
+                    };
+                }
+
+                if (!pattern.test(value)) {
+                    return {
+                        ok: false,
+                        message: `${displayName} must match pattern ${String(definition.pattern)}`,
+                    };
+                }
+            }
+
+            if (definition.format !== undefined) {
+                const formatIssue = validateStringFormat(definition.format, value);
+                if (formatIssue !== undefined) {
+                    return { ok: false, message: `${displayName} ${formatIssue}` };
+                }
+            }
+
+            return { ok: true };
+        }
+        case "number": {
+            if (typeof value !== "number" || !Number.isFinite(value)) {
+                return { ok: false, message: `${displayName} expects a number` };
+            }
+
+            if (definition.integer === true && !Number.isInteger(value)) {
+                return { ok: false, message: `${displayName} expects an integer` };
+            }
+
+            if (definition.min !== undefined && value < definition.min) {
+                return { ok: false, message: `${displayName} must be at least ${definition.min}` };
+            }
+
+            if (definition.max !== undefined && value > definition.max) {
+                return { ok: false, message: `${displayName} must be at most ${definition.max}` };
+            }
+
+            return { ok: true };
+        }
+        case "boolean": {
+            if (typeof value === "boolean") {
+                return { ok: true };
+            }
+
+            return { ok: false, message: `${displayName} expects true or false` };
+        }
+        case "enum": {
+            if (typeof value === "string" && definition.values.includes(value)) {
+                return { ok: true };
+            }
+
+            return {
+                ok: false,
+                message: `${displayName} must be one of: ${definition.values.join(", ")}`,
+            };
+        }
+        case "multi-enum": {
+            if (
+                !isStringArrayValue(value) ||
+                !value.every((item) => definition.values.includes(item))
+            ) {
+                return {
+                    ok: false,
+                    message: `${displayName} must use values from: ${definition.values.join(", ")}`,
+                };
+            }
+
+            if (new Set(value).size !== value.length) {
+                return {
+                    ok: false,
+                    message: `${displayName} may not contain duplicate values`,
+                };
+            }
+
+            if (definition.required === true && value.length === 0) {
+                return { ok: false, message: `${displayName} is required` };
+            }
+
+            if (definition.minItems !== undefined && value.length < definition.minItems) {
+                return {
+                    ok: false,
+                    message: `${displayName} must include at least ${definition.minItems} item(s)`,
+                };
+            }
+
+            if (definition.maxItems !== undefined && value.length > definition.maxItems) {
+                return {
+                    ok: false,
+                    message: `${displayName} must include at most ${definition.maxItems} item(s)`,
+                };
+            }
+
+            return { ok: true };
+        }
+        case "string-list": {
+            if (!isStringArrayValue(value)) {
+                return { ok: false, message: `${displayName} expects a list of text values` };
+            }
+
+            if (value.some((item) => item.length === 0)) {
+                return { ok: false, message: `${displayName} items must not be empty` };
+            }
+
+            if (value.some((item) => item.trim() !== item)) {
+                return {
+                    ok: false,
+                    message: `${displayName} items may not start or end with whitespace`,
+                };
+            }
+
+            if (value.some((item) => item.includes(","))) {
+                return { ok: false, message: `${displayName} items may not contain commas` };
+            }
+
+            if (definition.required === true && value.length === 0) {
+                return { ok: false, message: `${displayName} is required` };
+            }
+
+            if (definition.minItems !== undefined && value.length < definition.minItems) {
+                return {
+                    ok: false,
+                    message: `${displayName} must include at least ${definition.minItems} item(s)`,
+                };
+            }
+
+            if (definition.maxItems !== undefined && value.length > definition.maxItems) {
+                return {
+                    ok: false,
+                    message: `${displayName} must include at most ${definition.maxItems} item(s)`,
+                };
+            }
+
+            return { ok: true };
+        }
+        case "key-value": {
+            if (
+                !isRecord(value) ||
+                Array.isArray(value) ||
+                !Object.values(value).every((item) => typeof item === "string")
+            ) {
+                return { ok: false, message: `${displayName} expects key=value entries` };
+            }
+
+            const entries = Object.entries(value);
+            if (entries.some(([key]) => key.length === 0)) {
+                return { ok: false, message: `${displayName} keys must not be empty` };
+            }
+
+            if (entries.some(([key]) => key.trim() !== key)) {
+                return {
+                    ok: false,
+                    message: `${displayName} keys may not start or end with whitespace`,
+                };
+            }
+
+            if (entries.some(([key]) => key.includes(",") || key.includes("="))) {
+                return {
+                    ok: false,
+                    message: `${displayName} keys may not contain commas or equals signs`,
+                };
+            }
+
+            if (
+                entries.some(
+                    ([, entryValue]) => typeof entryValue === "string" && entryValue.includes(","),
+                )
+            ) {
+                return { ok: false, message: `${displayName} values may not contain commas` };
+            }
+
+            const size = entries.length;
+            if (definition.required === true && size === 0) {
+                return { ok: false, message: `${displayName} is required` };
+            }
+
+            if (definition.minItems !== undefined && size < definition.minItems) {
+                return {
+                    ok: false,
+                    message: `${displayName} must include at least ${definition.minItems} entry(s)`,
+                };
+            }
+
+            if (definition.maxItems !== undefined && size > definition.maxItems) {
+                return {
+                    ok: false,
+                    message: `${displayName} must include at most ${definition.maxItems} entry(s)`,
+                };
+            }
+
+            return { ok: true };
+        }
+        default:
+            return casesHandled(definition);
+    }
+}
+
+function validateDefault(
+    name: string,
+    definition: ArgumentDefinition,
+    diagnostics: DefinitionDiagnostic[],
+): void {
+    if (definition.default === undefined) {
+        return;
+    }
+
+    const validation = validateArgumentValue(name, definition, definition.default);
+    if (!validation.ok) {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "default",
+            "argument.default.invalid",
+            `${name}.default ${validation.message}`,
+        );
+    }
+}
+
+function validateUi(
+    name: string,
+    definition: ArgumentDefinition,
+    diagnostics: DefinitionDiagnostic[],
+): void {
+    const ui = definition.ui;
+    if (ui === undefined) {
+        return;
+    }
+
+    if (ui.widget !== undefined) {
+        if (!SUPPORTED_WIDGETS.has(ui.widget)) {
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "ui.widget",
+                "argument.ui.widget.invalid",
+                `${name}.ui.widget must be one of: ${[...SUPPORTED_WIDGETS].join(", ")}`,
+            );
+        }
+
+        if ((ui.widget === "number" || ui.widget === "stepper") && definition.type !== "number") {
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "ui.widget",
+                "argument.ui.widget.type-mismatch",
+                `${name}.ui.widget ${ui.widget} requires a number argument`,
+            );
+        }
+
+        if ((ui.widget === "toggle" || ui.widget === "confirm") && definition.type !== "boolean") {
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "ui.widget",
+                "argument.ui.widget.type-mismatch",
+                `${name}.ui.widget ${ui.widget} requires a boolean argument`,
+            );
+        }
+
+        if ((ui.widget === "select" || ui.widget === "radio") && definition.type !== "enum") {
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "ui.widget",
+                "argument.ui.widget.type-mismatch",
+                `${name}.ui.widget ${ui.widget} requires an enum argument`,
+            );
+        }
+
+        if (ui.widget === "multiselect" && definition.type !== "multi-enum") {
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "ui.widget",
+                "argument.ui.widget.type-mismatch",
+                `${name}.ui.widget multiselect requires a multi-enum argument`,
+            );
+        }
+
+        if (ui.widget === "list" && definition.type !== "string-list") {
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "ui.widget",
+                "argument.ui.widget.type-mismatch",
+                `${name}.ui.widget list requires a string-list argument`,
+            );
+        }
+
+        if (ui.widget === "key-value" && definition.type !== "key-value") {
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "ui.widget",
+                "argument.ui.widget.type-mismatch",
+                `${name}.ui.widget key-value requires a key-value argument`,
+            );
+        }
+
+        const pathLikeWidget = ["path", "file", "directory"].includes(ui.widget);
+        const stringWidget = [
+            "text",
+            "textarea",
+            "command",
+            "secret",
+            "duration",
+            "date",
+            "time",
+            "datetime",
+            "url",
+            "email",
+            "json",
+            "code",
+        ].includes(ui.widget);
+        if (
+            (stringWidget && definition.type !== "string") ||
+            (pathLikeWidget && definition.type !== "string" && definition.type !== "string-list")
+        ) {
+            let expectedType = "string";
+            if (pathLikeWidget) {
+                expectedType = "string or string-list";
+            }
+
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "ui.widget",
+                "argument.ui.widget.type-mismatch",
+                `${name}.ui.widget ${ui.widget} requires a ${expectedType} argument`,
+            );
+        }
+    }
+
+    if (ui.rows !== undefined && !isPositiveInteger(ui.rows)) {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "ui.rows",
+            "argument.ui.rows.invalid",
+            `${name}.ui.rows must be a positive integer`,
+        );
+    }
+}
+
+function validateTypeSpecificRules(
+    name: string,
+    definition: ArgumentDefinition,
+    diagnostics: DefinitionDiagnostic[],
+): void {
+    if (definition.complete?.constructor.name === "AsyncFunction") {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "complete",
+            "argument.completion.async-provider-in-sync-slot",
+            `${name}.complete must be synchronous; use completeAsync for async completion providers`,
+        );
+    }
+
+    if (definition.title !== undefined && typeof definition.title !== "string") {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "title",
+            "argument.title.invalid",
+            `${name}.title must be a string`,
+        );
+    }
+
+    if (
+        definition.occurrence !== undefined &&
+        !["error", "first", "last", "append"].includes(definition.occurrence)
+    ) {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "occurrence",
+            "argument.occurrence.invalid",
+            `${name}.occurrence must be one of: error, first, last, append`,
+        );
+    }
+
+    if (definition.occurrence === "append" && !supportsAppendOccurrence(definition)) {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "occurrence",
+            "argument.occurrence.type-mismatch",
+            `${name}.occurrence append is only valid for collection arguments`,
+        );
+    }
+
+    if (
+        definition.completionTimeoutMs !== undefined &&
+        !isNonNegativeInteger(definition.completionTimeoutMs)
+    ) {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "completionTimeoutMs",
+            "argument.completion-timeout.invalid",
+            `${name}.completionTimeoutMs must be a non-negative integer`,
+        );
+    }
+
+    if (definition.required === true && definition.default !== undefined) {
+        addDefinitionDiagnostic(
+            diagnostics,
+            "argument.required-default.conflict",
+            `${name}: required arguments may not define a default`,
+            [name],
+        );
+    }
+
+    if (isFormOnlyArgument(definition)) {
+        if (definition.required === true) {
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "required",
+                "argument.form-only.required",
+                `${name}: form-only arguments must be optional`,
+            );
+        }
+
+        if (definition.default !== undefined) {
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "default",
+                "argument.form-only.default",
+                `${name}: form-only arguments may not define a default`,
+            );
+        }
+
+        for (const field of ["flag", "aliases", "position", "rest"] as const) {
+            const value = definition[field];
+            if (value === undefined || value === false) {
+                continue;
+            }
+
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                field,
+                "argument.form-only.cli-metadata",
+                `${name}: form-only arguments may not define ${field}`,
+            );
+        }
+    }
+
+    if (definition.position !== undefined && !isNonNegativeInteger(definition.position)) {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "position",
+            "argument.position.invalid",
+            `${name}.position must be a non-negative integer`,
+        );
+    }
+
+    if (definition.rest === true) {
+        if (!isPositionalArgument(definition)) {
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "rest",
+                "argument.rest.requires-position",
+                `${name}.rest requires a positional argument`,
+            );
+        }
+
+        if (!supportsRestPosition(definition)) {
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "rest",
+                "argument.rest.type-mismatch",
+                `${name}.rest is only valid for string or multi-enum arguments`,
+            );
+        }
+    }
+
+    switch (definition.type) {
+        case "string": {
+            if (definition.minLength !== undefined && !isNonNegativeInteger(definition.minLength)) {
+                addArgumentDiagnostic(
+                    diagnostics,
+                    name,
+                    "minLength",
+                    "argument.string.min-length.invalid",
+                    `${name}.minLength must be a non-negative integer`,
+                );
+            }
+
+            if (definition.maxLength !== undefined && !isNonNegativeInteger(definition.maxLength)) {
+                addArgumentDiagnostic(
+                    diagnostics,
+                    name,
+                    "maxLength",
+                    "argument.string.max-length.invalid",
+                    `${name}.maxLength must be a non-negative integer`,
+                );
+            }
+
+            if (
+                definition.minLength !== undefined &&
+                definition.maxLength !== undefined &&
+                definition.minLength > definition.maxLength
+            ) {
+                addArgumentDiagnostic(
+                    diagnostics,
+                    name,
+                    "minLength",
+                    "argument.string.length-range.invalid",
+                    `${name}.minLength must be less than or equal to maxLength`,
+                );
+            }
+
+            if (definition.pattern !== undefined) {
+                try {
+                    if (typeof definition.pattern === "string") {
+                        new RegExp(definition.pattern);
+                    }
+                } catch {
+                    addArgumentDiagnostic(
+                        diagnostics,
+                        name,
+                        "pattern",
+                        "argument.string.pattern.invalid",
+                        `${name}.pattern must be a valid regular expression`,
+                    );
+                }
+            }
+            break;
+        }
+        case "number": {
+            if (definition.min !== undefined && !Number.isFinite(definition.min)) {
+                addArgumentDiagnostic(
+                    diagnostics,
+                    name,
+                    "min",
+                    "argument.number.min.invalid",
+                    `${name}.min must be a finite number`,
+                );
+            }
+
+            if (definition.max !== undefined && !Number.isFinite(definition.max)) {
+                addArgumentDiagnostic(
+                    diagnostics,
+                    name,
+                    "max",
+                    "argument.number.max.invalid",
+                    `${name}.max must be a finite number`,
+                );
+            }
+
+            if (
+                definition.min !== undefined &&
+                definition.max !== undefined &&
+                definition.min > definition.max
+            ) {
+                addArgumentDiagnostic(
+                    diagnostics,
+                    name,
+                    "min",
+                    "argument.number.range.invalid",
+                    `${name}.min must be less than or equal to max`,
+                );
+            }
+
+            if (
+                definition.step !== undefined &&
+                (!Number.isFinite(definition.step) || definition.step <= 0)
+            ) {
+                addArgumentDiagnostic(
+                    diagnostics,
+                    name,
+                    "step",
+                    "argument.number.step.invalid",
+                    `${name}.step must be a positive finite number`,
+                );
+            }
+
+            if (definition.unit?.length === 0) {
+                addArgumentDiagnostic(
+                    diagnostics,
+                    name,
+                    "unit",
+                    "argument.number.unit.invalid",
+                    `${name}.unit must not be empty`,
+                );
+            }
+            break;
+        }
+        case "boolean":
+            break;
+        case "string-list":
+        case "key-value": {
+            if (definition.minItems !== undefined && !isNonNegativeInteger(definition.minItems)) {
+                addArgumentDiagnostic(
+                    diagnostics,
+                    name,
+                    "minItems",
+                    "argument.collection.min-items.invalid",
+                    `${name}.minItems must be a non-negative integer`,
+                );
+            }
+
+            if (definition.maxItems !== undefined && !isNonNegativeInteger(definition.maxItems)) {
+                addArgumentDiagnostic(
+                    diagnostics,
+                    name,
+                    "maxItems",
+                    "argument.collection.max-items.invalid",
+                    `${name}.maxItems must be a non-negative integer`,
+                );
+            }
+
+            if (
+                definition.minItems !== undefined &&
+                definition.maxItems !== undefined &&
+                definition.minItems > definition.maxItems
+            ) {
+                addArgumentDiagnostic(
+                    diagnostics,
+                    name,
+                    "minItems",
+                    "argument.collection.item-range.invalid",
+                    `${name}.minItems must be less than or equal to maxItems`,
+                );
+            }
+            break;
+        }
+        case "enum":
+        case "multi-enum": {
+            if (definition.values.length === 0) {
+                addArgumentDiagnostic(
+                    diagnostics,
+                    name,
+                    "values",
+                    "argument.values.empty",
+                    `${name}.values must be a non-empty list of strings`,
+                );
+            }
+
+            const seen = new Set<string>();
+            for (const value of definition.values) {
+                if (value.length === 0) {
+                    addArgumentDiagnostic(
+                        diagnostics,
+                        name,
+                        "values",
+                        "argument.values.empty-string",
+                        `${name}.values may not contain empty strings`,
+                    );
+                }
+
+                if (definition.type === "multi-enum" && value.includes(",")) {
+                    addArgumentDiagnostic(
+                        diagnostics,
+                        name,
+                        "values",
+                        "argument.values.comma",
+                        `${name}.values may not contain commas`,
+                    );
+                }
+
+                if (seen.has(value)) {
+                    addArgumentDiagnostic(
+                        diagnostics,
+                        name,
+                        "values",
+                        "argument.values.duplicate",
+                        `${name}.values contains duplicate value ${value}`,
+                    );
+                }
+
+                seen.add(value);
+            }
+
+            if (definition.type === "multi-enum") {
+                if (
+                    definition.minItems !== undefined &&
+                    !isNonNegativeInteger(definition.minItems)
+                ) {
+                    addArgumentDiagnostic(
+                        diagnostics,
+                        name,
+                        "minItems",
+                        "argument.multi-enum.min-items.invalid",
+                        `${name}.minItems must be a non-negative integer`,
+                    );
+                }
+
+                if (
+                    definition.maxItems !== undefined &&
+                    !isNonNegativeInteger(definition.maxItems)
+                ) {
+                    addArgumentDiagnostic(
+                        diagnostics,
+                        name,
+                        "maxItems",
+                        "argument.multi-enum.max-items.invalid",
+                        `${name}.maxItems must be a non-negative integer`,
+                    );
+                }
+
+                if (
+                    definition.minItems !== undefined &&
+                    definition.maxItems !== undefined &&
+                    definition.minItems > definition.maxItems
+                ) {
+                    addArgumentDiagnostic(
+                        diagnostics,
+                        name,
+                        "minItems",
+                        "argument.multi-enum.item-range.invalid",
+                        `${name}.minItems must be less than or equal to maxItems`,
+                    );
+                }
+            }
+            break;
+        }
+        default:
+            casesHandled(definition);
+    }
+
+    validateDefault(name, definition, diagnostics);
+    validateUi(name, definition, diagnostics);
+}
+
+function validatePositionals(
+    definitions: ArgumentDefinitions,
+    diagnostics: DefinitionDiagnostic[],
+): void {
+    const flatDefinitions = flattenGroupedArgumentDefinitions(definitions);
+    const positions = new Map<number, string>();
+    for (const [name, definition] of Object.entries(flatDefinitions)) {
+        const position = definition.position;
+        const label = "position";
+
+        if (position === undefined || !isNonNegativeInteger(position)) {
+            continue;
+        }
+
+        const existing = positions.get(position);
+        if (existing !== undefined) {
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                label,
+                "argument.position.duplicate",
+                `${name}.${label} duplicates position ${position} from ${existing}`,
+            );
+            continue;
+        }
+
+        positions.set(position, name);
+    }
+
+    let optionalBeforeRequired: string | undefined;
+    let restArgument: string | undefined;
+    for (const [name, definition] of positionalArgumentEntries(definitions)) {
+        if (restArgument !== undefined) {
+            addDefinitionDiagnostic(
+                diagnostics,
+                "argument.position.after-rest",
+                `${name}: positional arguments may not follow rest argument ${restArgument}`,
+                [name, "position"],
+            );
+        }
+
+        if (definition.rest === true) {
+            restArgument = name;
+        }
+
+        const required = definition.required === true && definition.default === undefined;
+        if (!required) {
+            optionalBeforeRequired = name;
+            continue;
+        }
+
+        if (optionalBeforeRequired !== undefined) {
+            addDefinitionDiagnostic(
+                diagnostics,
+                "argument.position.required-after-optional",
+                `${name}: required positional arguments may not follow optional positional argument ${optionalBeforeRequired}`,
+                [name, "position"],
+            );
+        }
+    }
+}
+
+/**
+ * Validate argument names, flags, defaults, constraints, UI metadata, and positional layout.
+ *
+ * The function does not throw; returned diagnostics are structured for programmatic handling.
+ */
+export function validateArgumentDefinitions(definitions: unknown): DefinitionDiagnostic[] {
+    const diagnostics: DefinitionDiagnostic[] = [];
+    if (!isRecord(definitions)) {
+        addDefinitionDiagnostic(
+            diagnostics,
+            "arguments.invalid",
+            "arguments must be an object",
+            [],
+        );
+        return diagnostics;
+    }
+
+    const entries = collectUnknownGroupedArgumentDefinitions(definitions);
+
+    const flatDefinitions: Record<string, unknown> = {};
+    const sourcePaths = new Map<string, readonly string[]>();
+    for (const entry of entries) {
+        const firstPath = sourcePaths.get(entry.key);
+        if (firstPath !== undefined) {
+            addDefinitionDiagnostic(
+                diagnostics,
+                "argument.name.duplicate-path",
+                `${entry.key}: canonical argument path is defined by both ${firstPath.join(" > ")} and ${entry.sourcePath.join(" > ")}`,
+                entry.sourcePath,
+            );
+            continue;
+        }
+
+        sourcePaths.set(entry.key, entry.sourcePath);
+        Object.defineProperty(flatDefinitions, entry.key, {
+            value: entry.definition,
+            enumerable: true,
+            configurable: true,
+            writable: true,
+        });
+    }
+
+    const validDefinitions: Record<string, ArgumentDefinition> = {};
+    const names = Object.keys(flatDefinitions);
+    const flags = new Map<string, string>();
+
+    for (const name of names) {
+        if (!ARGUMENT_NAME_PATTERN.test(name)) {
+            addDefinitionDiagnostic(
+                diagnostics,
+                "argument.name.invalid",
+                `${name}: argument names may only contain letters, numbers, dots, underscores, and hyphens`,
+                [name],
+            );
+        }
+
+        const reservedSegment = reservedArgumentNameSegment(name);
+        if (reservedSegment !== undefined) {
+            addDefinitionDiagnostic(
+                diagnostics,
+                "argument.name.reserved-segment",
+                `${name}: argument path segment ${reservedSegment} is reserved`,
+                [name],
+            );
+        }
+
+        for (const other of names) {
+            if (name !== other && other.startsWith(`${name}.`)) {
+                addDefinitionDiagnostic(
+                    diagnostics,
+                    "argument.name.nested-collision",
+                    `${name}: cannot define both ${name} and nested argument ${other}`,
+                    [name],
+                );
+                break;
+            }
+        }
+
+        const definition = flatDefinitions[name];
+        if (!validateArgumentDefinition(name, definition, diagnostics)) {
+            continue;
+        }
+
+        Object.defineProperty(validDefinitions, name, {
+            value: definition,
+            enumerable: true,
+            configurable: true,
+            writable: true,
+        });
+
+        validateTypeSpecificRules(name, definition, diagnostics);
+
+        if (isPositionalArgument(definition) || isFormOnlyArgument(definition)) {
+            continue;
+        }
+
+        validateFlagName(name, argumentFlagName(name, definition), flags, diagnostics, [
+            name,
+            "flag",
+        ]);
+
+        for (const [index, alias] of (definition.aliases ?? []).entries()) {
+            validateFlagName(name, normalizeFlagName(alias), flags, diagnostics, [
+                name,
+                "aliases",
+                index,
+            ]);
+        }
+    }
+
+    validatePositionals(validDefinitions, diagnostics);
+
+    return diagnostics;
+}
+
+/** Build the flag lookup used by the parser; positional arguments are intentionally excluded. */
+export function createArgumentLookup(definitions: ArgumentDefinitions): ArgumentLookup {
+    const flatDefinitions = flattenGroupedArgumentDefinitions(definitions);
+    const byFlag = new Map<string, string>();
+
+    for (const [name, definition] of Object.entries(flatDefinitions)) {
+        if (isPositionalArgument(definition) || isFormOnlyArgument(definition)) {
+            continue;
+        }
+
+        for (const flag of argumentFlagNames(name, definition)) {
+            byFlag.set(flag, name);
+        }
+    }
+
+    return { byFlag, definitions: flatDefinitions };
+}
+
+/** Resolve a raw or normalized flag spelling to the owning argument name. */
+export function findArgumentName(lookup: ArgumentLookup, flag: string): string | undefined {
+    return lookup.byFlag.get(normalizeFlagName(flag));
+}
+
+/** Return an argument default, cloning array defaults so parses cannot share mutable selections. */
+export function applyArgumentDefault(definition: ArgumentDefinition): ArgumentValue {
+    if (definition.default !== undefined) {
+        if (isStringArrayValue(definition.default)) {
+            return [...definition.default];
+        }
+
+        if (typeof definition.default === "object") {
+            return { ...definition.default };
+        }
+
+        return definition.default;
+    }
+
+    return undefined;
+}
+
+/** Apply missing defaults to a shallow copy of parsed values without mutating the caller's object. */
+export function applyArgumentDefaults(
+    definitions: ArgumentDefinitions,
+    values: Record<string, ArgumentValue>,
+): Record<string, ArgumentValue> {
+    const next: Record<string, ArgumentValue> = { ...values };
+    for (const [name, definition] of Object.entries(
+        flattenGroupedArgumentDefinitions(definitions),
+    )) {
+        if (!Object.hasOwn(next, name) && Object.hasOwn(Object.prototype, name)) {
+            Object.defineProperty(next, name, {
+                configurable: true,
+                value: undefined,
+                writable: true,
+            });
+        }
+
+        if (Object.hasOwn(next, name) && next[name] !== undefined) {
+            continue;
+        }
+
+        const defaultValue = applyArgumentDefault(definition);
+        if (defaultValue !== undefined) {
+            Object.defineProperty(next, name, {
+                configurable: true,
+                enumerable: true,
+                value: defaultValue,
+                writable: true,
+            });
+        }
+    }
+
+    return next;
+}
+
+/**
+ * Parse one raw CLI/form token into an argument value.
+ *
+ * This handles token-level coercion and value membership; call `validateArgumentValue` afterward
+ * for required checks, string constraints, and collection-size constraints.
+ */
+export function coerceArgumentValue(
+    definition: ArgumentDefinition,
+    raw: string,
+    name: string,
+    options?: ArgumentMessageOptions,
+): CoercedArgumentValue {
+    const displayName = formatArgumentMessageName(name, definition, options);
+
+    switch (definition.type) {
+        case "string":
+            return { ok: true, value: raw };
+        case "number": {
+            if (raw.trim().length === 0) {
+                return {
+                    ok: false,
+                    issue: createParseIssue(
+                        "invalid-value",
+                        `${displayName} expects a number`,
+                        name,
+                        raw,
+                    ),
+                };
+            }
+
+            const parsed = Number(raw);
+            if (!Number.isFinite(parsed)) {
+                return {
+                    ok: false,
+                    issue: createParseIssue(
+                        "invalid-value",
+                        `${displayName} expects a number`,
+                        name,
+                        raw,
+                    ),
+                };
+            }
+
+            if (definition.integer === true && !Number.isInteger(parsed)) {
+                return {
+                    ok: false,
+                    issue: createParseIssue(
+                        "invalid-value",
+                        `${displayName} expects an integer`,
+                        name,
+                        raw,
+                    ),
+                };
+            }
+
+            if (definition.min !== undefined && parsed < definition.min) {
+                return {
+                    ok: false,
+                    issue: createParseIssue(
+                        "invalid-value",
+                        `${displayName} must be at least ${definition.min}`,
+                        name,
+                        raw,
+                    ),
+                };
+            }
+
+            if (definition.max !== undefined && parsed > definition.max) {
+                return {
+                    ok: false,
+                    issue: createParseIssue(
+                        "invalid-value",
+                        `${displayName} must be at most ${definition.max}`,
+                        name,
+                        raw,
+                    ),
+                };
+            }
+
+            return { ok: true, value: parsed };
+        }
+        case "boolean": {
+            const parsed = booleanFromString(raw);
+            if (parsed === undefined) {
+                return {
+                    ok: false,
+                    issue: createParseIssue(
+                        "invalid-value",
+                        `${displayName} expects a boolean value`,
+                        name,
+                        raw,
+                    ),
+                };
+            }
+
+            return { ok: true, value: parsed };
+        }
+        case "enum": {
+            if (!definition.values.includes(raw)) {
+                return {
+                    ok: false,
+                    issue: createParseIssue(
+                        "invalid-value",
+                        `${displayName} must be one of: ${definition.values.join(", ")}`,
+                        name,
+                        raw,
+                    ),
+                };
+            }
+
+            return { ok: true, value: raw };
+        }
+        case "multi-enum": {
+            const values = raw
+                .split(",")
+                .map((item) => item.trim())
+                .filter((item) => item.length > 0);
+            const invalid = values.find((item) => !definition.values.includes(item));
+            if (invalid !== undefined) {
+                return {
+                    ok: false,
+                    issue: createParseIssue(
+                        "invalid-value",
+                        `${displayName} must use values from: ${definition.values.join(", ")}`,
+                        name,
+                        invalid,
+                    ),
+                };
+            }
+
+            return { ok: true, value: [...new Set(values)] };
+        }
+        case "string-list": {
+            const values = raw
+                .split(",")
+                .map((item) => item.trim())
+                .filter((item) => item.length > 0);
+            return { ok: true, value: values };
+        }
+        case "key-value": {
+            const entries: Array<readonly [string, string]> = [];
+            if (raw.length === 0) {
+                return { ok: true, value: Object.fromEntries(entries) };
+            }
+
+            for (const item of raw.split(",")) {
+                const equalsIndex = item.indexOf("=");
+                if (equalsIndex <= 0) {
+                    return {
+                        ok: false,
+                        issue: createParseIssue(
+                            "invalid-value",
+                            `${displayName} expects key=value`,
+                            name,
+                            item,
+                        ),
+                    };
+                }
+
+                const key = item.slice(0, equalsIndex).trim();
+                if (key.length === 0) {
+                    return {
+                        ok: false,
+                        issue: createParseIssue(
+                            "invalid-value",
+                            `${displayName} expects a non-empty key`,
+                            name,
+                            item,
+                        ),
+                    };
+                }
+
+                entries.push([key, item.slice(equalsIndex + 1)]);
+            }
+
+            return { ok: true, value: Object.fromEntries(entries) };
+        }
+        default:
+            return casesHandled(definition);
+    }
+}
+
+/** Return finite values suitable for select/radio/toggle form controls. */
+export function selectableArgumentValues(definition: ArgumentDefinition): ArgumentValue[] {
+    switch (definition.type) {
+        case "string":
+        case "number":
+        case "string-list":
+        case "key-value":
+            return [];
+        case "boolean": {
+            const values: ArgumentValue[] = [true, false];
+            if (definition.required !== true && definition.default === undefined) {
+                values.push(undefined);
+            }
+
+            return values;
+        }
+        case "enum": {
+            const values: ArgumentValue[] = [...definition.values];
+            if (definition.required !== true && definition.default === undefined) {
+                values.push(undefined);
+            }
+
+            return values;
+        }
+        case "multi-enum":
+            return [...definition.values];
+        default:
+            return casesHandled(definition);
+    }
+}
+
+/** Return built-in static completion candidates for booleans and enum-like arguments. */
+export function completionValuesForArgument(definition: ArgumentDefinition): string[] {
+    switch (definition.type) {
+        case "string":
+        case "number":
+            return [];
+        case "boolean":
+            return ["true", "false"];
+        case "enum":
+        case "multi-enum":
+            return [...definition.values];
+        case "string-list":
+        case "key-value":
+            return [];
+        default:
+            return casesHandled(definition);
+    }
+}
+
+/** Convert freeform form input into an argument value; blank input falls back to the default/unset value. */
+export function normalizeTextArgumentInput(
+    definition: ArgumentDefinition,
+    input: string,
+): ArgumentValue {
+    const trimmed = input.trim();
+    if (trimmed.length === 0) {
+        return applyArgumentDefault(definition);
+    }
+
+    switch (definition.type) {
+        case "string":
+            return input;
+        case "number":
+            return Number(trimmed);
+        case "string-list":
+            return trimmed
+                .split(",")
+                .map((item) => item.trim())
+                .filter((item) => item.length > 0);
+        case "key-value": {
+            const entries: Array<readonly [string, string]> = [];
+            for (const item of trimmed.split(",")) {
+                const equalsIndex = item.indexOf("=");
+                if (equalsIndex <= 0) {
+                    return undefined;
+                }
+
+                entries.push([item.slice(0, equalsIndex).trim(), item.slice(equalsIndex + 1)]);
+            }
+
+            return Object.fromEntries(entries);
+        }
+        case "boolean":
+        case "enum":
+        case "multi-enum":
+            return undefined;
+        default:
+            return casesHandled(definition);
+    }
+}
+
+/** Return the compact type label shown in generated usage/help text. */
+export function argumentTypeHint(definition: ArgumentDefinition): string {
+    switch (definition.type) {
+        case "string":
+        case "boolean":
+        case "enum":
+        case "multi-enum":
+        case "string-list":
+        case "key-value":
+            return definition.type;
+        case "number":
+            if (definition.integer === true) {
+                return "int";
+            }
+
+            return definition.type;
+        default:
+            return casesHandled(definition);
+    }
+}
+
+/** Return the placeholder/value hint shown for an argument in usage, help, and forms. */
+export function argumentValueHint(definition: ArgumentDefinition, name?: string): string {
+    if (definition.placeholder !== undefined) {
+        return definition.placeholder;
+    }
+
+    switch (definition.type) {
+        case "string":
+            if (name === undefined) {
+                return "string";
+            }
+
+            return toKebabCase(name);
+        case "number":
+            return argumentTypeHint(definition);
+        case "boolean":
+            return "boolean";
+        case "enum":
+            return definition.values.join("|");
+        case "multi-enum":
+            return definition.values.join(",");
+        case "string-list":
+            return "value1,value2";
+        case "key-value":
+            return "key=value";
+        default:
+            return casesHandled(definition);
+    }
+}
+
+/** Format an argument default as the suffix used in compact generated usage text. */
+export function formatArgumentDefault(definition: ArgumentDefinition): string {
+    if (definition.default === undefined) {
+        return "";
+    }
+
+    if (definition.type === "string" && definition.sensitive === true) {
+        return "";
+    }
+
+    if (Array.isArray(definition.default)) {
+        return `=${definition.default.join(",")}`;
+    }
+
+    if (typeof definition.default === "object") {
+        return `=${Object.entries(definition.default)
+            .map(([key, value]) => `${key}=${value}`)
+            .join(",")}`;
+    }
+
+    if (typeof definition.default === "number" && Object.is(definition.default, -0)) {
+        return "=-0";
+    }
+
+    return `=${String(definition.default)}`;
+}

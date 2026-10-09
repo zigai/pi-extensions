@@ -11,7 +11,7 @@ const projectConfig: OxlintConfig = {
         builtin: true,
         node: true,
     },
-    ignorePatterns: ["dist/**", "node_modules/**"],
+    ignorePatterns: ["**/dist/**", "**/coverage/**", "**/node_modules/**"],
     rules: {
         ...blankLines.rules,
         "antislop/no-chained-type-assertions": "error",

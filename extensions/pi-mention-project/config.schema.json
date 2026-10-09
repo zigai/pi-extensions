@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/zigai/pi-tweaks/master/extensions/pi-mention-project/config.schema.json",
+  "title": "Pi Mention Project settings",
+  "description": "Settings for project mentions and project discovery.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "default": "./schemas/pi-mention-project.schema.json",
+      "description": "JSON Schema used by editors for this settings file."
+    },
+    "trigger": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^/\\s]+$",
+      "default": "#",
+      "description": "One or more non-whitespace, non-slash characters that start a project mention."
+    },
+    "roots": {
+      "anyOf": [
+        {
+          "type": "string",
+          "title": "One directory",
+          "minLength": 1,
+          "x-control": "path",
+          "description": "One project root directory."
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "x-control": "path",
+            "description": "Project root directory."
+          },
+          "title": "Directory list"
+        }
+      ],
+      "default": [],
+      "description": "Project root directory or directories searched for projects."
+    },
+    "gitReposOnly": {
+      "type": "boolean",
+      "default": true,
+      "description": "Include only directories containing Git repositories."
+    },
+    "includeDotFolders": {
+      "type": "boolean",
+      "default": false,
+      "description": "Include project directories whose names start with a dot."
+    },
+    "completionSuffix": {
+      "type": "string",
+      "default": " ",
+      "description": "Text inserted after a completed project mention."
+    },
+    "initialSuggestions": {
+      "type": "object",
+      "properties": {
+        "strategy": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "frecency"
+            },
+            {
+              "type": "string",
+              "const": "recent"
+            },
+            {
+              "type": "string",
+              "const": "frequent"
+            },
+            {
+              "type": "string",
+              "const": "alphabetical"
+            },
+            {
+              "type": "string",
+              "const": "sourceOrder"
+            }
+          ],
+          "default": "frecency",
+          "description": "Ordering used before any project query text is entered."
+        },
+        "pinned": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "default": [],
+          "uniqueItems": true,
+          "description": "Project names placed first, in this order, before the configured strategy."
+        }
+      },
+      "default": {},
+      "additionalProperties": false,
+      "description": "Controls the entries shown immediately after the trigger."
+    }
+  }
+}

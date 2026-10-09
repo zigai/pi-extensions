@@ -16,7 +16,7 @@ import {
   type RuntimeUsageGoalStatus,
   type SessionEntryLike,
   type ThreadGoal,
-} from "./types.js";
+} from "./types.ts";
 
 export interface ApplyUsageOptions {
   expectedGoalId?: string | null;

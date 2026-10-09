@@ -52,7 +52,7 @@ alias tsc := typecheck
 
 # Install the extension into Pi
 install:
-    pi install .
+    just --justfile ../../Justfile install
 
 # Build the actual distribution (also used by package verification)
 build:

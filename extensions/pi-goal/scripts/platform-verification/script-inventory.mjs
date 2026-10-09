@@ -11,6 +11,7 @@ export const platformVerificationSyntaxScripts = [
   "scripts/platform-verification/platform-build.mjs",
   "scripts/platform-verification/script-inventory.mjs",
   "scripts/platform-verification/targets.mjs",
+  "scripts/platform-verification/workspace-packages.mjs",
 ];
 
 export const platformVerificationPackageScripts = [

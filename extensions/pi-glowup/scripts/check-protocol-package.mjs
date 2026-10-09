@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { copyFile, mkdir, mkdtemp, readdir, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -9,13 +9,19 @@ import { fileURLToPath } from "node:url";
  * @param {string} packageRoot
  */
 export async function checkProtocolPackage(packageRoot) {
-  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "glowup-protocol-package-"));
+  const cacheDirectory = path.join(homedir(), ".cache", "pi-tweaks", "package-tests");
+  await mkdir(cacheDirectory, { recursive: true });
+  const temporaryRoot = await mkdtemp(path.join(cacheDirectory, "glowup-protocol-"));
 
   try {
-    execFileSync("npm", ["pack", "--ignore-scripts", "--pack-destination", temporaryRoot], {
-      cwd: packageRoot,
-      stdio: "pipe",
-    });
+    execFileSync(
+      "npm",
+      ["pack", "--ignore-scripts", "--workspaces=false", "--pack-destination", temporaryRoot],
+      {
+        cwd: packageRoot,
+        stdio: "pipe",
+      },
+    );
 
     const archives = (await readdir(temporaryRoot)).filter((name) => name.endsWith(".tgz"));
     const archive = archives[0];
@@ -36,7 +42,7 @@ export async function checkProtocolPackage(packageRoot) {
 
     // Supply only the public protocol's declared schema peer, not workspace sources.
     await symlink(
-      path.join(packageRoot, "node_modules", "typebox"),
+      fileURLToPath(new URL("..", import.meta.resolve("typebox"))),
       path.join(consumerRoot, "node_modules", "typebox"),
       "dir",
     );
@@ -64,7 +70,7 @@ export async function checkProtocolPackage(packageRoot) {
     execFileSync(
       process.execPath,
       [
-        path.join(packageRoot, "node_modules", "typescript", "bin", "tsc"),
+        fileURLToPath(new URL("../bin/tsc", import.meta.resolve("typescript"))),
         "--project",
         path.join(consumerRoot, "tsconfig.json"),
       ],

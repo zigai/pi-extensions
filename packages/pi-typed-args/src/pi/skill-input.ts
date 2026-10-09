@@ -1,0 +1,192 @@
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { openArgumentForm, type OpenArgumentFormOptions } from "../form/open.ts";
+import { combineSkillAdditionalInput, decideArgumentIssueAction } from "../invocation.ts";
+import { parseTypedCommandArgs } from "../parser.ts";
+import type { TypedCommandRegistry } from "../registry.ts";
+import { createPiCompletionCapabilities } from "./completions.ts";
+import {
+    isTypedSkillCommand,
+    skillPathFromCommand,
+    typedSkillCommandFromMetadata,
+} from "../skills/command.ts";
+import { formatTypedSkillDiagnostics } from "../skills/diagnostics.ts";
+import { readTypedSkillMetadataResult } from "../skills/metadata.ts";
+import { renderTypedSkillInvocation } from "../skills/prompt.ts";
+import type { TypedSkillDiagnostics } from "../skills/types.ts";
+import type { FormMode, ParsedCommandArguments } from "../types.ts";
+import type { RegisteredTypedCommand } from "./command-types.ts";
+import { commandInvocationForEditorText, slashCommandMatch } from "./editor-invocation.ts";
+import { notifyDetailedHelp } from "./help.ts";
+import type { ResolvedPiTypedCommandsAppearance } from "./presentation-config.ts";
+import { resolveTypedCommandFormTitle } from "./form-title.ts";
+import { notifyIssues, shouldNotifyInsteadOfOpeningForm } from "./register.ts";
+
+type SkillParseResult = {
+    parsed: ParsedCommandArguments;
+    additionalInput: string;
+};
+
+type TypedSkillInputResult = { action: "handled" } | { action: "transform"; text: string };
+
+/** Refresh process-local typed skill metadata from Pi's current skill command list. */
+export function refreshTypedSkills(pi: ExtensionAPI, registry: TypedCommandRegistry): void {
+    const commands: RegisteredTypedCommand[] = [];
+    const diagnostics: TypedSkillDiagnostics[] = [];
+    for (const command of pi.getCommands()) {
+        const skillPath = skillPathFromCommand(command);
+        if (skillPath === undefined) {
+            continue;
+        }
+
+        const fallbackName = command.name.replace(/^skill:/, "");
+        const result = readTypedSkillMetadataResult(skillPath, { fallbackName });
+        if (result.status === "ok") {
+            commands.push(typedSkillCommandFromMetadata(result.metadata));
+        }
+
+        if (result.status === "invalid") {
+            diagnostics.push(result.diagnostics);
+        }
+    }
+
+    registry.replaceSkills(commands, diagnostics);
+}
+
+/** Notify when editor text targets a skill whose typed arguments could not be registered. */
+export function notifySkillDiagnosticsForText(
+    text: string,
+    ctx: ExtensionContext,
+    registry: TypedCommandRegistry,
+): boolean {
+    const match = slashCommandMatch(text);
+    if (match === undefined) {
+        return false;
+    }
+
+    const diagnostics = registry.getSkillDiagnostics(match.commandName);
+    if (diagnostics === undefined) {
+        return false;
+    }
+
+    ctx.ui.notify(formatTypedSkillDiagnostics(diagnostics), "error");
+
+    return true;
+}
+
+function parseSkillArguments(
+    command: RegisteredTypedCommand,
+    rawArgs: string,
+    trailingBody: string,
+): SkillParseResult {
+    const parsedResult = parseTypedCommandArgs(command, rawArgs);
+    const additionalTokens: string[] = [];
+    const issues = parsedResult.issues.filter((issue) => {
+        const canPreserveAsAdditionalInput =
+            issue.kind === "unexpected-positional" ||
+            (issue.kind === "unknown-argument" && issue.name === undefined);
+        if (!canPreserveAsAdditionalInput || issue.token === undefined) {
+            return true;
+        }
+
+        additionalTokens.push(issue.token);
+
+        return false;
+    });
+
+    return {
+        parsed: { ...parsedResult, issues },
+        additionalInput: combineSkillAdditionalInput(additionalTokens.join(" "), trailingBody),
+    };
+}
+
+/** Render typed skill input or open prompts/notifications when required. */
+export async function renderTypedSkillInput(
+    command: RegisteredTypedCommand,
+    rawArgs: string,
+    trailingBody: string,
+    ctx: ExtensionContext,
+    formMode: FormMode,
+    appearance: ResolvedPiTypedCommandsAppearance,
+    registry: TypedCommandRegistry,
+    signal?: AbortSignal,
+): Promise<string | undefined> {
+    if (!isTypedSkillCommand(command)) {
+        return undefined;
+    }
+
+    const { parsed, additionalInput } = parseSkillArguments(command, rawArgs, trailingBody);
+    if (parsed.mode === "help") {
+        notifyDetailedHelp(ctx, command, appearance);
+        return undefined;
+    }
+
+    const issueMessages = parsed.issues.map((item) => item.message);
+    let values = parsed.values;
+    let issueAction = decideArgumentIssueAction(parsed.issues);
+    if (shouldNotifyInsteadOfOpeningForm(parsed.issues)) {
+        issueAction = "notify";
+    }
+
+    if (issueAction === "open-form") {
+        if (!ctx.hasUI) {
+            notifyIssues(ctx, issueMessages);
+            return undefined;
+        }
+
+        let formOptions: OpenArgumentFormOptions = {
+            appearance,
+            title: resolveTypedCommandFormTitle(command, ctx),
+            completionCapabilities: createPiCompletionCapabilities(ctx.cwd, registry, signal),
+        };
+        if (signal !== undefined) {
+            formOptions = { ...formOptions, signal };
+        }
+
+        const collected = await openArgumentForm(command, parsed, formMode, ctx, formOptions);
+        if (collected === undefined) {
+            return undefined;
+        }
+
+        values = collected;
+    } else if (issueAction === "notify") {
+        notifyIssues(ctx, issueMessages);
+        return undefined;
+    }
+
+    return renderTypedSkillInvocation({
+        skill: command.skill,
+        values,
+        additionalInput,
+    });
+}
+
+/** Transform a typed skill slash-command input into the model-facing skill prompt. */
+export async function transformTypedSkillInput(
+    text: string,
+    ctx: ExtensionContext,
+    registry: TypedCommandRegistry,
+    appearance: ResolvedPiTypedCommandsAppearance,
+    formMode: FormMode = "missing",
+    signal?: AbortSignal,
+): Promise<TypedSkillInputResult | undefined> {
+    const invocation = commandInvocationForEditorText(text, registry);
+    if (invocation === undefined || !isTypedSkillCommand(invocation.command)) {
+        return undefined;
+    }
+
+    const transformed = await renderTypedSkillInput(
+        invocation.command,
+        invocation.rawArgs,
+        invocation.trailingBody,
+        ctx,
+        formMode,
+        appearance,
+        registry,
+        signal,
+    );
+    if (transformed === undefined) {
+        return { action: "handled" };
+    }
+
+    return { action: "transform", text: transformed };
+}

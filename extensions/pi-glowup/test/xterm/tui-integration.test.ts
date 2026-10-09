@@ -119,24 +119,24 @@ const THEME_STYLE_PROFILES: readonly ThemeStyleProfile[] = [
         theme: "light",
         appearance: "default",
         expectedAppearance: EXTENSION_DEFAULT_APPEARANCE,
-        expectedAddedForeground: "#588458",
-        expectedDeletedForeground: "#AA5555",
+        expectedAddedForeground: "#337e58",
+        expectedDeletedForeground: "#c8253d",
     },
     {
         name: "light theme with a custom four-color palette",
         theme: "light",
         appearance: LIGHT_CUSTOM_APPEARANCE,
         expectedAppearance: LIGHT_CUSTOM_APPEARANCE,
-        expectedAddedForeground: "#588458",
-        expectedDeletedForeground: "#AA5555",
+        expectedAddedForeground: "#337e58",
+        expectedDeletedForeground: "#c8253d",
     },
     {
         name: "dark theme with the existing custom four-color palette",
         theme: "dark",
         appearance: DEFAULT_APPEARANCE,
         expectedAppearance: DEFAULT_APPEARANCE,
-        expectedAddedForeground: "#B5BD68",
-        expectedDeletedForeground: "#CC6666",
+        expectedAddedForeground: "#68b78d",
+        expectedDeletedForeground: "#ea7f81",
     },
 ];
 
@@ -192,9 +192,9 @@ function expectDefaultBackgroundWithoutDiffAttributes(row: InterpretedRow): void
     expect(row.cells.every((cell) => !cell.isBold && !cell.isDim)).toBe(true);
 }
 
-const DARK_THEME_DIM_FOREGROUND = rgbFromHex("#666666");
-const DARK_THEME_ADDED_FOREGROUND = rgbFromHex("#B5BD68");
-const DARK_THEME_DELETED_FOREGROUND = rgbFromHex("#CC6666");
+const DARK_THEME_DIM_FOREGROUND = rgbFromHex("#7e888e");
+const DARK_THEME_ADDED_FOREGROUND = rgbFromHex("#68b78d");
+const DARK_THEME_DELETED_FOREGROUND = rgbFromHex("#ea7f81");
 
 const cleanupPrototype: CleanupPrototype = {
     clearAutocompleteUi(this: CleanupEditor): void {

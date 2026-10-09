@@ -2,7 +2,7 @@
 
 The optional `x-control` TypeBox annotation tells compatible settings editors how to present a property. It does not change validation, defaults, or runtime loading.
 
-[Pi Settings UI](https://github.com/zigai/pi-settings-ui) supports these values:
+[Pi Settings UI](https://github.com/zigai/pi-tweaks/tree/master/extensions/pi-settings-ui) supports these values:
 
 | `x-control`   | Compatible schema           | Presentation                                                            |
 | ------------- | --------------------------- | ----------------------------------------------------------------------- |

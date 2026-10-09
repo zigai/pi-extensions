@@ -41,7 +41,11 @@ test.each([false, true])(
       await interval.runCommand("ship it");
 
       for (const harness of [repeated, interval]) {
-        await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
+        await harness.emit("turn_start", {
+          type: "turn_start",
+          turnIndex: 0,
+          timestamp: 1,
+        });
       }
 
       for (const elapsed of [250, 500, 750, 1_000, 1_250, 1_500, 1_750, 2_000, 2_250, 2_500]) {
@@ -65,8 +69,14 @@ test.each([false, true])(
       assert.deepEqual(repeated.snapshot().goal?.usage, interval.snapshot().goal?.usage);
     } finally {
       try {
-        await repeated.emit("session_shutdown", { type: "session_shutdown", reason: "quit" });
-        await interval.emit("session_shutdown", { type: "session_shutdown", reason: "quit" });
+        await repeated.emit("session_shutdown", {
+          type: "session_shutdown",
+          reason: "quit",
+        });
+        await interval.emit("session_shutdown", {
+          type: "session_shutdown",
+          reason: "quit",
+        });
       } finally {
         Date.now = originalNow;
       }
@@ -145,9 +155,15 @@ test.each(["pause", "replace", "reload"])(
         await harness.runCommand("resume");
       } else if (transition === "replace") {
         now = 21_000;
-        await harness.runTool("create_goal", { objective: "replacement", replace_existing: true });
+        await harness.runTool("create_goal", {
+          objective: "replacement",
+          replace_existing: true,
+        });
       } else {
-        await harness.emit("session_shutdown", { type: "session_shutdown", reason: "reload" });
+        await harness.emit("session_shutdown", {
+          type: "session_shutdown",
+          reason: "reload",
+        });
         now = 21_000;
         harness.reloadExtension();
         await harness.emit("session_tree", { type: "session_tree" });
@@ -168,7 +184,10 @@ test.each(["pause", "replace", "reload"])(
       assert.equal(harness.snapshot().goal?.usage.activeSeconds, 1);
     } finally {
       try {
-        await harness.emit("session_shutdown", { type: "session_shutdown", reason: "quit" });
+        await harness.emit("session_shutdown", {
+          type: "session_shutdown",
+          reason: "quit",
+        });
       } finally {
         Date.now = originalNow;
       }

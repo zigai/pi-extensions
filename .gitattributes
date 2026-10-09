@@ -1,3 +1,4 @@
+extensions/*/README.md text eol=lf
+extensions/*/config.schema.json text eol=lf
+extensions/*/src/settings.prevalidated.ts text eol=lf
 packages/*/README.md text eol=lf
-packages/*/config.schema.json text eol=lf
-packages/*/src/settings.prevalidated.ts text eol=lf

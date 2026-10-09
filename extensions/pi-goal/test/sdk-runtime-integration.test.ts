@@ -13,9 +13,9 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 
-import goalExtension, { __testHooks } from "../src/index.js";
-import { isActiveGoalQueuedDetails } from "../src/queued-goal-messages.js";
-import { CUSTOM_ENTRY_TYPE } from "../src/types.js";
+import goalExtension, { __testHooks } from "../src/index.ts";
+import { isActiveGoalQueuedDetails } from "../src/queued-goal-messages.ts";
+import { CUSTOM_ENTRY_TYPE } from "../src/types.ts";
 
 const GoalIdToolResultSchema = Type.Object(
   {

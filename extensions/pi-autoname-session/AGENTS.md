@@ -9,7 +9,7 @@ Guidance for agents working in this repository.
 3. Keep persisted settings, session entries, provider payloads, and model output parsed at their boundaries. Pass typed domain values inward.
 4. Add behavior evidence at the seam that owns the change, regenerate settings artifacts when required, and run the release gate before handoff.
 
-Run `just setup` after cloning. For later changes, run:
+Run `just setup` and `npm run build` from the monorepo root after cloning. For later changes, run from this workspace:
 
 ```sh
 npm run check

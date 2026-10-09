@@ -3,12 +3,12 @@ import { test, vi } from "vitest";
 
 import type { AgentStartEvent } from "@earendil-works/pi-coding-agent";
 
-import { formatFooterStatus } from "../src/format.js";
+import { formatFooterStatus } from "../src/format.ts";
 import {
   createRecoveryPausedAttention,
   createRecoveryPendingAttention,
   HOST_OVERFLOW_RECOVERY_REASON,
-} from "../src/recovery.js";
+} from "../src/recovery.ts";
 import {
   assistantMessage,
   createRuntimeHarness,
@@ -16,8 +16,8 @@ import {
   flushContinuationScheduler,
   queuedCustomMessage,
   sessionCompactEvent,
-} from "./support/runtime-harness.js";
-import { givenOverflowPausedGoal } from "./support/scenarios.js";
+} from "./support/runtime-harness.ts";
+import { givenOverflowPausedGoal } from "./support/scenarios.ts";
 
 function agentStartEvent(): AgentStartEvent {
   return { type: "agent_start" };

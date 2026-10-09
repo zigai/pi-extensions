@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/zigai/pi-tweaks/master/extensions/pi-keymap-tweaks/config.schema.json",
+  "title": "Pi Keymap Tweaks settings",
+  "description": "Settings for Pi editor keybindings and thinking navigation.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "default": "./schemas/pi-keymap-tweaks.schema.json",
+      "description": "JSON Schema used by editors for this settings file."
+    },
+    "cycleThinkingBackwardKey": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Keybinding to cycle thinking level backward (e.g. 'alt+shift+tab'). Unbound by default."
+    }
+  }
+}

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/zigai/pi-settings-ui/HEAD/config.schema.json",
+  "$id": "https://raw.githubusercontent.com/zigai/pi-tweaks/master/extensions/pi-settings-ui/config.schema.json",
   "title": "Pi Settings UI settings",
   "description": "Settings for Pi Settings UI.",
   "type": "object",

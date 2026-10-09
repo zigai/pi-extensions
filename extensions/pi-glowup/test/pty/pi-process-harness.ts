@@ -1,8 +1,9 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { Terminal as HeadlessTerminal } from "@xterm/headless";
 import { spawn, type IPty } from "node-pty";
-import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const SYNCHRONIZED_OUTPUT_END = "\u001b[?2026l";
 const MAX_RAW_OUTPUT_BYTES = 4 * 1024 * 1024;
@@ -115,7 +116,9 @@ export class PiPtyProcess {
             scrollback: 4_000,
         });
 
-        const cliPath = realpathSync(resolve("node_modules/.bin/pi"));
+        const cliPath = fileURLToPath(
+            new URL("./cli.js", import.meta.resolve("@earendil-works/pi-coding-agent")),
+        );
 
         const args = [
             cliPath,

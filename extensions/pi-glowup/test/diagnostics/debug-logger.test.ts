@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DebugFileLogger } from "../../src/diagnostics/logger.ts";
-import { jsonValueSchema, type JsonValue } from "../../src/json-value.js";
+import { jsonValueSchema, type JsonValue } from "../../src/json-value.ts";
 import { Value } from "typebox/value";
 
 describe("debug file logger", () => {

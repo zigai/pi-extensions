@@ -295,7 +295,13 @@ export function createWarmupFailureResult(
         error: secretViolations.join(", "),
       },
     ],
-    { target: targetName, suite: suiteName, elapsedMs, exitCode: lease.code, signal: lease.signal },
+    {
+      target: targetName,
+      suite: suiteName,
+      elapsedMs,
+      exitCode: lease.code,
+      signal: lease.signal,
+    },
     [
       "summary.json",
       "artifact-manifest.json",
@@ -442,10 +448,10 @@ export function buildGoalRuntimeVerificationCommand(config, targetName) {
   const model = verificationModel(config);
   const packageName = config.packageName ?? "pi-codex-goal";
   if (platformFor(targetName) === "powershell") {
-    return `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "node .\\scripts\\platform-verification\\goal-runtime-verification.mjs --model ${model.replace(/"/g, '`"')} --package-name ${packageName.replace(/"/g, '`"')}"`;
+    return `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "Set-Location .\\extensions\\pi-goal; node .\\scripts\\platform-verification\\goal-runtime-verification.mjs --model ${model.replace(/"/g, '`"')} --package-name ${packageName.replace(/"/g, '`"')}"`;
   }
 
-  return `node scripts/platform-verification/goal-runtime-verification.mjs --model ${shellQuote(model)} --package-name ${shellQuote(packageName)}`;
+  return `cd extensions/pi-goal && node scripts/platform-verification/goal-runtime-verification.mjs --model ${shellQuote(model)} --package-name ${shellQuote(packageName)}`;
 }
 
 export function buildPlatformBuildCommand(
@@ -454,10 +460,10 @@ export function buildPlatformBuildCommand(
   nodeValidationMajor = 24,
 ) {
   if (platformFor(targetName) === "powershell") {
-    return `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\platform-verification\\platform-build-windows.ps1 -PackageName ${psSingleQuote(packageName)} -NodeValidationMajor ${nodeValidationMajor}`;
+    return `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "Set-Location .\\extensions\\pi-goal; & .\\scripts\\platform-verification\\platform-build-windows.ps1 -PackageName ${psSingleQuote(packageName)} -NodeValidationMajor ${nodeValidationMajor}"`;
   }
 
-  return `node scripts/platform-verification/platform-build.mjs --package-name ${shellQuote(packageName)} --node-validation-major ${nodeValidationMajor}`;
+  return `cd extensions/pi-goal && node scripts/platform-verification/platform-build.mjs --package-name ${shellQuote(packageName)} --node-validation-major ${nodeValidationMajor}`;
 }
 
 async function runGoalRuntimeVerificationSuite(config, targetName, suiteName, leaseSession) {
@@ -631,7 +637,10 @@ async function runGoalRuntimeVerificationSuite(config, targetName, suiteName, le
       id: "goal-custom-entry-observed",
       fn: () => runtimeResult.checks?.customGoalObserved === true,
     },
-    { id: "goal-complete-observed", fn: () => runtimeResult.checks?.completeGoalObserved === true },
+    {
+      id: "goal-complete-observed",
+      fn: () => runtimeResult.checks?.completeGoalObserved === true,
+    },
     { id: "read-tool-observed", fn: () => runtimeResult.checks?.readToolObserved === true },
     { id: "pi-list-local-package", fn: () => runtimeResult.checks?.piList === true },
     {
@@ -792,6 +801,7 @@ export async function runTargetSuite(config, targetName, suiteName, leaseSession
       error: `Node major ${nodeMajor}`,
     },
     { id: "npm-ci", fn: () => /PLATFORM_NPM_CI_EXIT=0/.test(stdout) },
+    { id: "workspace-build", fn: () => /PLATFORM_WORKSPACE_BUILD_EXIT=0/.test(stdout) },
     { id: "npm-run-verify", fn: () => /PLATFORM_VERIFY_EXIT=0/.test(stdout) },
     {
       id: "npm-pack",

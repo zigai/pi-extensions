@@ -267,7 +267,17 @@ class Harness {
                 type: "before_agent_start",
                 prompt,
                 systemPrompt: "",
-                systemPromptOptions: { cwd: this.ctx.cwd, contextFiles: [] },
+                systemPromptOptions: {
+                    cwd: this.ctx.cwd,
+                    contextFiles: [],
+                    selectedTools: [],
+                    toolSnippets: {},
+                    toolGuidelines: {},
+                    promptGuidelines: [],
+                    appendSystemPrompt: "",
+                    sections: {},
+                    skills: [],
+                },
             },
             this.ctx,
         );

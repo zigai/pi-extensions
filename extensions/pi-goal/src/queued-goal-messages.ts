@@ -1,7 +1,7 @@
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 
-import { CUSTOM_ENTRY_TYPE } from "./types.js";
+import { CUSTOM_ENTRY_TYPE } from "./types.ts";
 
 type GoalQueuedWorkKind = "continuation" | "command_start" | "command_resume";
 

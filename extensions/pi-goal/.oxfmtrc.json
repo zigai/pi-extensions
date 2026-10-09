@@ -1,3 +1,4 @@
 {
-  "ignorePatterns": []
+  "ignorePatterns": [],
+  "tabWidth": 2
 }

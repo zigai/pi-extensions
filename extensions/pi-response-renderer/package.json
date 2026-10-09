@@ -1,0 +1,50 @@
+{
+  "name": "@zigai/pi-response-renderer",
+  "version": "0.1.23",
+  "description": "Pi package that makes assistant responses more compact.",
+  "keywords": [
+    "pi",
+    "pi-coding-agent",
+    "pi-extension",
+    "pi-package",
+    "pi-tweaks",
+    "rendering"
+  ],
+  "homepage": "https://github.com/zigai/pi-tweaks/tree/master/extensions/pi-response-renderer#readme",
+  "bugs": {
+    "url": "https://github.com/zigai/pi-tweaks/issues"
+  },
+  "license": "MIT",
+  "author": "zigai",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zigai/pi-tweaks.git",
+    "directory": "extensions/pi-response-renderer"
+  },
+  "files": [
+    "src",
+    "assets",
+    "README.md",
+    "*.json"
+  ],
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@zigai/pi-extension-internals": "0.1.6"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "^1.0.0",
+    "@earendil-works/pi-tui": "^1.0.0"
+  },
+  "pi": {
+    "image": "https://raw.githubusercontent.com/zigai/pi-tweaks/master/extensions/pi-response-renderer/assets/response-renderer-after.png",
+    "extensions": [
+      "./src/index.ts"
+    ]
+  }
+}

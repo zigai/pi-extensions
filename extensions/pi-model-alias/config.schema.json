@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/zigai/pi-tweaks/master/extensions/pi-model-alias/config.schema.json",
+  "title": "Pi Model Alias settings",
+  "description": "Settings for model and provider display aliases.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "default": "./schemas/pi-model-alias.schema.json",
+      "description": "JSON Schema used by editors for this settings file."
+    },
+    "aliases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "provider",
+          "model",
+          "alias"
+        ],
+        "properties": {
+          "provider": {
+            "type": "string",
+            "pattern": "\\S",
+            "description": "Provider ID that owns the model."
+          },
+          "model": {
+            "type": "string",
+            "pattern": "\\S",
+            "description": "Original model ID sent to the provider."
+          },
+          "alias": {
+            "type": "string",
+            "pattern": "\\S",
+            "description": "Short local model ID accepted by Pi."
+          },
+          "name": {
+            "type": "string",
+            "pattern": "\\S",
+            "description": "Optional displayed model name; omit it to keep Pi's native label."
+          }
+        },
+        "additionalProperties": false
+      },
+      "default": [],
+      "description": "Short model IDs with optional display-name overrides."
+    },
+    "providerAliases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "provider",
+          "name"
+        ],
+        "properties": {
+          "provider": {
+            "type": "string",
+            "pattern": "\\S",
+            "description": "Provider ID whose displayed name should change."
+          },
+          "name": {
+            "type": "string",
+            "pattern": "\\S",
+            "description": "Provider name displayed by Pi."
+          }
+        },
+        "additionalProperties": false
+      },
+      "default": [],
+      "description": "Provider display-name overrides; provider IDs remain unchanged."
+    },
+    "stableProviderColumn": {
+      "type": "boolean",
+      "default": true,
+      "description": "Keep the provider column stable when aliases are displayed."
+    }
+  }
+}

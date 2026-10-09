@@ -9,14 +9,14 @@ import type { JsonValue } from "@earendil-works/pi-ai";
 import {
   createGoalCreationPrompt,
   renderGoalCreationTemplate,
-} from "../src/goal-creation-prompt.js";
+} from "../src/goal-creation-prompt.ts";
 import {
   ensureGoalConfigFiles,
   getGoalGlobalConfigPath,
   getGoalGlobalConfigSchemaPath,
   loadGoalSettings,
-} from "../src/goal-settings.js";
-import { createThreadGoal } from "../src/state.js";
+} from "../src/goal-settings.ts";
+import { createThreadGoal } from "../src/state.ts";
 
 function writeText(path: string, content: string): void {
   mkdirSync(dirname(path), { recursive: true });

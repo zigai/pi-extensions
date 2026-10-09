@@ -4,14 +4,14 @@ import type {
   ExtensionHandler,
 } from "@earendil-works/pi-coding-agent";
 
-import { assistantTurnTokens, isAbortedAssistantMessage } from "./goal-accounting.js";
-import { isErrorAssistantMessage } from "./recovery.js";
+import { assistantTurnTokens, isAbortedAssistantMessage } from "./goal-accounting.ts";
+import { isErrorAssistantMessage } from "./recovery.ts";
 import {
   handleAgentErrorMessage,
   recordAssistantContextOverflow,
   runStaleQueuedWorkPlan,
-} from "./goal-runtime-event-utils.js";
-import type { GoalRuntimeAgentHandlerContext } from "./goal-runtime-event-handler-types.js";
+} from "./goal-runtime-event-utils.ts";
+import type { GoalRuntimeAgentHandlerContext } from "./goal-runtime-event-handler-types.ts";
 
 export function createAgentEventHandlers(deps: GoalRuntimeAgentHandlerContext) {
   const { runtimeState, stateController, continuation, goalAccounting, resetErrorRecovery } = deps;

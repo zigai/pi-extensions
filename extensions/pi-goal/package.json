@@ -10,15 +10,16 @@
     "pi-extension",
     "pi-package"
   ],
-  "homepage": "https://github.com/fitchmultz/pi-codex-goal#readme",
+  "homepage": "https://github.com/zigai/pi-tweaks/tree/master/extensions/pi-goal#readme",
   "bugs": {
-    "url": "https://github.com/fitchmultz/pi-codex-goal/issues"
+    "url": "https://github.com/zigai/pi-tweaks/issues"
   },
   "license": "MIT",
   "author": "Mitch Fultz (https://github.com/fitchmultz)",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/fitchmultz/pi-codex-goal.git"
+    "url": "git+https://github.com/zigai/pi-tweaks.git",
+    "directory": "extensions/pi-goal"
   },
   "files": [
     "src",
@@ -34,6 +35,9 @@
   ],
   "type": "module",
   "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "scripts": {
     "lint": "oxlint -c ./oxlint.config.ts src test && oxlint -c ./oxlint.config.ts --disable-typescript-plugin scripts platform-verification.config.mjs",
     "lint:fix": "oxlint -c ./oxlint.config.ts src test --fix && oxlint -c ./oxlint.config.ts --disable-typescript-plugin scripts platform-verification.config.mjs --fix",
@@ -54,15 +58,15 @@
     "verify:platform:all": "node scripts/platform-verification.mjs doctor --skip-windows-disposable-probe && node scripts/platform-verification.mjs run --target macos,ubuntu,windows-native"
   },
   "dependencies": {
-    "@zigai/pi-glowup": "file:../pi-glowup",
-    "pi-typed-args": "file:../pi-typed-commands"
+    "@zigai/pi-glowup": "1.0.0",
+    "pi-typed-args": "0.1.1"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "^1.0.0",
-    "@earendil-works/pi-coding-agent": "^1.0.0",
-    "@earendil-works/pi-tui": "^1.0.0",
-    "@types/node": "^25.9.1",
-    "@vitest/coverage-v8": "^4.1.10",
+    "@earendil-works/pi-ai": "1.0.0",
+    "@earendil-works/pi-coding-agent": "1.0.0",
+    "@earendil-works/pi-tui": "1.0.0",
+    "@types/node": "^24.10.1",
+    "@vitest/coverage-v8": "4.1.9",
     "@xterm/headless": "^6.0.0",
     "oxfmt": "^0.71.0",
     "oxlint": "^1.86.0",
@@ -88,17 +92,25 @@
       "optional": true
     }
   },
-  "bundledDependencies": [
-    "pi-typed-args"
-  ],
-  "bundleDependencies": [
-    "@zigai/pi-glowup",
-    "pi-typed-args"
-  ],
   "engines": {
     "node": ">=24.0.0"
   },
-  "packageManager": "npm@11.16.0",
+  "packageManager": "npm@11.19.0",
+  "lintStages": [
+    {
+      "targets": [
+        "src",
+        "test"
+      ]
+    },
+    {
+      "targets": [
+        "scripts",
+        "platform-verification.config.mjs"
+      ],
+      "disableTypescript": true
+    }
+  ],
   "pi": {
     "extensions": [
       "./src/index.ts"

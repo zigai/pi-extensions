@@ -15,7 +15,7 @@ import {
 import { withGlowupRendering } from "@zigai/pi-glowup/protocol";
 import { Type, type Static } from "typebox";
 
-import { applyPatchGlowupRendering } from "./glowup-rendering.js";
+import { applyPatchGlowupRendering } from "./glowup-rendering.ts";
 import {
     ApplyPatchError,
     applyPatchHunks,

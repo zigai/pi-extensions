@@ -10,15 +10,16 @@
     "pi-package",
     "rendering"
   ],
-  "homepage": "https://github.com/zigai/pi-glowup#readme",
+  "homepage": "https://github.com/zigai/pi-tweaks/tree/master/extensions/pi-glowup#readme",
   "bugs": {
-    "url": "https://github.com/zigai/pi-glowup/issues"
+    "url": "https://github.com/zigai/pi-tweaks/issues"
   },
   "license": "MIT",
   "author": "zigai",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/zigai/pi-glowup.git"
+    "url": "git+https://github.com/zigai/pi-tweaks.git",
+    "directory": "extensions/pi-glowup"
   },
   "files": [
     "dist",
@@ -73,8 +74,8 @@
     "verify": "npm run check",
     "prepack": "npm run config:check && npm run language-catalog:check && npm run build",
     "test:model": "vitest run test/tools/built-in/preview-store.model.test.ts",
-    "release": "release --root .",
-    "release:dry-run": "release --dry --root ."
+    "release": "release --root ../..",
+    "release:dry-run": "release --dry --root ../.."
   },
   "dependencies": {
     "@pierre/diffs": "1.2.12",
@@ -84,14 +85,14 @@
     "unbash": "4.0.10"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "^0.85.1",
-    "@earendil-works/pi-coding-agent": "^0.85.1",
-    "@earendil-works/pi-tui": "^0.85.1",
+    "@earendil-works/pi-ai": "1.0.0",
+    "@earendil-works/pi-coding-agent": "1.0.0",
+    "@earendil-works/pi-tui": "1.0.0",
     "@fast-check/vitest": "^0.4.1",
     "@types/node": "^24.10.1",
-    "@vitest/coverage-v8": "^4.1.9",
+    "@vitest/coverage-v8": "4.1.9",
     "@xterm/headless": "^6.0.0",
-    "esbuild": "^0.28.1",
+    "esbuild": "0.28.1",
     "fast-check": "^4.9.0",
     "node-pty": "^1.1.0",
     "oxfmt": "^0.71.0",
@@ -122,11 +123,7 @@
   "engines": {
     "node": ">=22.19.0 <27"
   },
-  "packageManager": "npm@11.0.0",
-  "allowScripts": {
-    "node-pty@1.1.0": true,
-    "esbuild@0.28.1": true
-  },
+  "packageManager": "npm@11.19.0",
   "pi": {
     "extensions": [
       "./dist/src/index.ts"

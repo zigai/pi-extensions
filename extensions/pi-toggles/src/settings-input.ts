@@ -318,7 +318,8 @@ export const settingsInput = {
     id: "pi-toggles",
     title: "Pi Toggles",
     description: "Central capability policy, profiles, conditions, and session overrides for Pi.",
-    schemaId: "https://raw.githubusercontent.com/zigai/pi-toggles/HEAD/config.schema.json",
+    schemaId:
+        "https://raw.githubusercontent.com/zigai/pi-tweaks/master/extensions/pi-toggles/config.schema.json",
     schema: settingsSchema,
     exampleSettings: {
         activeProfile: "focused",

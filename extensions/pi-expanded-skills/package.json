@@ -9,15 +9,16 @@
     "pi-extension",
     "pi-package"
   ],
-  "homepage": "https://github.com/zigai/pi-enhanced-skills#readme",
+  "homepage": "https://github.com/zigai/pi-tweaks/tree/master/extensions/pi-expanded-skills#readme",
   "bugs": {
-    "url": "https://github.com/zigai/pi-enhanced-skills/issues"
+    "url": "https://github.com/zigai/pi-tweaks/issues"
   },
   "license": "UNLICENSED",
   "author": "zigai",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/zigai/pi-enhanced-skills.git"
+    "url": "git+https://github.com/zigai/pi-tweaks.git",
+    "directory": "extensions/pi-expanded-skills"
   },
   "files": [
     "src",
@@ -25,6 +26,9 @@
   ],
   "type": "module",
   "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "publishConfig": {
     "access": "public"
   },
@@ -41,13 +45,13 @@
   },
   "dependencies": {},
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.83.0",
+    "@earendil-works/pi-coding-agent": "1.0.0",
     "@types/node": "^24.10.1",
-    "@vitest/coverage-v8": "^4.1.9",
-    "oxfmt": "^0.44.0",
-    "oxlint": "^1.59.0",
-    "oxlint-tsgolint": "^7.0.2001",
-    "typescript": "^6.0.3",
+    "@vitest/coverage-v8": "4.1.9",
+    "oxfmt": "^0.71.0",
+    "oxlint": "^1.86.0",
+    "oxlint-tsgolint": "^7.0.2003",
+    "typescript": "^7.0.2",
     "vitest": "^4.1.9"
   },
   "peerDependencies": {
@@ -61,7 +65,7 @@
   "engines": {
     "node": ">=22.19.0 <27"
   },
-  "packageManager": "npm@11.0.0",
+  "packageManager": "npm@11.19.0",
   "pi": {
     "extensions": [
       "./src/index.ts"

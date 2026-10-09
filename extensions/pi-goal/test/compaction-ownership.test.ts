@@ -6,7 +6,7 @@ import {
   createRuntimeHarness,
   flushContinuationScheduler,
   sessionCompactEvent,
-} from "./support/runtime-harness.js";
+} from "./support/runtime-harness.ts";
 
 async function emitToolUseTurnEnd(
   harness: ReturnType<typeof createRuntimeHarness>,

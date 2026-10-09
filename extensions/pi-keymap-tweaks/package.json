@@ -1,0 +1,62 @@
+{
+  "name": "@zigai/pi-keymap-tweaks",
+  "version": "0.4.2",
+  "description": "Pi package for opinionated editor and message-submit key tweaks.",
+  "keywords": [
+    "keybindings",
+    "keymap",
+    "pi",
+    "pi-coding-agent",
+    "pi-extension",
+    "pi-package",
+    "pi-tweaks"
+  ],
+  "homepage": "https://github.com/zigai/pi-tweaks/tree/master/extensions/pi-keymap-tweaks#readme",
+  "bugs": {
+    "url": "https://github.com/zigai/pi-tweaks/issues"
+  },
+  "license": "MIT",
+  "author": "zigai",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zigai/pi-tweaks.git",
+    "directory": "extensions/pi-keymap-tweaks"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "*.json"
+  ],
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "prepublishOnly": "pi-extension-settings check --root ."
+  },
+  "dependencies": {
+    "@zigai/pi-extension-internals": "0.1.6",
+    "@zigai/pi-extension-settings": "0.5.3"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-agent-core": "^1.0.0",
+    "@earendil-works/pi-ai": "^1.0.0",
+    "@earendil-works/pi-coding-agent": "^1.0.0",
+    "@earendil-works/pi-tui": "^1.0.0",
+    "typebox": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "piExtensionSettings": {
+    "definition": "./src/settings-input.ts",
+    "schema": "./config.schema.json",
+    "readme": "./README.md",
+    "prevalidation": "./src/settings.prevalidated.ts"
+  }
+}

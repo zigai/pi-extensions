@@ -1,6 +1,7 @@
 /** Thin Crabbox CLI wrapper for cross-platform verification tests. */
 
 import { spawn } from "node:child_process";
+import { repositoryRoot } from "./workspace-packages.mjs";
 
 function env(name) {
   return process.env[name] ?? "";
@@ -22,7 +23,8 @@ export function buildTargetBaseArgs(targetName, config = {}) {
   switch (targetName) {
     case "macos": {
       const user = env("PLATFORM_VERIFICATION_MAC_USER") || env("USER");
-      const host = env("PLATFORM_VERIFICATION_MAC_HOST") || config.macosStaticSsh?.host || "localhost";
+      const host =
+        env("PLATFORM_VERIFICATION_MAC_HOST") || config.macosStaticSsh?.host || "localhost";
       const configuredRoot = config.macosStaticSsh?.workRoot;
       const workRoot =
         env("PLATFORM_VERIFICATION_MAC_WORK_ROOT") ||
@@ -46,7 +48,9 @@ export function buildTargetBaseArgs(targetName, config = {}) {
     }
     case "ubuntu": {
       const image =
-        env("PLATFORM_VERIFICATION_UBUNTU_IMAGE") || config.ubuntuContainerImage || "cimg/node:24.16";
+        env("PLATFORM_VERIFICATION_UBUNTU_IMAGE") ||
+        config.ubuntuContainerImage ||
+        "cimg/node:24.16";
       return [
         "--provider",
         "local-container",
@@ -59,7 +63,9 @@ export function buildTargetBaseArgs(targetName, config = {}) {
     case "windows-native": {
       const windows = config.windowsParallels ?? {};
       const vm =
-        env("PLATFORM_VERIFICATION_WINDOWS_VM") || windows.sourceVm || "pi-extension-windows-template";
+        env("PLATFORM_VERIFICATION_WINDOWS_VM") ||
+        windows.sourceVm ||
+        "pi-extension-windows-template";
       const snapshot =
         env("PLATFORM_VERIFICATION_WINDOWS_SNAPSHOT") || windows.snapshot || "crabbox-ready";
       const user = env("PLATFORM_VERIFICATION_WINDOWS_USER") || windows.user || env("USER");
@@ -105,6 +111,7 @@ function quoteCmd(value) {
 function spawnCrabbox(args, options = {}) {
   const bin = crabboxBin();
   const spawnOptions = {
+    cwd: repositoryRoot,
     stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, CRABBOX_SYNC_GIT_SEED: "false", ...options.env },
   };

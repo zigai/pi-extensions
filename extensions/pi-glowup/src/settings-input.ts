@@ -357,7 +357,8 @@ export const extensionSettingsInput = {
     id: "pi-glowup",
     title: "Pi Glowup",
     description: "High-signal rendering for Pi tool calls and results.",
-    schemaId: "https://github.com/zigai/pi-glowup/config.schema.json",
+    schemaId:
+        "https://raw.githubusercontent.com/zigai/pi-tweaks/master/extensions/pi-glowup/config.schema.json",
     schema: settingsSchema,
 } as const;
 

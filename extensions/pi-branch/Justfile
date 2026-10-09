@@ -7,14 +7,12 @@ help:
 
 # Install dependencies, Git hooks, and verify the project
 setup:
-    npm install
-    pre-commit install
-    just check
+    just --justfile ../../Justfile setup
 
 
 # Install the extension into Pi
 install:
-    pi install .
+    just --justfile ../../Justfile install
 # Format code
 format:
     npm run format

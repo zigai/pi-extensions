@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { createRequire } from "node:module";
+import { repositoryRoot } from "./platform-verification/workspace-packages.mjs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -135,7 +136,7 @@ async function main() {
   }
 
   if (args.command === "run") {
-    const localForbidden = localForbiddenProjectArtifacts();
+    const localForbidden = localForbiddenProjectArtifacts(repositoryRoot);
     if (localForbidden.length > 0) {
       throw new Error(
         `${forbiddenArtifactMessage(localForbidden)}. Remove them before platform sync or run verify:platform:doctor for full setup checks.`,

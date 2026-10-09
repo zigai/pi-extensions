@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-import type { ThreadGoal } from "./types.js";
+import type { ThreadGoal } from "./types.ts";
 
 const REQUIRED_ACTIVE_GOAL_TOOLS = new Set(["get_goal", "update_goal"]);
 const MAX_DISABLED_TOOLS = 128;

@@ -3,6 +3,12 @@
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import {
+  packageRoot,
+  repositoryRoot,
+  piCliPath,
+  packRuntimeDependencies,
+} from "./workspace-packages.mjs";
 
 function parseArgs(argv) {
   const args = { packageName: "pi-codex-goal", nodeValidationMajor: 24 };
@@ -65,7 +71,7 @@ function write(path, text) {
 }
 
 const args = parseArgs(process.argv);
-const sourceRoot = process.cwd();
+const sourceRoot = packageRoot;
 const stamp = new Date()
   .toISOString()
   .replace(/[-:.TZ]/g, "")
@@ -86,8 +92,10 @@ const nodeVersionExit = nodeMajor >= args.nodeValidationMajor ? 0 : 1;
 console.log(`PLATFORM_NODE_VERSION=${nodeVersion}`);
 console.log(`PLATFORM_NODE_VERSION_EXIT=${nodeVersionExit}`);
 const npm = commandName("npm");
-const npmCi = run(npm, ["ci"], { cwd: sourceRoot });
+const npmCi = run(npm, ["ci"], { cwd: repositoryRoot });
 console.log(`PLATFORM_NPM_CI_EXIT=${npmCi.status}`);
+const build = run(npm, ["run", "build"], { cwd: repositoryRoot });
+console.log(`PLATFORM_WORKSPACE_BUILD_EXIT=${build.status}`);
 const verify = run(npm, ["run", "verify"], { cwd: sourceRoot });
 console.log(`PLATFORM_VERIFY_EXIT=${verify.status}`);
 const packStderr = join(packDir, "npm-pack.stderr.txt");
@@ -123,19 +131,11 @@ console.log(`PLATFORM_FIXTURE_EXIT=${fixtureExit}`);
 if (existsSync(join(packDir, "fixture.stderr.txt")))
   process.stderr.write(readFileSync(join(packDir, "fixture.stderr.txt"), "utf8"));
 
-let piCli = resolve(
-  sourceRoot,
-  "node_modules",
-  ".bin",
-  process.platform === "win32" ? "pi.cmd" : "pi",
-);
-if (!existsSync(piCli))
-  piCli =
-    process.platform === "win32" && existsSync(resolve(sourceRoot, "node_modules", ".bin", "pi"))
-      ? resolve(sourceRoot, "node_modules", ".bin", "pi")
-      : "pi";
-
-console.log(`PLATFORM_PI_CLI=${piCli}`);
+console.log(`PLATFORM_PI_CLI=${piCliPath}`);
+const piEnv = {
+  PI_CODING_AGENT_DIR: resolve(sourceRoot, runRoot, "agent-config"),
+  PI_OFFLINE: "1",
+};
 const packedNodeInstallStdout = join(packDir, "packed-node-install.stdout.txt");
 const packedNodeInstallStderr = join(packDir, "packed-node-install.stderr.txt");
 let packedNodeInstallExit = 1;
@@ -143,7 +143,17 @@ if (packFile && existsSync(packFile)) {
   const npmInit = run(npm, ["init", "-y"], { cwd: piProject, quiet: true });
   const npmInstall =
     npmInit.status === 0
-      ? run(npm, ["install", "--no-save", packFile], { cwd: piProject, quiet: true })
+      ? run(
+          npm,
+          [
+            "install",
+            "--ignore-scripts",
+            "--no-save",
+            packFile,
+            ...packRuntimeDependencies(packDir),
+          ],
+          { cwd: piProject, quiet: true },
+        )
       : { status: npmInit.status, stdout: "", stderr: "" };
 
   packedNodeInstallExit = npmInit.status === 0 ? npmInstall.status : npmInit.status;
@@ -163,9 +173,9 @@ const piInstallStderr = join(packDir, "pi-install.stderr.txt");
 let piInstallExit = 1;
 if (packedNodeInstallExit === 0) {
   const installPath = `.${process.platform === "win32" ? "\\" : "/"}node_modules${process.platform === "win32" ? "\\" : "/"}${args.packageName}`;
-  const piInstall = run(piCli, ["install", "-l", installPath, "--approve"], {
+  const piInstall = run(process.execPath, [piCliPath, "install", "-l", installPath, "--approve"], {
     cwd: piProject,
-    env: { PI_OFFLINE: "1" },
+    env: piEnv,
     quiet: true,
   });
   piInstallExit = piInstall.status;
@@ -182,9 +192,9 @@ section("PI_INSTALL_STDERR", readFileSync(piInstallStderr, "utf8"));
 
 const piListStdout = join(packDir, "pi-list.stdout.txt");
 const piListStderr = join(packDir, "pi-list.stderr.txt");
-const piList = run(piCli, ["list", "--approve"], {
+const piList = run(process.execPath, [piCliPath, "list", "--approve"], {
   cwd: piProject,
-  env: { PI_OFFLINE: "1" },
+  env: piEnv,
   quiet: true,
 });
 write(piListStdout, piList.stdout);
@@ -197,6 +207,7 @@ if (
   [
     nodeVersionExit,
     npmCi.status,
+    build.status,
     verify.status,
     pack.status,
     fixtureExit,

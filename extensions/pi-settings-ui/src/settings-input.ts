@@ -15,7 +15,8 @@ export const settingsInput = {
     id: "pi-settings-ui",
     title: "Pi Settings UI",
     description: "Settings for Pi Settings UI.",
-    schemaId: "https://raw.githubusercontent.com/zigai/pi-settings-ui/HEAD/config.schema.json",
+    schemaId:
+        "https://raw.githubusercontent.com/zigai/pi-tweaks/master/extensions/pi-settings-ui/config.schema.json",
     schema: settingsSchema,
 } as const satisfies ExtensionSettingsDefinitionInput<typeof settingsSchema>;
 

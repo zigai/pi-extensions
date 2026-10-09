@@ -11,9 +11,9 @@ import {
   type CommandHost,
   type GoalCommandContext,
   type GoalCommandPi,
-} from "../src/commands.js";
-import { createThreadGoal } from "../src/state.js";
-import type { ThreadGoal } from "../src/types.js";
+} from "../src/commands.ts";
+import { createThreadGoal } from "../src/state.ts";
+import type { ThreadGoal } from "../src/types.ts";
 
 function parseText(value: Parameters<GoalCommandPi["sendUserMessage"]>[0]): string {
   return Value.Parse(Type.String(), value);

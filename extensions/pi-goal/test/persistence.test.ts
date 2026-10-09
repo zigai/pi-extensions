@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
-import { __testHooks } from "../src/index.js";
+import { __testHooks } from "../src/index.ts";
 import {
   isGoalCustomEntry,
   reconstructGoal,
   createThreadGoal,
   runtimeUsageEntry,
   setEntry,
-} from "../src/state.js";
-import { CUSTOM_ENTRY_TYPE } from "../src/types.js";
+} from "../src/state.ts";
+import { CUSTOM_ENTRY_TYPE } from "../src/types.ts";
 import {
   assistantMessage,
   countGoalSetEntries,
@@ -19,7 +19,7 @@ import {
   sessionBeforeCompactEvent,
   sessionCompactEvent,
   sessionShutdownEvent,
-} from "./support/runtime-harness.js";
+} from "./support/runtime-harness.ts";
 
 test("duplicate update_goal complete appends only one complete entry", async () => {
   const harness = createRuntimeHarness();

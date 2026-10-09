@@ -23,8 +23,12 @@ export type Registration =
 export class ExtensionRegistrationFixture implements Pick<ExtensionAPI, "on"> {
     readonly registrations: Registration[] = [];
 
-    on(...registration: Registration): void {
+    on(...registration: Registration): () => void {
         this.registrations.push(registration);
+        return () => {
+            const index = this.registrations.indexOf(registration);
+            if (index >= 0) this.registrations.splice(index, 1);
+        };
     }
 }
 

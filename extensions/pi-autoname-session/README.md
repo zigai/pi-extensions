@@ -64,7 +64,8 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-autoname-sessio
 ## Development
 
 ```sh
-just setup
+just --justfile ../../Justfile setup
+npm run build --prefix ../..
 just coverage
 ```
 

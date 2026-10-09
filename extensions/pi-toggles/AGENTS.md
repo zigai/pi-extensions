@@ -4,7 +4,7 @@
 
 Keep Pi resources in `package.json.pi`, descriptions in `package.json.description`, and the default `ExtensionAPI` factory in `src/index.ts`. Use Pi's extension APIs without modifying installed Pi source. Keep Pi-host packages and TypeBox as `"*"` peers and development dependencies, never bundled.
 
-Run `just setup` after cloning, `just check` before handoff, and `just coverage` when needed. Keep pre-commit enabled with `config:check` first; verify visual changes in a real tmux/TTY, not only snapshots.
+Run `just setup` and `npm run build` from the monorepo root after cloning, `just check` from this workspace before handoff, and `just coverage` when needed. Keep pre-commit enabled with `config:check` first; verify visual changes in a real tmux/TTY, not only snapshots.
 
 ## Extension Settings
 

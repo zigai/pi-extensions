@@ -55,9 +55,13 @@ test("platform verification scripts have working syntax and help", () => {
   const inventory = readScriptInventory();
   assert.equal(inventory.platformVerificationCheckTest, "test/platform-verification.check.ts");
   assert.ok(
-    inventory.platformVerificationSyntaxScripts.includes("scripts/platform-verification/platform-build.mjs"),
+    inventory.platformVerificationSyntaxScripts.includes(
+      "scripts/platform-verification/platform-build.mjs",
+    ),
   );
-  assert.ok(inventory.platformVerificationSyntaxScripts.includes("scripts/platform-verification/check.mjs"));
+  assert.ok(
+    inventory.platformVerificationSyntaxScripts.includes("scripts/platform-verification/check.mjs"),
+  );
 
   for (const path of inventory.platformVerificationSyntaxScripts) {
     assert.equal(run(process.execPath, ["--check", path]).status, 0, path);
@@ -71,7 +75,10 @@ test("platform verification scripts have working syntax and help", () => {
   );
   assert.match(powershellScript, /platform-build\.mjs/);
   assert.doesNotMatch(powershellScript, /npm run verify/);
-  const goalRuntimeScript = readFileSync("scripts/platform-verification/goal-runtime-verification.mjs", "utf8");
+  const goalRuntimeScript = readFileSync(
+    "scripts/platform-verification/goal-runtime-verification.mjs",
+    "utf8",
+  );
   assert.match(goalRuntimeScript, /"install", "-l", installPath, "--approve"/);
   assert.match(goalRuntimeScript, /"list", "--approve"/);
   assert.match(goalRuntimeScript, /"--approve",\s*"--model"/);
@@ -222,6 +229,8 @@ const result = {
   powershellNoExtensionShortcut: !/\\bpi\\s+(?:-e|--extension)\\s+\\./.test(powershell),
   goalRuntimeHasDefaultModel: goalRuntime.includes("zai/glm-5.2"),
   goalRuntimeHasPackage: goalRuntime.includes("pi-codex-goal"),
+  goalRuntimeChangesWorkspace: goalRuntime.startsWith("cd extensions/pi-goal && "),
+  powershellChangesWorkspace: powershell.includes("Set-Location"),
   goalRuntimeAssertsReadTool: readFileSync("scripts/platform-verification/goal-runtime-verification.mjs", "utf8").includes("readToolObserved"),
   goalRuntimeTargetChecksReadTool: readFileSync("scripts/platform-verification/targets.mjs", "utf8").includes("read-tool-observed"),
   macArgsUseConfigHost: macArgs.includes("127.0.0.1"),
@@ -345,12 +354,15 @@ test("npm pack includes platform verification docs and scripts", () => {
     "docs/platform-verification.md",
     ".crabboxignore",
     "platform-verification.config.mjs",
-    "node_modules/pi-typed-args/package.json",
-    "node_modules/pi-typed-args/src/pi/index.ts",
     ...readScriptInventory().platformVerificationPackageScripts,
   ]) {
     assert.ok(paths.has(path), `expected npm pack to include ${path}`);
   }
+
+  assert.equal(
+    [...paths].some((path) => path.startsWith("node_modules/")),
+    false,
+  );
 
   for (const forbidden of [".artifacts/", ".crabbox/", ".debug/", ".env", ".env."]) {
     assert.equal(

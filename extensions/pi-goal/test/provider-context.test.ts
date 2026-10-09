@@ -5,8 +5,8 @@ import {
   compactContinuationPrompt,
   continuationGoalIdFromPrompt,
   continuationPrompt,
-} from "../src/prompts.js";
-import { userContentFromUnknown } from "../src/queued-goal-messages.js";
+} from "../src/prompts.ts";
+import { userContentFromUnknown } from "../src/queued-goal-messages.ts";
 import {
   assistantMessage,
   createRuntimeHarness,
@@ -17,7 +17,7 @@ import {
   providerContextMessageAt,
   requireProviderContextResult,
   sentMessageText,
-} from "./support/runtime-harness.js";
+} from "./support/runtime-harness.ts";
 
 test("provider context dedupes many active continuations without refreshing the latest prompt", async () => {
   const harness = createRuntimeHarness();

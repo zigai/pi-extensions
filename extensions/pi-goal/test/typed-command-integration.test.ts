@@ -3,7 +3,7 @@ import { test } from "vitest";
 
 import { getTypedCommands } from "pi-typed-args/pi";
 
-import { createRuntimeHarness } from "./support/runtime-harness.js";
+import { createRuntimeHarness } from "./support/runtime-harness.ts";
 
 test("/goal accepts -r before free-form text and rejects inline expanded-form options", async () => {
   const rawHarness = createRuntimeHarness();

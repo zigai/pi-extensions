@@ -77,6 +77,34 @@ describe("session naming", () => {
         expect(context).not.toContain("tool call: read");
     });
 
+    it.each(["minimized", "full"] as const)(
+        "ignores system instructions in activity and %s naming context",
+        (scope) => {
+            const session = SessionManager.inMemory("/workspace/project");
+            session.appendMessage({
+                role: "system",
+                content: "Internal processing policy",
+                timestamp: 1,
+            });
+            session.appendMessage({
+                role: "user",
+                content: "Repair invalid request handling",
+                timestamp: 2,
+            });
+
+            expect(measureSession(session.getBranch())).toEqual({
+                messages: 1,
+                turns: 0,
+                toolCalls: 0,
+                tokens: 0,
+            });
+
+            expect(buildConversationContext(session.getBranch(), { phase: "refresh", scope })).toBe(
+                "USER:\nRepair invalid request handling",
+            );
+        },
+    );
+
     it("triggers initial naming after the first processed user message", () => {
         const state = createSessionNamingState({
             initialNameSet: false,
@@ -364,14 +392,7 @@ describe("session naming", () => {
     it("serializes cyclic and bigint tool arguments safely in full scope", () => {
         const session = SessionManager.inMemory("/workspace/project");
 
-        type CyclicArguments = {
-            readonly count: bigint;
-            readonly notFinite: number;
-            self?: CyclicArguments;
-        };
-
-        const cyclicArguments: CyclicArguments = { count: 10n, notFinite: Number.NaN };
-        cyclicArguments.self = cyclicArguments;
+        const toolArguments = {};
         session.appendMessage({ role: "user", content: "Inspect arguments", timestamp: 1 });
         session.appendMessage({
             role: "assistant",
@@ -380,7 +401,7 @@ describe("session naming", () => {
                     type: "toolCall",
                     id: "call-1",
                     name: "inspect",
-                    arguments: cyclicArguments,
+                    arguments: toolArguments,
                 },
             ],
             api: "openai-responses",
@@ -396,6 +417,12 @@ describe("session naming", () => {
             },
             stopReason: "toolUse",
             timestamp: 2,
+        });
+
+        Object.assign(toolArguments, {
+            count: 10n,
+            notFinite: Number.NaN,
+            self: toolArguments,
         });
 
         const full = buildConversationContext(session.getBranch(), {

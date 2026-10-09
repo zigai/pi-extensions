@@ -3,9 +3,9 @@ import { fileURLToPath } from "node:url";
 
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
-import { loadGoalSettings } from "./goal-settings.js";
-import { escapeXmlText } from "./prompts.js";
-import type { ThreadGoal } from "./types.js";
+import { loadGoalSettings } from "./goal-settings.ts";
+import { escapeXmlText } from "./prompts.ts";
+import type { ThreadGoal } from "./types.ts";
 
 const BUNDLED_PROMPT_PATH = fileURLToPath(new URL("../prompts/create-goal.md", import.meta.url));
 const TEMPLATE_ATTRIBUTE_PATTERN = /{{\s*([A-Za-z][A-Za-z0-9]*)\s*}}/g;

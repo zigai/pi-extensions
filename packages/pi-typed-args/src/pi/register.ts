@@ -1,0 +1,294 @@
+import type {
+    ExtensionAPI,
+    ExtensionCommandContext,
+    ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
+import { defineTypedCommand } from "../command/definition.ts";
+import { createCommandHandle } from "../command/handle.ts";
+import { normalizeRegisteredCommand } from "../command/registered-command.ts";
+import { decideArgumentIssueAction } from "../invocation.ts";
+import { parseTypedCommandInvocation } from "../parser.ts";
+import type { OpenArgumentFormOptions } from "../form/open.ts";
+import { createPiCompletionCapabilities, getTypedArgumentCompletions } from "./completions.ts";
+import { getPiTypedCommandRegistry } from "./registry.ts";
+import { resolveTypedCommandFormTitle } from "./form-title.ts";
+import { takeExpandedFormArguments } from "./session-state.ts";
+import type { TypedCommandRegistry } from "../registry.ts";
+import type {
+    ArgumentDefinitions,
+    FlatArgumentDefinitions,
+    FormMode,
+    InferArguments,
+    ParseIssue,
+} from "../types.ts";
+import type {
+    DefinedTypedCommand,
+    RegisteredTypedCommand,
+    TypedCommandDefinition,
+    TypedCommandHandle,
+    TypedSubcommandDefinitions,
+} from "./command-types.ts";
+import { recordTypedCommandRecentValues } from "./presets.ts";
+
+/** Notify Pi users about one or more typed-command issues. */
+export function notifyIssues(ctx: ExtensionContext, messages: string[]): void {
+    if (messages.length === 0) {
+        return;
+    }
+
+    ctx.ui.notify(messages.join("\n"), "error");
+}
+
+/** Return whether parse issues should notify directly instead of opening a form. */
+export function shouldNotifyInsteadOfOpeningForm(issues: readonly ParseIssue[]): boolean {
+    return issues.some((issue) => issue.kind !== "missing-required");
+}
+
+async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>(
+    command: RegisteredTypedCommand<TDefinitions>,
+    invocationName: string,
+    rawArgs: string,
+    ctx: ExtensionCommandContext,
+    registry: TypedCommandRegistry,
+): Promise<
+    | {
+          readonly command: RegisteredTypedCommand;
+          readonly args: InferArguments<FlatArgumentDefinitions>;
+      }
+    | undefined
+> {
+    let editorText = `/${invocationName}`;
+    if (rawArgs.length > 0) {
+        editorText += ` ${rawArgs}`;
+    }
+
+    const routed = parseTypedCommandInvocation(command, rawArgs);
+    let selectedCommand: RegisteredTypedCommand = command;
+    if (routed.route.status === "subcommand" && routed.route.subcommand !== undefined) {
+        selectedCommand = command.subcommands?.[routed.route.subcommand] ?? command;
+    }
+
+    const expandedFormArguments = takeExpandedFormArguments(ctx, invocationName, editorText);
+    if (expandedFormArguments !== undefined) {
+        return { command: selectedCommand, args: expandedFormArguments };
+    }
+
+    let parsed = routed.parsed;
+    if (routed.route.status === "missing" && routed.parsed.mode !== "help" && ctx.hasUI) {
+        let dialogOptions: { signal?: AbortSignal } | undefined;
+        if (ctx.signal !== undefined) {
+            dialogOptions = { signal: ctx.signal };
+        }
+
+        const subcommandName = await ctx.ui.select(
+            "Select subcommand",
+            Object.keys(command.subcommands ?? {}),
+            dialogOptions,
+        );
+        if (subcommandName === undefined) {
+            return undefined;
+        }
+
+        selectedCommand = command.subcommands?.[subcommandName] ?? command;
+        parsed = parseTypedCommandInvocation(selectedCommand, "").parsed;
+    }
+
+    const { resolveTypedCommandSessionOptions } = await import("./session-state.ts");
+    const options = resolveTypedCommandSessionOptions(ctx);
+    if (parsed.mode === "help") {
+        const { notifyDetailedHelp } = await import("./help.ts");
+        notifyDetailedHelp(ctx, selectedCommand, options.appearance);
+        return undefined;
+    }
+
+    const issueMessages = parsed.issues.map((item) => item.message);
+    const formPolicy = selectedCommand.formPolicy ?? "missing";
+    let formMode: FormMode = "missing";
+    if (formPolicy === "always") {
+        formMode = "all";
+    }
+
+    let issueAction = decideArgumentIssueAction(parsed.issues);
+    if (formPolicy === "always") {
+        issueAction = "open-form";
+    } else if (formPolicy === "manual") {
+        issueAction = "notify";
+        if (parsed.issues.length === 0) {
+            issueAction = "ok";
+        }
+    } else if (formPolicy === "invalid") {
+        issueAction = "open-form";
+        if (parsed.issues.length === 0) {
+            issueAction = "ok";
+        }
+    } else if (
+        shouldNotifyInsteadOfOpeningForm(parsed.issues) &&
+        !parsed.issues.some((issue) => issue.kind === "missing-subcommand")
+    ) {
+        issueAction = "notify";
+    }
+
+    if (issueAction === "open-form") {
+        if (!ctx.hasUI) {
+            notifyIssues(ctx, issueMessages);
+            return undefined;
+        }
+
+        const { openArgumentForm } = await import("../form/open.ts");
+        let formOptions: OpenArgumentFormOptions = {
+            appearance: options.appearance,
+            title: resolveTypedCommandFormTitle(selectedCommand, ctx),
+            completionCapabilities: createPiCompletionCapabilities(ctx.cwd, registry, ctx.signal),
+        };
+        if (ctx.signal !== undefined) {
+            formOptions = {
+                appearance: options.appearance,
+                signal: ctx.signal,
+                title: resolveTypedCommandFormTitle(selectedCommand, ctx),
+                completionCapabilities: createPiCompletionCapabilities(
+                    ctx.cwd,
+                    registry,
+                    ctx.signal,
+                ),
+            };
+        }
+
+        const collected = await openArgumentForm(
+            selectedCommand,
+            parsed,
+            formMode,
+            ctx,
+            formOptions,
+        );
+        if (collected === undefined) {
+            return undefined;
+        }
+
+        if (
+            selectedCommand.formPresets === true &&
+            !recordTypedCommandRecentValues(ctx, selectedCommand, collected)
+        ) {
+            ctx.ui.notify("Typed command recent values could not be saved.", "warning");
+        }
+
+        return { command: selectedCommand, args: collected };
+    }
+
+    if (issueAction === "notify") {
+        if (ctx.hasUI) {
+            ctx.ui.setEditorText(editorText);
+
+            const [
+                { helperInvocationForEditorText },
+                { setHelperWidget },
+                { markSubmittedInvalidCommand },
+            ] = await Promise.all([
+                import("./editor-invocation.ts"),
+                import("./helper.ts"),
+                import("./session-state.ts"),
+            ]);
+            if (!markSubmittedInvalidCommand(ctx, editorText)) {
+                setHelperWidget(
+                    ctx,
+                    helperInvocationForEditorText(editorText, registry),
+                    options.helperPlacement,
+                    { submittedInvalidEditorText: editorText },
+                    options.appearance.inlineHelp,
+                );
+            }
+
+            return undefined;
+        }
+
+        notifyIssues(ctx, issueMessages);
+
+        return undefined;
+    }
+
+    return {
+        command: selectedCommand,
+        args: parsed.values,
+    };
+}
+
+/**
+ * Register a Pi slash command with typed named arguments.
+ *
+ * The command is still registered with Pi's raw command system, but pi-typed-args parses,
+ * validates, defaults, completes, and optionally prompts for arguments before calling `run`.
+ */
+export function registerTypedCommand<
+    const TDefinitions extends ArgumentDefinitions,
+    const TSubcommands extends TypedSubcommandDefinitions<TDefinitions>,
+>(
+    pi: ExtensionAPI,
+    definition:
+        | TypedCommandDefinition<TDefinitions, TSubcommands>
+        | DefinedTypedCommand<TDefinitions, TSubcommands>,
+): TypedCommandHandle<TDefinitions, TSubcommands>;
+export function registerTypedCommand<
+    TDefinitions extends ArgumentDefinitions,
+    TSubcommands extends TypedSubcommandDefinitions<TDefinitions>,
+>(
+    pi: ExtensionAPI,
+    definition:
+        | TypedCommandDefinition<TDefinitions, TSubcommands>
+        | DefinedTypedCommand<TDefinitions, TSubcommands>,
+): TypedCommandHandle<TDefinitions, TSubcommands> {
+    const name = definition.name;
+    const registry = getPiTypedCommandRegistry();
+    const command = normalizeRegisteredCommand(definition);
+    let invocationName = name;
+    const maybeInvocationName: unknown = pi.registerCommand(name, {
+        description: command.description,
+        async getArgumentCompletions(argumentPrefix) {
+            return getTypedArgumentCompletions(
+                command,
+                argumentPrefix,
+                createPiCompletionCapabilities(process.cwd(), registry),
+            );
+        },
+        handler: async (rawArgs, ctx) => {
+            const invocation = await resolveCommandArguments(
+                command,
+                invocationName,
+                rawArgs,
+                ctx,
+                registry,
+            );
+            if (invocation === undefined) {
+                return;
+            }
+
+            if (invocation.command.target?.kind !== "extension") {
+                ctx.ui.notify(
+                    `Typed command /${name} does not have an extension handler.`,
+                    "error",
+                );
+
+                return;
+            }
+
+            await invocation.command.target.run(invocation.args, ctx);
+        },
+    });
+
+    let piInvocationName: string | undefined;
+    if (typeof maybeInvocationName === "string") {
+        piInvocationName = maybeInvocationName;
+    }
+
+    if (piInvocationName === undefined) {
+        invocationName = registry.register(command);
+    } else {
+        invocationName = registry.register(command, {
+            invocationName: piInvocationName,
+        });
+    }
+
+    const definedCommand = defineTypedCommand(definition);
+
+    return createCommandHandle(definedCommand, command, invocationName, (registered) => {
+        registry.unregister(registered);
+    });
+}

@@ -1,0 +1,313 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/zigai/pi-tweaks/master/extensions/pi-mention-anything/config.schema.json",
+  "title": "Pi Mention Anything settings",
+  "description": "Define custom mention sources and triggers.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "default": "./schemas/pi-mention-anything.schema.json",
+      "description": "JSON Schema used by editors for this settings file."
+    },
+    "mentions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "trigger",
+          "source"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "description": "Stable identifier used for diagnostics and selection history."
+          },
+          "trigger": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[^/\\s]+$",
+            "description": "One or more non-whitespace, non-slash characters that start the mention."
+          },
+          "separator": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1,
+            "pattern": "^[^\\s\"\\\\]$",
+            "description": "Separator between chained mention segments."
+          },
+          "expansionPolicy": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "selected-only"
+              },
+              {
+                "type": "string",
+                "const": "selected-or-resolved"
+              }
+            ],
+            "default": "selected-or-resolved",
+            "description": "Expand only picker selections, or also resolve manually typed mentions."
+          },
+          "replacementTemplate": {
+            "type": "string",
+            "description": "Replacement template. Allowed fields: {{id}}, {{label}}, {{segment}}, {{path}}, {{ids}}. Provider data is never implicitly included."
+          },
+          "completionSuffix": {
+            "type": "string",
+            "default": " ",
+            "description": "Text inserted after a completed mention."
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": [
+                  "type",
+                  "items"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "static"
+                  },
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "name"
+                      ],
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Name selected and written after the trigger."
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Stable identity within the parent path. Defaults to name for simple lists."
+                        },
+                        "segment": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Text inserted as this path segment. Defaults to name."
+                        },
+                        "searchText": {
+                          "type": "string",
+                          "description": "Text used for searching instead of the name and description."
+                        },
+                        "insertionText": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Complete editor text for a selected terminal target."
+                        },
+                        "parentPath": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "description": "Ancestor IDs, from root to parent. Omit for root items."
+                        },
+                        "selectable": {
+                          "type": "boolean",
+                          "description": "Allow selecting this item as a completed target. Defaults to false for navigable items and true otherwise."
+                        },
+                        "navigable": {
+                          "type": "boolean",
+                          "description": "Open a child picker when this item is selected. Defaults to false."
+                        },
+                        "description": {
+                          "type": "string",
+                          "description": "Secondary text shown in autocomplete."
+                        },
+                        "replacement": {
+                          "type": "string",
+                          "description": "Text sent to the model in place of the mention. Defaults to the name."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "title": "MentionItem"
+                    },
+                    "maxItems": 10000,
+                    "description": "Candidates offered by this mention source."
+                  }
+                },
+                "additionalProperties": false,
+                "title": "StaticMentionSource"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type",
+                  "command",
+                  "args"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "command"
+                  },
+                  "mode": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "const": "array"
+                      },
+                      {
+                        "type": "string",
+                        "const": "protocol"
+                      }
+                    ],
+                    "default": "array",
+                    "description": "array prints a flat item array; protocol uses version 1 JSON requests on stdin for discovery and exact resolution."
+                  },
+                  "filtering": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "const": "local"
+                      },
+                      {
+                        "type": "string",
+                        "const": "provider"
+                      }
+                    ],
+                    "default": "provider",
+                    "description": "Protocol result ranking owner. Array commands always use local filtering."
+                  },
+                  "maxOutputBytes": {
+                    "type": "integer",
+                    "minimum": 1024,
+                    "maximum": 16777216,
+                    "default": 1048576,
+                    "description": "Maximum combined standard output and standard error size in bytes."
+                  },
+                  "refreshIntervalMs": {
+                    "type": "integer",
+                    "minimum": 1000,
+                    "description": "Periodic refresh interval for active cache entries. Requires caching."
+                  },
+                  "watchFiles": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "maxItems": 32,
+                    "description": "Files whose changes invalidate cached results. Requires caching."
+                  },
+                  "persistentCache": {
+                    "type": "boolean",
+                    "description": "Local disk caching, scoped by configuration, working directory, and trust."
+                  },
+                  "command": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Executable that returns candidates in the selected command mode."
+                  },
+                  "args": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "default": [],
+                    "description": "Arguments passed directly to the executable without shell interpretation."
+                  },
+                  "debounceMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 100,
+                    "description": "Delay before starting the command so superseded autocomplete requests can cancel."
+                  },
+                  "timeoutMs": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "default": 5000,
+                    "description": "Maximum command runtime in milliseconds."
+                  },
+                  "refreshOnStartup": {
+                    "type": "boolean",
+                    "description": "Background root discovery at session startup. Requires caching."
+                  },
+                  "cacheTtlMs": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Cache lifetime in milliseconds. Expired results remain available during refresh. Without a lifetime, results last for the session."
+                  },
+                  "cache": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Caching of successful command results."
+                  }
+                },
+                "additionalProperties": false,
+                "title": "CommandMentionSource"
+              }
+            ],
+            "description": "Where this mention gets its candidates."
+          },
+          "initialSuggestions": {
+            "type": "object",
+            "required": [
+              "strategy",
+              "pinned"
+            ],
+            "properties": {
+              "strategy": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "frecency"
+                  },
+                  {
+                    "type": "string",
+                    "const": "recent"
+                  },
+                  {
+                    "type": "string",
+                    "const": "frequent"
+                  },
+                  {
+                    "type": "string",
+                    "const": "alphabetical"
+                  },
+                  {
+                    "type": "string",
+                    "const": "sourceOrder"
+                  }
+                ],
+                "default": "frecency",
+                "description": "Ordering used before any query text is entered."
+              },
+              "pinned": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "default": [],
+                "uniqueItems": true,
+                "description": "Candidate names placed first, in this order, before the configured strategy."
+              }
+            },
+            "default": {},
+            "additionalProperties": false,
+            "description": "Controls the entries shown immediately after the trigger."
+          }
+        },
+        "additionalProperties": false,
+        "title": "MentionDefinition"
+      },
+      "default": [],
+      "description": "Mention sources enabled in Pi."
+    }
+  }
+}

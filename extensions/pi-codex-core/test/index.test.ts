@@ -9,7 +9,7 @@ import {
     type ExtensionAPI,
     type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { buildSystemPrompt } from "../node_modules/@earendil-works/pi-coding-agent/dist/core/system-prompt.js";
+import { buildSystemPrompt } from "./pi-system-prompt.ts";
 import extension, { packageName, extensionName } from "../src/index.ts";
 import { DEFAULT_CODEX_CORE_CONFIG_JSON, getCodexCoreConfigPath } from "../src/config/config.ts";
 import { JsonObjectDecoder } from "../src/compaction/responses-input.ts";

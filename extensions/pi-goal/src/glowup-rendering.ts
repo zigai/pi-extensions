@@ -9,7 +9,7 @@ import {
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 
-import { formatCompactTokenValue, formatDuration } from "./format.js";
+import { formatCompactTokenValue, formatDuration } from "./format.ts";
 
 export const GetGoalArgsSchema = Type.Object({});
 export const CreateGoalArgsSchema = Type.Object({

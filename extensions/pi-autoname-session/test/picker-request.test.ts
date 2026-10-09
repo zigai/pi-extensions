@@ -84,6 +84,20 @@ describe("picker request", () => {
         ).toBeUndefined();
     });
 
+    it("keeps the model-required rewrite when an opt-in header is removed", () => {
+        const payload = { model: "sample-sol", parallel_tool_calls: true };
+
+        expect(
+            preparePickerPayload(createModel("sample-sol"), payload, {
+                "X-OpenAI-Internal-Codex-Responses-Lite": null,
+            }),
+        ).toEqual({
+            model: "sample-sol",
+            parallel_tool_calls: false,
+            reasoning: { context: "all_turns" },
+        });
+    });
+
     it("does not replace non-JSON objects returned by a provider", () => {
         const payload = new Date(0);
 

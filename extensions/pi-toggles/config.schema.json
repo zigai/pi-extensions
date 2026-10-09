@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/zigai/pi-toggles/HEAD/config.schema.json",
+  "$id": "https://raw.githubusercontent.com/zigai/pi-tweaks/master/extensions/pi-toggles/config.schema.json",
   "title": "Pi Toggles settings",
   "description": "Central capability policy, profiles, conditions, and session overrides for Pi.",
   "type": "object",

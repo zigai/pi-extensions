@@ -1,0 +1,56 @@
+{
+  "name": "@zigai/pi-mention-project",
+  "version": "0.11.4",
+  "description": "Pi package that adds fuzzy project directory mentions.",
+  "keywords": [
+    "mention",
+    "pi",
+    "pi-coding-agent",
+    "pi-extension",
+    "pi-package",
+    "pi-tweaks",
+    "project"
+  ],
+  "homepage": "https://github.com/zigai/pi-tweaks/tree/master/extensions/pi-mention-project#readme",
+  "bugs": {
+    "url": "https://github.com/zigai/pi-tweaks/issues"
+  },
+  "license": "MIT",
+  "author": "zigai",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zigai/pi-tweaks.git",
+    "directory": "extensions/pi-mention-project"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "*.json"
+  ],
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@zigai/pi-extension-settings": "0.5.3",
+    "@zigai/pi-mention-anything": "0.1.4"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "^1.0.0",
+    "typebox": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "piExtensionSettings": {
+    "definition": "./src/settings-input.ts",
+    "schema": "./config.schema.json",
+    "readme": "./README.md",
+    "prevalidation": "./src/settings.prevalidated.ts"
+  }
+}

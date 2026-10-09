@@ -7,13 +7,12 @@ help:
 
 # Install dependencies, then verify the project
 setup:
-    npm install
-    npm run check
+    just --justfile ../../Justfile setup
 
 
 # Install the extension into Pi
 install:
-    pi install .
+    just --justfile ../../Justfile install
 # Type-check the extension
 typecheck:
     npm run typecheck

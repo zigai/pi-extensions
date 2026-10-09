@@ -4,9 +4,9 @@
 
 - Keep the extension entrypoint declared explicitly in `package.json` under `pi.extensions`.
 - Keep Pi-bundled imports in `peerDependencies` with `"*"` and in `devDependencies` for local checks only.
-- Bundle `pi-typed-args` because Pi packages do not share module roots at runtime.
+- Keep `pi-typed-args` at the exact supported version as a normal runtime dependency; verify it through the packed production install.
 - Keep the package allowlist and package verification check current when adding published files.
-- Validate changes with `just check` before handing off.
+- Build dependencies with `npm run build` at the repository root, then validate this workspace with `just check` before handing off.
 
 ## Settings and Session Lifecycle
 

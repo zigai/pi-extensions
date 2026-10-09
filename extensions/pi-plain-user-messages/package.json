@@ -1,0 +1,48 @@
+{
+  "name": "@zigai/pi-plain-user-messages",
+  "version": "0.1.12",
+  "description": "Pi package that renders user messages as plain text instead of Markdown.",
+  "keywords": [
+    "pi",
+    "pi-coding-agent",
+    "pi-extension",
+    "pi-package",
+    "pi-tweaks",
+    "rendering"
+  ],
+  "homepage": "https://github.com/zigai/pi-tweaks/tree/master/extensions/pi-plain-user-messages#readme",
+  "bugs": {
+    "url": "https://github.com/zigai/pi-tweaks/issues"
+  },
+  "license": "MIT",
+  "author": "zigai",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zigai/pi-tweaks.git",
+    "directory": "extensions/pi-plain-user-messages"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "*.json"
+  ],
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@zigai/pi-extension-internals": "0.1.6"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "^1.0.0",
+    "@earendil-works/pi-tui": "^1.0.0"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  }
+}

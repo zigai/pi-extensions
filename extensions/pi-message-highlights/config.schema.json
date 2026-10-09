@@ -1,0 +1,245 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/zigai/pi-tweaks/master/extensions/pi-message-highlights/config.schema.json",
+  "title": "Pi Message Highlights settings",
+  "description": "Settings for highlighting URLs in message output.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "default": "./schemas/pi-message-highlights.schema.json",
+      "description": "JSON Schema used by editors for this settings file."
+    },
+    "urlColor": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "title": "ANSI 256 color",
+          "minimum": 0,
+          "maximum": 255,
+          "x-control": "slider",
+          "description": "ANSI 256 color index."
+        },
+        {
+          "type": "string",
+          "const": "",
+          "title": "Disabled",
+          "description": "Disable URL highlighting."
+        },
+        {
+          "type": "string",
+          "title": "Hex color",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "x-control": "color",
+          "description": "Six-digit hexadecimal color."
+        },
+        {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "accent"
+            },
+            {
+              "type": "string",
+              "const": "border"
+            },
+            {
+              "type": "string",
+              "const": "borderAccent"
+            },
+            {
+              "type": "string",
+              "const": "borderMuted"
+            },
+            {
+              "type": "string",
+              "const": "success"
+            },
+            {
+              "type": "string",
+              "const": "error"
+            },
+            {
+              "type": "string",
+              "const": "warning"
+            },
+            {
+              "type": "string",
+              "const": "muted"
+            },
+            {
+              "type": "string",
+              "const": "dim"
+            },
+            {
+              "type": "string",
+              "const": "text"
+            },
+            {
+              "type": "string",
+              "const": "thinkingText"
+            },
+            {
+              "type": "string",
+              "const": "scrollbarTrack"
+            },
+            {
+              "type": "string",
+              "const": "scrollbarThumb"
+            },
+            {
+              "type": "string",
+              "const": "searchMatchText"
+            },
+            {
+              "type": "string",
+              "const": "userMessageText"
+            },
+            {
+              "type": "string",
+              "const": "customMessageText"
+            },
+            {
+              "type": "string",
+              "const": "customMessageLabel"
+            },
+            {
+              "type": "string",
+              "const": "toolTitle"
+            },
+            {
+              "type": "string",
+              "const": "toolOutput"
+            },
+            {
+              "type": "string",
+              "const": "mdHeading"
+            },
+            {
+              "type": "string",
+              "const": "mdLink"
+            },
+            {
+              "type": "string",
+              "const": "mdLinkUrl"
+            },
+            {
+              "type": "string",
+              "const": "mdCode"
+            },
+            {
+              "type": "string",
+              "const": "mdCodeBlock"
+            },
+            {
+              "type": "string",
+              "const": "mdCodeBlockBorder"
+            },
+            {
+              "type": "string",
+              "const": "mdQuote"
+            },
+            {
+              "type": "string",
+              "const": "mdQuoteBorder"
+            },
+            {
+              "type": "string",
+              "const": "mdHr"
+            },
+            {
+              "type": "string",
+              "const": "mdListBullet"
+            },
+            {
+              "type": "string",
+              "const": "toolDiffAdded"
+            },
+            {
+              "type": "string",
+              "const": "toolDiffRemoved"
+            },
+            {
+              "type": "string",
+              "const": "toolDiffContext"
+            },
+            {
+              "type": "string",
+              "const": "syntaxComment"
+            },
+            {
+              "type": "string",
+              "const": "syntaxKeyword"
+            },
+            {
+              "type": "string",
+              "const": "syntaxFunction"
+            },
+            {
+              "type": "string",
+              "const": "syntaxVariable"
+            },
+            {
+              "type": "string",
+              "const": "syntaxString"
+            },
+            {
+              "type": "string",
+              "const": "syntaxNumber"
+            },
+            {
+              "type": "string",
+              "const": "syntaxType"
+            },
+            {
+              "type": "string",
+              "const": "syntaxOperator"
+            },
+            {
+              "type": "string",
+              "const": "syntaxPunctuation"
+            },
+            {
+              "type": "string",
+              "const": "thinkingOff"
+            },
+            {
+              "type": "string",
+              "const": "thinkingMinimal"
+            },
+            {
+              "type": "string",
+              "const": "thinkingLow"
+            },
+            {
+              "type": "string",
+              "const": "thinkingMedium"
+            },
+            {
+              "type": "string",
+              "const": "thinkingHigh"
+            },
+            {
+              "type": "string",
+              "const": "thinkingXhigh"
+            },
+            {
+              "type": "string",
+              "const": "thinkingMax"
+            },
+            {
+              "type": "string",
+              "const": "bashMode"
+            }
+          ],
+          "title": "Theme color",
+          "x-control": "select",
+          "description": "Pi theme foreground color name."
+        }
+      ],
+      "default": "#87d7ff",
+      "description": "URL color as an ANSI-256 index, hex color, theme color name, or empty string to disable highlighting."
+    }
+  }
+}

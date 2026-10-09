@@ -1,5 +1,5 @@
-import type { JsonValue } from "../../json-value.js";
-import type { GlowupNode } from "./nodes.js";
+import type { JsonValue } from "../../json-value.ts";
+import type { GlowupNode } from "./nodes.ts";
 
 export {
     type GlowupTone,
@@ -28,7 +28,7 @@ export {
     mutation,
     stack,
     empty,
-} from "./nodes.js";
+} from "./nodes.ts";
 
 /** Property read from a Pi tool definition when Glowup is installed. */
 export const GLOWUP_RENDERING_PROPERTY = "glowupRendering" as const;
@@ -162,4 +162,4 @@ export {
     decodeGlowupNode,
     DEFAULT_GLOWUP_NODE_DECODE_LIMITS,
     type GlowupNodeDecodeLimits,
-} from "./decode.js";
+} from "./decode.ts";

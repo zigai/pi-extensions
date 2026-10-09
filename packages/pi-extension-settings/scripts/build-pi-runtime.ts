@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { chmod, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -51,3 +51,5 @@ for (const entry of ["pi", "runtime"]) {
         throw new Error(`${entry} bundle contains an absolute workspace path`);
     }
 }
+
+await chmod(path.join(packageRoot, "dist", "cli-entry.js"), 0o755);

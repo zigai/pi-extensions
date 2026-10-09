@@ -12,7 +12,7 @@ import {
     type ExtensionToolContext,
     type Theme,
 } from "@earendil-works/pi-coding-agent";
-import { normalizeBuildSystemPromptOptions } from "../node_modules/@earendil-works/pi-coding-agent/dist/core/system-prompt.js";
+import { normalizeBuildSystemPromptOptions } from "./pi-system-prompt.ts";
 import { JsonObjectDecoder, JsonStringDecoder } from "../src/compaction/responses-input.ts";
 import type { JsonValue } from "../src/compaction/types.ts";
 import type { CodexRuntime, ScheduledTask } from "../src/runtime.ts";

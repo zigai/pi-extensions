@@ -29,7 +29,8 @@ const EXTENSION_ID = "pi-branch";
 const CONFIG_FILE_NAME = "config.json";
 const CONFIG_SCHEMA_FILE_NAME = "config.schema.json";
 const CONFIG_SCHEMA_REFERENCE = "./config.schema.json";
-export const CONFIG_SCHEMA_ID = "https://github.com/zigai/pi-branch/config.schema.json";
+export const CONFIG_SCHEMA_ID =
+    "https://raw.githubusercontent.com/zigai/pi-tweaks/master/extensions/pi-branch/config.schema.json";
 const CommandExitCodeSchema = Type.Number();
 const FileSystemErrorSchema = Type.Object({ code: Type.String() });
 

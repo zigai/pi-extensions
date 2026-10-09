@@ -5,6 +5,7 @@ import { accessSync, constants, mkdirSync, writeFileSync, unlinkSync } from "nod
 import { resolve } from "node:path";
 
 import { buildTargetBaseArgs } from "./crabbox-runner.mjs";
+import { repositoryRoot } from "./workspace-packages.mjs";
 import {
   forbiddenArtifactMessage,
   isForbiddenProjectPath,
@@ -188,11 +189,11 @@ function npmPackFiles() {
 }
 
 function checkForbiddenProjectFiles(failures) {
-  const trackedForbidden = trackedForbiddenProjectPaths();
+  const trackedForbidden = trackedForbiddenProjectPaths(repositoryRoot);
   if (trackedForbidden.length === 0) ok("tracked source files exclude forbidden local artifacts");
   else fail(`forbidden tracked source path(s): ${trackedForbidden.join(", ")}`, failures);
 
-  const localForbidden = localForbiddenProjectArtifacts();
+  const localForbidden = localForbiddenProjectArtifacts(repositoryRoot);
   if (localForbidden.length === 0)
     ok("no local .env or package tarball artifacts at repo top level");
   else fail(forbiddenArtifactMessage(localForbidden), failures);
@@ -357,7 +358,8 @@ export async function runDoctor(config, options = {}) {
 
   console.log("\n── macOS SSH ──");
   const sshUser = env("PLATFORM_VERIFICATION_MAC_USER") || env("USER");
-  const sshHost = env("PLATFORM_VERIFICATION_MAC_HOST") || config?.macosStaticSsh?.host || "localhost";
+  const sshHost =
+    env("PLATFORM_VERIFICATION_MAC_HOST") || config?.macosStaticSsh?.host || "localhost";
   const sshProbe = shell(
     `ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no ${sshUser}@${sshHost} 'node --version && npm --version && git --version'`,
   );
@@ -374,7 +376,9 @@ export async function runDoctor(config, options = {}) {
 
       const windows = config?.windowsParallels ?? {};
       const vmName =
-        env("PLATFORM_VERIFICATION_WINDOWS_VM") || windows.sourceVm || "pi-extension-windows-template";
+        env("PLATFORM_VERIFICATION_WINDOWS_VM") ||
+        windows.sourceVm ||
+        "pi-extension-windows-template";
       const snapshot =
         env("PLATFORM_VERIFICATION_WINDOWS_SNAPSHOT") || windows.snapshot || "crabbox-ready";
       const user = env("PLATFORM_VERIFICATION_WINDOWS_USER") || windows.user || env("USER");
@@ -434,7 +438,13 @@ export async function runDoctor(config, options = {}) {
           cbox,
           buildTargetBaseArgs("windows-native", {
             ...config,
-            windowsParallels: { ...windows, sourceVm: vmName, snapshot, user, workRoot },
+            windowsParallels: {
+              ...windows,
+              sourceVm: vmName,
+              snapshot,
+              user,
+              workRoot,
+            },
           }),
           "windows parallels",
           failures,
@@ -469,7 +479,13 @@ export async function runDoctor(config, options = {}) {
 
             const probe = disposableWindowsSshProbe(cbox, {
               ...config,
-              windowsParallels: { ...windows, sourceVm: vmName, snapshot, user, workRoot },
+              windowsParallels: {
+                ...windows,
+                sourceVm: vmName,
+                snapshot,
+                user,
+                workRoot,
+              },
             });
             if (probe.ok) ok(`disposable Windows clone SSH/tool probe OK: ${probe.message}`);
             else fail(probe.message, failures);
@@ -504,7 +520,9 @@ export async function runDoctor(config, options = {}) {
   console.log("\n── Repository hygiene ──");
   const status = shell("git status --short");
   if (status)
-    warn(`${status.split(/\r?\n/).length} uncommitted change(s) recorded for verification evidence`);
+    warn(
+      `${status.split(/\r?\n/).length} uncommitted change(s) recorded for verification evidence`,
+    );
   else ok("git status clean");
 
   checkForbiddenProjectFiles(failures);

@@ -2,7 +2,7 @@
 
 ## Work and verification
 
-This library provides settings runtime and artifact tooling for Pi extensions; it is not itself an extension. Run `just setup` after cloning and `just check` before handing off changes. Preserve strict TypeScript, type-aware Oxlint, coverage thresholds, and non-mutating generation checks. Test filesystem behavior with real temporary directories, not module mocks or method spies.
+This library provides settings runtime and artifact tooling for Pi extensions; it is not itself an extension. Run `just setup` from the monorepo root after cloning and `just check` before handing off changes. Preserve strict TypeScript, type-aware Oxlint, coverage thresholds, and non-mutating generation checks. Test filesystem behavior with real temporary directories, not module mocks or method spies.
 
 ## Ownership and package surface
 

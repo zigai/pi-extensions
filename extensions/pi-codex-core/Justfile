@@ -44,4 +44,4 @@ alias tsc := typecheck
 
 # Install the extension into Pi
 install:
-    pi install .
+    just --justfile ../../Justfile install

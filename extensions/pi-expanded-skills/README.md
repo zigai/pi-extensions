@@ -61,7 +61,7 @@ Raw skill contents and user arguments are not stored.
 ## Development
 
 ```sh
-npm install
+just --justfile ../../Justfile setup
 just check
 just coverage
 ```

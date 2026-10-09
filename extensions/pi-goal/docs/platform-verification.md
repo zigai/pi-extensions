@@ -2,7 +2,9 @@
 
 `pi-codex-goal` uses a Crabbox-backed local platform verification gate to prove the package on macOS, Ubuntu Linux, and native Windows before release-sensitive changes ship.
 
-Ordinary hosted CI only runs `npm run verify` on Node 24 for push and pull request checks. It does not run this Crabbox release matrix, lease targets, secrets, or model-backed platform verification.
+Ordinary hosted CI is owned by the monorepo root and runs shared and per-workspace checks on Node 24 for push and pull request checks. It does not run this Crabbox release matrix, lease targets, secrets, or model-backed platform verification.
+
+Run the commands below from `extensions/pi-goal` (or with `npm run <task> -w pi-codex-goal` at the repository root). Crabbox synchronizes the entire monorepo from its root, then changes into this workspace on each target. Root `.crabboxignore` must exclude secrets, dependency trees, and generated verification/build artifacts throughout the repository.
 
 This setup reuses the portable Crabbox platform-testing lessons without copying provider-specific verification flows from another project. The gate includes a real model-backed pi run so release checks catch platform-specific extension failures before completion is claimed.
 
@@ -71,18 +73,18 @@ Each required target runs `platform-build` and `goal-runtime-verification`.
 ### `platform-build`
 
 1. Verify Node major version is at least the configured Node 24 validation baseline.
-2. Run `npm ci` in the synced checkout.
-3. Run `npm run verify`, the repo's ordinary local/hosted verification command.
-4. Run `npm pack`.
+2. Run `npm ci` at the synced monorepo root, using its shared lockfile.
+3. Run root `npm run build` to build shared runtime dependencies, then workspace `npm run verify`.
+4. Pack this workspace and its built local settings, Glowup, and typed-args dependencies. The packages keep normal exact runtime dependency declarations, not bundled workspace sources.
 5. Create a clean target-local pi project.
-6. Install the packed tarball into that project with `npm install --no-save`.
+6. Install those tarballs into that project with `npm install --ignore-scripts --no-save`, so the check exercises the current local dependency closure rather than registry copies.
 7. Run `pi install -l ./node_modules/pi-codex-goal --approve` from the clean project so Pi 0.79+ can read and write project-local package settings for this isolated command.
-8. Run `pi list --approve` and assert `pi-codex-goal` is registered from the packed install.
+8. Run the resolved SDK CLI with an isolated `PI_CODING_AGENT_DIR` for both install and list; run `pi list --approve` and assert `pi-codex-goal` is registered from the packed install.
 9. Assert the verification never used the source shortcut `pi -e .` or `pi --extension .`.
 
 ### `goal-runtime-verification`
 
-1. Re-pack and install the package into a clean target-local pi project.
+1. Re-pack and install this workspace and its local runtime dependency tarballs into a clean target-local pi project.
 2. Run real `pi --approve --model <model> -p <prompt>` against that packed install so non-interactive Pi 0.79+ loads the isolated project-local package settings.
 3. Prompt the model to call the actual goal tools, create a marker file, verify it with the built-in `read` tool, call `update_goal`, and confirm completion.
 4. Capture pi stdout/stderr and session JSONL.

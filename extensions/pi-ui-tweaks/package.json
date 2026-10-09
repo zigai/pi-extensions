@@ -1,0 +1,59 @@
+{
+  "name": "@zigai/pi-ui-tweaks",
+  "version": "0.7.7",
+  "description": "Pi package for small configurable UI tweaks.",
+  "keywords": [
+    "pi",
+    "pi-coding-agent",
+    "pi-extension",
+    "pi-package",
+    "pi-tweaks",
+    "ui-tweaks"
+  ],
+  "homepage": "https://github.com/zigai/pi-tweaks/tree/master/extensions/pi-ui-tweaks#readme",
+  "bugs": {
+    "url": "https://github.com/zigai/pi-tweaks/issues"
+  },
+  "license": "MIT",
+  "author": "zigai",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zigai/pi-tweaks.git",
+    "directory": "extensions/pi-ui-tweaks"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "*.json"
+  ],
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "prepublishOnly": "pi-extension-settings check --root ."
+  },
+  "dependencies": {
+    "@zigai/pi-extension-internals": "0.1.6",
+    "@zigai/pi-extension-settings": "0.5.3"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "^1.0.0",
+    "@earendil-works/pi-tui": "^1.0.0",
+    "typebox": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "piExtensionSettings": {
+    "definition": "./src/settings-input.ts",
+    "schema": "./config.schema.json",
+    "readme": "./README.md",
+    "prevalidation": "./src/settings.prevalidated.ts"
+  }
+}

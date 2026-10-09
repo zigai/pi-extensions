@@ -7,9 +7,7 @@ help:
 
 # Install dependencies and Git hooks, then verify the project
 setup:
-    npm install
-    pre-commit install
-    npm run check
+    just --justfile ../../Justfile setup
 
 # Format code
 format:

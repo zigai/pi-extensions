@@ -1,6 +1,6 @@
 # pi-glowup
 
-[![CI](https://github.com/zigai/pi-glowup/actions/workflows/ci.yml/badge.svg)](https://github.com/zigai/pi-glowup/actions/workflows/ci.yml)
+[![CI](https://github.com/zigai/pi-tweaks/actions/workflows/ci.yml/badge.svg)](https://github.com/zigai/pi-tweaks/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/@zigai/pi-glowup?color=blue)](https://www.npmjs.com/package/@zigai/pi-glowup)
 [![npm downloads](https://img.shields.io/npm/dm/@zigai/pi-glowup?color=blue)](https://www.npmjs.com/package/@zigai/pi-glowup)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)

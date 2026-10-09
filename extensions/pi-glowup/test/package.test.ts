@@ -2,12 +2,13 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { copyFile, cp, mkdir, mkdtemp, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { readModuleGraph } from "./support/module-graph.ts";
 import { describe, expect, it, onTestFinished } from "vitest";
 import Type, { type Static } from "typebox";
 import { Value } from "typebox/value";
-import { jsonValueSchema } from "../src/json-value.js";
+import { jsonValueSchema } from "../src/json-value.ts";
 
 const dependencyMap = Type.Record(Type.String(), Type.String());
 const lockRootSchema = Type.Object({
@@ -39,6 +40,22 @@ type PackageJson = Static<typeof packageJsonSchema>;
 function readPackageJson(): PackageJson {
     const raw: unknown = JSON.parse(readFileSync("package.json", "utf8"));
     return Value.Parse(packageJsonSchema, raw);
+}
+
+function resolvedPackageRoot(name: string): string {
+    let directory = dirname(fileURLToPath(import.meta.resolve(name)));
+    for (;;) {
+        try {
+            const manifest = Value.Parse(
+                Type.Object({ name: Type.String() }),
+                JSON.parse(readFileSync(join(directory, "package.json"), "utf8")),
+            );
+            if (manifest.name === name) return directory;
+        } catch {}
+        const parent = dirname(directory);
+        if (parent === directory) throw new Error(`Cannot locate resolved package ${name}`);
+        directory = parent;
+    }
 }
 
 describe("package manifest", () => {
@@ -78,15 +95,22 @@ describe("package manifest", () => {
         "devDependencies",
         "peerDependencies",
         "optionalDependencies",
-    ] as const)("keeps manifest and lockfile root %s declarations identical", (section) => {
-        const manifest = readPackageJson();
-        const lock = Value.Parse(
-            Type.Object({ packages: Type.Object({ "": lockRootSchema }) }),
-            JSON.parse(readFileSync("package-lock.json", "utf8")),
-        );
-
-        expect(lock.packages[""][section] ?? {}).toEqual(manifest[section] ?? {});
-    });
+    ] as const)(
+        "keeps manifest and monorepo lockfile workspace %s declarations identical",
+        (section) => {
+            const manifest = readPackageJson();
+            const workspaceKey = "extensions/pi-glowup";
+            const lock = Value.Parse(
+                Type.Object({ packages: Type.Record(Type.String(), lockRootSchema) }),
+                JSON.parse(
+                    readFileSync(new URL("../../../package-lock.json", import.meta.url), "utf8"),
+                ),
+            );
+            const workspace = lock.packages[workspaceKey];
+            expect(workspace, "the root lockfile must contain this workspace").toBeDefined();
+            expect(workspace?.[section] ?? {}).toEqual(manifest[section] ?? {});
+        },
+    );
 
     it("keeps Pi core packages as peers instead of bundled runtime dependencies", () => {
         const manifest = readPackageJson();
@@ -123,8 +147,26 @@ describe("package manifest", () => {
             ),
             cp(join(packageRoot, "src"), join(buildRoot, "src"), { recursive: true }),
             cp(join(packageRoot, "scripts"), join(buildRoot, "scripts"), { recursive: true }),
-            symlink(join(packageRoot, "node_modules"), join(buildRoot, "node_modules"), "dir"),
+            copyFile(join(packageRoot, "LICENSE"), join(buildRoot, "LICENSE")),
+            copyFile(join(packageRoot, "README.md"), join(buildRoot, "README.md")),
+            cp(join(packageRoot, "themes"), join(buildRoot, "themes"), { recursive: true }),
         ]);
+        for (const dependency of [
+            "esbuild",
+            "typescript",
+            "@pierre/diffs",
+            "ansi-styles",
+            "unbash",
+            "@zigai/pi-extension-settings",
+            "typebox",
+            "shiki",
+            "@earendil-works/pi-coding-agent",
+            "@earendil-works/pi-tui",
+        ]) {
+            const destination = join(buildRoot, "node_modules", dependency);
+            await mkdir(dirname(destination), { recursive: true });
+            await symlink(resolvedPackageRoot(dependency), destination, "dir");
+        }
         execFileSync(process.execPath, [join(buildRoot, "scripts", "build.mjs")], {
             cwd: buildRoot,
             stdio: "pipe",
@@ -149,11 +191,11 @@ describe("package manifest", () => {
             installedRoot,
             "--strip-components=1",
         ]);
-        await symlink(
-            join(packageRoot, "node_modules", "@earendil-works"),
-            join(consumerRoot, "node_modules", "@earendil-works"),
-            "dir",
-        );
+        for (const dependency of ["@earendil-works/pi-coding-agent", "typebox"]) {
+            const destination = join(consumerRoot, "node_modules", dependency);
+            await mkdir(dirname(destination), { recursive: true });
+            await symlink(resolvedPackageRoot(dependency), destination, "dir");
+        }
         await writeFile(join(consumerRoot, "package.json"), JSON.stringify({ type: "module" }));
         await writeFile(
             join(consumerRoot, "tsconfig.json"),
@@ -182,7 +224,7 @@ glowup(pi);
 glowup({ on: pi.on });
 `,
         );
-        const compiler = join(packageRoot, "node_modules", "typescript", "bin", "tsc");
+        const compiler = fileURLToPath(new URL("../bin/tsc", import.meta.resolve("typescript")));
         const valid = spawnSync(process.execPath, [compiler, "--project", "tsconfig.json"], {
             cwd: consumerRoot,
             encoding: "utf8",

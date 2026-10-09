@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/zigai/pi-tweaks/master/extensions/pi-tree/config.schema.json",
+  "title": "Pi Tree settings",
+  "description": "Settings for session-tree timestamps and preview layout.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "default": "./schemas/pi-tree.schema.json",
+      "description": "JSON Schema used by editors for this settings file."
+    },
+    "treeTimestampMode": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "off"
+        },
+        {
+          "type": "string",
+          "const": "relative"
+        },
+        {
+          "type": "string",
+          "const": "absolute"
+        }
+      ],
+      "default": "relative",
+      "description": "Timestamp style shown in tree entries."
+    },
+    "treeSelectedPreview": {
+      "type": "boolean",
+      "default": false,
+      "description": "Show the selected tree entry preview."
+    },
+    "treeMaxVisibleLines": {
+      "type": "number",
+      "minimum": 5,
+      "description": "Maximum visible lines in the tree selector."
+    },
+    "treePreviewFullHeight": {
+      "type": "boolean",
+      "default": true,
+      "description": "Allow the preview to use the selector's full available height."
+    }
+  }
+}

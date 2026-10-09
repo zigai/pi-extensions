@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
-import { createStaleQueuedWorkGuard } from "../src/stale-queued-work-guard.js";
-import { CUSTOM_ENTRY_TYPE } from "../src/types.js";
+import { createStaleQueuedWorkGuard } from "../src/stale-queued-work-guard.ts";
+import { CUSTOM_ENTRY_TYPE } from "../src/types.ts";
 
 const abortedAssistant = { role: "assistant" as const, stopReason: "aborted" as const };
 const stoppedAssistant = { role: "assistant" as const, stopReason: "stop" as const };

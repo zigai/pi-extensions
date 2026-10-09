@@ -7,9 +7,9 @@ import {
   reloadGoalRuntimeEffects,
   type GoalTransitionEffect,
   type GoalTransitionEffectHandlers,
-} from "../src/goal-transition.js";
-import { createThreadGoal } from "../src/state.js";
-import type { GoalStatus, GoalTimeConstraints, ThreadGoal } from "../src/types.js";
+} from "../src/goal-transition.ts";
+import { createThreadGoal } from "../src/state.ts";
+import type { GoalStatus, GoalTimeConstraints, ThreadGoal } from "../src/types.ts";
 
 const limits: GoalTimeConstraints = {
   minimumActiveSeconds: 5,
@@ -265,7 +265,11 @@ test("runtime accounting validates timeLimited thresholds and statuses", () => {
           { ...current, status },
           {
             kind: "runtime_accounting",
-            nextGoal: { ...current, status, usage: { tokensUsed: 1, activeSeconds: 1 } },
+            nextGoal: {
+              ...current,
+              status,
+              usage: { tokensUsed: 1, activeSeconds: 1 },
+            },
           },
         ),
       /current status must be active or timeLimited/,

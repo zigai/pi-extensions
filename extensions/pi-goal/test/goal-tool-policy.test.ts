@@ -6,9 +6,9 @@ import { test } from "vitest";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-import { createGoalToolPolicyController } from "../src/goal-tool-policy.js";
-import { createThreadGoal } from "../src/state.js";
-import { createRuntimeHarness, sessionShutdownEvent } from "./support/runtime-harness.js";
+import { createGoalToolPolicyController } from "../src/goal-tool-policy.ts";
+import { createThreadGoal } from "../src/state.ts";
+import { createRuntimeHarness, sessionShutdownEvent } from "./support/runtime-harness.ts";
 
 function createHarness(availableNames: readonly string[], activeNames: readonly string[]) {
   const available = new Set(availableNames);

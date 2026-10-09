@@ -4,11 +4,12 @@ import { fileURLToPath } from "node:url";
 
 import * as esbuild from "esbuild";
 import ts from "typescript";
+import { pierreDiffsRuntimeSource } from "./pierre-diffs-runtime.mjs";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const outputRoot = path.join(packageRoot, "dist");
 const outfile = path.join(outputRoot, "src", "index.ts");
-const pierreDiffsRuntime = path.join(packageRoot, "scripts", "pierre-diffs-runtime.mjs");
+const pierreDiffsDirectory = path.dirname(fileURLToPath(import.meta.resolve("@pierre/diffs")));
 
 const external = [
   "@earendil-works/pi-agent-core",
@@ -52,7 +53,13 @@ const result = await esbuild.build({
       name: "pi-glowup-pierre-runtime",
       setup(build) {
         build.onResolve({ filter: /^@pierre\/diffs$/ }, () => ({
-          path: pierreDiffsRuntime,
+          path: "pierre-diffs-runtime",
+          namespace: "pi-glowup-pierre-runtime",
+        }));
+        build.onLoad({ filter: /.*/, namespace: "pi-glowup-pierre-runtime" }, () => ({
+          contents: pierreDiffsRuntimeSource,
+          resolveDir: pierreDiffsDirectory,
+          loader: "js",
         }));
       },
     },

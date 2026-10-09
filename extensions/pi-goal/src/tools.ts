@@ -5,7 +5,7 @@ import {
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { withGlowupRendering } from "@zigai/pi-glowup/protocol";
-import { goalToolResponse, toToolText, type GoalToolResponse } from "./format.js";
+import { goalToolResponse, toToolText, type GoalToolResponse } from "./format.ts";
 import {
   CreateGoalArgsSchema,
   GetGoalArgsSchema,
@@ -13,10 +13,10 @@ import {
   createGoalGlowupRendering,
   getGoalGlowupRendering,
   updateGoalGlowupRendering,
-} from "./glowup-rendering.js";
-import { createGoal, replaceGoal } from "./state.js";
-import { TOOL_PROMPT_GUIDELINES } from "./prompts.js";
-import type { GoalEntrySource, GoalResult, GoalTimeConstraints, ThreadGoal } from "./types.js";
+} from "./glowup-rendering.ts";
+import { createGoal, replaceGoal } from "./state.ts";
+import { TOOL_PROMPT_GUIDELINES } from "./prompts.ts";
+import type { GoalEntrySource, GoalResult, GoalTimeConstraints, ThreadGoal } from "./types.ts";
 
 export interface ToolHost {
   getGoal(): ThreadGoal | null;

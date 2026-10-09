@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
-import { createGoalRecoveryMachine, setRecoveryPausedAttention } from "../src/recovery-machine.js";
-import type { StatusContext } from "../src/goal-runtime-status.js";
-import { createGoalRecoveryRuntime } from "../src/recovery-runtime.js";
-import { CONTEXT_OVERFLOW_SIGNATURE } from "../src/recovery.js";
-import type { ThreadGoal } from "../src/types.js";
+import { createGoalRecoveryMachine, setRecoveryPausedAttention } from "../src/recovery-machine.ts";
+import type { StatusContext } from "../src/goal-runtime-status.ts";
+import { createGoalRecoveryRuntime } from "../src/recovery-runtime.ts";
+import { CONTEXT_OVERFLOW_SIGNATURE } from "../src/recovery.ts";
+import type { ThreadGoal } from "../src/types.ts";
 
 const activeGoal: ThreadGoal = {
   goalId: "goal-a",

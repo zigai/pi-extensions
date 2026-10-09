@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/zigai/pi-autoname-session/HEAD/config.schema.json",
+  "$id": "https://raw.githubusercontent.com/zigai/pi-tweaks/master/extensions/pi-autoname-session/config.schema.json",
   "title": "Pi Autoname Session settings",
   "description": "Settings for Pi Autoname Session.",
   "type": "object",
@@ -25,16 +25,15 @@
           "description": "Automatically name an otherwise unnamed session once."
         },
         "timing": {
-          "type": "string",
           "enum": [
             "prompt",
             "settled"
           ],
-          "description": "When to first check the naming trigger: before the agent starts on a prompt, or after the agent has settled.",
-          "default": "prompt"
+          "type": "string",
+          "default": "prompt",
+          "description": "When to first check the naming trigger: before the agent starts on a prompt, or after the agent has settled."
         },
         "trigger": {
-          "type": "string",
           "enum": [
             "messages",
             "turns",
@@ -42,6 +41,7 @@
             "tokens",
             "minutes"
           ],
+          "type": "string",
           "description": "The session activity that starts a naming attempt.",
           "default": "messages"
         },
@@ -69,7 +69,6 @@
           "description": "Periodically refresh the name as the session develops."
         },
         "trigger": {
-          "type": "string",
           "enum": [
             "messages",
             "turns",
@@ -77,6 +76,7 @@
             "tokens",
             "minutes"
           ],
+          "type": "string",
           "description": "The activity that starts a naming refresh.",
           "default": "turns"
         },
@@ -102,7 +102,6 @@
       "description": "Picker model: provider/model-id, or current for the active model."
     },
     "reasoningEffort": {
-      "type": "string",
       "enum": [
         "off",
         "minimal",
@@ -112,6 +111,7 @@
         "xhigh",
         "max"
       ],
+      "type": "string",
       "description": "Reasoning effort used by the session-name picker.",
       "default": "low"
     },
@@ -122,11 +122,11 @@
       "description": "Maximum time in milliseconds for picker authentication and the model response before the naming attempt is treated as failed."
     },
     "conversationScope": {
-      "type": "string",
       "enum": [
         "minimized",
         "full"
       ],
+      "type": "string",
       "description": "How much refresh context to send. Minimized sends only user and assistant text; full also includes tool arguments, results, and shell output. Initial naming always uses only the first user request.",
       "default": "minimized"
     },

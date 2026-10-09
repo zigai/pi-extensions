@@ -24,8 +24,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import goalExtension from "../src/index.js";
-import { VirtualTerminal } from "./support/virtual-terminal.js";
+import goalExtension from "../src/index.ts";
+import { VirtualTerminal } from "./support/virtual-terminal.ts";
 
 class LinesComponent implements Component {
   constructor(private readonly lines: readonly string[]) {}

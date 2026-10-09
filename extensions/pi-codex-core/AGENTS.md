@@ -2,17 +2,17 @@
 
 ## Pi Extension Workflow
 
-- This repository is a standalone Pi package for the `pi-codex-core` extension.
+- This workspace is an independently installable Pi package for the `pi-codex-core` extension.
 - Keep Pi resources declared explicitly in `package.json` under the `pi` manifest.
-- Validate changes with `npm run check` before handing off when practical.
-- Keep `apply_patch`, `web_run`, `imagegen`, and `view_image` Glowup protocol adapters with their owning tools in this repository. Preserve native renderers alongside passive adapters, and keep the bundled protocol runtime available so this extension still loads when the Glowup extension itself is absent.
+- Build dependencies with `npm run build` at the repository root, then validate this workspace with `npm run check` before handing off when practical.
+- Keep `apply_patch`, `web_run`, `imagegen`, and `view_image` Glowup protocol adapters with their owning tools in this repository. Preserve native renderers alongside passive adapters, and keep the declared protocol dependency available so this extension still loads when the Glowup extension itself is absent.
 - Glowup adapters return semantic protocol nodes only; do not import Pi TUI components, Glowup themes, ANSI helpers, or pi-glowup internal modules.
 - Test both native rendering and optional `glowupRendering` paths.
 - Keep `src/settings/integration.ts` wire-compatible with Pi Codex Voice's `src/codex-integration-registry.ts`; this versioned global registry is what lets independently installed Codex extensions share one `/codex` command and settings tabs without package dependencies.
 
 ## Settings and Session Lifecycle
 
-Keep the existing `src/config` and `src/settings` architecture, shared `/codex` registry, explicit updates, and reload behavior. Glowup’s dependency does not make this extension a direct settings-library consumer. Keep imports free of settings I/O; preserve the current startup configuration boundary and synchronous resource registration. Load new behavior’s settings only where needed.
+Keep the existing `src/config` and `src/settings` architecture, shared `/codex` registry, explicit updates, and reload behavior. This workspace directly uses `@zigai/pi-extension-settings` through `src/settings.ts`; keep its exact supported runtime dependency declared. Keep imports free of settings I/O; preserve the current startup configuration boundary and synchronous resource registration. Load new behavior’s settings only where needed.
 
 Gate feature side effects on their resolved configuration. Cancel/dispose owned async work before clearing session state; use the existing recovery and activation owners. Report configuration failures without raw values or secrets. `pi config` is the zero-load switch, preventing import and registration.
 

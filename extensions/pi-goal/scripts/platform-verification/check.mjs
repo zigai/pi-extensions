@@ -2,7 +2,10 @@
 
 import { spawnSync } from "node:child_process";
 
-import { platformVerificationCheckTest, platformVerificationSyntaxScripts } from "./script-inventory.mjs";
+import {
+  platformVerificationCheckTest,
+  platformVerificationSyntaxScripts,
+} from "./script-inventory.mjs";
 
 function run(command, args) {
   const result = spawnSync(command, args, {

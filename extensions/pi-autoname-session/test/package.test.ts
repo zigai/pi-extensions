@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import {
     access,
     copyFile,
+    mkdir,
     mkdtemp,
     readFile,
     readdir,
@@ -9,7 +10,7 @@ import {
     rm,
     writeFile,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -28,7 +29,9 @@ async function installedVersion(packageName: string): Promise<string> {
 }
 
 it("loads the packed production install in Pi and restores persisted naming progress", async () => {
-    const installDir = await mkdtemp(join(tmpdir(), "pi-autoname-package-test-"));
+    const cacheDir = join(homedir(), ".cache", "pi-tweaks", "package-tests");
+    await mkdir(cacheDir, { recursive: true });
+    const installDir = await mkdtemp(join(cacheDir, "autoname-"));
     try {
         const npmrc = join(installDir, "npmrc");
         const globalNpmrc = join(installDir, "global-npmrc");
@@ -55,6 +58,28 @@ it("loads the packed production install in Pi and restores persisted naming prog
             throw new Error("npm pack did not produce an archive.");
         }
 
+        const settingsPackageDir = fileURLToPath(
+            new URL("..", import.meta.resolve("@zigai/pi-extension-settings")),
+        );
+        const settingsPack = await execute(
+            "npm",
+            [
+                "pack",
+                "--ignore-scripts",
+                "--workspaces=false",
+                "--json",
+                "--pack-destination",
+                installDir,
+            ],
+            { cwd: settingsPackageDir, env, timeout: 30_000 },
+        );
+        const packedSettings = Value.Parse(
+            Type.Object({
+                "@zigai/pi-extension-settings": Type.Object({ filename: Type.String() }),
+            }),
+            JSON.parse(settingsPack.stdout),
+        )["@zigai/pi-extension-settings"];
+
         await writeFile(
             join(installDir, "package.json"),
             JSON.stringify({
@@ -62,6 +87,7 @@ it("loads the packed production install in Pi and restores persisted naming prog
                 type: "module",
                 dependencies: {
                     "@zigai/pi-autoname-session": `file:${join(installDir, archive)}`,
+                    "@zigai/pi-extension-settings": `file:${join(installDir, packedSettings.filename)}`,
                     "@earendil-works/pi-coding-agent": await installedVersion(
                         "@earendil-works/pi-coding-agent",
                     ),
