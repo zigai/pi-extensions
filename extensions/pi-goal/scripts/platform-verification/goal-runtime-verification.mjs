@@ -252,12 +252,21 @@ const packedTarball =
   latestPackedTarball(packDir, args.packageName) ||
   join(packDir, pack.stdout.trim().split(/\r?\n/).at(-1) ?? "");
 
-const npmInit = run(npm, ["init", "-y"], { cwd: piProject });
+const npmInit = run(npm, ["init", "-y", "--workspaces=false"], { cwd: piProject });
 commands.push({ name: "npm-init", ...npmInit });
 
 const npmInstall = run(
   npm,
-  ["install", "--ignore-scripts", "--no-save", packedTarball, ...packRuntimeDependencies(packDir)],
+  [
+    "install",
+    "--prefix",
+    piProject,
+    "--workspaces=false",
+    "--ignore-scripts",
+    "--no-save",
+    packedTarball,
+    ...packRuntimeDependencies(packDir),
+  ],
   { cwd: piProject },
 );
 commands.push({ name: "npm-install-packed", ...npmInstall });

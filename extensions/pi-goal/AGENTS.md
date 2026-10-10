@@ -40,16 +40,13 @@ npm run verify
 
 Runs `tsc --noEmit`, the platform-verification harness checks, and the full Vitest suite (`test/*.test.ts`).
 
-For release-sensitive changes, also use the local Crabbox platform gate documented in `docs/platform-verification.md`:
+For release-sensitive changes, confirm the hosted `pi-goal` CI jobs pass on macOS, Ubuntu Linux, and native Windows. Each runs the full workspace verification and installs the packed package into an isolated Pi project. The same command runs locally:
 
 ```sh
-npm run check:platform-verification
-npm run verify:platform:all
+node scripts/platform-verification/platform-build.mjs
 ```
 
-`verify:platform:all` runs `verify:platform:doctor` before any target suite starts.
-
-The required gate runs the full suite plus a real model-backed goal-tool verification on macOS, Ubuntu Linux, and native Windows. The default verification model is `zai/glm-5.2`; override with `PLATFORM_VERIFICATION_MODEL` when needed.
+The inherited Crabbox and model-backed commands documented in `docs/platform-verification.md` are optional diagnostics, not release requirements. Run model-backed verification only when explicitly requested.
 
 ## Layout
 

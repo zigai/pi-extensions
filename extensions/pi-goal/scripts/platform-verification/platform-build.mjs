@@ -141,13 +141,19 @@ const packedNodeInstallStdout = join(packDir, "packed-node-install.stdout.txt");
 const packedNodeInstallStderr = join(packDir, "packed-node-install.stderr.txt");
 let packedNodeInstallExit = 1;
 if (packFile && existsSync(packFile)) {
-  const npmInit = run(npm, ["init", "-y"], { cwd: piProject, quiet: true });
+  const npmInit = run(npm, ["init", "-y", "--workspaces=false"], {
+    cwd: piProject,
+    quiet: true,
+  });
   const npmInstall =
     npmInit.status === 0
       ? run(
           npm,
           [
             "install",
+            "--prefix",
+            piProject,
+            "--workspaces=false",
             "--ignore-scripts",
             "--no-save",
             packFile,
@@ -215,7 +221,8 @@ if (
     packedNodeInstallExit,
     piInstallExit,
     piList.status,
-  ].some((status) => status !== 0)
+  ].some((status) => status !== 0) ||
+  !piList.stdout.includes(args.packageName)
 ) {
   console.log("PLATFORM_BUILD_FAILED");
   process.exit(1);

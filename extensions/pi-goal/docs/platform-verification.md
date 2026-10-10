@@ -1,16 +1,14 @@
 # Platform verification testing
 
-`@zigai/pi-goal` uses a Crabbox-backed local platform verification gate to prove the package on macOS, Ubuntu Linux, and native Windows before release-sensitive changes ship.
+`@zigai/pi-goal` uses GitHub-hosted CI on macOS, Ubuntu Linux, and native Windows for release-sensitive changes. Each `pi-goal` job runs the shared `platform-build.mjs` command on Node 24: workspace builds, the full goal verification suite, packing, and installation into an isolated Pi project. No model credentials or Crabbox setup are required.
 
-Ordinary hosted CI is owned by the monorepo root and runs shared and per-workspace checks on Node 24 for push and pull request checks. It does not run this Crabbox release matrix, lease targets, secrets, or model-backed platform verification.
+The root CI job also runs shared and per-workspace checks. Run the platform-build command locally from `extensions/pi-goal` with `node scripts/platform-verification/platform-build.mjs`.
 
-Run the commands below from `extensions/pi-goal` (or with `npm run <task> -w @zigai/pi-goal` at the repository root). Crabbox synchronizes the entire monorepo from its root, then changes into this workspace on each target. Root `.crabboxignore` must exclude secrets, dependency trees, and generated verification/build artifacts throughout the repository.
+The inherited Crabbox harness below remains available for optional diagnostics. It synchronizes the entire monorepo, then changes into this workspace on each target. Root `.crabboxignore` excludes secrets, dependency trees, and generated verification/build artifacts.
 
-This setup reuses the portable Crabbox platform-testing lessons without copying provider-specific verification flows from another project. The gate includes a real model-backed pi run so release checks catch platform-specific extension failures before completion is claimed.
+## Optional Crabbox gate
 
-## Required gate
-
-Release-sensitive changes use a doctor-first gate:
+Run model-backed verification only when explicitly requested. The optional Crabbox commands use a doctor-first gate:
 
 ```sh
 npm run check:platform-verification
@@ -68,7 +66,7 @@ For Windows, `pi-extension-windows-template` must be stopped and `crabbox-ready`
 
 ## What the suites prove
 
-Each required target runs `platform-build` and `goal-runtime-verification`.
+Hosted CI runs `platform-build` on each platform. The optional Crabbox harness runs both `platform-build` and `goal-runtime-verification`.
 
 ### `platform-build`
 
@@ -197,15 +195,15 @@ The suites record failures as artifacts before reporting failure so the host can
 ## Lessons carried forward
 
 - Treat Crabbox as the lease/sync/run layer; this repo owns the assertions that make a run meaningful.
-- Use Crabbox targets instead of a one-OS local script.
+- Use real hosted runners for the release matrix; Crabbox targets are optional diagnostics.
 - Keep `platform-build` behavior in the shared Node orchestrator; native Windows may use only a thin PowerShell wrapper to launch it.
 - Run the repository's existing validation command on every required target.
 - Test the packed package, not `pi -e .`.
 - Pass `--approve` for isolated project-local package verification commands and non-interactive runtime verifications; Pi 0.79+ otherwise skips project-local settings and packages when no saved trust decision exists.
-- Include a real model-backed pi run so release claims are not based on unit tests alone.
+- Run model-backed verification only when explicitly requested, not as a release prerequisite.
 - Assert built-in `read` evidence in the model-backed runtime verification so post-tool goal completion stays covered.
 - Keep project-specific defaults in `platform-verification.config.mjs`; use environment variables only for local overrides.
-- Make doctor fail before expensive or long target runs, and enforce doctor-before-all in the release entrypoint.
+- Make doctor fail before expensive target runs, and enforce doctor-before-all in the optional Crabbox entrypoint.
 - Preserve artifacts on failure and use `assertions.json` as the pass/fail source of truth.
 - Record lease stop evidence for every target and fail cleanup problems.
 - Treat missing platform setup as blocked, not skipped-ready.
