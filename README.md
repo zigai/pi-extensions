@@ -35,7 +35,7 @@ Do not enable the collection alongside the same individual extensions. The priva
 | [@zigai/pi-branch](extensions/pi-branch)                           | Pi package for branching the current session into parallel tmux or Ghostty panes. | `pi install npm:@zigai/pi-branch`              |
 | [@zigai/pi-codex-core](extensions/pi-codex-core)                   | Everything GPT models need to feel at home in Pi.                                 | `pi install npm:@zigai/pi-codex-core`          |
 | [@zigai/pi-glowup](extensions/pi-glowup)                           | Compact, high-signal rendering for Pi tool calls and results.                     | `pi install npm:@zigai/pi-glowup`              |
-| [pi-codex-goal](extensions/pi-goal)                                | Codex-style goal tracking and continuation for pi.                                | `pi install npm:pi-codex-goal`                 |
+| [@zigai/pi-goal](extensions/pi-goal)                               | Codex-style goal tracking and continuation for pi.                                | `pi install npm:@zigai/pi-goal`                |
 | [@zigai/pi-autoname-session](extensions/pi-autoname-session)       | Automatically name and keep Pi sessions organized                                 | `pi install npm:@zigai/pi-autoname-session`    |
 | [@zigai/pi-toggles](extensions/pi-toggles)                         | Central capability policy, profiles, conditions, and session overrides for Pi     | `pi install npm:@zigai/pi-toggles`             |
 | [@zigai/pi-settings-ui](extensions/pi-settings-ui)                 | Schema-driven TUI editor for Pi extension settings.                               | `pi install npm:@zigai/pi-settings-ui`         |

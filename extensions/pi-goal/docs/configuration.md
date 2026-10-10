@@ -1,6 +1,6 @@
 # Configuration
 
-On first session start, `pi-codex-goal` creates the global settings file and its JSON Schema:
+On first session start, `@zigai/pi-goal` creates the global settings file and its JSON Schema:
 
 ```text
 ~/.pi/agent/pi-codex-goal/config.json

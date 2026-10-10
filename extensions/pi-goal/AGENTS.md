@@ -1,4 +1,4 @@
-# pi-codex-goal — agent notes
+# @zigai/pi-goal — agent notes
 
 Pi extension: Codex-style `/goal` command and `get_goal` / `create_goal` / `update_goal` tools. State lives in pi session custom entries.
 
@@ -25,11 +25,11 @@ On this machine, the canonical active install is the global/user package pointin
 Do not leave project-local installs of this package in this repo. In particular, avoid release verification commands such as:
 
 ```sh
-pi install -l npm:pi-codex-goal
+pi install -l npm:@zigai/pi-goal
 pi install -l https://github.com/fitchmultz/pi-codex-goal@vX.Y.Z
 ```
 
-Those write duplicate package entries under `.pi/` for the current project, causing `get_goal`, `create_goal`, and `update_goal` tool-registration conflicts with the global local-checkout install. For install-path release verification, use an isolated temp project/config directory or remove the project-local entries immediately after the check. With Pi 0.79+ project trust, pass `--approve` for isolated project-local package install/list/non-interactive verification commands when those commands must load `.pi/settings.json`. If conflicts appear, inspect `pi list --approve` and `.pi/settings.json`, then remove any project-local `pi-codex-goal` npm/GitHub installs so only the global local-checkout package remains active.
+Those write duplicate package entries under `.pi/` for the current project, causing `get_goal`, `create_goal`, and `update_goal` tool-registration conflicts with the global local-checkout install. For install-path release verification, use an isolated temp project/config directory or remove the project-local entries immediately after the check. With Pi 0.79+ project trust, pass `--approve` for isolated project-local package install/list/non-interactive verification commands when those commands must load `.pi/settings.json`. If conflicts appear, inspect `pi list --approve` and `.pi/settings.json`, then remove any project-local goal npm/GitHub installs so only the global local-checkout package remains active.
 
 ## Verify before finishing
 

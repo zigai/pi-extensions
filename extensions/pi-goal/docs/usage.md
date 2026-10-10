@@ -1,6 +1,6 @@
 # Goal commands and lifecycle
 
-`pi-codex-goal` provides one interactive command and three model-callable tools. Goal state is
+`@zigai/pi-goal` provides one interactive command and three model-callable tools. Goal state is
 stored in Pi session history, so it follows the selected branch through resume, fork, tree
 navigation, reload, and compaction.
 

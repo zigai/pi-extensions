@@ -71,9 +71,13 @@ export function runWorkspaceTask(root: string, task: string, args: readonly stri
 
     const inventory = loadWorkspacePackages(root, false);
     if (task === "build") {
-        for (const workspace of planWorkspaceBuild(inventory.packages)) {
+        const builds = planWorkspaceBuild(inventory.packages);
+        for (const workspace of builds) {
             run(root, "npm", ["run", "build", "-w", workspace.manifest.name]);
         }
+
+        if (builds.length > 0)
+            run(root, "npm", ["rebuild", ...builds.map(({ manifest }) => manifest.name)]);
 
         return;
     }

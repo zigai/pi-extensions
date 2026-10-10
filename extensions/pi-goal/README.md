@@ -1,6 +1,6 @@
-# Pi Codex Goal
+# Pi Goal
 
-`pi-codex-goal` is a Pi extension inspired by the Codex CLI goal feature. It keeps an agent working
+`@zigai/pi-goal` is a Pi extension inspired by the Codex CLI goal feature. It keeps an agent working
 toward a durable objective across turns, tool calls, session reloads, and context compaction. An
 active goal continues until it is completed, paused, blocked, or stopped by an optional time limit.
 
@@ -14,7 +14,7 @@ active goal continues until it is completed, paused, blocked, or stopped by an o
 The package requires Node.js 24 or newer. Install the current npm release with Pi:
 
 ```sh
-pi install npm:pi-codex-goal
+pi install npm:@zigai/pi-goal
 ```
 
 Append `@<version>` to the package name when you need a specific release.

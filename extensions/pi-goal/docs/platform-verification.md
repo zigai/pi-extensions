@@ -1,10 +1,10 @@
 # Platform verification testing
 
-`pi-codex-goal` uses a Crabbox-backed local platform verification gate to prove the package on macOS, Ubuntu Linux, and native Windows before release-sensitive changes ship.
+`@zigai/pi-goal` uses a Crabbox-backed local platform verification gate to prove the package on macOS, Ubuntu Linux, and native Windows before release-sensitive changes ship.
 
 Ordinary hosted CI is owned by the monorepo root and runs shared and per-workspace checks on Node 24 for push and pull request checks. It does not run this Crabbox release matrix, lease targets, secrets, or model-backed platform verification.
 
-Run the commands below from `extensions/pi-goal` (or with `npm run <task> -w pi-codex-goal` at the repository root). Crabbox synchronizes the entire monorepo from its root, then changes into this workspace on each target. Root `.crabboxignore` must exclude secrets, dependency trees, and generated verification/build artifacts throughout the repository.
+Run the commands below from `extensions/pi-goal` (or with `npm run <task> -w @zigai/pi-goal` at the repository root). Crabbox synchronizes the entire monorepo from its root, then changes into this workspace on each target. Root `.crabboxignore` must exclude secrets, dependency trees, and generated verification/build artifacts throughout the repository.
 
 This setup reuses the portable Crabbox platform-testing lessons without copying provider-specific verification flows from another project. The gate includes a real model-backed pi run so release checks catch platform-specific extension failures before completion is claimed.
 
@@ -78,8 +78,8 @@ Each required target runs `platform-build` and `goal-runtime-verification`.
 4. Pack this workspace and its built local settings, Glowup, and typed-args dependencies. The packages keep normal exact runtime dependency declarations, not bundled workspace sources.
 5. Create a clean target-local pi project.
 6. Install those tarballs into that project with `npm install --ignore-scripts --no-save`, so the check exercises the current local dependency closure rather than registry copies.
-7. Run `pi install -l ./node_modules/pi-codex-goal --approve` from the clean project so Pi 0.79+ can read and write project-local package settings for this isolated command.
-8. Run the resolved SDK CLI with an isolated `PI_CODING_AGENT_DIR` for both install and list; run `pi list --approve` and assert `pi-codex-goal` is registered from the packed install.
+7. Run `pi install -l ./node_modules/@zigai/pi-goal --approve` from the clean project so Pi 0.79+ can read and write project-local package settings for this isolated command.
+8. Run the resolved SDK CLI with an isolated `PI_CODING_AGENT_DIR` for both install and list; run `pi list --approve` and assert `@zigai/pi-goal` is registered from the packed install.
 9. Assert the verification never used the source shortcut `pi -e .` or `pi --extension .`.
 
 ### `goal-runtime-verification`

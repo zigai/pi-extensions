@@ -73,12 +73,18 @@ it("loads the packed production install in Pi and restores persisted naming prog
             ],
             { cwd: settingsPackageDir, env, timeout: 30_000 },
         );
-        const packedSettings = Value.Parse(
-            Type.Object({
-                "@zigai/pi-extension-settings": Type.Object({ filename: Type.String() }),
-            }),
+        const packDescriptionSchema = Type.Object({ filename: Type.String() });
+        const settingsPackOutput = Value.Parse(
+            Type.Union([
+                Type.Tuple([packDescriptionSchema]),
+                Type.Object({ "@zigai/pi-extension-settings": packDescriptionSchema }),
+            ]),
             JSON.parse(settingsPack.stdout),
-        )["@zigai/pi-extension-settings"];
+        );
+        const packedSettings = Object.values(settingsPackOutput)[0];
+        if (packedSettings === undefined) {
+            throw new Error("npm pack did not describe the settings archive.");
+        }
 
         await writeFile(
             join(installDir, "package.json"),

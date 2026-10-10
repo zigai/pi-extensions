@@ -1,5 +1,5 @@
 {
-  "name": "pi-codex-goal",
+  "name": "@zigai/pi-goal",
   "version": "0.1.36",
   "description": "Codex-style goal tracking and continuation for pi.",
   "keywords": [

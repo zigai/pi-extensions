@@ -32,6 +32,7 @@
     "@zigai/pi-enhanced-skills": "0.1.0",
     "@zigai/pi-footer": "0.7.8",
     "@zigai/pi-glowup": "1.0.0",
+    "@zigai/pi-goal": "0.1.36",
     "@zigai/pi-keymap-tweaks": "0.4.2",
     "@zigai/pi-mention-anything": "0.1.4",
     "@zigai/pi-mention-project": "0.11.4",
@@ -48,8 +49,7 @@
     "@zigai/pi-toggles": "0.1.0",
     "@zigai/pi-tree": "0.6.1",
     "@zigai/pi-trust-all-folders": "0.2.6",
-    "@zigai/pi-ui-tweaks": "0.7.7",
-    "pi-codex-goal": "0.1.36"
+    "@zigai/pi-ui-tweaks": "0.7.7"
   },
   "bundleDependencies": [
     "@zigai/pi-autoname-session",
@@ -58,6 +58,7 @@
     "@zigai/pi-enhanced-skills",
     "@zigai/pi-footer",
     "@zigai/pi-glowup",
+    "@zigai/pi-goal",
     "@zigai/pi-keymap-tweaks",
     "@zigai/pi-mention-anything",
     "@zigai/pi-mention-project",
@@ -74,8 +75,7 @@
     "@zigai/pi-toggles",
     "@zigai/pi-tree",
     "@zigai/pi-trust-all-folders",
-    "@zigai/pi-ui-tweaks",
-    "pi-codex-goal"
+    "@zigai/pi-ui-tweaks"
   ],
   "pi": {
     "extensions": [
@@ -98,7 +98,7 @@
       "./node_modules/@zigai/pi-branch/index.ts",
       "./node_modules/@zigai/pi-codex-core/src/index.ts",
       "./node_modules/@zigai/pi-glowup/dist/src/index.ts",
-      "./node_modules/pi-codex-goal/src/index.ts",
+      "./node_modules/@zigai/pi-goal/src/index.ts",
       "./node_modules/@zigai/pi-autoname-session/src/index.ts",
       "./node_modules/@zigai/pi-toggles/src/index.ts",
       "./node_modules/@zigai/pi-settings-ui/src/index.ts",
@@ -125,7 +125,7 @@
     "@zigai/pi-branch",
     "@zigai/pi-codex-core",
     "@zigai/pi-glowup",
-    "pi-codex-goal",
+    "@zigai/pi-goal",
     "@zigai/pi-autoname-session",
     "@zigai/pi-toggles",
     "@zigai/pi-settings-ui",

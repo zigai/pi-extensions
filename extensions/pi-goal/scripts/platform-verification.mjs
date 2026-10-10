@@ -39,7 +39,7 @@ Targets:
 
 Suites:
   platform-build             npm ci, npm run verify, npm pack, packed pi install/list with project trust approval
-  goal-runtime-verification         real model run through packed pi-codex-goal install
+  goal-runtime-verification         real model run through packed @zigai/pi-goal install
 
 Options:
   --target <names>           Comma-separated target names

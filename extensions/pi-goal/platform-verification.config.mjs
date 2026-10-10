@@ -1,9 +1,9 @@
-// Platform verification configuration for pi-codex-goal.
+// Platform verification configuration for @zigai/pi-goal.
 // Reuses the portable Crabbox cross-platform testing lessons while keeping
 // this package's verification gate focused on build, verify, pack, and installed pi package behavior.
 
 export default {
-  packageName: "pi-codex-goal",
+  packageName: "@zigai/pi-goal",
   artifactRoot: ".artifacts/platform-verification",
   requiredTargets: ["macos", "ubuntu", "windows-native"],
   requiredSuites: ["platform-build", "goal-runtime-verification"],

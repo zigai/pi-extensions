@@ -133,6 +133,7 @@ test("platform verification config and package scripts require macOS, Ubuntu, an
   assert.match(packageJson.scripts?.["verify:platform:windows-native"] ?? "", /windows-native/);
 
   const code = String.raw`
+import { readFileSync } from "node:fs";
 import config from "./platform-verification.config.mjs";
 const result = {
   targets: config.requiredTargets,
@@ -146,7 +147,7 @@ const result = {
   windowsWorkRoot: config.windowsParallels.workRoot,
 };
 console.log(JSON.stringify(result));
-if (result.packageName !== "pi-codex-goal") process.exit(1);
+if (result.packageName !== JSON.parse(readFileSync("package.json", "utf8")).name) process.exit(1);
 if (result.suites.join(",") !== "platform-build,goal-runtime-verification") process.exit(1);
 if (result.targets.join(",") !== "macos,ubuntu,windows-native") process.exit(1);
 if (result.crabboxMinVersion !== "0.26.0") process.exit(1);
@@ -297,7 +298,7 @@ try {
   const warmupStderrText = readFileSync(join(warmupFailure.suiteDir, "crabbox.stderr.txt"), "utf8");
   const warmupAssertions = JSON.parse(warmupAssertionsText);
   const fakeCrabboxJs = join(root, "fake-crabbox.js");
-  writeFileSync(fakeCrabboxJs, "process.stderr.write(" + JSON.stringify("warmup failed " + warmupSecret + "\n") + "); process.exit(1);\n");
+  writeFileSync(fakeCrabboxJs, "process.stdout.write(JSON.stringify(process.argv.slice(2)) + '\\n'); process.stderr.write(" + JSON.stringify("warmup failed " + warmupSecret + "\n") + "); process.exit(1);\n");
   const fakeCrabboxBin = process.platform === "win32" ? join(root, "fake-crabbox.cmd") : join(root, "fake-crabbox");
   if (process.platform === "win32") {
     writeFileSync(fakeCrabboxBin, "@echo off\r\n\"" + process.execPath + "\" \"%~dp0fake-crabbox.js\" %*\r\n");
@@ -307,10 +308,12 @@ try {
   }
   const originalCrabbox = process.env.PLATFORM_VERIFICATION_CRABBOX;
   process.env.PLATFORM_VERIFICATION_CRABBOX = fakeCrabboxBin;
-  const multiWarmupFailure = await runTargetSuites({ artifactRoot: root, packageName: "pi-codex-goal", defaultAuthEnv: ["ZAI_API_KEY"], ubuntuContainerImage: "fake-node-24" }, "ubuntu", ["platform-build", "goal-runtime-verification"]);
+  const multiWarmupFailure = await runTargetSuites({ artifactRoot: root, packageName: "@sample/fixture-goal", defaultAuthEnv: ["ZAI_API_KEY"], ubuntuContainerImage: "fake-node-24" }, "ubuntu", ["platform-build", "goal-runtime-verification"]);
   if (originalCrabbox === undefined) delete process.env.PLATFORM_VERIFICATION_CRABBOX;
   else process.env.PLATFORM_VERIFICATION_CRABBOX = originalCrabbox;
   const multiWarmup = multiWarmupFailure.results[0];
+  const warmupArguments = JSON.parse(readFileSync(join(multiWarmup.suiteDir, "crabbox.stdout.txt"), "utf8"));
+  const scopedSlug = warmupArguments[warmupArguments.indexOf("--slug") + 1];
   const multiWarmupAssertionsText = readFileSync(join(multiWarmup.suiteDir, "assertions.json"), "utf8");
   const multiWarmupFailuresText = readFileSync(join(multiWarmup.suiteDir, "failures.md"), "utf8");
   const multiWarmupStderrText = readFileSync(join(multiWarmup.suiteDir, "crabbox.stderr.txt"), "utf8");
@@ -328,6 +331,7 @@ try {
     warmupAssertionFailed: warmupAssertions.checks.some((check) => check.id === "crabbox-warmup" && check.ok === false),
     warmupSecretRedacted: !warmupStderrText.includes(warmupSecret) && warmupStderrText.includes("[REDACTED_SECRET]") && !warmupAssertionsText.includes(warmupSecret) && !warmupFailuresText.includes(warmupSecret),
     multiWarmupFailure: multiWarmupFailure.ok === false && multiWarmup.suiteDir.includes("warmup-failure"),
+    multiWarmupScopedSlug: scopedSlug === "sample-fixture-goal-ubuntu",
     multiWarmupSecretRedacted: !multiWarmupStderrText.includes(warmupSecret) && !multiWarmupAssertionsText.includes(warmupSecret) && !multiWarmupFailuresText.includes(warmupSecret),
     assertionsOk: assertions.ok,
     leaseCleanupFailed: assertions.checks.some((check) => check.id === "lease-cleanup" && check.ok === false),
@@ -336,7 +340,7 @@ try {
     secretRedacted: !redacted.includes(env.ZAI_API_KEY) && redacted.includes("[REDACTED_SECRET]"),
   };
   console.log(JSON.stringify(result));
-  if (!result.manifestIncludesSelf || !result.missingRecorded || result.cleanupOk || !result.cleanupSuccessOk || !result.cleanupSuccessRecorded || result.warmupOk || !result.warmupFailureRecorded || !result.warmupAssertionFailed || !result.warmupSecretRedacted || !result.multiWarmupFailure || !result.multiWarmupSecretRedacted || result.assertionsOk || !result.leaseCleanupFailed || !result.targetRecordsProvider || !result.secretDetected || !result.secretRedacted) process.exit(1);
+  if (!result.manifestIncludesSelf || !result.missingRecorded || result.cleanupOk || !result.cleanupSuccessOk || !result.cleanupSuccessRecorded || result.warmupOk || !result.warmupFailureRecorded || !result.warmupAssertionFailed || !result.warmupSecretRedacted || !result.multiWarmupFailure || !result.multiWarmupScopedSlug || !result.multiWarmupSecretRedacted || result.assertionsOk || !result.leaseCleanupFailed || !result.targetRecordsProvider || !result.secretDetected || !result.secretRedacted) process.exit(1);
 } finally {
   rmSync(root, { recursive: true, force: true });
 }

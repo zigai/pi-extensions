@@ -11,8 +11,10 @@ export function crabboxBin() {
   return process.env.PLATFORM_VERIFICATION_CRABBOX || "crabbox";
 }
 
-function packageSlug(config = {}) {
-  return config.packageName || process.env.PLATFORM_VERIFICATION_PACKAGE_SLUG || "pi-codex-goal";
+export function packageSlug(config = {}) {
+  const name =
+    config.packageName || process.env.PLATFORM_VERIFICATION_PACKAGE_SLUG || "@zigai/pi-goal";
+  return name.replace(/^@/, "").replaceAll("/", "-");
 }
 
 function expandUser(value, user) {

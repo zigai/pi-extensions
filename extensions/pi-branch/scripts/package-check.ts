@@ -9,7 +9,11 @@ import { Value } from "typebox/value";
 const projectRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const packDirectory = mkdtempSync(path.join(tmpdir(), "pi-branch-pack-"));
 const NpmPackResultSchema = Type.Object({ filename: Type.String() });
-const NpmPackOutputSchema = Type.Object({ "@zigai/pi-branch": NpmPackResultSchema });
+const NpmPackOutputSchema = Type.Union([
+    Type.Tuple([NpmPackResultSchema]),
+    Type.Object({ "@zigai/pi-branch": NpmPackResultSchema }),
+]);
+
 const PackageManifestSchema = Type.Object({
     name: Type.Literal("@zigai/pi-branch"),
     dependencies: Type.Object({ "pi-typed-args": Type.Literal("0.1.1") }),
@@ -18,16 +22,16 @@ const PackageManifestSchema = Type.Object({
     bundleDependencies: Type.Optional(Type.Array(Type.String())),
 });
 
-type NpmPackOutput = Static<typeof NpmPackOutputSchema>;
+type NpmPackResult = Static<typeof NpmPackResultSchema>;
 type PackageManifest = Static<typeof PackageManifestSchema>;
 
 function fail(message: string): never {
     throw new Error(`Package verification failed: ${message}`);
 }
 
-function parseNpmPackOutput(text: string): NpmPackOutput {
+function parseNpmPackOutput(text: string): NpmPackResult {
     const parsed: unknown = JSON.parse(text);
-    return Value.Parse(NpmPackOutputSchema, parsed);
+    return Object.values(Value.Parse(NpmPackOutputSchema, parsed))[0];
 }
 
 function parsePackageManifest(text: string): PackageManifest {
@@ -44,7 +48,7 @@ try {
             encoding: "utf8",
         },
     );
-    const { filename } = parseNpmPackOutput(output)["@zigai/pi-branch"];
+    const { filename } = parseNpmPackOutput(output);
     const archive = path.join(packDirectory, filename);
     const files = new Set(
         execFileSync("tar", ["-tzf", archive], { encoding: "utf8" }).trim().split("\n"),

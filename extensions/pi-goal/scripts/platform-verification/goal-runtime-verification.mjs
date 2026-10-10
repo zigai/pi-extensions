@@ -39,7 +39,7 @@ const ReadToolResultSchema = Type.Object(
 );
 
 function parseArgs(argv) {
-  const args = { model: "zai/glm-5.2", packageName: "pi-codex-goal" };
+  const args = { model: "zai/glm-5.2", packageName: "@zigai/pi-goal" };
   for (let i = 2; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--help" || arg === "-h") {

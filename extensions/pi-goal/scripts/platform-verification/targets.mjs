@@ -1,4 +1,4 @@
-/** Target/suite runner for pi-codex-goal platform verification. */
+/** Target/suite runner for @zigai/pi-goal platform verification. */
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -17,6 +17,7 @@ import {
 import {
   buildTargetBaseArgs,
   cleanupStaleTargetState,
+  packageSlug,
   runOnLease,
   stopLease,
   warmupLease,
@@ -246,7 +247,7 @@ export function createWarmupFailureResult(
   existing = {},
 ) {
   const runId = existing.runId ?? makeRunId();
-  const slug = `${config.packageName}-${targetName}`;
+  const slug = `${packageSlug(config)}-${targetName}`;
   const suiteDir =
     existing.suiteDir ?? createSuiteDir(config.artifactRoot, runId, targetName, suiteName);
   const secretValues = collectSecretValues(authEnvAllowList(config));
@@ -334,7 +335,7 @@ export function createLeaseCleanupResult(
   writeFileSync(
     resolve(suiteDir, "target.json"),
     JSON.stringify(
-      targetMetadata(config, targetName, runId, `${config.packageName}-${targetName}`),
+      targetMetadata(config, targetName, runId, `${packageSlug(config)}-${targetName}`),
       null,
       2,
     ),
@@ -446,7 +447,7 @@ export function createLeaseCleanupFailureResult(config, targetName, leaseId, sto
 
 export function buildGoalRuntimeVerificationCommand(config, targetName) {
   const model = verificationModel(config);
-  const packageName = config.packageName ?? "pi-codex-goal";
+  const packageName = config.packageName ?? "@zigai/pi-goal";
   if (platformFor(targetName) === "powershell") {
     return `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "Set-Location .\\extensions\\pi-goal; node .\\scripts\\platform-verification\\goal-runtime-verification.mjs --model ${model.replace(/"/g, '`"')} --package-name ${packageName.replace(/"/g, '`"')}"`;
   }
@@ -456,7 +457,7 @@ export function buildGoalRuntimeVerificationCommand(config, targetName) {
 
 export function buildPlatformBuildCommand(
   targetName,
-  packageName = "pi-codex-goal",
+  packageName = "@zigai/pi-goal",
   nodeValidationMajor = 24,
 ) {
   if (platformFor(targetName) === "powershell") {
@@ -470,7 +471,7 @@ async function runGoalRuntimeVerificationSuite(config, targetName, suiteName, le
   const runId = makeRunId();
   const suiteDir = createSuiteDir(config.artifactRoot, runId, targetName, suiteName);
   const startedAt = Date.now();
-  const slug = `${config.packageName}-${targetName}`;
+  const slug = `${packageSlug(config)}-${targetName}`;
   const command = buildGoalRuntimeVerificationCommand(config, targetName);
 
   writeFileSync(
@@ -717,7 +718,7 @@ export async function runTargetSuite(config, targetName, suiteName, leaseSession
   const runId = makeRunId();
   const suiteDir = createSuiteDir(config.artifactRoot, runId, targetName, suiteName);
   const startedAt = Date.now();
-  const slug = `${config.packageName}-${targetName}`;
+  const slug = `${packageSlug(config)}-${targetName}`;
   const command = buildPlatformBuildCommand(
     targetName,
     config.packageName,
@@ -876,7 +877,7 @@ export async function runTargetSuite(config, targetName, suiteName, leaseSession
 }
 
 export async function runTargetSuites(config, targetName, suiteNames) {
-  const slug = `${config.packageName}-${targetName}`;
+  const slug = `${packageSlug(config)}-${targetName}`;
   const startedAt = Date.now();
   const lease = await warmupLease(targetName, slug, config);
   if (!lease.ok)

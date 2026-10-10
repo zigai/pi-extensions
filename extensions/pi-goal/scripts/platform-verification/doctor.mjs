@@ -4,7 +4,7 @@ import { execFileSync, execSync } from "node:child_process";
 import { accessSync, constants, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { buildTargetBaseArgs } from "./crabbox-runner.mjs";
+import { buildTargetBaseArgs, packageSlug } from "./crabbox-runner.mjs";
 import { repositoryRoot } from "./workspace-packages.mjs";
 import {
   forbiddenArtifactMessage,
@@ -87,8 +87,7 @@ function crabbox(cbox, args, timeout = 300_000) {
 }
 
 function disposableWindowsSshProbe(cbox, config) {
-  const packageName = config?.packageName ?? "pi-codex-goal";
-  const slug = `${packageName}-doctor-windows`;
+  const slug = `${packageSlug(config)}-doctor-windows`;
   const baseArgs = windowsCrabboxBaseArgs(config);
   const warm = crabbox(
     cbox,
@@ -251,7 +250,7 @@ function checkCrabboxProvider(cbox, args, label, failures) {
 export async function runDoctor(config, options = {}) {
   const failures = { count: 0 };
   const skipWindowsDisposableProbe = options.skipWindowsDisposableProbe === true;
-  const packageName = config?.packageName ?? "pi-codex-goal";
+  const packageName = config?.packageName ?? "@zigai/pi-goal";
   const artifactRoot = config?.artifactRoot ?? ".artifacts/platform-verification";
   const nodeMajor = config?.nodeValidationMajor ?? 24;
   console.log("\n── Platform verification config ──");

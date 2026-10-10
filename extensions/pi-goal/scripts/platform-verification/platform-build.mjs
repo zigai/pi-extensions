@@ -11,7 +11,7 @@ import {
 } from "./workspace-packages.mjs";
 
 function parseArgs(argv) {
-  const args = { packageName: "pi-codex-goal", nodeValidationMajor: 24 };
+  const args = { packageName: "@zigai/pi-goal", nodeValidationMajor: 24 };
   for (let i = 2; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--help" || arg === "-h") {

@@ -23,9 +23,10 @@ const PackDescriptionSchema = Type.Object({
     files: Type.Array(Type.Object({ path: Type.String() })),
 });
 
-const PackOutputSchema = Type.Object({
-    "@zigai/pi-extension-settings": PackDescriptionSchema,
-});
+const PackOutputSchema = Type.Union([
+    Type.Tuple([PackDescriptionSchema]),
+    Type.Object({ "@zigai/pi-extension-settings": PackDescriptionSchema }),
+]);
 const PackageVersionSchema = Type.Object({ version: Type.String() });
 
 type CommandResult = {
@@ -124,9 +125,10 @@ try {
         ],
         packageRoot,
     );
-    const packed = Value.Parse(PackOutputSchema, JSON.parse(packedCommand.stdout))[
-        "@zigai/pi-extension-settings"
-    ];
+    const packed = Object.values(
+        Value.Parse(PackOutputSchema, JSON.parse(packedCommand.stdout)),
+    )[0];
+    if (packed === undefined) throw new Error("npm pack did not describe the settings archive.");
 
     const packedFiles = new Set(packed.files.map((file) => file.path));
     for (const required of [
