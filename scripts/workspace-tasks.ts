@@ -54,7 +54,14 @@ export function planWorkspaceBuild(packages: readonly WorkspacePackage[]): Works
 }
 
 function run(root: string, executable: string, args: readonly string[]): void {
-    execFileSync(executable, [...args], { cwd: root, stdio: "inherit" });
+    const windowsShim = process.platform === "win32" && executable !== "node";
+    if (windowsShim) executable += ".cmd";
+
+    execFileSync(executable, [...args], {
+        cwd: root,
+        stdio: "inherit",
+        shell: windowsShim,
+    });
 }
 
 export function runWorkspaceTask(root: string, task: string, args: readonly string[] = []): void {

@@ -41,7 +41,13 @@ function check(files: readonly string[]): void {
         if (task === "lint:fix") args.push("--fix");
     }
 
-    execFileSync(executable, [...args, ...process.argv.slice(3)], { cwd: root, stdio: "inherit" });
+    if (process.platform === "win32") executable += ".cmd";
+
+    execFileSync(executable, [...args, ...process.argv.slice(3)], {
+        cwd: root,
+        stdio: "inherit",
+        shell: process.platform === "win32",
+    });
 }
 
 if (task === "format" || task === "format:check") {
