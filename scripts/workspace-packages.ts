@@ -35,7 +35,6 @@ export const workspaceManifest = Type.Object({
         Type.Array(
             Type.Object({
                 targets: Type.Array(Type.String()),
-                disableTypescript: Type.Optional(Type.Boolean()),
             }),
         ),
     ),

@@ -1,3 +1,53 @@
 {
-  "ignorePatterns": ["**/dist/**", "**/coverage/**", "extensions/*/src/settings.prevalidated.ts"]
+  "ignorePatterns": [
+    "**/dist/**",
+    "**/coverage/**",
+    "extensions/*/src/settings.prevalidated.ts",
+    "extensions/pi-codex-core/.agents/audit/**",
+    "extensions/pi-codex-core/README.md",
+    "extensions/pi-codex-core/src/prompt/codex-gpt-*.md",
+    "extensions/pi-codex-core/src/tools/imagegen-description.md",
+    "extensions/pi-codex-core/src/tools/web-run/web-run-description.md",
+    "extensions/pi-glowup/README.md",
+    "extensions/pi-glowup/config.schema.json",
+    "extensions/pi-glowup/.agents/audit/**",
+    "extensions/*/config.schema.json",
+    "extensions/pi-footer/README.md",
+    "extensions/pi-mention-anything/README.md",
+    "extensions/pi-mention-project/README.md",
+    "extensions/pi-mention-skill/README.md",
+    "extensions/pi-message-highlights/README.md",
+    "extensions/pi-model-alias/README.md",
+    "extensions/pi-model-filter/README.md",
+    "extensions/pi-model-modes/README.md",
+    "extensions/pi-status-bar/README.md",
+    "extensions/pi-tree/README.md",
+    "extensions/pi-ui-tweaks/README.md",
+    "extensions/pi-keymap-tweaks/README.md",
+    "extensions/pi-autoname-session/config.schema.json",
+    "extensions/pi-autoname-session/README.md",
+    "extensions/pi-settings-ui/config.schema.json",
+    "extensions/pi-settings-ui/README.md",
+    "extensions/pi-toggles/config.schema.json",
+    "extensions/pi-toggles/README.md"
+  ],
+  "overrides": [
+    {
+      "files": ["extensions/pi-goal/**/*"],
+      "options": {
+        "tabWidth": 2
+      }
+    },
+    {
+      "files": [
+        "extensions/pi-glowup/**/*.js",
+        "extensions/pi-glowup/**/*.jsx",
+        "extensions/pi-glowup/**/*.mjs",
+        "extensions/pi-glowup/**/*.cjs"
+      ],
+      "options": {
+        "tabWidth": 2
+      }
+    }
+  ]
 }

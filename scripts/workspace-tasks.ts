@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { readdirSync, rmSync } from "node:fs";
+import { rmSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { loadWorkspacePackages, type WorkspacePackage } from "./workspace-packages.ts";
@@ -64,6 +64,11 @@ export function runWorkspaceTask(root: string, task: string, args: readonly stri
         task = task.slice(0, -5);
     }
 
+    if (["lint", "lint:fix", "format", "format:check"].includes(task)) {
+        run(root, "node", ["scripts/tracked-check.ts", task, ...args]);
+        return;
+    }
+
     const inventory = loadWorkspacePackages(root, false);
     if (task === "build") {
         for (const workspace of planWorkspaceBuild(inventory.packages)) {
@@ -100,27 +105,6 @@ export function runWorkspaceTask(root: string, task: string, args: readonly stri
         run(root, "vitest", [...testArgs, ...args]);
     } else if (task === "typecheck") {
         run(root, "tsc", ["--noEmit"]);
-    } else if (["lint", "lint:fix", "format", "format:check"].includes(task)) {
-        const shared = inventory.packages.filter((workspace) => !isolated.includes(workspace));
-        const rootFiles = readdirSync(root, { withFileTypes: true })
-            .filter((entry) => entry.isFile())
-            .map((entry) => entry.name);
-
-        const targets = [
-            ...rootFiles,
-            "scripts",
-            ".github",
-            ...shared.map((workspace) => path.relative(root, workspace.directory)),
-        ];
-        if (task.startsWith("lint")) {
-            const lintArgs = ["-c", "./oxlint.config.ts", ...targets];
-            if (task === "lint:fix") lintArgs.push("--fix");
-            run(root, "oxlint", lintArgs);
-        } else {
-            const formatArgs: string[] = [];
-            if (task === "format:check") formatArgs.push("--check");
-            run(root, "oxfmt", [...formatArgs, ...targets]);
-        }
     } else {
         throw new Error(`Unknown workspace task: ${task}`);
     }

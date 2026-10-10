@@ -7,12 +7,12 @@ repos:
         language: system
         pass_filenames: false
       - id: format-check
-        name: format check (shared and isolated workspace contracts)
-        entry: node scripts/tracked-check.ts format
+        name: format check (repository configuration)
+        entry: node scripts/tracked-check.ts format:check
         language: system
         pass_filenames: false
       - id: lint
-        name: lint (shared and isolated workspace contracts)
+        name: lint (repository configuration)
         entry: node scripts/tracked-check.ts lint
         language: system
         pass_filenames: false

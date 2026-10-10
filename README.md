@@ -55,7 +55,7 @@ Use Node 24 and npm workspaces. `just setup` installs dependencies and pre-commi
 - `npm run build`: build settings/CLI first, then compiled workspace dependencies before consumers, then stage the collection's bundled dependencies from local tarballs.
 - `npm run check`: build, check architecture/generated settings, run shared-root checks, verify every extension/library's independent installed dependency closure and the collection separately, then run all imported workspaces' complete `check` scripts in their own working directories.
 - `npm test`, `npm run coverage`, `npm run typecheck`: build first, run the original shared suite and each imported package's own script with working-directory isolation. This retains PTY, platform, package smoke, and settings coverage-threshold checks.
-- `npm run lint` / `npm run format:check`: apply the shared root contract to original workspaces and tooling; invoke imported packages' own strict configurations separately.
+- `npm run lint` / `npm run format:check`: check tracked and new nonignored files with repository-root configurations and tooling dependencies; scoped overrides retain package-specific policies. Workspace commands select that workspace's files.
 - `npm run config:generate` / `npm run config:check`: build the local settings CLI, then generate or verify artifacts across workspace roots.
 - `npm run test:package`: build and install independent consumers under `~/.cache/pi-tweaks/package-check/`, without Pi host peers, then probe the real Pi loader and RPC readiness. Temporary consumer runs are removed afterward; npm's normal cache remains reusable.
 

@@ -33,10 +33,10 @@
     "access": "public"
   },
   "scripts": {
-    "lint": "oxlint -c ./.oxlintrc.json .",
-    "lint:fix": "oxlint -c ./.oxlintrc.json . --fix",
-    "format": "oxfmt .",
-    "format:check": "oxfmt --check .",
+    "lint": "node ../../scripts/tracked-check.ts lint",
+    "lint:fix": "node ../../scripts/tracked-check.ts lint:fix",
+    "format": "node ../../scripts/tracked-check.ts format",
+    "format:check": "node ../../scripts/tracked-check.ts format:check",
     "test": "vitest run",
     "coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
@@ -48,9 +48,6 @@
     "@earendil-works/pi-coding-agent": "1.0.0",
     "@types/node": "^24.10.1",
     "@vitest/coverage-v8": "4.1.9",
-    "oxfmt": "^0.71.0",
-    "oxlint": "^1.86.0",
-    "oxlint-tsgolint": "^7.0.2003",
     "typescript": "^7.0.2",
     "vitest": "^4.1.9"
   },
