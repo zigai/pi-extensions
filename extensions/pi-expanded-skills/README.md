@@ -65,3 +65,7 @@ just --justfile ../../Justfile setup
 just check
 just coverage
 ```
+
+## License
+
+[MIT](LICENSE)

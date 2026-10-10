@@ -13,7 +13,7 @@
   "bugs": {
     "url": "https://github.com/zigai/pi-tweaks/issues"
   },
-  "license": "UNLICENSED",
+  "license": "MIT",
   "author": "zigai",
   "repository": {
     "type": "git",
@@ -22,7 +22,8 @@
   },
   "files": [
     "src",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "type": "module",
   "main": "src/index.ts",
