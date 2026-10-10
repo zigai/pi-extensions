@@ -16,6 +16,8 @@ const cacheRoot = path.join(homedir(), ".cache", "pi-tweaks", "collection");
 mkdirSync(cacheRoot, { recursive: true });
 
 const temporary = mkdtempSync(path.join(cacheRoot, "run-"));
+let npm = "npm";
+if (process.platform === "win32") npm += ".cmd";
 
 try {
     const tarballs: string[] = [];
@@ -23,11 +25,12 @@ try {
         if (workspace === collection) continue;
 
         const output = execFileSync(
-            "npm",
+            npm,
             ["pack", "--silent", "--ignore-scripts", "--pack-destination", temporary],
             {
                 cwd: workspace.directory,
                 encoding: "utf8",
+                shell: process.platform === "win32",
             },
         );
         const filename = output.trim().split(/\r?\n/u).at(-1);
@@ -39,7 +42,7 @@ try {
 
     rmSync(path.join(collection.directory, "node_modules"), { recursive: true, force: true });
     execFileSync(
-        "npm",
+        npm,
         [
             "install",
             ...tarballs,
@@ -56,6 +59,7 @@ try {
         {
             cwd: root,
             stdio: "inherit",
+            shell: process.platform === "win32",
         },
     );
 } finally {

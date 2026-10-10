@@ -213,6 +213,7 @@ const customConfig = {
   macosStaticSsh: { host: "127.0.0.1", workRoot: "/Users/$USER/crabbox/custom-goal-package" },
   windowsParallels: { sourceVm: "custom-template", snapshot: "custom-snapshot", user: "windows-user", workRoot: "C:\\crabbox\\custom-goal-package" },
 };
+process.env.PLATFORM_VERIFICATION_MAC_USER = "fixture-user";
 const macArgs = buildTargetBaseArgs("macos", customConfig);
 const ubuntuArgs = buildTargetBaseArgs("ubuntu", customConfig);
 const windowsArgs = buildTargetBaseArgs("windows-native", customConfig);
@@ -236,7 +237,7 @@ const result = {
   goalRuntimeAssertsReadTool: readFileSync("scripts/platform-verification/goal-runtime-verification.mjs", "utf8").includes("readToolObserved"),
   goalRuntimeTargetChecksReadTool: readFileSync("scripts/platform-verification/targets.mjs", "utf8").includes("read-tool-observed"),
   macArgsUseConfigHost: macArgs.includes("127.0.0.1"),
-  macArgsUseConfigWorkRoot: macArgs.includes("/Users/" + process.env.USER + "/crabbox/custom-goal-package"),
+  macArgsUseConfigWorkRoot: macArgs.includes("/Users/fixture-user/crabbox/custom-goal-package"),
   ubuntuArgsUseConfigImage: ubuntuArgs.includes("node:24-test"),
   windowsArgsUseConfigTemplate: windowsArgs.includes("custom-template"),
   windowsArgsUseConfigSnapshot: windowsArgs.includes("custom-snapshot"),

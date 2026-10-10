@@ -121,8 +121,8 @@ function spawnCrabbox(args, options = {}) {
     const comspec = process.env.ComSpec || "cmd.exe";
     return spawn(
       comspec,
-      ["/d", "/s", "/c", [quoteCmd(bin), ...args.map(quoteCmd)].join(" ")],
-      spawnOptions,
+      ["/d", "/s", "/c", `"${[quoteCmd(bin), ...args.map(quoteCmd)].join(" ")}"`],
+      { ...spawnOptions, windowsVerbatimArguments: true },
     );
   }
 
