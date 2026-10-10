@@ -4,13 +4,9 @@ A collection of small Pi extensions for improving interaction, display, and mode
 
 ## Install
 
-Install individual extensions from the table below, or explicitly install the complete ordered collection:
+Install individual extensions from the table below. The complete ordered `@zigai/pi-tweaks` collection is not being published yet.
 
-```sh
-pi install npm:@zigai/pi-tweaks
-```
-
-Do not enable the collection alongside the same individual extensions. The private repository root is a development package; the published collection references bundled, independently versioned dependencies through Pi resource paths. Personal migration settings retain their previous load order and enabled selection; installing the collection is an explicit opt-in to all 24 extensions.
+Do not enable the collection alongside the same individual extensions. The private repository root is a development package; the unpublished collection references bundled, independently versioned dependencies through Pi resource paths. Personal migration settings retain their previous load order and enabled selection; installing the collection is an explicit opt-in to all 24 extensions.
 
 ## Packages
 
@@ -48,21 +44,6 @@ Do not enable the collection alongside the same individual extensions. The priva
 - [pi-typed-args](packages/pi-typed-args): typed command and skill arguments; its original repository was named pi-typed-commands.
 - [@zigai/pi-tweaks](packages/pi-tweaks): ordered collection with exact independent extension-version pins.
 
-## Development and verification
-
-Use Node 24 and npm workspaces. `just setup` installs dependencies and pre-commit hooks, then runs `npm run check`. The root lockfile owns installation for `extensions/*` and `packages/*`; packages retain independent versions, exports, licenses, runtime dependencies, and strict verification contracts.
-
-- `npm run build`: build settings/CLI first, then compiled workspace dependencies before consumers, then stage the collection's bundled dependencies from local tarballs.
-- `npm run check`: build, check architecture/generated settings, format/lint once, run shared-root types/tests and installed-package verification, then run imported workspaces' remaining checks through their `check:code` scripts in their own working directories. Standalone `check` scripts retain formatting and lint.
-- `npm test`, `npm run coverage`, `npm run typecheck`: build first, run the original shared suite and each imported package's own script with working-directory isolation. This retains PTY, platform, package smoke, and settings coverage-threshold checks.
-- `npm run lint` / `npm run format:check`: check tracked and new nonignored files with repository-root configurations and tooling dependencies; scoped overrides retain package-specific policies. Workspace commands select that workspace's files.
-- `npm run config:generate` / `npm run config:check`: build the local settings CLI, then generate or verify artifacts across workspace roots.
-- `npm run test:package`: build and install independent consumers under `~/.cache/pi-tweaks/package-check/`, without Pi host peers, then probe the real Pi loader and RPC readiness. Temporary consumer runs are removed afterward; npm's normal cache remains reusable.
-
-The collection stages dependency tarballs under `~/.cache/pi-tweaks/collection/` and installs bundled runtime dependencies in its ignored `node_modules/` directory. It uses Pi's supported `node_modules` manifest resource paths rather than a combined factory, preserving per-extension identity and settings. Root architecture validation checks collection order, pins, and resource paths against the development manifest.
-
-Release tags identify individual package versions (for example `@zigai/pi-tree@0.6.1` or `pi-typed-args@0.1.1`). CI selects manifests by package name across both workspace roots and publishes missing exact-version prerequisites first. Publication is separate from migration. `npm run release` delegates to the machine's external `release` command; that command must support npm-workspace discovery.
-
 ## License
 
-Original repository code is MIT. Imported and bundled packages retain their own license files and terms.
+MIT

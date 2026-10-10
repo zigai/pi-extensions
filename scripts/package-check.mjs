@@ -71,7 +71,7 @@ try {
             mkdirSync(directory, { recursive: true });
         }
 
-        let closure = planWorkspacePublish(releases, consumer.manifest.name);
+        let closure;
         let consumerTarballs;
         if (consumer === collection) {
             const collectionRelease = releases.find(
@@ -81,6 +81,7 @@ try {
             closure = [collectionRelease];
             consumerTarballs = [tarballs.get(consumer.manifest.name)];
         } else {
+            closure = planWorkspacePublish(releases, consumer.manifest.name);
             consumerTarballs = closure.map((workspace) => tarballs.get(workspace.name));
         }
 
