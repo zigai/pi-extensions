@@ -23,6 +23,11 @@ jobs:
           node-version: 24
           cache: npm
 
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: false
+
       - name: Install dependencies
         run: npm ci
 
