@@ -61,7 +61,8 @@
     "test:package": "node scripts/package-check.ts",
     "coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
-    "check": "npm run format:check && npm run lint && npm run typecheck && npm run build && npm run coverage && npm run test:package",
+    "check": "npm run format:check && npm run lint && npm run check:code",
+    "check:code": "npm run typecheck && npm run build && npm run coverage && npm run test:package",
     "verify": "npm run check",
     "prepack": "npm run check"
   },

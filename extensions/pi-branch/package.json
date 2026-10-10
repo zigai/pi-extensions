@@ -45,7 +45,8 @@
     "coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
     "check:package": "node scripts/package-check.ts",
-    "check": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run check:package",
+    "check": "npm run format:check && npm run lint && npm run check:code",
+    "check:code": "npm run typecheck && npm test && npm run check:package",
     "verify": "npm run check"
   },
   "dependencies": {

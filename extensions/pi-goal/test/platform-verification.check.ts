@@ -118,7 +118,7 @@ test("platform verification config and package scripts require macOS, Ubuntu, an
     packageJson.scripts?.["check:platform-verification"],
     "node scripts/platform-verification/check.mjs",
   );
-  assert.match(packageJson.scripts?.check ?? "", /check:platform-verification/);
+  assert.match(packageJson.scripts?.["check:code"] ?? "", /check:platform-verification/);
   assert.equal(packageJson.scripts?.verify, "npm run check");
   assert.equal(
     packageJson.scripts?.["verify:platform:doctor"],
@@ -160,10 +160,10 @@ if (result.windowsWorkRoot !== "C:\\crabbox\\pi-codex-goal") process.exit(1);
 });
 
 test("platform verification hygiene rejects local secret and package artifacts before sync", () => {
-  const gitignore = readFileSync(".gitignore", "utf8");
+  const ignored = run("git", ["check-ignore", "--no-index", "--", ".env", ".env.private"]);
+  assert.equal(ignored.status, 0, ignored.stderr);
+  assert.deepEqual(ignored.stdout.trim().split(/\r?\n/u), [".env", ".env.private"]);
   const crabboxignore = readFileSync(".crabboxignore", "utf8");
-  assert.match(gitignore, /^\.env$/m);
-  assert.match(gitignore, /^\.env\.\*$/m);
   assert.match(crabboxignore, /^\.env$/m);
   assert.match(crabboxignore, /^\.env\.\*$/m);
 

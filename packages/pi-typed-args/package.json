@@ -53,7 +53,8 @@
     "test": "vitest run",
     "coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
-    "check": "npm run format:check && npm run lint && npm run typecheck && npm test",
+    "check": "npm run format:check && npm run lint && npm run check:code",
+    "check:code": "npm run typecheck && npm test",
     "verify": "npm run check",
     "release": "release --root ../..",
     "release:dry-run": "release --dry --root ../.."

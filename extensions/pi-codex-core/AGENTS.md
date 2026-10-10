@@ -18,7 +18,7 @@ Gate feature side effects on their resolved configuration. Cancel/dispose owned 
 
 Native renderers receive `ToolRenderContext`, not `ExtensionContext`: return components even for history before activation, using arguments/results and renderer state without settings I/O or retained execution contexts. Keep passive Glowup adapters on their protocol contract. Guard dialogs/notifications with `ctx.hasUI` and terminal UI with `ctx.mode === "tui"`.
 
-Preserve the current configuration owner; these instructions do not require a settings-library migration. If adopting `@zigai/pi-extension-settings` as part of a requested change, follow its `docs/manual-setup.md` and `docs/runtime.md`.
+Preserve the current configuration owner and shared settings integration. Follow `@zigai/pi-extension-settings`'s `docs/manual-setup.md` and `docs/runtime.md` when changing that integration.
 
 ## Codex Parity Policy
 
@@ -33,16 +33,13 @@ Preserve the current configuration owner; these instructions do not require a se
 
 ## User-Facing Configuration Docs
 
-Keep README/configuration docs user-facing, without lifecycle or schema implementation details. Show one global path sentence (`~/.pi/agent/pi-codex-core/config.json`), a compact table of actual editable keys/dot paths, and the complete default JSON, including `$schema` when scaffolded. Do not invent defaults. Put useful project-override details only in a dedicated Advanced section of `docs/configuration.md`, not the README.
+Keep README configuration docs user-facing, without lifecycle or schema implementation details. The generated settings region owns the global path (`~/.pi/agent/extension-settings/pi-codex-core.json`), editable-key table, and default JSON. Update `src/settings-input.ts` and regenerate instead of hand-editing that region. Do not invent defaults.
 
 ## Pi Extension Configuration
 
-- If the extension needs user-configurable behavior, store persistent runtime settings as JSON files, not Pi core `settings.json` or YAML/TOML/TypeScript config.
-- Use `getAgentDir()/<extension-id>/config.json` for user-owned global config and trusted `ctx.cwd/CONFIG_DIR_NAME/<extension-id>/config.json` for user-owned project overrides.
-- Import `getAgentDir()` and `CONFIG_DIR_NAME` from `@earendil-works/pi-coding-agent`; do not hardcode Pi agent paths.
-- Parse config at the boundary: read JSON with `JSON.parse` into `unknown`, then decode with TypeBox before passing typed config inward.
-- Keep checked-in `config.schema.json` synchronized with the TypeBox schema and default config values, including top-level JSON Schema metadata.
-- Scaffold default global `config.json` only when missing, include `"$schema": "./config.schema.json"`, and never overwrite existing or malformed user config.
-- Treat `config.schema.json` as extension-owned: write it when missing and refresh it when the installed extension schema content is stale.
-- Never auto-create project config; read trusted project config only when already present.
+- Keep persistent runtime settings in the shared settings library's JSON files, not Pi core `settings.json` or YAML/TOML/TypeScript config.
+- `src/settings-input.ts` owns the TypeBox schema, defaults, and descriptions; `src/settings.ts` hydrates prevalidation and loads through the library's `/pi` adapter. Do not add parallel config paths or readers.
+- Keep the exact supported settings-library runtime dependency and all `piExtensionSettings` artifacts synchronized. Run `npm run config:generate` after definition changes and `npm run config:check` to verify them.
+- Parse external data at its boundary, decode with TypeBox, and pass typed values inward. Let the library own Pi paths, schema refresh, and missing-global scaffolding.
+- Preserve existing and malformed user files. Read project overrides only when trusted and already present; creating them requires an explicit trusted update.
 - Use environment variables only for secrets, CI/session overrides, or explicit config-path overrides.

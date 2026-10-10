@@ -1,7 +1,60 @@
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
-import { expect, test } from "vitest";
-import { planWorkspaceBuild } from "../workspace-tasks.ts";
+import { afterEach, expect, test } from "vitest";
+import { planWorkspaceBuild, runWorkspaceTask } from "../workspace-tasks.ts";
 import type { WorkspacePackage } from "../workspace-packages.ts";
+
+const temporaryRoots: string[] = [];
+
+afterEach(() => {
+    for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+function checkWorkspace(exitCode: number) {
+    const cache = path.join(homedir(), ".cache", "pi-tweaks", "workspace-tests");
+    mkdirSync(cache, { recursive: true });
+    const root = mkdtempSync(path.join(cache, "run-"));
+    temporaryRoots.push(root);
+    const directory = path.join(root, "extensions", "pi-branch");
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(
+        path.join(root, "package.json"),
+        JSON.stringify({ workspaces: ["extensions/*"], pi: { extensions: [] } }),
+    );
+
+    writeFileSync(
+        path.join(directory, "package.json"),
+        JSON.stringify({
+            name: "fixture-extension",
+            version: "1.0.0",
+            exports: { ".": "./index.js" },
+            scripts: {
+                check: 'node -e "process.exit(1)"',
+                "check:code": "node check.mjs",
+            },
+        }),
+    );
+
+    writeFileSync(
+        path.join(directory, "check.mjs"),
+        `import { writeFileSync } from "node:fs";\nwriteFileSync("verified", process.cwd());\nprocess.exit(${exitCode});\n`,
+    );
+
+    return { root, directory };
+}
+
+test("runs workspace code checks without repeating the complete gate", () => {
+    const { root, directory } = checkWorkspace(0);
+    runWorkspaceTask(root, "check:code:workspaces");
+    expect(readFileSync(path.join(directory, "verified"), "utf8")).toBe(directory);
+});
+
+test("reports a failed workspace code check instead of accepting partial verification", () => {
+    const { root, directory } = checkWorkspace(1);
+    expect(() => runWorkspaceTask(root, "check:code:workspaces")).toThrow(Error);
+    expect(readFileSync(path.join(directory, "verified"), "utf8")).toBe(directory);
+});
 
 function workspace(
     name: string,
@@ -10,6 +63,7 @@ function workspace(
 ): WorkspacePackage {
     let scripts = {};
     if (build) scripts = { build: "node build.js" };
+
     return {
         directory: path.resolve(name),
         manifest: {

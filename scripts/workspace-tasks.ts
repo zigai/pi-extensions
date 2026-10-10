@@ -92,9 +92,9 @@ export function runWorkspaceTask(root: string, task: string, args: readonly stri
     const isolated = inventory.packages.filter((workspace) =>
         isolatedDirectories.has(path.relative(root, workspace.directory)),
     );
-    if (task === "check:workspaces") {
+    if (task === "check:code:workspaces") {
         for (const workspace of isolated)
-            run(root, "npm", ["run", "check", "-w", workspace.manifest.name]);
+            run(root, "npm", ["run", "check:code", "-w", workspace.manifest.name]);
 
         return;
     }

@@ -2,7 +2,7 @@
 
 ## Work and verification
 
-This is a strict TypeScript ESM npm-workspaces monorepo. Independently installable Pi extensions live under `extensions/*`; shared libraries and the published collection live under `packages/*`; each package declares its TypeScript entrypoints in `pi.extensions`. Extensions run with user-level permissions: settings persistence and patches of Pi internals require particular care.
+This is a strict TypeScript ESM npm-workspaces monorepo. Independently installable Pi extensions live under `extensions/*`; shared libraries and the published collection live under `packages/*`; extension packages declare their entrypoints in `pi.extensions`. Extensions run with user-level permissions: settings persistence and patches of Pi internals require particular care.
 
 Packages retain independent versions, licenses, published exports, and strict workspace checks. Oxlint and Oxfmt use the repository-root configurations and dependencies, with scoped overrides preserving package policies. The root task runner runs imported-package builds, types, and tests from their own working directories; do not flatten those configurations or suppress failures. The collection uses bundled published dependencies and Pi resource paths, never a combined extension factory. Root development loading and collection loading are alternatives, not simultaneous activations.
 
