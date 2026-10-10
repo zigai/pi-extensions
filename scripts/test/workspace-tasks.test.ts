@@ -96,9 +96,28 @@ test("makes built workspace executables available after a clean install", () => 
         path.join(library, "build.mjs"),
         `import { mkdirSync, writeFileSync } from "node:fs";\nmkdirSync("dist", { recursive: true });\nwriteFileSync("dist/cli.js", ${JSON.stringify(cli)});\n`,
     );
-    execFileSync("npm", ["install", "--package-lock-only", "--no-audit", "--no-fund"], {
-        cwd: root,
-    });
+    writeFileSync(
+        path.join(root, "package-lock.json"),
+        JSON.stringify({
+            lockfileVersion: 3,
+            requires: true,
+            packages: {
+                "": { workspaces: ["extensions/*", "packages/*"] },
+                "extensions/pi-branch": {
+                    name: "fixture-extension",
+                    version: "1.0.0",
+                    dependencies: { "fixture-cli": "1.0.0" },
+                },
+                "packages/cli-library": {
+                    name: "fixture-cli",
+                    version: "1.0.0",
+                    bin: { "fixture-command": "dist/cli.js" },
+                },
+                "node_modules/fixture-cli": { resolved: "packages/cli-library", link: true },
+                "node_modules/fixture-extension": { resolved: "extensions/pi-branch", link: true },
+            },
+        }),
+    );
     execFileSync("npm", ["ci", "--no-audit", "--no-fund"], { cwd: root });
 
     runWorkspaceTask(root, "build");

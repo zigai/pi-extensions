@@ -367,7 +367,7 @@ const result = {
     npmInit: npmInit.status === 0,
     npmInstallPacked: npmInstall.status === 0,
     piInstall: piInstall.status === 0,
-    piList: piList.status === 0 && piList.stdout.includes(args.packageName),
+    piList: piList.status === 0 && piList.stdout.replaceAll("\\", "/").includes(args.packageName),
     piRun: piRun.status === 0,
     finalMarkerObserved,
     customGoalObserved,

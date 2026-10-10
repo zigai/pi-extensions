@@ -781,7 +781,7 @@ export async function runTargetSuite(config, targetName, suiteName, leaseSession
   }
 
   const stdout = result.stdout;
-  const listOutput = section(stdout, "PI_LIST_STDOUT");
+  const listOutput = section(stdout, "PI_LIST_STDOUT").replaceAll("\\", "/");
   const nodeMajor = Number(
     marker(stdout, "PLATFORM_NODE_VERSION").replace(/^v/, "").split(".")[0] ?? 0,
   );

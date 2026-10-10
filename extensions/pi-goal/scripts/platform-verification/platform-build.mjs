@@ -222,7 +222,7 @@ if (
     piInstallExit,
     piList.status,
   ].some((status) => status !== 0) ||
-  !piList.stdout.includes(args.packageName)
+  !piList.stdout.replaceAll("\\", "/").includes(args.packageName)
 ) {
   console.log("PLATFORM_BUILD_FAILED");
   process.exit(1);
