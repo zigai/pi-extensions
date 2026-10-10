@@ -103,9 +103,11 @@ export function generatePreparedSettingsArtifacts(
     if (writeTextAtomically(targets.schemaPath, prepared.schema) !== "unchanged") {
         changedPaths.push(targets.schemaPath);
     }
+
     if (writeTextAtomically(targets.readmePath, prepared.readme) !== "unchanged") {
         changedPaths.push(targets.readmePath);
     }
+
     if (
         targets.prevalidationPath !== undefined &&
         prepared.prevalidation !== undefined &&
@@ -113,6 +115,7 @@ export function generatePreparedSettingsArtifacts(
     ) {
         changedPaths.push(targets.prevalidationPath);
     }
+
     return { changedPaths };
 }
 
@@ -137,12 +140,14 @@ export function checkPreparedSettingsArtifacts(
     const stalePaths: string[] = [];
     if (schemaCurrent !== prepared.schema) stalePaths.push(targets.schemaPath);
     if (readmeCurrent !== prepared.readme) stalePaths.push(targets.readmePath);
+
     if (
         targets.prevalidationPath !== undefined &&
         prevalidationCurrent !== prepared.prevalidation
     ) {
         stalePaths.push(targets.prevalidationPath);
     }
+
     return { current: stalePaths.length === 0, stalePaths };
 }
 

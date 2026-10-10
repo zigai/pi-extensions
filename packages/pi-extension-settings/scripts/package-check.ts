@@ -103,6 +103,7 @@ async function assertMissing(pathname: string, message: string): Promise<void> {
 
 const cacheDirectory = path.join(homedir(), ".cache", "pi-tweaks", "package-tests");
 await mkdir(cacheDirectory, { recursive: true });
+
 const temporaryRoot = await mkdtemp(path.join(cacheDirectory, "settings-"));
 
 try {

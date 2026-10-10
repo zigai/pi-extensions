@@ -285,6 +285,7 @@ async function saveSettingsLayer(
     return withFileMutationQueue(request.configPath, async () => {
         let release: (() => Promise<void>) | undefined;
         let lockCompromised = false;
+
         try {
             await mkdir(dirname(request.configPath), { recursive: true });
             release = await lockfile.lock(request.configPath, {

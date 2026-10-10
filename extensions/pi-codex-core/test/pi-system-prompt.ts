@@ -5,6 +5,7 @@ import type {
 
 type PiSystemPromptModule = {
     readonly buildSystemPrompt: (options: BuildSystemPromptOptions) => string;
+
     readonly normalizeBuildSystemPromptOptions: (
         options: BuildSystemPromptOptions,
     ) => NormalizedBuildSystemPromptOptions;

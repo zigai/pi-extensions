@@ -139,7 +139,6 @@ async function mutationQueueIdentity(path: string): Promise<string> {
         return await realpath(resolved);
     } catch (cause: unknown) {
         let code: string;
-
         try {
             code = Value.Parse(FileSystemErrorSchema, cause).code;
         } catch {

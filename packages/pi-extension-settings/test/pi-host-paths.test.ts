@@ -35,9 +35,11 @@ describe("Pi host paths", () => {
         expect(getPiAgentDir({ PI_CODING_AGENT_DIR: pathToFileURL(localPath).href })).toBe(
             localPath,
         );
+
         expect(
             getPiAgentDir({ PI_CODING_AGENT_DIR: "/mnt/c/Users/pi" }, "C:\\Users\\home", "win32"),
         ).toBe("C:\\Users\\pi");
+
         expect(
             getPiAgentDir({ PI_CODING_AGENT_DIR: "/cygdrive/d/pi" }, "C:\\Users\\home", "win32"),
         ).toBe("D:\\pi");

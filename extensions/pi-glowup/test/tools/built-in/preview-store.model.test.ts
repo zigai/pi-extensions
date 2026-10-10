@@ -40,6 +40,7 @@ function modelSet(entries: readonly Entry[], next: Entry, budget: Budget): reado
         const suffix = candidates.slice(index);
         return suffix.length <= budget.maxEntries && measuredBytes(suffix) <= budget.maxBytes;
     });
+
     return firstRetained === -1 ? [] : candidates.slice(firstRetained);
 }
 
@@ -76,6 +77,7 @@ describe("preview-store operation histories", () => {
                         expect(store.get(operation.key)).toBe(
                             model.find((entry) => entry.key === operation.key)?.value,
                         );
+
                         break;
                     }
                     case "clear": {

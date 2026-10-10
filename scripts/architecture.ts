@@ -222,6 +222,7 @@ function checkProjectArchitecture(workspaces: WorkspacePackages, program: Progra
             if (!entry.startsWith("./node_modules/") && !entry.startsWith("./dist/"))
                 files.add(entry);
         }
+
         for (const relative of files) {
             const file = path.resolve(workspace.directory, relative);
             for (const dependency of load(file).imports) {

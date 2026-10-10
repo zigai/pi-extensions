@@ -24,6 +24,7 @@ describe("semantic diff selection", () => {
             for (const index of selected) {
                 expect(index).toBeGreaterThanOrEqual(0);
                 expect(index).toBeLessThan(kinds.length);
+
                 if (kinds.length > budget) {
                     expect(kinds[index]).not.toBe("meta");
                 }

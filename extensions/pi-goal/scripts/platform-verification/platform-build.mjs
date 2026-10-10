@@ -132,6 +132,7 @@ if (existsSync(join(packDir, "fixture.stderr.txt")))
   process.stderr.write(readFileSync(join(packDir, "fixture.stderr.txt"), "utf8"));
 
 console.log(`PLATFORM_PI_CLI=${piCliPath}`);
+
 const piEnv = {
   PI_CODING_AGENT_DIR: resolve(sourceRoot, runRoot, "agent-config"),
   PI_OFFLINE: "1",

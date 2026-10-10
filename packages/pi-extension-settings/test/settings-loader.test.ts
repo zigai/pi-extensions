@@ -300,6 +300,7 @@ describe("loadSettings", () => {
         expect(loaded.diagnostics).toContainEqual(
             expect.objectContaining({ code: "config-decode-failed", scope: "global" }),
         );
+
         expect(JSON.stringify(loaded.diagnostics)).not.toContain("rejected-secret");
         expect(await readFile(paths.configPath, "utf8")).toContain("rejected-secret");
     });
@@ -392,6 +393,7 @@ describe("loadSettings", () => {
         expect(loaded.diagnostics).toContainEqual(
             expect.objectContaining({ code: "config-invalid", scope: "global" }),
         );
+
         expect(JSON.stringify(loaded.diagnostics)).not.toContain("kept");
         expect(await readFile(paths.configPath, "utf8")).toBe(content);
     });

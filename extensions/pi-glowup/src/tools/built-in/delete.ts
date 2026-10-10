@@ -59,12 +59,14 @@ export function createNativeDeleteFeature() {
         ) {
             return;
         }
+
         const captureGeneration = generation;
         const preview = await captureDeletedTextPreview(
             cwd,
             filePath,
             mutationSettings.limits.maxDeletePreimageBytes,
         );
+
         if (captureGeneration !== generation) {
             return;
         }

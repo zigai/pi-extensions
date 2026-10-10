@@ -122,6 +122,7 @@ function collectDeclaredPropertyNames(value: JsonValue, names: Set<string>): voi
 
         return;
     }
+
     if (!isJsonObject(value)) return;
 
     if (isJsonObject(value.properties)) {
@@ -147,7 +148,9 @@ function declaredPropertyNames(schema: TSchema): ReadonlySet<string> {
 
 function safeIssuePath(instancePath: string, names: ReadonlySet<string>): string {
     if (instancePath === "") return "/";
+
     const segments = instancePath.slice(1).split("/");
+
     return `/${segments
         .map((segment) => {
             const decoded = segment.replaceAll("~1", "/").replaceAll("~0", "~");
@@ -162,6 +165,7 @@ export function settingsValidationIssues(
     value: JsonValue,
 ): readonly SettingsValidationIssue[] {
     const names = declaredPropertyNames(schema);
+
     return [...Value.Errors(schema, value)].map((issue: TLocalizedValidationError) => ({
         path: safeIssuePath(issue.instancePath, names),
         message: validationMessage(issue.keyword),
@@ -176,16 +180,20 @@ export function unsupportedSettingsKeyPath(value: JsonValue, path = ""): string 
             const result = unsupportedSettingsKeyPath(child, `${path}/${index}`);
             if (result !== undefined) return result;
         }
+
         return undefined;
     }
+
     if (!isJsonObject(value)) return undefined;
 
     for (const [key, child] of Object.entries(value)) {
         const childPath = `${path}/${key.replaceAll("~", "~0").replaceAll("/", "~1")}`;
         if (UNSUPPORTED_SETTING_KEYS.has(key)) return childPath;
+
         const result = unsupportedSettingsKeyPath(child, childPath);
         if (result !== undefined) return result;
     }
+
     return undefined;
 }
 
@@ -249,7 +257,6 @@ export function parseSettingsLayer(
 
     const schemaReference =
         isJsonObject(parsed) && isJsonString(parsed.$schema) ? parsed.$schema : undefined;
-
     return {
         settings: settingsLayerFromFile(cloneJson(parsed)),
         schemaReference,

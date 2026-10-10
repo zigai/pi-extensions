@@ -40,9 +40,11 @@ function manifestError(path: string, reason: string): Error {
 function stringProperty(packagePath: string, object: JsonObject, key: string): string | undefined {
     const value = object[key];
     if (value === undefined) return undefined;
+
     if (!isJsonString(value) || value.trim() === "") {
         throw manifestError(packagePath, `${key} must be a non-empty string`);
     }
+
     return value;
 }
 
@@ -171,6 +173,7 @@ async function importDefinition(path: string): Promise<ExtensionSettingsDefiniti
                 cause,
             });
         }
+
         throw new Error(invalidDefaultMessage, { cause });
     }
 }
@@ -203,12 +206,14 @@ async function loadProject(packagePath: string): Promise<SettingsArtifactProject
 
     const outputs = [schemaPath, readmePath];
     if (prevalidationPath !== undefined) outputs.push(prevalidationPath);
+
     if (new Set(outputs).size !== outputs.length) {
         throw manifestError(
             packagePath,
             "schema, readme, and prevalidation paths must be distinct",
         );
     }
+
     if (outputs.includes(definitionPath) || outputs.includes(packagePath)) {
         throw manifestError(
             packagePath,

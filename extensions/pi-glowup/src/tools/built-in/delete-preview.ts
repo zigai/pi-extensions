@@ -45,6 +45,7 @@ export async function captureTextFilePreimage(
 
     try {
         let readablePath = resolvedPath;
+
         if (options.allowOutsideCwd !== true) {
             const canonicalCwd = await realpath(resolvedCwd);
             const canonicalPath = await realpath(resolvedPath);

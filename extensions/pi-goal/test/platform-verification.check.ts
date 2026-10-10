@@ -75,6 +75,7 @@ test("platform verification scripts have working syntax and help", () => {
   );
   assert.match(powershellScript, /platform-build\.mjs/);
   assert.doesNotMatch(powershellScript, /npm run verify/);
+
   const goalRuntimeScript = readFileSync(
     "scripts/platform-verification/goal-runtime-verification.mjs",
     "utf8",

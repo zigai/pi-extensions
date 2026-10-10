@@ -19,8 +19,10 @@ export function resolvedPackageRoot(name) {
     } catch {
       // The public entry may be nested below its package manifest.
     }
+
     const parent = dirname(directory);
     if (parent === directory) throw new Error(`Cannot locate resolved package ${name}`);
+
     directory = parent;
   }
 }
@@ -28,6 +30,7 @@ export function resolvedPackageRoot(name) {
 /** Pack the built local runtime closure, so verification never substitutes registry copies. */
 export function packRuntimeDependencies(packDirectory) {
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+
   return ["@zigai/pi-extension-settings", "@zigai/pi-glowup", "pi-typed-args"].map((name) => {
     const output = execFileSync(
       npm,

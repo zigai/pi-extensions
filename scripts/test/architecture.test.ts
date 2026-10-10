@@ -233,6 +233,7 @@ test("discovers mixed workspace roots and conditional exports without flattening
             pi: { extensions: ["./packages/b/src/index.ts", "./packages/a/src/index.ts"] },
         }),
     );
+
     write(
         root,
         "extensions/library/package.json",
@@ -247,9 +248,11 @@ test("discovers mixed workspace roots and conditional exports without flattening
         "@test/a",
         "@test/b",
     ]);
+
     expect(inventory.packages[0]?.manifest.exports).toEqual({
         ".": { types: "./dist/index.d.ts", import: ["./dist/index.js", null] },
     });
+
     expect(checkArchitecture(inventory)).toEqual([]);
 });
 
@@ -267,6 +270,7 @@ test("collection is an alternative resource inventory, not another root activati
             }),
         );
     }
+
     write(
         root,
         "packages/collection/package.json",
@@ -289,6 +293,7 @@ test("collection is an alternative resource inventory, not another root activati
         "@test/b",
         "@test/a",
     ]);
+
     write(
         root,
         "packages/collection/package.json",
@@ -298,5 +303,6 @@ test("collection is an alternative resource inventory, not another root activati
             piCollection: ["@test/a", "@test/b"],
         }),
     );
+
     expect(() => loadWorkspacePackages(root)).toThrow("ordered root extension inventory");
 });

@@ -180,6 +180,7 @@ export class PiPtyProcess {
 
             if (this.exitState !== undefined) {
                 await this.parseQueue.catch(() => {});
+
                 throw new Error(
                     `Pi exited before the requested screen appeared (${this.exitState.exitCode})`,
                 );
@@ -208,6 +209,7 @@ export class PiPtyProcess {
         if (this.exitState !== undefined) {
             await this.parseQueue.catch(() => {});
             this.terminal.dispose();
+
             return this.exitState;
         }
 
@@ -217,10 +219,12 @@ export class PiPtyProcess {
         if (graceful !== undefined) {
             await this.parseQueue.catch(() => {});
             this.terminal.dispose();
+
             return graceful;
         }
 
         this.process.kill();
+
         const terminated = await Promise.race([
             this.exitPromise,
             delay(2_000).then(() => undefined),
@@ -228,6 +232,7 @@ export class PiPtyProcess {
         if (terminated !== undefined) {
             await this.parseQueue.catch(() => {});
             this.terminal.dispose();
+
             return terminated;
         }
 

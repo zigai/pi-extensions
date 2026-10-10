@@ -152,6 +152,7 @@ function configSchemaErrorSummary(input: JsonValue): string {
 
     return messages.join("; ") || "invalid settings shape";
 }
+
 /** Create default in-memory configuration without reading or modifying any files. */
 export function createDefaultGlowupConfig(reportWarning?: ConfigWarningReporter): GlowupConfig {
     return normalizeGlowupConfig(

@@ -360,7 +360,6 @@ async function pickSessionName(options: PickSessionNameOptions): Promise<PickSes
         streamOptions.signal = operationSignal;
 
         const response = await completePickerModel(ctx, model, prompt, streamOptions);
-
         if (response.stopReason === "aborted") {
             if (timeoutSignal.aborted) {
                 return { type: "timeout", diagnostic: timeoutDiagnostic(settings.timeoutMs) };
@@ -397,9 +396,11 @@ async function pickSessionName(options: PickSessionNameOptions): Promise<PickSes
         return { type: "picked", name };
     } catch (cause: unknown) {
         console.error("PICKER CAUGHT ERROR:", cause);
+
         if (timeoutSignal.aborted) {
             return { type: "timeout", diagnostic: timeoutDiagnostic(settings.timeoutMs) };
         }
+
         if (signal.aborted) {
             return { type: "cancelled" };
         }
@@ -649,6 +650,7 @@ export default function extension(pi: ExtensionAPI): void {
 
             if ("diagnostic" in outcome && !pickerDiagnosticShown) {
                 pickerDiagnosticShown = true;
+
                 if (ctx.hasUI) {
                     ctx.ui.notify(outcome.diagnostic, "warning");
                 } else {

@@ -52,8 +52,10 @@ function resolvedPackageRoot(name: string): string {
             );
             if (manifest.name === name) return directory;
         } catch {}
+
         const parent = dirname(directory);
         if (parent === directory) throw new Error(`Cannot locate resolved package ${name}`);
+
         directory = parent;
     }
 }
@@ -100,6 +102,7 @@ describe("package manifest", () => {
         (section) => {
             const manifest = readPackageJson();
             const workspaceKey = "extensions/pi-glowup";
+
             const lock = Value.Parse(
                 Type.Object({ packages: Type.Record(Type.String(), lockRootSchema) }),
                 JSON.parse(
@@ -151,6 +154,7 @@ describe("package manifest", () => {
             copyFile(join(packageRoot, "README.md"), join(buildRoot, "README.md")),
             cp(join(packageRoot, "themes"), join(buildRoot, "themes"), { recursive: true }),
         ]);
+
         for (const dependency of [
             "esbuild",
             "typescript",
@@ -167,6 +171,7 @@ describe("package manifest", () => {
             await mkdir(dirname(destination), { recursive: true });
             await symlink(resolvedPackageRoot(dependency), destination, "dir");
         }
+
         execFileSync(process.execPath, [join(buildRoot, "scripts", "build.mjs")], {
             cwd: buildRoot,
             stdio: "pipe",
@@ -191,11 +196,13 @@ describe("package manifest", () => {
             installedRoot,
             "--strip-components=1",
         ]);
+
         for (const dependency of ["@earendil-works/pi-coding-agent", "typebox"]) {
             const destination = join(consumerRoot, "node_modules", dependency);
             await mkdir(dirname(destination), { recursive: true });
             await symlink(resolvedPackageRoot(dependency), destination, "dir");
         }
+
         await writeFile(join(consumerRoot, "package.json"), JSON.stringify({ type: "module" }));
         await writeFile(
             join(consumerRoot, "tsconfig.json"),

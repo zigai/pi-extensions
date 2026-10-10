@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 export async function checkProtocolPackage(packageRoot) {
   const cacheDirectory = path.join(homedir(), ".cache", "pi-tweaks", "package-tests");
   await mkdir(cacheDirectory, { recursive: true });
+
   const temporaryRoot = await mkdtemp(path.join(cacheDirectory, "glowup-protocol-"));
 
   try {

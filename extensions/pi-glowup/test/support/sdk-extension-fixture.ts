@@ -25,6 +25,7 @@ export class ExtensionRegistrationFixture implements Pick<ExtensionAPI, "on"> {
 
     on(...registration: Registration): () => void {
         this.registrations.push(registration);
+
         return () => {
             const index = this.registrations.indexOf(registration);
             if (index >= 0) this.registrations.splice(index, 1);

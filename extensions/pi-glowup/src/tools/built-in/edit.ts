@@ -44,6 +44,7 @@ export function createNativeEditFeature() {
     const editPreviews = new EditPreviewStore(300);
     const nativeEditSnapshots = new Map<string, EditSnapshotState>();
     const nativeEditPierrePayloads = new Map<string, PierreDiffPayload>();
+
     async function captureNativeEditSnapshot(
         toolCallId: string,
         cwd: string,
@@ -64,6 +65,7 @@ export function createNativeEditFeature() {
             filePath,
             diffRenderLimits(mutationSettings),
         );
+
         if (captureGeneration !== generation) {
             return;
         }
@@ -89,6 +91,7 @@ export function createNativeEditFeature() {
             await snapshot.finish(),
             diffRenderLimits(mutationSettings),
         );
+
         if (finishGeneration !== generation) {
             return undefined;
         }
@@ -97,6 +100,7 @@ export function createNativeEditFeature() {
             nativeEditPierrePayloads.set(toolCallId, payload);
             trimOldestMapEntries(nativeEditPierrePayloads, 300);
         }
+
         return payload;
     }
 

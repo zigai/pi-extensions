@@ -83,6 +83,7 @@ function substituteWidthPlaceholders(
     }
 
     const widthStr = String(targetWidth);
+
     return args.map((arg) => arg.replace(/\{width\}|\{line_length\}|\{cols\}/gi, widthStr));
 }
 

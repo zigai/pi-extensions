@@ -306,6 +306,7 @@ async function runSettingsTransaction<Schema extends TObject>(
                 // The global resolved value is already invalid without the project layer.
             }
         }
+
         return invalidExisting([
             {
                 code: "config-decode-failed",

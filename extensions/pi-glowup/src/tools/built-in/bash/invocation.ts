@@ -61,6 +61,7 @@ function decodeShellWord(word: string): string {
                 else if (char === "t") decoded += "\t";
                 else if (char === "\\" || char === "'" || char === '"') decoded += char;
                 else decoded += `\\${char}`;
+
                 escaped = false;
                 continue;
             }
@@ -473,10 +474,12 @@ export function tokenizeShellLexemes(command: string): ShellLexeme[] {
                     escaped = false;
                     continue;
                 }
+
                 if (char === "\\") {
                     escaped = true;
                     continue;
                 }
+
                 if (char === "'") quote = undefined;
                 continue;
             }
@@ -555,6 +558,7 @@ export function tokenizeShellLexemes(command: string): ShellLexeme[] {
                 start: index,
                 end: index + 1,
             });
+
             continue;
         }
 
@@ -577,6 +581,7 @@ function hasDynamicShellExpansion(command: string): boolean {
     let escaped = false;
     for (let index = 0; index < command.length; index += 1) {
         const char = command[index] ?? "";
+
         if (escaped) {
             escaped = false;
             continue;

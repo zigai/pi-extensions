@@ -74,6 +74,7 @@ function makeSettingsObjectPartial(schema: JsonObject): JsonObject {
                     isJsonObject(child) ? makeMergeablePropertyPartial(child) : cloneJson(child),
                 ]),
             );
+
             continue;
         }
 
@@ -97,6 +98,7 @@ function stripTypeBoxMetadataFromSchema(schema: JsonObject): JsonObject {
                         : cloneJson(nested),
                 ]),
             );
+
             continue;
         }
 
@@ -104,6 +106,7 @@ function stripTypeBoxMetadataFromSchema(schema: JsonObject): JsonObject {
             sanitized[key] = child.map((nested) =>
                 isJsonObject(nested) ? stripTypeBoxMetadataFromSchema(nested) : cloneJson(nested),
             );
+
             continue;
         }
 

@@ -215,8 +215,10 @@ if (await loadPiInternalModule("modes/interactive/theme/theme.js", options) !== 
 
         writeFileSync(path.join(agentDirectory, "auth.json"), "{}\n");
         writeFileSync(path.join(agentDirectory, "models-store.json"), "{}\n");
+
         const consumerPackages = [];
         if (extensionEntries.length > 0) consumerPackages.push(installedConsumer);
+
         writeFileSync(
             path.join(agentDirectory, "settings.json"),
             `${JSON.stringify(

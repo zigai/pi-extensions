@@ -74,6 +74,7 @@ try {
     if (manifest.bundleDependencies !== undefined || manifest.bundledDependencies !== undefined) {
         fail("runtime libraries must be independently installed, not bundled");
     }
+
     for (const file of files) {
         if (file.startsWith("package/node_modules/")) fail(`bundled dependency: ${file}`);
     }
