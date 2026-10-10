@@ -34,6 +34,11 @@ jobs:
           cache: npm
           registry-url: https://registry.npmjs.org
 
+      - name: Setup uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+        with:
+          enable-cache: false
+
       - name: Install dependencies
         run: npm ci
 
