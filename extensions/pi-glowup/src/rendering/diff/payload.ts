@@ -10,7 +10,7 @@ import {
     type Hunk,
 } from "@pierre/diffs";
 import { diffContentDigest, diffMetadataDigest } from "./identity.ts";
-import { diffTextStats as countDiffTextStats } from "./statistics.ts";
+import { diffTextStats as countDiffTextStats, type DiffStats } from "./statistics.ts";
 import type { PierreDiffPayload, PierreDiffStats, PierreDiffSummary } from "./types.ts";
 import { syntaxLanguageFromFile } from "../syntax/language.ts";
 import { countContentLines } from "../../text-boundaries.ts";
@@ -135,6 +135,8 @@ export type DiffSnapshot = {
     readonly oldLineCount?: number;
     readonly newLineCount?: number;
     readonly canBuildPierreDiff: boolean;
+    readonly patch?: string;
+    readonly changeStats?: DiffStats;
     readonly summaryReason?: PierreDiffSummary["reason"];
 };
 
@@ -143,7 +145,11 @@ export function buildPierreDiffPayload(
     snapshot: DiffSnapshot,
     limits: DiffRenderLimits = DEFAULT_DIFF_RENDER_LIMITS,
 ): PierreDiffPayload | undefined {
-    if (snapshot.oldContent === snapshot.newContent && snapshot.summaryReason === undefined) {
+    if (
+        snapshot.patch === undefined &&
+        snapshot.oldContent === snapshot.newContent &&
+        snapshot.summaryReason === undefined
+    ) {
         return undefined;
     }
 
@@ -359,6 +365,24 @@ export function buildPierreSummaryPayload(
 }
 
 function buildDiffMetadata(snapshot: DiffSnapshot): FileDiffMetadata {
+    if (snapshot.patch !== undefined) {
+        const patchKey = `patch:${diffContentDigest(snapshot.patch)}`;
+        const files = parsePatchFiles(snapshot.patch, patchKey, true).flatMap(
+            (parsedPatch) => parsedPatch.files,
+        );
+        const metadata = files[0];
+        if (files.length !== 1 || metadata === undefined) {
+            throw new Error("Native edit patch must describe exactly one file");
+        }
+
+        return normalizeDiffMetadataLanguage(
+            metadata,
+            snapshot.path,
+            snapshot.newContent,
+            snapshot.oldContent,
+        );
+    }
+
     const oldKey = `old:${diffContentDigest(snapshot.oldContent)}`;
     const newKey = `new:${diffContentDigest(snapshot.newContent)}`;
     const oldFile: FileContents = {
@@ -400,9 +424,10 @@ function normalizeDiffMetadataLanguage(
 function estimatedDiffStats(snapshot: DiffSnapshot): PierreDiffStats {
     const oldLineCount = snapshot.oldLineCount ?? countContentLines(snapshot.oldContent);
     const newLineCount = snapshot.newLineCount ?? countContentLines(snapshot.newContent);
+
     return {
-        added: newLineCount,
-        removed: oldLineCount,
+        added: snapshot.changeStats?.added ?? newLineCount,
+        removed: snapshot.changeStats?.removed ?? oldLineCount,
         lineCount: oldLineCount + newLineCount,
         sizeBytes: snapshot.oldSizeBytes + snapshot.newSizeBytes,
     };

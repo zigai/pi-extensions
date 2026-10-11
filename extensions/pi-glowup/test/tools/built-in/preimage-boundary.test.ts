@@ -170,6 +170,10 @@ describe("native edit session preimages", () => {
             "old-session",
             false,
             DEFAULT_MUTATION_SETTINGS,
+            {
+                diff: "-1 inside\n+1 AFTER\n",
+                patch: "--- a/inside.txt\n+++ b/inside.txt\n@@ -1 +1 @@\n-inside\n+AFTER\n",
+            },
         );
         feature.clear();
         await expect(finishing).resolves.toBeUndefined();
@@ -186,7 +190,15 @@ describe("native edit session preimages", () => {
         );
         await writeFile(join(project, "inside.txt"), "AFTER NEW SESSION\n");
         expect(
-            await feature.finishNativeEditSnapshot("new-session", false, DEFAULT_MUTATION_SETTINGS),
+            await feature.finishNativeEditSnapshot(
+                "new-session",
+                false,
+                DEFAULT_MUTATION_SETTINGS,
+                {
+                    diff: "-1 AFTER\n+1 AFTER NEW SESSION\n",
+                    patch: "--- a/inside.txt\n+++ b/inside.txt\n@@ -1 +1 @@\n-AFTER\n+AFTER NEW SESSION\n",
+                },
+            ),
         ).toBeDefined();
 
         expect(feature.stats().nativeEditPierrePayloads).toBe(1);

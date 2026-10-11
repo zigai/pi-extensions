@@ -4,7 +4,13 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { initTheme, ToolExecutionComponent, SessionManager } from "@earendil-works/pi-coding-agent";
+import {
+    createEditTool,
+    initTheme,
+    ToolExecutionComponent,
+    SessionManager,
+    type ToolResultEvent,
+} from "@earendil-works/pi-coding-agent";
 import Type, { type Static } from "typebox";
 import { Value } from "typebox/value";
 import { TuiMainScreen } from "@earendil-works/pi-tui";
@@ -29,11 +35,7 @@ type ToolCallInput = {
     readonly toolCallId: string;
     readonly input: Record<string, string | readonly { oldText: string; newText: string }[]>;
 };
-type ToolResultInput = ToolCallInput & {
-    readonly content: { type: "text"; text: string }[];
-    readonly details: Record<string, string>;
-    readonly isError: boolean;
-};
+type ToolResultInput = ToolCallInput & Pick<ToolResultEvent, "content" | "details" | "isError">;
 
 function assistantMessage(source: AssistantSourceMessage): AssistantMessage {
     return {
@@ -436,6 +438,7 @@ describe("extension lifecycle", () => {
                 content: [{ type: "text", text: "Updated example.ts" }],
                 details: {
                     diff: "example.ts\n-1 export const value = 1;\n+1 export const value = 2;\n",
+                    patch: "--- a/example.ts\n+++ b/example.ts\n@@ -1 +1 @@\n-export const value = 1;\n+export const value = 2;\n",
                 },
                 isError: false,
             },
@@ -456,6 +459,69 @@ describe("extension lifecycle", () => {
         });
 
         await pi.shutdownSession();
+    });
+
+    it("persists each native edit independently when both preflights precede execution", async () => {
+        const root = await mkdtemp(join(import.meta.dirname, ".parallel-edit-"));
+        onTestFinished(async () => rm(root, { recursive: true, force: true }));
+        const project = join(root, "project");
+        await mkdir(project);
+        process.env[AGENT_DIR_ENV] = join(root, "agent");
+        await writeFile(join(project, "sample.txt"), "item0=0\nitem1=0\n");
+        const pi = new FakeExtensionApi();
+        installGlowup(pi);
+        onTestFinished(async () => pi.shutdownSession());
+        await pi.startSession(project, false);
+        const first = {
+            toolName: "edit",
+            toolCallId: "first-edit",
+            input: { path: "sample.txt", edits: [{ oldText: "item0=0", newText: "item0=1" }] },
+        };
+        const second = {
+            toolName: "edit",
+            toolCallId: "second-edit",
+            input: { path: "sample.txt", edits: [{ oldText: "item1=0", newText: "item1=1" }] },
+        };
+        await Promise.all(pi.runToolCall(first, project));
+        await Promise.all(pi.runToolCall(second, project));
+
+        const tool = createEditTool(project);
+
+        const operations = [
+            {
+                call: first,
+                deletionLines: ["item0=0\n", "item1=0\n"],
+                additionLines: ["item0=1\n", "item1=0\n"],
+            },
+            {
+                call: second,
+                deletionLines: ["item0=1\n", "item1=0\n"],
+                additionLines: ["item0=1\n", "item1=1\n"],
+            },
+        ];
+        for (const { call, deletionLines, additionLines } of operations) {
+            const result = await tool.execute(call.toolCallId, call.input);
+            const persisted = await pi.runToolResult(
+                {
+                    ...call,
+                    ...result,
+                    isError: false,
+                },
+                project,
+            );
+            expect(persisted).toHaveLength(1);
+            expect(persisted[0]).toMatchObject({
+                details: {
+                    pierreDiff: {
+                        kind: "renderable",
+                        stats: { added: 1, removed: 1 },
+                        metadata: { deletionLines, additionLines },
+                    },
+                },
+            });
+        }
+
+        expect(readFileSync(join(project, "sample.txt"), "utf8")).toBe("item0=1\nitem1=1\n");
     });
 
     it("keeps syntax ready across reload teardown", async () => {

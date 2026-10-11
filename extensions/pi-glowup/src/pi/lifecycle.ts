@@ -410,6 +410,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
                 event.toolCallId,
                 event.isError,
                 config.mutations,
+                diffDetailsParser.parse(event.details),
             );
         }
 

@@ -14,7 +14,10 @@ export function stringField(value: JsonValue | undefined, key: string): string |
     return Value.Check(Type.String(), field) ? field : undefined;
 }
 
-const diffDetailsSchema = Type.Object({ diff: Type.String() });
+const diffDetailsSchema = Type.Object({
+    diff: Type.String(),
+    patch: Type.Optional(Type.String()),
+});
 
 /** Other host metadata is opaque and does not affect the diff fallback. */
 export const diffDetailsParser = {

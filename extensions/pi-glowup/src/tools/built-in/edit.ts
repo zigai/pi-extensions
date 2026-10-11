@@ -17,6 +17,7 @@ import {
     renderPierreDiff,
 } from "../../rendering/diff/pierre-renderer.ts";
 import { type PierreDiffPayload } from "../../rendering/diff/types.ts";
+import { countDiffStats } from "../../rendering/diff/statistics.ts";
 import {
     isActiveToolCall,
     toolStatusLabel,
@@ -78,17 +79,22 @@ export function createNativeEditFeature() {
         toolCallId: string,
         isError: boolean,
         mutationSettings: MutationSettings,
+        details: ReturnType<typeof diffDetailsParser.parse>,
     ): Promise<PierreDiffPayload | undefined> {
         const snapshot = nativeEditSnapshots.get(toolCallId);
         nativeEditSnapshots.delete(toolCallId);
 
-        if (snapshot === undefined || isError) {
+        if (snapshot === undefined || isError || details?.patch === undefined) {
             return undefined;
         }
 
         const finishGeneration = generation;
         const payload = buildPierreDiffPayload(
-            await snapshot.finish(),
+            {
+                ...(await snapshot.finish()),
+                patch: details.patch,
+                changeStats: countDiffStats(details.diff),
+            },
             diffRenderLimits(mutationSettings),
         );
 
