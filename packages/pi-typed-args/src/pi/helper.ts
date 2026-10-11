@@ -377,7 +377,7 @@ function providedHelperToken(
     valueSeparator: string,
 ): string {
     if (isPositionalArgument(definition)) {
-        return `${name}${valueSeparator}${formatHelperValue(value)}`;
+        return `${name}${valueSeparator}${formatArgumentHelperValue(definition, value)}`;
     }
 
     const flag = formatArgumentFlagName(name, definition);
@@ -440,7 +440,7 @@ function defaultHelperToken(
     valueSeparator: string,
 ): string {
     if (isPositionalArgument(definition)) {
-        return `${name}${valueSeparator}${formatHelperValue(value)}`;
+        return `${name}${valueSeparator}${formatArgumentHelperValue(definition, value)}`;
     }
 
     const flag = formatArgumentFlagName(name, definition);

@@ -478,6 +478,44 @@ describe("global presentation config", () => {
         );
     });
 
+    it.each([
+        {
+            source: "provided",
+            rawArgs: "a",
+            args: {
+                token: { type: "string", position: 0, sensitive: true },
+            } satisfies FlatArgumentDefinitions,
+        },
+        {
+            source: "default",
+            rawArgs: "",
+            args: {
+                token: { type: "string", position: 0, sensitive: true, default: "a" },
+            } satisfies FlatArgumentDefinitions,
+        },
+    ])(
+        "redacts $source sensitive positional values in compact inline help",
+        ({ rawArgs, args }) => {
+            const command: RegisteredTypedCommand = {
+                name: "secure",
+                description: "Sensitive argument",
+                args,
+                formSymbols,
+            };
+
+            const lines = renderInlineHelper(
+                { command, rawArgs, trailingBody: "" },
+                200,
+                identityTheme,
+            );
+
+            assert.deepEqual(
+                lines.map((line) => line.trim()),
+                ["[token=<redacted>]"],
+            );
+        },
+    );
+
     it("hides inline help for commands that opt out", () => {
         const command: RegisteredTypedCommand = {
             ...helperCommand(),
