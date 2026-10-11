@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,6 +7,13 @@ import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 
 const projectRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
+const libraryManifest: unknown = JSON.parse(
+    readFileSync(new URL("../../../packages/pi-typed-args/package.json", import.meta.url), "utf8"),
+);
+const libraryVersion = Value.Parse(
+    Type.Object({ version: Type.String() }),
+    libraryManifest,
+).version;
 const packDirectory = mkdtempSync(path.join(tmpdir(), "pi-branch-pack-"));
 const NpmPackResultSchema = Type.Object({ filename: Type.String() });
 const NpmPackOutputSchema = Type.Union([
@@ -16,7 +23,7 @@ const NpmPackOutputSchema = Type.Union([
 
 const PackageManifestSchema = Type.Object({
     name: Type.Literal("@zigai/pi-branch"),
-    dependencies: Type.Object({ "pi-typed-args": Type.Literal("0.1.1") }),
+    dependencies: Type.Object({ "pi-typed-args": Type.Literal(libraryVersion) }),
     exports: Type.Object({ ".": Type.Literal("./index.ts") }),
     bundledDependencies: Type.Optional(Type.Array(Type.String())),
     bundleDependencies: Type.Optional(Type.Array(Type.String())),

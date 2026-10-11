@@ -4,6 +4,7 @@ import { test } from "vitest";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 
+const PackageVersionSchema = Type.Object({ version: Type.String() });
 const StringDictionarySchema = Type.Record(Type.String(), Type.String());
 const PackageManifestSchema = Type.Object(
   {
@@ -29,11 +30,25 @@ test("package keeps the bundled creation template without exposing /create-goal"
     JSON.parse(readFileSync("package.json", "utf8")),
   );
 
+  const typedArgs = Value.Parse(
+    PackageVersionSchema,
+    JSON.parse(
+      readFileSync(
+        new URL("../../../packages/pi-typed-args/package.json", import.meta.url),
+        "utf8",
+      ),
+    ),
+  );
+  const glowup = Value.Parse(
+    PackageVersionSchema,
+    JSON.parse(readFileSync(new URL("../../pi-glowup/package.json", import.meta.url), "utf8")),
+  );
+
   assert.ok(packageJson.files?.includes("prompts"));
   assert.deepEqual(packageJson.pi?.extensions, ["./src/index.ts"]);
   assert.equal(packageJson.pi?.prompts, undefined);
-  assert.equal(packageJson.dependencies?.["pi-typed-args"], "0.1.1");
-  assert.equal(packageJson.dependencies?.["@zigai/pi-glowup"], "1.0.0");
+  assert.equal(packageJson.dependencies?.["pi-typed-args"], typedArgs.version);
+  assert.equal(packageJson.dependencies?.["@zigai/pi-glowup"], glowup.version);
   assert.equal(packageJson.bundledDependencies, undefined);
   assert.equal(packageJson.bundleDependencies, undefined);
   assert.equal(packageJson.scripts?.test, "vitest run");
