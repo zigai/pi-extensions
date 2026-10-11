@@ -1,6 +1,6 @@
 {
   "name": "@zigai/pi-mention-project",
-  "version": "0.11.4",
+  "version": "0.12.0",
   "description": "Pi package that adds fuzzy project directory mentions.",
   "keywords": [
     "mention",
@@ -35,8 +35,8 @@
     "access": "public"
   },
   "dependencies": {
-    "@zigai/pi-extension-settings": "0.5.3",
-    "@zigai/pi-mention-anything": "0.1.4"
+    "@zigai/pi-extension-settings": "0.6.0",
+    "@zigai/pi-mention-anything": "0.2.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "^1.0.0",

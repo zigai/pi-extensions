@@ -50,7 +50,7 @@
     "verify": "npm run check"
   },
   "dependencies": {
-    "pi-typed-args": "0.1.1"
+    "pi-typed-args": "0.2.0"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "1.0.0",

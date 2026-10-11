@@ -1,6 +1,6 @@
 {
   "name": "@zigai/pi-extension-internals",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "description": "Shared composition protocols and guarded Pi-internal loading for Pi extensions.",
   "keywords": [
     "pi",

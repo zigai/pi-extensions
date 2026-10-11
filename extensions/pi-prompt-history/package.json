@@ -1,6 +1,6 @@
 {
   "name": "@zigai/pi-prompt-history",
-  "version": "0.1.16",
+  "version": "0.2.0",
   "description": "Pi package that restores current-session prompt history in the prompt editor.",
   "keywords": [
     "history",
@@ -34,7 +34,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@zigai/pi-extension-internals": "0.1.6"
+    "@zigai/pi-extension-internals": "0.2.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "^1.0.0",

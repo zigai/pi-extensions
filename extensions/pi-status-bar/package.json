@@ -1,6 +1,6 @@
 {
   "name": "@zigai/pi-status-bar",
-  "version": "0.8.4",
+  "version": "0.9.0",
   "description": "Pi package that provides a programmable active and idle status bar with timing stats.",
   "keywords": [
     "loader",
@@ -38,8 +38,8 @@
     "access": "public"
   },
   "dependencies": {
-    "@zigai/pi-extension-internals": "0.1.6",
-    "@zigai/pi-extension-settings": "0.5.3"
+    "@zigai/pi-extension-internals": "0.2.0",
+    "@zigai/pi-extension-settings": "0.6.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "^1.0.0",

@@ -1,6 +1,6 @@
 {
   "name": "@zigai/pi-plain-user-messages",
-  "version": "0.1.12",
+  "version": "0.2.0",
   "description": "Pi package that renders user messages as plain text instead of Markdown.",
   "keywords": [
     "pi",
@@ -34,7 +34,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@zigai/pi-extension-internals": "0.1.6"
+    "@zigai/pi-extension-internals": "0.2.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "^1.0.0",

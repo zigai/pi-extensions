@@ -1,6 +1,6 @@
 {
   "name": "@zigai/pi-response-renderer",
-  "version": "0.1.23",
+  "version": "0.2.0",
   "description": "Pi package that makes assistant responses more compact.",
   "keywords": [
     "pi",
@@ -35,7 +35,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@zigai/pi-extension-internals": "0.1.6"
+    "@zigai/pi-extension-internals": "0.2.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "^1.0.0",
