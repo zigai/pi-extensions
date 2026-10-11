@@ -426,6 +426,47 @@ describe("skill usage tracking", () => {
         ]);
     });
 
+    it("records escaped skill locations even when the displayed name differs", async () => {
+        const root = await mkdtemp(join(tmpdir(), "pi-enhanced-skills-quoted-"));
+        const skillDir = join(root, 'a"b');
+        const skillPath = join(skillDir, "SKILL.md");
+        try {
+            await mkdir(skillDir);
+            await writeFile(
+                skillPath,
+                "---\nname: demo\ndescription: Example skill\n---\nUse carefully.\n",
+            );
+            const { records, store } = makeRecordingSkillUsageStore();
+            const { pi, handlers } = createExtensionHarness([makeSkillCommand("demo", skillPath)]);
+            extension(pi, { skillUsageStore: store });
+
+            await handlers.context(
+                {
+                    type: "context",
+                    messages: [
+                        {
+                            role: "user",
+                            content: `<skill name="renamed" location="${join(root, "a&quot;b", "SKILL.md")}">\nUse carefully.\n</skill>`,
+                            timestamp: 1,
+                        },
+                    ],
+                },
+                makeContext(() => undefined),
+            );
+
+            expect(records).toEqual([
+                expect.objectContaining({
+                    event: "mention_expansion",
+                    skillName: "demo",
+                    filePath: skillPath,
+                    mention: { source: "context" },
+                }),
+            ]);
+        } finally {
+            await rm(root, { recursive: true, force: true });
+        }
+    });
+
     it("persists skill mentions from provider payload when context hook order misses them", async () => {
         const skillPath = await writeSkill({
             frontmatter: "name: review\ndescription: Review skill",

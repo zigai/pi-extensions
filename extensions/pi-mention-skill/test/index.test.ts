@@ -228,6 +228,46 @@ test("mention skill expands provider context through the shared input observer",
     }
 });
 
+test("skill mentions escape quotes in discovered file locations", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-mention-skill-quoted-"));
+    const baseDir = path.join(cwd, 'a"b');
+    const skillPath = path.join(baseDir, "SKILL.md");
+    try {
+        await mkdir(baseDir);
+        await writeFile(skillPath, "Use carefully.\n");
+        const handlers = new Map<string, unknown>();
+        mentionSkillExtension({
+            on(event, handler) {
+                handlers.set(event, handler);
+
+                return () => {};
+            },
+            getCommands() {
+                return [skillCommand("demo", skillPath)];
+            },
+        });
+        await startSharedRuntime(handlers, cwd);
+        const messages: ContextEvent["messages"] = [
+            { role: "user", content: "Use $demo", timestamp: 1 },
+        ];
+
+        const result = await getContextHandler(handlers)(
+            { type: "context", messages },
+            context(cwd),
+        );
+
+        assert.deepEqual(result?.messages, [
+            {
+                role: "user",
+                content: `Use <skill name="demo" location="${path.join(cwd, "a&quot;b", "SKILL.md")}">\nReferences are relative to ${baseDir}.\n\nUse carefully.\n</skill>`,
+                timestamp: 1,
+            },
+        ]);
+    } finally {
+        await rm(cwd, { recursive: true, force: true });
+    }
+});
+
 test("registered skill mentions expand custom triggers without mutating images or re-expanding content", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "pi-mention-skill-context-"));
     const skillPath = path.join(cwd, "python.md");

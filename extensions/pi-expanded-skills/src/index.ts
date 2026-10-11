@@ -592,15 +592,24 @@ function isUnknownRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null;
 }
 
+function decodeSkillAttribute(value: string): string {
+    return value
+        .replaceAll("&quot;", '"')
+        .replaceAll("&apos;", "'")
+        .replaceAll("&lt;", "<")
+        .replaceAll("&gt;", ">")
+        .replaceAll("&amp;", "&");
+}
+
 function extractMentionSkillBlocks(text: string): MentionSkillBlock[] {
     SKILL_BLOCK_OPEN_PATTERN.lastIndex = 0;
     const blocks: MentionSkillBlock[] = [];
     for (const match of text.matchAll(SKILL_BLOCK_OPEN_PATTERN)) {
-        const names = (match[1] ?? "")
+        const names = decodeSkillAttribute(match[1] ?? "")
             .split(",")
             .map((name) => name.trim())
             .filter((name) => name.length > 0);
-        const location = match[2] ?? "";
+        const location = decodeSkillAttribute(match[2] ?? "");
         if (names.length > 0 && location.length > 0) {
             blocks.push({ names, location });
         }

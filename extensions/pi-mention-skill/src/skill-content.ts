@@ -55,6 +55,14 @@ export function createCachedSkillExpansionLoader(): SkillExpansionLoader {
     };
 }
 
+function escapeSkillAttribute(value: string): string {
+    return value
+        .replaceAll("&", "&amp;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;");
+}
+
 export function formatSkillBlock(expansion: SkillExpansion): string {
-    return `<skill name="${expansion.name}" location="${expansion.location}">\nReferences are relative to ${expansion.baseDir}.\n\n${expansion.body}\n</skill>`;
+    return `<skill name="${escapeSkillAttribute(expansion.name)}" location="${escapeSkillAttribute(expansion.location)}">\nReferences are relative to ${expansion.baseDir}.\n\n${expansion.body}\n</skill>`;
 }
