@@ -461,10 +461,24 @@ function parseFileDiffMetadata(value: RestoredMetadata): FileDiffMetadata | unde
     const splitLineCount = Math.floor(value.splitLineCount);
     const unifiedLineCount = Math.floor(value.unifiedLineCount);
     const hunks: Hunk[] = [];
+    let additionEnd = 0;
+    let deletionEnd = 0;
     for (const rawHunk of value.hunks) {
         const hunk = parseHunk(rawHunk, deletionLines.length, additionLines.length);
         if (hunk === undefined) {
             return undefined;
+        }
+
+        if (hunk.additionCount > 0) {
+            if (hunk.additionLineIndex < additionEnd) return undefined;
+
+            additionEnd = hunk.additionLineIndex + hunk.additionCount;
+        }
+
+        if (hunk.deletionCount > 0) {
+            if (hunk.deletionLineIndex < deletionEnd) return undefined;
+
+            deletionEnd = hunk.deletionLineIndex + hunk.deletionCount;
         }
 
         hunks.push(hunk);

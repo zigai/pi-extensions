@@ -195,6 +195,33 @@ describe("Pierre diff rendering", () => {
         ).toContain("generated diff metadata was invalid");
     });
 
+    it.each([
+        { oldContent: "item0=0\n", newContent: "item0=1\n", oldSizeBytes: 8, newSizeBytes: 8 },
+        { oldContent: "", newContent: "item0=1\n", oldSizeBytes: 0, newSizeBytes: 8 },
+        { oldContent: "item0=0\n", newContent: "", oldSizeBytes: 8, newSizeBytes: 0 },
+    ])("downgrades duplicated restored hunks for $oldContent → $newContent", (input) => {
+        const payload = buildPierreDiffPayload({
+            path: "sample.txt",
+            ...input,
+            canBuildPierreDiff: true,
+        });
+        if (payload?.kind !== "renderable") throw new Error("expected renderable payload");
+
+        const hunk = payload.metadata.hunks[0];
+        if (hunk === undefined) throw new Error("expected hunk");
+
+        const persisted: unknown = JSON.parse(
+            JSON.stringify({
+                ...payload,
+                metadata: { ...payload.metadata, hunks: [hunk, hunk] },
+            }),
+        );
+        expect(getPierreDiffPayloadFromDetails({ pierreDiff: persisted })).toMatchObject({
+            kind: "summary",
+            summary: { reason: "metadata-invalid" },
+        });
+    });
+
     it("accepts Pierre's -1 empty-side indexes for new and deleted files", () => {
         const cases = [
             { path: "new.ts", oldContent: "", newContent: "one\ntwo\n", type: "new" },
