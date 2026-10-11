@@ -1075,6 +1075,32 @@ describe("third-party tool renderers", () => {
         expect(lines.join("\n")).not.toContain('"args"');
     });
 
+    it.each([
+        { args: ["fill", "@e1", "CREDENTIAL_a_END"], target: "@e1" },
+        { args: ["type", "@e1", "CREDENTIAL_a_END"], target: "@e1" },
+        { args: ["keyboard", "type", "CREDENTIAL_a_END"], target: "type" },
+        { args: ["keyboard", "inserttext", "CREDENTIAL_a_END"], target: "inserttext" },
+        {
+            args: ["--session", "browser", "fill", "@e1", "CREDENTIAL_a_END"],
+            target: "@e1",
+        },
+    ])("keeps entered browser values out of transcript previews for $args", ({ args, target }) => {
+        const renderer = createThirdPartyToolRenderer("agent_browser");
+        for (const expanded of [false, true]) {
+            const rendered = renderer
+                .renderCall({ args }, plainTheme, {
+                    ...renderContext,
+                    expanded,
+                })
+                .render(120)
+                .join("\n");
+
+            expect(rendered).toContain(target);
+            expect(rendered).toContain("16 characters");
+            expect(rendered).not.toContain("CREDENTIAL_a_END");
+        }
+    });
+
     it("updates browser-specific verbs in lifecycle mode", () => {
         const renderer = createThirdPartyToolRenderer("agent_browser", {
             labelMode: "lifecycle",

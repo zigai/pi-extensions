@@ -195,9 +195,22 @@ function summarizeAgentBrowserArgs(
     if (nonEmptyCommand !== undefined && commandArgs !== undefined) {
         const commandBody = commandArgs
             .slice(1)
-            .map((value) => {
+            .map((value, index) => {
                 const text = stringParser.parse(value);
-                return text === undefined ? undefined : compactWhitespaceText(text, 120);
+                if (text === undefined) return undefined;
+
+                const precedingCommand = commandArgs[index - 1];
+                const precedingArgument = commandArgs[index];
+                if (
+                    precedingCommand === "fill" ||
+                    (precedingCommand === "type" && commandArgs[index - 2] !== "keyboard") ||
+                    (precedingCommand === "keyboard" &&
+                        (precedingArgument === "type" || precedingArgument === "inserttext"))
+                ) {
+                    return countLabel(Array.from(text).length, "character");
+                }
+
+                return compactWhitespaceText(text, 120);
             })
             .filter(isDefined)
             .join(" ");
