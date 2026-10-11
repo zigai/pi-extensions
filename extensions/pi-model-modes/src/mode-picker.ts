@@ -39,6 +39,9 @@ const THINKING_UNSET_LABEL = "(don't change)";
 function isReservedModeName(name: string): boolean {
     return (
         name === CUSTOM_MODE_NAME ||
+        name === "__proto__" ||
+        name === "constructor" ||
+        name === "prototype" ||
         name === MODE_UI_CONFIGURE ||
         name === MODE_UI_ADD ||
         name === MODE_UI_BACK
