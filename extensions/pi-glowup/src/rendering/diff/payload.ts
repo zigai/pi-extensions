@@ -494,6 +494,19 @@ function parseFileDiffMetadata(value: RestoredMetadata): FileDiffMetadata | unde
             return undefined;
         }
 
+        for (const content of hunk.hunkContent) {
+            if (content.type !== "context") continue;
+
+            for (let index = 0; index < content.lines; index += 1) {
+                if (
+                    additionLines[content.additionLineIndex + index] !==
+                    deletionLines[content.deletionLineIndex + index]
+                ) {
+                    return undefined;
+                }
+            }
+        }
+
         if (hunk.additionCount > 0) {
             if (hunk.additionLineIndex < additionEnd) return undefined;
 

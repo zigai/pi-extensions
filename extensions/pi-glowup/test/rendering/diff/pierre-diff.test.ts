@@ -222,6 +222,30 @@ describe("Pierre diff rendering", () => {
         });
     });
 
+    it("downgrades restored context with different old and new text", () => {
+        const payload = buildPierreDiffPayload({
+            path: "sample.txt",
+            oldContent: "a\nc\n",
+            newContent: "a\nd\n",
+            oldSizeBytes: 4,
+            newSizeBytes: 4,
+            canBuildPierreDiff: true,
+        });
+        if (payload?.kind !== "renderable") throw new Error("expected renderable payload");
+
+        const persisted: unknown = JSON.parse(
+            JSON.stringify({
+                ...payload,
+                metadata: { ...payload.metadata, additionLines: ["b\n", "d\n"] },
+            }),
+        );
+
+        expect(getPierreDiffPayloadFromDetails({ pierreDiff: persisted })).toMatchObject({
+            kind: "summary",
+            summary: { reason: "metadata-invalid" },
+        });
+    });
+
     it("accepts Pierre's -1 empty-side indexes for new and deleted files", () => {
         const cases = [
             { path: "new.ts", oldContent: "", newContent: "one\ntwo\n", type: "new" },
