@@ -1,7 +1,7 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import type { JsonValue } from "../../src/json-value.ts";
 import { describe, expect, it } from "vitest";
-import type { GlowupRenderTheme } from "../../src/rendering/theme.ts";
+import { createPlainTheme } from "../support/plain-theme.ts";
 import { createThirdPartyToolRenderer } from "../../src/tools/renderers.ts";
 import type { ThirdPartyToolResult } from "../../src/tools/types.ts";
 
@@ -14,17 +14,7 @@ type RendererConformanceCase = {
     readonly resultText?: string | null;
 };
 
-const theme: GlowupRenderTheme = {
-    fg(_token, text) {
-        return text;
-    },
-    bg(_token, text) {
-        return text;
-    },
-    bold(text) {
-        return text;
-    },
-};
+const theme = createPlainTheme();
 
 const context = {
     args: {},

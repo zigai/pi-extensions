@@ -22,18 +22,9 @@ import { parseScriptInvocation } from "../../src/tools/built-in/bash/invocation.
 import { renderGlowupDiff } from "../../src/rendering/diff/text-renderer.ts";
 import { renderGlowupOutput } from "../../src/rendering/output.ts";
 import { renderScriptCall } from "../../src/tools/built-in/bash/script-renderer.ts";
+import { createPlainTheme } from "../support/plain-theme.ts";
 
-const plainTheme: GlowupRenderTheme = {
-    fg(_token: string, text: string): string {
-        return text;
-    },
-    bg(_token: string, text: string): string {
-        return text;
-    },
-    bold(text: string): string {
-        return text;
-    },
-};
+const plainTheme = createPlainTheme();
 
 const tokenTheme: GlowupRenderTheme = {
     fg(token: string, text: string): string {

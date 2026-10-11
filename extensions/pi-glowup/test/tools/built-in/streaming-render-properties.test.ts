@@ -1,7 +1,7 @@
 import { fc } from "@fast-check/vitest";
 import { visibleWidth, type Component } from "@earendil-works/pi-tui";
 import { expect, test } from "vitest";
-import type { GlowupRenderTheme } from "../../../src/rendering/theme.ts";
+import { createPlainTheme } from "../../support/plain-theme.ts";
 import { renderWriteCallPreview } from "../../../src/tools/built-in/write-preview.ts";
 import { reflowBashCommand } from "../../../src/tools/built-in/bash/command.ts";
 
@@ -9,17 +9,7 @@ const PROPERTY_SEED = 0x5eed_2026;
 const PROPERTY_RUNS = 60;
 const MAX_STREAMING_ROWS = 16;
 
-const plainTheme: GlowupRenderTheme = {
-    fg(_token: string, text: string): string {
-        return text;
-    },
-    bg(_token: string, text: string): string {
-        return text;
-    },
-    bold(text: string): string {
-        return text;
-    },
-};
+const plainTheme = createPlainTheme();
 
 const atomicLines = [
     "export const asciiMarker = 1;",

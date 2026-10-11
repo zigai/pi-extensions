@@ -3,6 +3,7 @@ import Type from "typebox";
 import { Value } from "typebox/value";
 import { ToolExecutionComponent, type AgentToolResult } from "@earendil-works/pi-coding-agent";
 import type { GlowupRenderTheme } from "../../src/rendering/theme.ts";
+import { createPlainTheme } from "../support/plain-theme.ts";
 import { call, text } from "../../src/tools/protocol/contract.ts";
 import { jsonValueParser, type JsonValue } from "../../src/json-value.ts";
 import { stringField } from "../../src/unknown-values.ts";
@@ -33,17 +34,7 @@ function installThirdPartyToolRendererPatch(
     configureThirdPartyToolRendererPatch(true, options, prototype);
 }
 
-const plainTheme: GlowupRenderTheme = {
-    fg(_token: string, text: string): string {
-        return text;
-    },
-    bg(_token: string, text: string): string {
-        return text;
-    },
-    bold(text: string): string {
-        return text;
-    },
-};
+const plainTheme = createPlainTheme();
 
 type FakeComponent = {
     render(width: number): string[];

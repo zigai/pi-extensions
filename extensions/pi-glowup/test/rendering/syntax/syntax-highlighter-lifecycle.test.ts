@@ -7,7 +7,7 @@ import Type from "typebox";
 import { Value } from "typebox/value";
 import { afterEach, describe, expect, it } from "vitest";
 import { renderScriptCall } from "../../../src/tools/built-in/bash/script-renderer.ts";
-import { type GlowupRenderTheme } from "../../../src/rendering/theme.ts";
+import { createPlainTheme } from "../../support/plain-theme.ts";
 import { renderWriteCallPreview } from "../../../src/tools/built-in/write-preview.ts";
 import { scheduleCodeOutputSyntaxLoad } from "../../../src/rendering/syntax/code-component.ts";
 import {
@@ -27,17 +27,7 @@ import {
     type SyntaxHighlighterFactory,
 } from "../../../src/rendering/syntax/highlighter.ts";
 
-const plainTheme: GlowupRenderTheme = {
-    fg(_token: string, text: string): string {
-        return text;
-    },
-    bg(_token: string, text: string): string {
-        return text;
-    },
-    bold(text: string): string {
-        return text;
-    },
-};
+const plainTheme = createPlainTheme();
 
 type FakeHighlighterOptions = {
     readonly loadedLanguages?: readonly string[];

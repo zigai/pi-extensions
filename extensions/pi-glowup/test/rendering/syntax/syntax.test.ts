@@ -5,10 +5,8 @@ import { Theme, type ThemeColor } from "@earendil-works/pi-coding-agent";
 import { buildPierreDiffPayload } from "../../../src/rendering/diff/payload.ts";
 import { renderPierreDiff } from "../../../src/rendering/diff/pierre-renderer.ts";
 import { loadHighlightedDiff } from "../../../src/rendering/diff/highlight.ts";
-import {
-    configureRenderingAppearance,
-    type GlowupRenderTheme,
-} from "../../../src/rendering/theme.ts";
+import { configureRenderingAppearance } from "../../../src/rendering/theme.ts";
+import { createPlainTheme } from "../../support/plain-theme.ts";
 import { parseDiffSections } from "../../../src/rendering/diff/text-diff.ts";
 import { renderGlowupDiff } from "../../../src/rendering/diff/text-renderer.ts";
 import { renderGlowupOutput } from "../../../src/rendering/output.ts";
@@ -72,17 +70,7 @@ const piTheme = new Theme(
     { name: "sample-dark-test" },
 );
 
-const plainTheme: GlowupRenderTheme = {
-    fg(_token: string, text: string): string {
-        return text;
-    },
-    bg(_token: string, text: string): string {
-        return text;
-    },
-    bold(text: string): string {
-        return text;
-    },
-};
+const plainTheme = createPlainTheme();
 
 const markdownTheme: MarkdownTheme = {
     heading: (text) => text,

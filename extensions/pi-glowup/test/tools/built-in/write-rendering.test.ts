@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Component } from "@earendil-works/pi-tui";
+import { createPlainTheme } from "../../support/plain-theme.ts";
 import {
     configureRenderingAppearance,
     type GlowupRenderTheme,
@@ -13,17 +14,7 @@ import {
     PREVIEW_MUTATION_SETTINGS,
 } from "../../../src/rendering/preview-settings.ts";
 
-const plainTheme: GlowupRenderTheme = {
-    fg(_token: string, text: string): string {
-        return text;
-    },
-    bg(_token: string, text: string): string {
-        return text;
-    },
-    bold(text: string): string {
-        return text;
-    },
-};
+const plainTheme = createPlainTheme();
 
 const dimMarkerTheme: GlowupRenderTheme = {
     fg(token: string, text: string): string {
