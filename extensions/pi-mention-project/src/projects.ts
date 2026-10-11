@@ -30,7 +30,7 @@ function expandHome(root: string): string {
 }
 
 export function resolveProjectRoot(root: string, cwd: string): string {
-    const expanded = expandHome(root.trim());
+    const expanded = expandHome(root);
     if (path.isAbsolute(expanded)) return path.resolve(expanded);
     return path.resolve(cwd, expanded);
 }

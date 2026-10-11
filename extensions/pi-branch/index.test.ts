@@ -1,7 +1,8 @@
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
     discoverAndLoadExtensions,
@@ -155,6 +156,91 @@ process.stdout.write(JSON.stringify({ messages, fileArgs: args.fileArgs, noSessi
             }
         },
     );
+});
+
+async function loadBranchRunner(cwd: string, agentDir: string): Promise<ExtensionRunner> {
+    const loaded = await discoverAndLoadExtensions(
+        [fileURLToPath(new URL("./index.ts", import.meta.url))],
+        cwd,
+        agentDir,
+    );
+    expect(loaded.errors).toEqual([]);
+    const models = await ModelRuntime.create({
+        authPath: join(agentDir, "auth.json"),
+        modelsPath: null,
+        refreshOnCreate: false,
+    });
+
+    return new ExtensionRunner(
+        loaded.extensions,
+        loaded.runtime,
+        cwd,
+        SessionManager.inMemory(cwd),
+        new ModelRegistry(models),
+    );
+}
+
+describe("branch worktrees", () => {
+    it("forks the repository whose root ends in a space, not its trimmed sibling", async () => {
+        const root = await mkdtemp(join(tmpdir(), "pi-branch-worktree-"));
+        try {
+            const agentDir = join(root, "agent");
+            const source = join(root, "repo ");
+            const sibling = join(root, "repo");
+            const worktrees = join(root, "worktrees");
+            const bin = join(root, "bin");
+            await mkdir(bin);
+            await mkdir(source);
+            await mkdir(sibling);
+            execFileSync("git", ["init", "--quiet", source]);
+            execFileSync("git", ["init", "--quiet", sibling]);
+            await writeFile(join(source, "origin.txt"), "source");
+            await writeFile(join(sibling, "origin.txt"), "sibling");
+            execFileSync("git", ["-C", source, "add", "origin.txt"]);
+            execFileSync("git", ["-C", sibling, "add", "origin.txt"]);
+            const commitArgs = [
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "commit",
+                "--quiet",
+                "-m",
+                "initial",
+            ];
+            execFileSync("git", ["-C", source, ...commitArgs]);
+            execFileSync("git", ["-C", sibling, ...commitArgs]);
+            await writeFile(
+                join(bin, "tmux"),
+                `#!${process.execPath}\nprocess.stdout.write('@1\\n');\n`,
+                { mode: 0o755 },
+            );
+            await mkdir(join(agentDir, "pi-branch"), { recursive: true });
+            await writeFile(
+                join(agentDir, "pi-branch", "config.json"),
+                JSON.stringify({ worktreeDir: worktrees }),
+            );
+            vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
+            vi.stubEnv("PATH", `${bin}${delimiter}${process.env.PATH}`);
+            vi.stubEnv("TMUX", "isolated-launcher");
+            vi.stubEnv("TMUX_PANE", undefined);
+            const runner = await loadBranchRunner(source, agentDir);
+            const command = runner.getCommand("branch");
+            if (command === undefined) throw new Error("Missing /branch command");
+
+            await command.handler("--worktree", runner.createCommandContext());
+
+            const directories = await readdir(worktrees);
+            expect(directories).toHaveLength(1);
+            const directory = directories.at(0);
+            if (directory === undefined) throw new Error("No worktree was created");
+
+            expect(await readFile(join(worktrees, directory, "origin.txt"), "utf8")).toBe("source");
+        } finally {
+            vi.unstubAllEnvs();
+            await rm(root, { recursive: true, force: true });
+        }
+    });
 });
 
 describe("configuration schema", () => {

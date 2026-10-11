@@ -692,7 +692,7 @@ async function getGitRepoInfo(cwd: string): Promise<GitRepoInfo> {
         );
     }
 
-    const root = rootResult.stdout?.trim();
+    const root = rootResult.stdout?.replace(/\n$/, "");
     if (root === undefined || root.length === 0) {
         throw new Error("Cannot create worktree because git did not report a repository root.");
     }

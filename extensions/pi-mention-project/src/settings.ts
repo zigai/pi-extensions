@@ -132,21 +132,6 @@ function matchesLegacyRoots(value: unknown): value is string | string[] {
     return Value.Check(legacyRootsSchema, value);
 }
 
-function normalizeLegacyRoots(value: string | string[]): string[] | undefined {
-    let candidates: string[];
-    if (Array.isArray(value)) candidates = value;
-    else candidates = [value];
-
-    const roots: string[] = [];
-    for (const root of candidates) {
-        const trimmed = root.trim();
-        if (trimmed.length > 0) roots.push(trimmed);
-    }
-
-    if (roots.length === 0 && candidates.length > 0) return undefined;
-    return roots;
-}
-
 function loadLegacySettings(ctx: MentionProjectSettingsContext): LegacyMentionProjectSettings {
     const paths = legacySettingsPaths(ctx);
     const globalSettingsPath = paths.at(0);
@@ -176,8 +161,8 @@ function applyLegacySettings(
     if (!hasExplicitExtensionSetting(loaded, "roots")) {
         const legacyRoots = legacy.mentionProjectRoots;
         if (matchesLegacyRoots(legacyRoots)) {
-            const roots = normalizeLegacyRoots(legacyRoots);
-            if (roots !== undefined) settings.roots = roots;
+            if (Array.isArray(legacyRoots)) settings.roots = [...legacyRoots];
+            else settings.roots = [legacyRoots];
         }
     }
 

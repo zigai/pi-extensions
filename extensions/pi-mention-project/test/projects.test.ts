@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { test } from "vitest";
+import { test, vi } from "vitest";
 
 import { listProjectDirectories, resolveProjectRoot } from "../src/projects.ts";
-import type { MentionProjectSettings } from "../src/settings.ts";
+import { loadMentionProjectSettings, type MentionProjectSettings } from "../src/settings.ts";
 
 function settings(
     roots: string[],
@@ -71,6 +71,32 @@ test("listProjectDirectories lists only direct child git directories and ignores
             [alpha, beta, gamma],
         );
     } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
+});
+
+test.each([
+    ["extension-settings/pi-mention-project.json", "roots"],
+    ["settings.json", "mentionProjectRoots"],
+])("listProjectDirectories preserves trailing spaces in roots from %s", async (file, key) => {
+    const dir = await mkdtemp(path.join(tmpdir(), "pi-mention-project-root-space-"));
+    try {
+        const root = path.join(dir, "projects ");
+        const intended = path.join(root, "intended");
+        const sibling = path.join(dir, "projects", "unrelated");
+        const agentDir = path.join(dir, "agent");
+        const configPath = path.join(agentDir, file);
+        await markGitRepo(intended);
+        await markGitRepo(sibling);
+        await mkdir(path.dirname(configPath), { recursive: true });
+        await writeFile(configPath, JSON.stringify({ [key]: [root] }));
+        vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
+        const configured = loadMentionProjectSettings({ cwd: dir, isProjectTrusted: () => false });
+
+        const projects = await listProjectDirectories(configured, dir);
+        assert.deepEqual(projects, [{ name: "intended", path: intended, root }]);
+    } finally {
+        vi.unstubAllEnvs();
         await rm(dir, { recursive: true, force: true });
     }
 });
