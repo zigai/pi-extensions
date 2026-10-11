@@ -180,7 +180,13 @@ async function executeRemoteCompactionV2Attempt(
     if (!response.ok) {
         let detail: string | undefined;
         try {
-            detail = await readSafeHttpErrorDetail(response, signal, services, attemptController);
+            detail = await readSafeHttpErrorDetail(
+                response,
+                request.headers.get("Authorization"),
+                signal,
+                services,
+                attemptController,
+            );
         } catch (cause: unknown) {
             return cancelledRemoteCompaction(cause);
         }
@@ -366,11 +372,13 @@ async function readRemoteCompactionResponseText(
 
 async function readSafeHttpErrorDetail(
     response: Response,
+    authorization: string | null,
     signal: AbortSignal,
     services: CodexRuntime,
     attemptController: AbortController,
 ): Promise<string | undefined> {
-    const requestId = safeDiagnosticValue(response.headers.get("x-request-id"));
+    const credential = authorization?.replace(/^Bearer\s+/iu, "");
+    const requestId = safeDiagnosticValue(response.headers.get("x-request-id"), credential);
     let payload: unknown;
 
     try {
@@ -396,9 +404,9 @@ async function readSafeHttpErrorDetail(
 
     const nestedError = JsonObjectDecoder.decode(root.error);
     const error = nestedError ?? root;
-    const type = safeDiagnosticValue(error.type);
-    const code = safeDiagnosticValue(error.code);
-    const message = safeDiagnosticValue(error.message ?? error.detail, 500);
+    const type = safeDiagnosticValue(error.type, credential);
+    const code = safeDiagnosticValue(error.code, credential);
+    const message = safeDiagnosticValue(error.message ?? error.detail, credential, 500);
     const fields = [
         type ? `type=${type}` : undefined,
         code ? `code=${code}` : undefined,
@@ -465,11 +473,20 @@ async function readRemoteCompactionStreamChunk(
     );
 }
 
-function safeDiagnosticValue(value: unknown, maxCharacters = 128): string | undefined {
+function safeDiagnosticValue(
+    value: unknown,
+    credential: string | undefined,
+    maxCharacters = 128,
+): string | undefined {
     const diagnosticValue = DiagnosticScalarDecoder.decode(value);
     if (diagnosticValue === undefined) return undefined;
 
-    const normalized = String(diagnosticValue)
+    let text = String(diagnosticValue);
+    if (credential !== undefined && credential.length > 0) {
+        text = text.replaceAll(credential, "[redacted]");
+    }
+
+    const normalized = text
         .replaceAll(/Bearer\s+[^\s,;]+/gi, "Bearer [redacted]")
         .replaceAll(/\bsk-[A-Za-z0-9_-]+\b/g, "[redacted]")
         .replaceAll(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[redacted]")

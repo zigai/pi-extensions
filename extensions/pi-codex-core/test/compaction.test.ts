@@ -670,6 +670,49 @@ test("reports bounded redacted remote compaction HTTP error details", async () =
     assert.doesNotMatch(result.error.message, /secret-token/);
 });
 
+test.each([
+    { field: "type", error: { type: "a" }, requestId: "", detail: "type=[redacted]" },
+    { field: "code", error: { code: "a" }, requestId: "", detail: "code=[redacted]" },
+    { field: "message", error: { message: "a" }, requestId: "", detail: "message=[redacted]" },
+    { field: "request ID", error: {}, requestId: "a", detail: "request_id=[redacted]" },
+])(
+    "redacts the request credential echoed as the HTTP error $field",
+    async ({ error, requestId, detail }) => {
+        const runtime = makeTestRuntime(async (_url, init) => {
+            assert.equal(new Headers(init?.headers).get("Authorization"), "Bearer a");
+            return new Response(JSON.stringify({ error }), {
+                status: 400,
+                headers: { "x-request-id": requestId },
+            });
+        });
+        const request = buildRemoteCompactionV2Request({
+            sessionId: "session",
+            model: "gpt-5.6-sol",
+            input: [{ role: "user", content: "compact" }],
+            instructions: "system",
+            promptCacheKey: "session",
+            verbosity: "low",
+            fast: false,
+        });
+
+        const result = await executeRemoteCompactionV2(
+            {
+                responsesUrl: "https://example.test/responses",
+                headers: new Headers({ Authorization: "Bearer a" }),
+            },
+            request,
+            { signal: new AbortController().signal, services: runtime },
+        );
+
+        assert.ok(result.isErr());
+        assert.equal(result.error._tag, "CodexHttpRequestFailed");
+        assert.equal(
+            result.error.message,
+            `Codex remote compaction failed with HTTP 400. ${detail}`,
+        );
+    },
+);
+
 test("reports top-level Codex compatibility error details", async () => {
     const runtime = makeTestRuntime(
         async () =>
