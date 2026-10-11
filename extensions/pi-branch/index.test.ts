@@ -243,6 +243,44 @@ describe("branch worktrees", () => {
     });
 });
 
+describe("branch configuration", () => {
+    it("reports malformed config without quoting its contents", async () => {
+        const root = await mkdtemp(join(tmpdir(), "pi-branch-config-"));
+        try {
+            const agentDir = join(root, "agent");
+            const configPath = join(agentDir, "pi-branch", "config.json");
+            await mkdir(join(configPath, ".."), { recursive: true });
+            await writeFile(configPath, "private-token");
+            vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
+            vi.stubEnv("TMUX", "isolated-launcher");
+            const runner = await loadBranchRunner(root, agentDir);
+            const notifications: string[] = [];
+            runner.setUIContext(
+                {
+                    ...runner.getUIContext(),
+                    notify: (message) => {
+                        notifications.push(message);
+                    },
+                },
+                "rpc",
+            );
+            const command = runner.getCommand("branch");
+            if (command === undefined) throw new Error("Missing /branch command");
+
+            await command.handler("--worktree", runner.createCommandContext());
+
+            expect(notifications).toEqual([
+                `Invalid global pi-branch config at ${configPath}: Config must contain valid JSON.`,
+            ]);
+
+            expect(await readFile(configPath, "utf8")).toBe("private-token");
+        } finally {
+            vi.unstubAllEnvs();
+            await rm(root, { recursive: true, force: true });
+        }
+    });
+});
+
 describe("configuration schema", () => {
     it("matches the checked-in editor schema", () => {
         const actual: unknown = JSON.parse(readFileSync("config.schema.json", "utf8"));

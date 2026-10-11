@@ -380,7 +380,9 @@ function readConfigInput(configPath: string): ConfigInputReadResult {
         const rawConfig: unknown = JSON.parse(readFileSync(configPath, "utf8"));
         return { value: JsonValueDecoder.decode(rawConfig), diagnostics: [] };
     } catch (cause: unknown) {
-        const message = cause instanceof Error ? cause.message : String(cause);
+        let message = cause instanceof Error ? cause.message : String(cause);
+        if (cause instanceof SyntaxError) message = "Config must contain valid JSON.";
+
         const reason = cause instanceof SyntaxError ? "malformed-json" : "unreadable";
         return {
             value: undefined,

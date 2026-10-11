@@ -155,9 +155,7 @@ function readConfig(configPath: string): LoadedConfig | undefined {
 
   const unknownKeys = Object.keys(parsed).filter((key) => !CONFIG_KEYS.has(key));
   if (unknownKeys.length > 0) {
-    throw new Error(
-      `Unknown goal setting${unknownKeys.length === 1 ? "" : "s"} in ${configPath}: ${unknownKeys.join(", ")}.`,
-    );
+    throw new Error(`Unknown goal setting${unknownKeys.length === 1 ? "" : "s"} in ${configPath}.`);
   }
 
   if (!isOptionalSchemaPath(parsed.$schema)) {
@@ -241,7 +239,9 @@ export function loadGoalSettings(
       },
     };
   } catch (cause: unknown) {
-    const message = cause instanceof Error ? cause.message : "Unknown settings error.";
+    let message = cause instanceof Error ? cause.message : "Unknown settings error.";
+    if (cause instanceof SyntaxError) message = "Settings must contain valid JSON.";
+
     return { ok: false, message: `Could not load pi-codex-goal settings: ${message}` };
   }
 }

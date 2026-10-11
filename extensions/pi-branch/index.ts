@@ -578,9 +578,12 @@ async function readBranchConfigFile(input: {
             baseDir: input.baseDir,
         };
     } catch (error: unknown) {
+        let message = formatUnknownError(error);
+        if (error instanceof SyntaxError) message = "Config must contain valid JSON.";
+
         return {
             state: "invalid",
-            error: `Invalid ${input.label} pi-branch config at ${input.file}: ${formatUnknownError(error)}`,
+            error: `Invalid ${input.label} pi-branch config at ${input.file}: ${message}`,
         };
     }
 }

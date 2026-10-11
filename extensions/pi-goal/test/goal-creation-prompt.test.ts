@@ -161,6 +161,43 @@ test("active-goal disabled tools resolve from global and trusted-project setting
   }
 });
 
+test("goal settings errors do not quote malformed config contents", () => {
+  const agentDir = mkdtempSync(join(tmpdir(), "pi-goal-settings-json-"));
+  const configPath = getGoalGlobalConfigPath(agentDir);
+  try {
+    writeText(configPath, "private-token");
+
+    const result = loadGoalSettings({ cwd: agentDir, isProjectTrusted: () => false }, agentDir);
+
+    assert.deepEqual(result, {
+      ok: false,
+      message: "Could not load pi-codex-goal settings: Settings must contain valid JSON.",
+    });
+    assert.equal(readFileSync(configPath, "utf8"), "private-token");
+  } finally {
+    rmSync(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("goal settings errors do not quote unknown config keys", () => {
+  const agentDir = mkdtempSync(join(tmpdir(), "pi-goal-settings-key-"));
+  const configPath = getGoalGlobalConfigPath(agentDir);
+  const original = '{"private-token":true}';
+  try {
+    writeText(configPath, original);
+
+    const result = loadGoalSettings({ cwd: agentDir, isProjectTrusted: () => false }, agentDir);
+
+    assert.deepEqual(result, {
+      ok: false,
+      message: `Could not load pi-codex-goal settings: Unknown goal setting in ${configPath}.`,
+    });
+    assert.equal(readFileSync(configPath, "utf8"), original);
+  } finally {
+    rmSync(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("creation template validation rejects missing and unknown dynamic attributes", () => {
   const context = { cwd: "/tmp/project", currentGoal: null };
   const missing = renderGoalCreationTemplate("only {{task}}", { task: "ship" }, context);

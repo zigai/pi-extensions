@@ -160,7 +160,7 @@ test("does not overwrite malformed existing codex config", async () => {
     }
 });
 
-test("fails extension activation on malformed global config", async () => {
+test("fails extension activation without quoting malformed global config contents", async () => {
     const root = await mkdtemp(join(tmpdir(), "pi-codex-core-config-activation-"));
     const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
     try {
@@ -168,16 +168,18 @@ test("fails extension activation on malformed global config", async () => {
         process.env.PI_CODING_AGENT_DIR = agentDir;
         const configPath = getCodexCoreConfigPath(agentDir);
         await mkdir(join(configPath, ".."), { recursive: true });
-        await writeFile(configPath, "{not json");
+        await writeFile(configPath, "private-token");
 
         const harness = makeExtensionHarness();
         extension(harness.api);
         await assert.rejects(harness.startSession(makeExtensionContext(root, false)), (cause) => {
             assert.ok(cause instanceof Error);
             assert.equal(cause.name, "CodexConfigStartupError");
-            assert.match(cause.message, /\(malformed-json\)/);
-            assert.match(cause.message, new RegExp(configPath.replaceAll("/", "\\/")));
-            assert.doesNotMatch(cause.message, /\{not json/);
+            assert.equal(
+                cause.message,
+                `Invalid Pi Codex Core config at ${configPath} (malformed-json): Config must contain valid JSON.`,
+            );
+
             return true;
         });
     } finally {
