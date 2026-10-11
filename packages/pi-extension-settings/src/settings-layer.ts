@@ -197,6 +197,17 @@ export function unsupportedSettingsKeyPath(value: JsonValue, path = ""): string 
     return undefined;
 }
 
+export function unsupportedSettingsKeyIssue(
+    schema: TSchema,
+    value: JsonValue,
+): SettingsValidationIssue | undefined {
+    const path = unsupportedSettingsKeyPath(value);
+    if (path === undefined) return undefined;
+
+    const names = new Set([...declaredPropertyNames(schema), ...UNSUPPORTED_SETTING_KEYS]);
+    return { path: safeIssuePath(path, names), message: "Unsupported property name" };
+}
+
 export function parseSettingsLayer(
     path: string,
     scope: SettingsScope,
@@ -220,8 +231,8 @@ export function parseSettingsLayer(
         };
     }
 
-    const unsupportedPath = unsupportedSettingsKeyPath(parsed);
-    if (unsupportedPath !== undefined) {
+    const unsupportedIssue = unsupportedSettingsKeyIssue(layerSchema, parsed);
+    if (unsupportedIssue !== undefined) {
         return {
             settings: undefined,
             schemaReference: undefined,
@@ -232,7 +243,7 @@ export function parseSettingsLayer(
                     scope,
                     path,
                     message: `${scope} settings contain an unsupported property name and were ignored`,
-                    issues: [{ path: unsupportedPath, message: "Unsupported property name" }],
+                    issues: [unsupportedIssue],
                 },
             ],
         };

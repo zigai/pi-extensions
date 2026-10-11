@@ -21,7 +21,7 @@ import {
     applySettingsLayer,
     parseSettingsLayer,
     settingsValidationIssues,
-    unsupportedSettingsKeyPath,
+    unsupportedSettingsKeyIssue,
     type SettingsDiagnostic,
     type SettingsScope,
     type SettingsValidationIssue,
@@ -339,10 +339,10 @@ async function runSettingsTransaction<Schema extends TObject>(
         ]);
     }
 
-    const unsupportedPath = unsupportedSettingsKeyPath(candidateJson);
-    if (unsupportedPath !== undefined) {
+    const unsupportedIssue = unsupportedSettingsKeyIssue(layerSchema, candidateJson);
+    if (unsupportedIssue !== undefined) {
         return invalidUpdate("The settings updater returned an unsupported property name.", [
-            { path: unsupportedPath, message: "Unsupported property name" },
+            unsupportedIssue,
         ]);
     }
 

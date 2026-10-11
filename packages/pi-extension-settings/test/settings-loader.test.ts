@@ -377,6 +377,56 @@ describe("loadSettings", () => {
         ).toThrow("Validated default settings could not be decoded");
     });
 
+    it("redacts private parent keys when rejecting unsupported properties on disk", async () => {
+        const agentDir = await temporaryDirectory();
+        const definition = defineExtensionSettings({
+            id: "pi-private",
+            title: "Private settings",
+            description: "Settings for a private record.",
+            schemaId: "urn:example:private",
+            schema: Type.Object(
+                {
+                    profiles: Type.Record(
+                        Type.String(),
+                        Type.Object(
+                            { enabled: Type.Boolean() },
+                            { additionalProperties: false, title: "Profile" },
+                        ),
+                        { default: {}, description: "Named profiles." },
+                    ),
+                },
+                { additionalProperties: false },
+            ),
+        });
+        const paths = resolveGlobalSettingsPaths(agentDir, definition.id);
+        const content = '{"profiles":{"private-token":{"constructor":true}}}';
+        await mkdir(join(agentDir, "extension-settings"), { recursive: true });
+        await writeFile(paths.configPath, content);
+
+        const loaded = loadSettings(definition, {
+            agentDir,
+            bundledSchema: {
+                kind: "content",
+                content: formatJson(createSettingsFileSchema(definition)),
+            },
+        });
+
+        expect(loaded.usedGlobalConfig).toBe(false);
+        expect(loaded.settings).toEqual({ profiles: {} });
+        expect(loaded.diagnostics).toEqual([
+            expect.objectContaining({
+                code: "config-invalid",
+                scope: "global",
+                issues: [
+                    { path: "/profiles/<key>/constructor", message: "Unsupported property name" },
+                ],
+            }),
+        ]);
+
+        expect(JSON.stringify(loaded.diagnostics)).not.toContain("private-token");
+        expect(await readFile(paths.configPath, "utf8")).toBe(content);
+    });
+
     it("rejects unsupported property names without changing the file", async () => {
         const agentDir = await temporaryDirectory();
         const paths = resolveGlobalSettingsPaths(agentDir, "pi-example");
