@@ -975,6 +975,26 @@ describe("third-party tool renderers", () => {
         expect(rendered).not.toContain("also-do-not-show");
     });
 
+    it.each(["api key", "private.key"])(
+        "redacts the separated credential key %s in generic argument previews",
+        (key) => {
+            const renderer = createThirdPartyToolRenderer("custom_tool");
+            for (const expanded of [false, true]) {
+                const rendered = renderer
+                    .renderCall({ [key]: "CREDENTIAL_a_END" }, plainTheme, {
+                        ...renderContext,
+                        expanded,
+                    })
+                    .render(120)
+                    .join("\n");
+
+                expect(rendered).toContain(key);
+                expect(rendered).toContain("[redacted]");
+                expect(rendered).not.toContain("CREDENTIAL_a_END");
+            }
+        },
+    );
+
     it("suppresses internal artifact paths from generic detail summaries", () => {
         const renderer = createThirdPartyToolRenderer("custom_tool");
         const rendered = renderer

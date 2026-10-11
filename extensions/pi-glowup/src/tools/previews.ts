@@ -16,7 +16,7 @@ const MAX_PREVIEW_OBJECT_PROPERTIES = 30;
 const MAX_PARTIAL_PREVIEW_PROPERTIES = 8;
 const MAX_PREVIEW_DEPTH = 5;
 const SENSITIVE_KEY_PATTERN =
-    /(?:pass(?:word|phrase)?|secret|token|api[_-]?key|auth(?:orization)?|cookie|credential|private[_-]?key|access[_-]?key)/iu;
+    /(?:pass(?:word|phrase)?|secret|token|api[\s._-]?key|auth(?:orization)?|cookie|credential|private[\s._-]?key|access[\s._-]?key)/iu;
 const INTERNAL_DETAIL_PATH_KEY_PATTERN =
     /(?:artifact|transcript|workspace|report|patch|output|attachment|session)(?:[_-]?(?:file|dir(?:ectory)?))?[_-]?paths?$/iu;
 
