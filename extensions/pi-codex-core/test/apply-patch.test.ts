@@ -185,6 +185,38 @@ test.each([
     },
 );
 
+test("rejects conflicting EOF chunks before writing any file", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-conflicting-chunks-"));
+    try {
+        await writeFile(join(root, "target.txt"), "old\n");
+        const patch = wrapPatch(`*** Add File: untouched.txt
++new
+*** Update File: target.txt
+@@
+-old
++first
+@@
+-old
++second
+*** End of File`);
+
+        await assert.rejects(
+            createApplyPatchTool().execute(
+                "conflicting-chunks",
+                { patch },
+                undefined,
+                undefined,
+                makeExtensionContext(root, true),
+            ),
+            { message: /Failed to find expected lines/ },
+        );
+        assert.equal(await readFile(join(root, "target.txt"), "utf8"), "old\n");
+        await assert.rejects(readFile(join(root, "untouched.txt"), "utf8"), { code: "ENOENT" });
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
 test("apply_patch update matching follows Codex whitespace and Unicode lenience", async () => {
     const root = await mkdtemp(join(tmpdir(), "pi-codex-core-apply-patch-fuzzy-"));
     try {

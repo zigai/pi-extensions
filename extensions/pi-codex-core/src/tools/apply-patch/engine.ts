@@ -681,7 +681,7 @@ function seekSequence(
 
     const maxStart = lines.length - pattern.length;
     const searchStart = eof && lines.length >= pattern.length ? maxStart : start;
-    if (searchStart > maxStart) return undefined;
+    if (searchStart < start || searchStart > maxStart) return undefined;
 
     const passes: readonly ((line: string, patternLine: string) => boolean)[] = [
         (line, patternLine) => line === patternLine,
