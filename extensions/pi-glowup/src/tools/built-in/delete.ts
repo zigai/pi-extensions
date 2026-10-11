@@ -86,8 +86,8 @@ export function createNativeDeleteFeature() {
     ) {
         const filePath = pathField(args);
         const preview =
-            nativeDeletePreviews.get(context.toolCallId) ??
-            persistedDeletePreview(context.result, filePath);
+            persistedDeletePreview(context.result, filePath) ??
+            nativeDeletePreviews.get(context.toolCallId);
         const header = renderGlowupCall(theme, {
             state: callState(context),
             statusText: toolStatusLabel(labelMode, context, {

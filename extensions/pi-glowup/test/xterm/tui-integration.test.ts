@@ -1138,6 +1138,50 @@ export const grownWriteTwelve = 12;
         pendingTerminal.assertRowsFitWidth();
     });
 
+    it("shows the deletion result instead of a stale preflight after another write", async () => {
+        const pendingTerminal = new VirtualTerminal(100, 12);
+        const activeTui = createTui(pendingTerminal);
+        const filePath = "sample.txt";
+        const absolutePath = join(cwd, filePath);
+        const toolCallId = "changed-delete";
+        const tool = new ToolExecutionComponent(
+            "Delete",
+            toolCallId,
+            { path: filePath },
+            undefined,
+            undefined,
+            activeTui,
+            cwd,
+        );
+        const installedExtension = extension;
+        if (installedExtension === undefined) throw new Error("extension must be installed");
+
+        writeFileSync(absolutePath, "a\n");
+        await installedExtension.emitToolCall(
+            { type: "tool_call", toolName: "Delete", toolCallId, input: { path: filePath } },
+            cwd,
+        );
+        writeFileSync(absolutePath, "b\n");
+        unlinkSync(absolutePath);
+
+        tool.setArgsComplete();
+        tool.updateResult({
+            content: [{ type: "text", text: "Successfully deleted sample.txt" }],
+            details: { diff: "sample.txt\n-1 b\n" },
+            isError: false,
+        });
+        activeTui.addChild(tool);
+        terminal = pendingTerminal;
+        tui = activeTui;
+        activeTui.start();
+        await pendingTerminal.settle();
+
+        expect(pendingTerminal.screenText()).toContain("Deleted sample.txt (-1)");
+        expect(
+            pendingTerminal.rowsMatching(/\s-/u).map((row) => row.text.trim().slice(-1)),
+        ).toEqual(["b"]);
+    });
+
     it("restores a completed Delete preview from persisted result details", async () => {
         const pendingTerminal = new VirtualTerminal(110, 20);
         const activeTui = createTui(pendingTerminal);
