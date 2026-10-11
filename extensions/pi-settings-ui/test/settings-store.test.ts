@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -46,6 +46,31 @@ describe("settings catalog", () => {
             _tag: "BlockedLayer",
             message: "Settings contain malformed JSON.",
         });
+    });
+
+    it("redacts private record keys when loading invalid settings from disk", async () => {
+        const { root, location } = await testLocation();
+        const content = '{"aliases":{"private-token":false}}';
+        try {
+            await mkdir(location.schemaDirectory, { recursive: true });
+            await writeFile(
+                join(location.schemaDirectory, "pi-fixture.schema.json"),
+                richSchemaText(),
+            );
+            await writeFile(location.globalConfigPath("pi-fixture"), content);
+
+            const catalog = await loadSettingsCatalog(location, { projectTrusted: false });
+
+            expect(catalog.extensions[0]?.global).toMatchObject({
+                _tag: "BlockedLayer",
+                issues: ["/aliases/<key>: Setting failed validation"],
+            });
+
+            expect(JSON.stringify(catalog.diagnostics)).not.toContain("private-token");
+            expect(await readFile(location.globalConfigPath("pi-fixture"), "utf8")).toBe(content);
+        } finally {
+            await rm(root, { recursive: true, force: true });
+        }
     });
 
     it("blocks malformed global settings instead of replacing them", async () => {

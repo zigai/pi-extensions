@@ -1114,6 +1114,36 @@ export function parseExtensionSettingsSchema(
     }
 }
 
+function safeValidationPath(schema: TSchema, instancePath: string): string {
+    if (instancePath === "") return "/";
+
+    let current: unknown = schema;
+    const segments: string[] = [];
+    for (const segment of instancePath.slice(1).split("/")) {
+        const name = segment.replaceAll("~1", "/").replaceAll("~0", "~");
+        if (
+            isJsonObjectBoundary(current) &&
+            isJsonObject(current.properties) &&
+            Object.hasOwn(current.properties, name)
+        ) {
+            segments.push(segment);
+            current = current.properties[name];
+        } else if (
+            isJsonObjectBoundary(current) &&
+            current.type === "array" &&
+            /^\d+$/.test(name)
+        ) {
+            segments.push("<index>");
+            current = current.items;
+        } else {
+            segments.push("<key>");
+            current = undefined;
+        }
+    }
+
+    return `/${segments.join("/")}`;
+}
+
 /** Parse a persisted settings document and validate it against its extension schema. */
 export function parseSettingsDocument(
     extensionSchema: ExtensionSettingsSchema,
@@ -1132,9 +1162,8 @@ export function parseSettingsDocument(
         if (!Value.Check(extensionSchema.schema, raw)) {
             const issues = [...Value.Errors(extensionSchema.schema, raw)].map(
                 (issue) =>
-                    `${issue.instancePath === "" ? "/" : issue.instancePath}: ${issue.message}`,
+                    `${safeValidationPath(extensionSchema.schema, issue.instancePath)}: Setting failed validation`,
             );
-
             return {
                 _tag: "InvalidDocument",
                 message: "Settings do not match the extension schema.",
