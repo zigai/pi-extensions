@@ -329,8 +329,8 @@ export class StreamingPatchParser {
             }
         }
 
-        if (trimmed === END_PATCH_MARKER) {
-            this.ensureUpdateHunkIsNotEmpty(trimmed);
+        if (trimmed.trimEnd() === END_PATCH_MARKER) {
+            this.ensureUpdateHunkIsNotEmpty(END_PATCH_MARKER);
             this.mode = { type: "endedPatch" };
             return true;
         }
@@ -379,11 +379,11 @@ export class StreamingPatchParser {
                 throw invalidPatch("The first line of the patch must be '*** Begin Patch'");
             }
             case "startedPatch": {
-                if (this.handleHunkHeadersAndEndPatch(trimmed)) return;
+                if (this.handleHunkHeadersAndEndPatch(line.trimStart())) return;
                 throw invalidHunk(invalidHunkHeaderMessage(trimmed), this.lineNumber);
             }
             case "addFile": {
-                if (this.handleHunkHeadersAndEndPatch(trimmed)) return;
+                if (this.handleHunkHeadersAndEndPatch(line.trimStart())) return;
 
                 const lineToAdd = stripPrefix(line, "+");
                 const hunk = this.hunks.at(-1);
@@ -395,7 +395,7 @@ export class StreamingPatchParser {
                 throw invalidHunk(invalidHunkHeaderMessage(trimmed), this.lineNumber);
             }
             case "deleteFile": {
-                if (this.handleHunkHeadersAndEndPatch(trimmed)) return;
+                if (this.handleHunkHeadersAndEndPatch(line.trimStart())) return;
                 throw invalidHunk(invalidHunkHeaderMessage(trimmed), this.lineNumber);
             }
             case "updateFile": {
@@ -411,7 +411,8 @@ export class StreamingPatchParser {
 
     private processUpdateLine(line: string, hunkLineNumber: number): void {
         const updateLine = line.trimEnd();
-        if (this.handleHunkHeadersAndEndPatch(updateLine)) return;
+
+        if (this.handleHunkHeadersAndEndPatch(line)) return;
 
         const hunk = this.hunks.at(-1);
         if (hunk?.type !== "update") {
@@ -433,7 +434,7 @@ export class StreamingPatchParser {
             }
         }
 
-        const moveToPath = stripPrefix(updateLine, MOVE_TO_MARKER);
+        const moveToPath = stripPrefix(line, MOVE_TO_MARKER);
         if (hunk.chunks.length === 0 && hunk.movePath === undefined && moveToPath !== undefined) {
             hunk.movePath = moveToPath;
             this.mode = { type: "updateFile", hunkLineNumber };

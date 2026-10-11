@@ -126,6 +126,65 @@ test("applies Codex apply_patch changes to the local filesystem", async () => {
     }
 });
 
+test.each([
+    {
+        operation: "add",
+        body: "*** Add File: target.txt \n+new",
+        remaining: [["target.txt ", "new\n"]],
+        absent: [],
+    },
+    {
+        operation: "delete",
+        body: "*** Delete File: target.txt ",
+        remaining: [],
+        absent: ["target.txt "],
+    },
+    {
+        operation: "update",
+        body: "*** Update File: target.txt \n@@\n-old\n+new",
+        remaining: [["target.txt ", "new\n"]],
+        absent: [],
+    },
+    {
+        operation: "move",
+        body: "*** Update File: target.txt \n*** Move to: destination.txt \n@@\n-old\n+new",
+        remaining: [["destination.txt ", "new\n"]],
+        absent: ["target.txt "],
+    },
+])(
+    "apply_patch $operation preserves trailing spaces in paths",
+    async ({ body, remaining, absent }) => {
+        const root = await mkdtemp(join(tmpdir(), "pi-codex-core-exact-path-"));
+        try {
+            await writeFile(join(root, "target.txt"), "old\n");
+            await writeFile(join(root, "target.txt "), "old\n");
+            await writeFile(join(root, "destination.txt"), "protected\n");
+
+            await createApplyPatchTool().execute(
+                "exact-path",
+                { patch: wrapPatch(body) },
+                undefined,
+                undefined,
+                makeExtensionContext(root, true),
+            );
+
+            assert.equal(await readFile(join(root, "target.txt"), "utf8"), "old\n");
+            assert.equal(await readFile(join(root, "destination.txt"), "utf8"), "protected\n");
+
+            for (const [file, contents] of remaining) {
+                assert.ok(file);
+                assert.equal(await readFile(join(root, file), "utf8"), contents);
+            }
+
+            for (const file of absent) {
+                await assert.rejects(readFile(join(root, file), "utf8"), { code: "ENOENT" });
+            }
+        } finally {
+            await rm(root, { recursive: true, force: true });
+        }
+    },
+);
+
 test("apply_patch update matching follows Codex whitespace and Unicode lenience", async () => {
     const root = await mkdtemp(join(tmpdir(), "pi-codex-core-apply-patch-fuzzy-"));
     try {
