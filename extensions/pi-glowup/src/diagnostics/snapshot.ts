@@ -92,6 +92,13 @@ export function detailsDiagnostics(details: unknown): DebugLogFields {
 
     const diff = parsed.diff;
     const pierreDiff = parsed.pierreDiff;
+    let pierreDiffKind: "summary" | "renderable" | undefined;
+    if (
+        isRecord(pierreDiff) &&
+        (pierreDiff.kind === "summary" || pierreDiff.kind === "renderable")
+    ) {
+        pierreDiffKind = pierreDiff.kind;
+    }
 
     return {
         detailsKind: "object",
@@ -100,7 +107,7 @@ export function detailsDiagnostics(details: unknown): DebugLogFields {
             stringParser.parse(diff) === undefined
                 ? undefined
                 : Buffer.byteLength(stringParser.parse(diff) ?? "", "utf8"),
-        pierreDiffKind: isRecord(pierreDiff) ? stringParser.parse(pierreDiff.kind) : undefined,
+        pierreDiffKind,
     };
 }
 

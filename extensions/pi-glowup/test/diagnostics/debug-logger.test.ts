@@ -1,8 +1,9 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { DebugFileLogger } from "../../src/diagnostics/logger.ts";
+import { detailsDiagnostics } from "../../src/diagnostics/snapshot.ts";
 import { jsonValueSchema, type JsonValue } from "../../src/json-value.ts";
 import { Value } from "typebox/value";
 
@@ -38,6 +39,49 @@ describe("debug file logger", () => {
         });
 
         expect(entries[0]).not.toHaveProperty("fields.omitted");
+    });
+
+    it.each([
+        {
+            kind: "summary",
+            expectedFields: {
+                detailsKind: "object",
+                detailKeyCount: 1,
+                pierreDiffKind: "summary",
+            },
+        },
+        {
+            kind: "renderable",
+            expectedFields: {
+                detailsKind: "object",
+                detailKeyCount: 1,
+                pierreDiffKind: "renderable",
+            },
+        },
+        {
+            kind: "CREDENTIAL_a_END",
+            expectedFields: { detailsKind: "object", detailKeyCount: 1 },
+        },
+    ])("logs only the known Pierre discriminator $kind", ({ kind, expectedFields }) => {
+        const extensionDirectory = mkdtempSync(join(import.meta.dirname, ".debug-kind-"));
+        onTestFinished(() => rmSync(extensionDirectory, { recursive: true, force: true }));
+        const logger = new DebugFileLogger({ extensionDirectory, reportWarning() {} });
+        logger.configure({
+            enabled: true,
+            path: "debug.log",
+            maxBytes: null,
+            memorySampleIntervalMs: 0,
+        });
+        logger.record("tool_result", () => detailsDiagnostics({ pierreDiff: { kind } }));
+
+        const entries = readJsonLines(join(extensionDirectory, "debug.log"));
+        expect(entries).toHaveLength(1);
+        expect(entries[0]).toHaveProperty("event", "tool_result");
+        expect(entries[0]).toHaveProperty("fields", expectedFields);
+
+        expect(readFileSync(join(extensionDirectory, "debug.log"), "utf8")).not.toContain(
+            "CREDENTIAL_a_END",
+        );
     });
 
     it("does not create a file when disabled", () => {
