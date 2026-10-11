@@ -136,7 +136,7 @@ function parseChainAt(
                     break;
                 }
 
-                if (character === undefined || character === "\n" || character === "\r") break;
+                if (character === undefined) break;
 
                 value += character;
                 cursor += 1;

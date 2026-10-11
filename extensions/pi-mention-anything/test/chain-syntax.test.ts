@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import { activeChainSegment, formatChain, parseMentions } from "../src/chain-syntax.ts";
+import { parseCandidate } from "../src/source-contract.ts";
 
 const definitions = [{ id: "tmux", trigger: "t:", separator: ":" }] as const;
 
@@ -103,6 +104,33 @@ test("formatting round-trips punctuation, separators, quotes, escapes, and Unico
         String.raw`t:"work:remote":"api logs":"pane \"zero\"":"C:\\tmp":東京:"x,"`,
     );
     assert.deepEqual(parseMentions(formatted, definitions)[0]?.segments, segments);
+});
+
+test.each([
+    { newline: "LF", segment: "a\nb" },
+    { newline: "CR", segment: "a\rb" },
+    { newline: "CRLF", segment: "a\r\nb" },
+])("formatted provider segments preserve $newline line breaks", ({ segment }) => {
+    const candidate = parseCandidate({
+        id: "item",
+        label: "Item",
+        segment,
+        selectable: true,
+        navigable: false,
+    });
+
+    const formatted = formatChain([candidate.segment], "t:", ":");
+
+    assert.deepEqual(parseMentions(formatted, definitions), [
+        {
+            sourceId: "tmux",
+            trigger: "t:",
+            start: 0,
+            end: formatted.length,
+            segments: [segment],
+            complete: true,
+        },
+    ]);
 });
 
 test("rejects duplicate triggers rather than selecting by registration order", () => {
