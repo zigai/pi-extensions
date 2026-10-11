@@ -949,24 +949,27 @@ export async function renderSkillContent(
     shell?: DynamicShell,
 ): Promise<string> {
     const effectiveShell = shell ?? parseDynamicShell(parseFrontmatter(content).frontmatter.shell);
-    const withFencedCommands = await replaceAsync(
-        content,
-        FENCED_COMMAND_PATTERN,
-        async (_match, indentation: string, command: string) => {
-            const output = await runDynamicCommand(
-                command.trim(),
-                effectiveShell,
-                cwd,
-                executeCommand,
-            );
-            return `${indentation}${output}`;
-        },
-    );
+    FENCED_COMMAND_PATTERN.lastIndex = 0;
+    const fencedMatches = Array.from(content.matchAll(FENCED_COMMAND_PATTERN));
+    FENCED_COMMAND_PATTERN.lastIndex = 0;
+    const fencedOutputs: { readonly start: number; readonly end: number; readonly text: string }[] =
+        [];
+    for (const match of fencedMatches) {
+        const output = await runDynamicCommand(
+            (match[2] ?? "").trim(),
+            effectiveShell,
+            cwd,
+            executeCommand,
+        );
+        fencedOutputs.push({
+            start: match.index,
+            end: match.index + match[0].length,
+            text: `${match[1] ?? ""}${output}`,
+        });
+    }
 
-    return replaceAsync(
-        withFencedCommands,
-        INLINE_COMMAND_PATTERN,
-        async (_match, prefix: string, command: string) => {
+    const renderInline = (text: string): Promise<string> =>
+        replaceAsync(text, INLINE_COMMAND_PATTERN, async (_match, prefix, command) => {
             const output = await runDynamicCommand(
                 command.trim(),
                 effectiveShell,
@@ -974,8 +977,16 @@ export async function renderSkillContent(
                 executeCommand,
             );
             return `${prefix}${output}`;
-        },
-    );
+        });
+
+    let rendered = "";
+    let cursor = 0;
+    for (const fenced of fencedOutputs) {
+        rendered += await renderInline(content.slice(cursor, fenced.start));
+        rendered += fenced.text;
+        cursor = fenced.end;
+    }
+    return rendered + (await renderInline(content.slice(cursor)));
 }
 
 function createPiCommandExecutor(pi: Pick<SkillExtensionAPI, "exec">): DynamicCommandExecutor {

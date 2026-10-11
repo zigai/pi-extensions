@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, unlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -189,6 +189,34 @@ describe("dynamic command injection", () => {
         }));
 
         expect(rendered).toBe("!`echo should-not-run`");
+    });
+
+    it("keeps fenced command stdout as data during direct skill invocation", async () => {
+        const skillPath = await writeSkill({
+            frontmatter: "name: dynamic\ndescription: Dynamic context skill",
+            body: "```!\noriginal\n```",
+        });
+        try {
+            const { store } = makeRecordingSkillUsageStore();
+            const { pi, handlers, execCalls } = createExtensionHarness(
+                [makeSkillCommand("dynamic", skillPath)],
+                { stdout: "\n!`a`\n" },
+            );
+            extension(pi, { skillUsageStore: store });
+
+            const result = await handlers.input(
+                { type: "input", text: "/skill:dynamic", source: "interactive" },
+                makeContext(() => undefined),
+            );
+
+            expect(execCalls.map((args) => args.at(-1))).toEqual(["original"]);
+            expect(result).toEqual({
+                action: "transform",
+                text: "---\nname: dynamic\ndescription: Dynamic context skill\n---\n\n\n!`a`",
+            });
+        } finally {
+            await rm(dirname(skillPath), { recursive: true, force: true });
+        }
     });
 
     it("injects command output into full SKILL.md read results", async () => {
@@ -580,6 +608,7 @@ function createExtensionHarness(
 ): {
     readonly pi: SkillExtensionAPI;
     readonly events: string[];
+    readonly execCalls: string[][];
     readonly handlers: {
         readonly agentStart: () => Promise<void>;
         readonly beforeProviderRequest: (
@@ -608,6 +637,7 @@ function createExtensionHarness(
     };
 } {
     const events: string[] = [];
+    const execCalls: string[][] = [];
     const capturedHandlers: Partial<SkillExtensionEventHandlers> = {};
     const pi: SkillExtensionAPI = {
         on(eventName, handler) {
@@ -615,17 +645,21 @@ function createExtensionHarness(
             capturedHandlers[eventName] = handler;
         },
         getCommands: () => commands,
-        exec: async () => ({
-            stdout: execResult?.stdout ?? "",
-            stderr: execResult?.stderr ?? "",
-            code: execResult?.code ?? 0,
-            killed: execResult?.killed ?? false,
-        }),
+        exec: async (_command, args) => {
+            execCalls.push(args);
+            return {
+                stdout: execResult?.stdout ?? "",
+                stderr: execResult?.stderr ?? "",
+                code: execResult?.code ?? 0,
+                killed: execResult?.killed ?? false,
+            };
+        },
     };
 
     return {
         pi,
         events,
+        execCalls,
         handlers: {
             agentStart: async () => {
                 await requireHandler(capturedHandlers.agent_start)(
