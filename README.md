@@ -2,12 +2,6 @@
 
 A collection of small Pi extensions for improving interaction, display, and model selection.
 
-## Install
-
-Install individual extensions from the table below. The complete ordered `@zigai/pi-tweaks` collection is not being published yet.
-
-Do not enable the collection alongside the same individual extensions. The private repository root is a development package; the unpublished collection references bundled, independently versioned dependencies through Pi resource paths. Personal migration settings retain their previous load order and enabled selection; installing the collection is an explicit opt-in to all 24 extensions.
-
 ## Packages
 
 | Package                                                            | What it does                                                                      | Install                                        |
@@ -37,7 +31,7 @@ Do not enable the collection alongside the same individual extensions. The priva
 | [@zigai/pi-settings-ui](extensions/pi-settings-ui)                 | Schema-driven TUI editor for Pi extension settings.                               | `pi install npm:@zigai/pi-settings-ui`         |
 | [@zigai/pi-enhanced-skills](extensions/pi-expanded-skills)         | Enhanced Pi skills                                                                | `pi install npm:@zigai/pi-enhanced-skills`     |
 
-## Libraries and collection
+## Libraries
 
 - [@zigai/pi-extension-internals](packages/pi-extension-internals): composition protocols and guarded Pi-internal loading.
 - [@zigai/pi-extension-settings](packages/pi-extension-settings): settings runtime and artifact-generation CLI.
