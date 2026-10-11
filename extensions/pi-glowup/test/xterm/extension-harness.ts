@@ -4,7 +4,10 @@ import {
     type ToolCallEvent,
 } from "@earendil-works/pi-coding-agent";
 import glowupExtension from "../../src/index.ts";
-import { createExtensionContext, ExtensionRegistrationFixture } from "./sdk-extension-fixture.ts";
+import {
+    createExtensionContext,
+    ExtensionRegistrationFixture,
+} from "../support/sdk-extension-fixture.ts";
 
 export class GlowupExtensionHarness {
     private readonly api = new ExtensionRegistrationFixture();

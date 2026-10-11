@@ -25,7 +25,7 @@ import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import goalExtension from "../src/index.ts";
-import { VirtualTerminal } from "./support/virtual-terminal.ts";
+import { VirtualTerminal } from "./virtual-terminal.ts";
 
 class LinesComponent implements Component {
   constructor(private readonly lines: readonly string[]) {}

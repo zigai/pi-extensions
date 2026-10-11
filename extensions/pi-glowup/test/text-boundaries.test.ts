@@ -8,7 +8,7 @@ import {
     takeGraphemeSuffix,
     truncateGraphemeText,
     truncateUtf8ByGrapheme,
-} from "../../src/text-boundaries.ts";
+} from "../src/text-boundaries.ts";
 
 function expectWellFormed(text: string): void {
     expect(Buffer.from(text, "utf8").toString("utf8")).toBe(text);

@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getGlowupGlobalConfigPath } from "../../src/config/load.ts";
 import { buildPierreDiffPayload } from "../../src/rendering/diff/payload.ts";
 import { configureAutocompleteCleanupPatch } from "../../src/pi/patches/autocomplete-cleanup.ts";
-import { GlowupExtensionHarness } from "../support/extension-harness.ts";
+import { GlowupExtensionHarness } from "./extension-harness.ts";
 import { applyPatchOwnerToolDefinition } from "../support/apply-patch-owner-fixture.ts";
 import {
     rgbFromHex,

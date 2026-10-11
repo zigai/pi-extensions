@@ -4,7 +4,7 @@ import { copyFile, cp, mkdir, mkdtemp, readdir, rm, symlink, writeFile } from "n
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readModuleGraph } from "./support/module-graph.ts";
+import { readModuleGraph } from "./module-graph.ts";
 import { describe, expect, it, onTestFinished } from "vitest";
 import Type, { type Static } from "typebox";
 import { Value } from "typebox/value";
