@@ -238,7 +238,11 @@ function buildPiCommandParts(
     }
 
     if (prompt.length > 0) {
-        commandParts.push(prompt);
+        commandParts.push(
+            "--extension",
+            fileURLToPath(import.meta.url),
+            `--branch-prompt=${prompt}`,
+        );
     }
 
     return commandParts;
@@ -1720,4 +1724,19 @@ function createBranchCommand() {
 export default function (pi: ExtensionAPI): void {
     installTypedCommandUx(pi);
     registerTypedCommand(pi, createBranchCommand());
+    pi.registerFlag("branch-prompt", {
+        type: "string",
+        description: "Send a literal initial prompt to the forked session",
+    });
+    pi.on("session_start", (event) => {
+        if (event.reason !== "startup") return;
+
+        const prompt = pi.getFlag("branch-prompt");
+        if (prompt === undefined) return;
+
+        Value.Assert(Type.String(), prompt);
+        if (prompt.length > 0) {
+            pi.sendUserMessage(prompt, { expandPromptTemplates: true });
+        }
+    });
 }
