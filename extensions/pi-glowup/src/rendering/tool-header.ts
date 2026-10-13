@@ -124,8 +124,10 @@ export function renderGlowupExplore(
         const visibleActions = actions.filter((action): action is string => Boolean(action));
 
         for (const [index, action] of visibleActions.entries()) {
-            const prefix = index === 0 ? dim(theme, "  └ ") : "    ";
-            rendered.push(...wrapPrefixedLine(action, width, prefix, "    "));
+            const last = index === visibleActions.length - 1;
+            const prefix = dim(theme, last ? "  └ " : "  ├ ");
+            const restPrefix = last ? "    " : dim(theme, "  │ ");
+            rendered.push(...wrapPrefixedLine(action, width, prefix, restPrefix));
         }
 
         return rendered;

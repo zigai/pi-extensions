@@ -14,6 +14,7 @@ import {
     formatGrepAction,
     formatReadAction,
     renderGlowupCall,
+    renderGlowupExplore,
     renderMutationCall,
 } from "../../src/rendering/tool-header.ts";
 import { makeComponent } from "../../src/rendering/component.ts";
@@ -292,6 +293,32 @@ describe("Glowup rendering helpers", () => {
         expect(
             renderMutationCall(plainTheme, summary, { labelColumnWidth: 7 }).render(80)[0],
         ).toContain("Wrote   src/example.ts (+1)");
+    });
+
+    it("connects every explore entry as a tree", () => {
+        const rows = (actions: ReadonlyArray<string | undefined>, width: number) =>
+            renderGlowupExplore(plainTheme, actions)
+                .render(width)
+                .map((row) => row.trimEnd());
+
+        expect(rows(["Read a.ts", undefined, "Read b.ts", "Read c.ts", undefined], 40)).toEqual([
+            "• Explored",
+            "  ├ Read a.ts",
+            "  ├ Read b.ts",
+            "  └ Read c.ts",
+        ]);
+
+        expect(rows(["Read only.ts"], 40)).toEqual(["• Explored", "  └ Read only.ts"]);
+
+        const wrappedPrefixes = rows(
+            ["Read first-long-entry-name.ts", "Read last-long-entry-name.ts"],
+            20,
+        )
+            .slice(1)
+            .map((row) => `[${row.slice(0, 4)}]`)
+            .join("");
+
+        expect(wrappedPrefixes).toMatch(/^\[ {2}├ \](\[ {2}│ \])+\[ {2}└ \](\[ {4}\])+$/u);
     });
 
     it("renders mutation state and aligned statistics", () => {
