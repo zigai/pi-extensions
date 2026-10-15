@@ -3,7 +3,13 @@ import { createHash } from "node:crypto";
 import type { Readable, Writable } from "node:stream";
 import type { ScriptInvocation } from "./invocation.ts";
 import { jsonObjectParser, type JsonValue } from "../../../json-value.ts";
-import { jsonArrayParser, stringParser } from "../../../json-scalar.ts";
+import { stringParser } from "../../../json-scalar.ts";
+import { Value } from "typebox/value";
+import {
+    scriptFormatterProfileSchema,
+    type ScriptFormatterProfile,
+} from "../../../settings-input.ts";
+import { prepareFormatterCommand, type PreparedFormatterCommand } from "./display-profile.ts";
 
 export type ScriptBlockFormatterInput = {
     readonly label: string;
@@ -17,12 +23,14 @@ export type ScriptBlockFormatterOptions = {
     readonly targetWidth?: number;
 };
 
-export type ScriptBlockFormatter = (
+export type ScriptBlockFormatter = ((
     input: ScriptBlockFormatterInput,
     options?: ScriptBlockFormatterOptions,
-) => Promise<string | undefined>;
+) => Promise<string | undefined>) & {
+    readonly profileFor?: (language: string) => ScriptFormatterProfile | undefined;
+};
 
-export type ScriptFormatterCommands = ReadonlyMap<string, readonly string[]>;
+export type ScriptFormatterCommands = ReadonlyMap<string, ScriptFormatterProfile>;
 export type ScriptFormatterWarningReporter = (message: string) => void;
 
 export type ScriptFormatterParseOptions = {
@@ -61,13 +69,14 @@ function isSafeFormatterCommandPart(value: JsonValue): value is string {
     return text !== undefined && text.trim().length > 0 && !text.includes("\0");
 }
 
-function formatterCommand(value: JsonValue): readonly string[] | undefined {
-    const parts = jsonArrayParser.parse(value);
-    if (parts === undefined || parts.length === 0 || !parts.every(isSafeFormatterCommandPart)) {
+function formatterProfile(value: JsonValue): ScriptFormatterProfile | undefined {
+    try {
+        const profile = Value.Parse(scriptFormatterProfileSchema, value);
+        if (!profile.command.every(isSafeFormatterCommandPart)) return undefined;
+        return profile;
+    } catch {
         return undefined;
     }
-
-    return parts;
 }
 
 function normalizeCode(code: string): string {
@@ -100,7 +109,7 @@ export function parseScriptFormatterCommandsValue(
         return new Map();
     }
 
-    const commands = new Map<string, readonly string[]>();
+    const commands = new Map<string, ScriptFormatterProfile>();
     const invalidEntries: string[] = [];
     for (const [language, value] of Object.entries(record)) {
         if (language.trim().length === 0) {
@@ -108,8 +117,8 @@ export function parseScriptFormatterCommandsValue(
             continue;
         }
 
-        const command = formatterCommand(value);
-        if (command === undefined) {
+        const command = formatterProfile(value);
+        if (command === undefined || (command.kind !== "command" && command.kind !== language)) {
             invalidEntries.push(language);
             continue;
         }
@@ -158,6 +167,8 @@ async function runFormatterCommand(
     input: string,
     options: ScriptBlockFormatterOptions,
     release: () => void,
+    cwd: string | undefined,
+    reportFailure: (message: string) => void,
 ): Promise<string | undefined> {
     if (options.signal?.aborted === true) {
         release();
@@ -187,12 +198,16 @@ async function runFormatterCommand(
             child = spawn(executable, [...finalArgs], {
                 shell: false,
                 signal: options.signal,
+                cwd,
                 env,
                 stdio: ["pipe", "pipe", "ignore"],
             });
         } catch {
             release();
+
+            if (options.signal?.aborted !== true) reportFailure("could not start");
             resolve(undefined);
+
             return;
         }
 
@@ -237,12 +252,26 @@ async function runFormatterCommand(
         });
 
         child.stdin.on("error", fail);
-        child.on("error", fail);
+        child.on("error", (cause: unknown) => {
+            if (options.signal?.aborted !== true) {
+                let reason = "failed";
+                if (cause instanceof Error && "code" in cause && cause.code === "ENOENT") {
+                    reason = "executable not found";
+                }
+
+                reportFailure(reason);
+            }
+
+            fail();
+        });
+
         options.signal?.addEventListener("abort", fail, { once: true });
 
         child.once("close", (code) => {
             options.signal?.removeEventListener("abort", fail);
             clearTimeout(escalation);
+
+            if (code !== 0 && options.signal?.aborted !== true) reportFailure("failed");
             finish(code === 0 ? stdout : undefined);
             release();
         });
@@ -326,6 +355,7 @@ function startQueuedFormatters(): void {
 
 export function createCommandScriptFormatter(
     commands: ScriptFormatterCommands,
+    reportWarning: ScriptFormatterWarningReporter = console.warn,
 ): ScriptBlockFormatter | undefined {
     if (commands.size === 0) {
         return undefined;
@@ -333,6 +363,13 @@ export function createCommandScriptFormatter(
 
     const cache = new Map<string, { readonly output: string; readonly bytes: number }>();
     let cacheBytes = 0;
+    const reportedFailures = new Set<string>();
+    const reportFailure = (language: string, reason: string): void => {
+        if (reportedFailures.has(language)) return;
+
+        reportedFailures.add(language);
+        reportWarning(`[pi-glowup] ${language} display formatter ${reason}`);
+    };
 
     const remember = (key: string, output: string): void => {
         const bytes = Buffer.byteLength(output, "utf8");
@@ -351,7 +388,7 @@ export function createCommandScriptFormatter(
         }
     };
 
-    return async (input, options = {}) => {
+    const formatter: ScriptBlockFormatter = async (input, options = {}) => {
         if (options.signal?.aborted === true) return undefined;
 
         const command = commands.get(input.language);
@@ -360,12 +397,6 @@ export function createCommandScriptFormatter(
         }
 
         if (Buffer.byteLength(input.code, "utf8") > FORMATTER_MAX_INPUT_BYTES) {
-            return undefined;
-        }
-
-        const [executable, ...args] = command;
-
-        if (executable === undefined) {
             return undefined;
         }
 
@@ -388,13 +419,44 @@ export function createCommandScriptFormatter(
             return undefined;
         }
 
-        const output = await runFormatterCommand(
-            executable,
-            args,
-            input.code,
-            effectiveOptions,
-            release,
-        );
+        let prepared: PreparedFormatterCommand;
+        try {
+            prepared = await prepareFormatterCommand(command, effectiveOptions);
+        } catch {
+            release();
+
+            if (effectiveOptions.signal?.aborted !== true)
+                reportFailure(input.language, "profile could not be prepared");
+
+            return undefined;
+        }
+
+        let resolveClosed = () => {};
+        const closed = new Promise<void>((resolve) => {
+            resolveClosed = resolve;
+        });
+        const releaseClosed = (): void => {
+            release();
+            resolveClosed();
+        };
+        let output: string | undefined;
+        try {
+            output = await runFormatterCommand(
+                prepared.executable,
+                prepared.args,
+                input.code,
+                effectiveOptions,
+                releaseClosed,
+                prepared.cwd,
+                (reason) => reportFailure(input.language, reason),
+            );
+        } finally {
+            if (prepared.dispose !== undefined) {
+                await closed;
+                await prepared.dispose();
+            }
+        }
+
         if (output === undefined) {
             return undefined;
         }
@@ -406,6 +468,8 @@ export function createCommandScriptFormatter(
 
         return formatted;
     };
+
+    return Object.assign(formatter, { profileFor: (language: string) => commands.get(language) });
 }
 
 export async function formatScriptInvocation(

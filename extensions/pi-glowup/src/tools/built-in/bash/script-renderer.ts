@@ -29,7 +29,10 @@ import {
     makeComponent,
     wrapPrefixedLine,
 } from "../../../rendering/component.ts";
-import { type Component } from "@earendil-works/pi-tui";
+import { type Component, visibleWidth } from "@earendil-works/pi-tui";
+import { parse, type WordPart } from "unbash";
+import { shellWords } from "./shell-words.ts";
+import type { ScriptFormatterProfile } from "../../../settings-input.ts";
 
 export type ScriptPreviewHeaderLayout = "auto" | "inline" | "block";
 
@@ -71,6 +74,7 @@ type ShellCommandKind = "generic" | "interpreter" | "script" | "subcommands";
 
 type ShellHighlightState = {
     readonly expectsCommand: boolean;
+    readonly expectsRedirectTarget: boolean;
     readonly expectingFlagValue: boolean;
     readonly commandKind: ShellCommandKind;
     readonly sawScriptOperand: boolean;
@@ -175,6 +179,7 @@ const VALUE_SINGLE_DASH_LONG_FLAGS = new Set([
 
 const initialShellHighlightState: ShellHighlightState = {
     expectsCommand: true,
+    expectsRedirectTarget: false,
     expectingFlagValue: false,
     commandKind: "generic",
     sawScriptOperand: false,
@@ -231,6 +236,7 @@ type EmbeddedInlineHighlightRow = {
 
 function embeddedInlineHighlightRows(
     lines: ReadonlyArray<string>,
+    invalidate: (() => void) | undefined,
 ): ReadonlyMap<number, ReadonlyArray<EmbeddedInlineHighlightRow>> {
     const source = lines.join("\n");
     const scripts = embeddedInlineScripts(source);
@@ -244,7 +250,7 @@ function embeddedInlineHighlightRows(
     const rows = new Map<number, EmbeddedInlineHighlightRow[]>();
     for (const script of scripts) {
         const code = source.slice(script.start, script.end);
-        const highlightedLines = highlightSyntaxCode(code, script.language);
+        const highlightedLines = highlightSyntaxCode(code, script.language, { invalidate });
         let absoluteStart = script.start;
         for (const highlighted of highlightedLines) {
             let lineIndex = 0;
@@ -297,9 +303,10 @@ function highlightShellLineWithEmbeddedCode(
 function highlightBashScriptPreviewLines(
     lines: ReadonlyArray<string>,
     theme: GlowupRenderTheme,
+    invalidate: (() => void) | undefined,
 ): string[] {
     const highlighted: string[] = [];
-    const embeddedRows = embeddedInlineHighlightRows(lines);
+    const embeddedRows = embeddedInlineHighlightRows(lines, invalidate);
     let heredoc: BashHeredocHighlight | undefined;
     let heredocBody: string[] = [];
 
@@ -308,7 +315,9 @@ function highlightBashScriptPreviewLines(
             return;
         }
 
-        highlighted.push(...highlightSyntaxCode(heredocBody.join("\n"), heredoc.language));
+        highlighted.push(
+            ...highlightSyntaxCode(heredocBody.join("\n"), heredoc.language, { invalidate }),
+        );
         heredocBody = [];
     }
 
@@ -346,12 +355,17 @@ function highlightScriptPreviewLines(
     lines: ReadonlyArray<string>,
     language: string,
     theme: GlowupRenderTheme,
+    invalidate: (() => void) | undefined,
 ): string[] {
     if (language === "bash") {
-        return highlightBashScriptPreviewLines(lines, theme);
+        return highlightBashScriptPreviewLines(lines, theme, invalidate);
     }
 
-    return [...highlightCodePreviewRuns(lines, (code) => highlightSyntaxCode(code, language))];
+    return [
+        ...highlightCodePreviewRuns(lines, (code) =>
+            highlightSyntaxCode(code, language, { invalidate }),
+        ),
+    ];
 }
 
 function scriptPreviewSyntaxLanguages(invocation: ScriptInvocation): readonly string[] {
@@ -379,7 +393,11 @@ function scheduleScriptPreviewSyntaxLoads(
     invalidate: (() => void) | undefined,
 ): void {
     for (const language of scriptPreviewSyntaxLanguages(invocation)) {
-        scheduleCodeOutputSyntaxLoad({ language }, invalidate);
+        scheduleCodeOutputSyntaxLoad(
+            { language },
+            invalidate,
+            language === invocation.language ? invocation.code : undefined,
+        );
     }
 }
 
@@ -387,7 +405,16 @@ function collapsedScriptPreview(
     invocation: ScriptInvocation,
     maxCodePreviewLines: number,
     showPrologueOmission: boolean,
+    profile?: ScriptFormatterProfile,
 ): ScriptPreview {
+    if (profile?.kind === "bash") return { code: invocation.code };
+
+    if (profile !== undefined && profile.kind !== "command") {
+        if (profile.imports === "show") return { code: invocation.code };
+
+        maxCodePreviewLines = 0;
+    }
+
     if (trimEdgeBlankLines(invocation.code.split("\n")).length <= maxCodePreviewLines) {
         return { code: invocation.code };
     }
@@ -411,12 +438,13 @@ function scriptPreviewForRender(
     expanded: boolean,
     maxCodePreviewLines: number,
     showPrologueOmission: boolean,
+    profile?: ScriptFormatterProfile,
 ): ScriptPreview {
     if (expanded) {
         return { code: invocation.code };
     }
 
-    return collapsedScriptPreview(invocation, maxCodePreviewLines, showPrologueOmission);
+    return collapsedScriptPreview(invocation, maxCodePreviewLines, showPrologueOmission, profile);
 }
 
 function retainedScriptInvocation(
@@ -424,6 +452,7 @@ function retainedScriptInvocation(
     expanded: boolean,
     maxCodePreviewLines: number,
     showPrologueOmission: boolean,
+    profile?: ScriptFormatterProfile,
 ): ScriptInvocation {
     if (expanded) {
         return invocation;
@@ -433,7 +462,8 @@ function retainedScriptInvocation(
         label: invocation.label,
         language: invocation.language,
         code: detachedScriptPreviewCode(
-            collapsedScriptPreview(invocation, maxCodePreviewLines, showPrologueOmission).code,
+            collapsedScriptPreview(invocation, maxCodePreviewLines, showPrologueOmission, profile)
+                .code,
         ),
     };
 }
@@ -502,6 +532,8 @@ export type ScriptCallRenderOptions = {
     readonly omittedHint?: string;
     readonly headerLayout?: ScriptPreviewHeaderLayout;
     readonly invalidate?: () => void;
+    readonly onContentWidth?: (contentWidth: number, renderWidth: number) => void;
+    readonly profile?: ScriptFormatterProfile;
 };
 
 export function renderScriptCall(
@@ -518,6 +550,7 @@ export function renderScriptCall(
         expanded,
         maxCodePreviewLines,
         showPrologueOmission,
+        options.profile,
     );
     const omittedHint = options.omittedHint ?? toolExpandHint();
     const headerLayoutOption = options.headerLayout ?? "auto";
@@ -531,14 +564,24 @@ export function renderScriptCall(
             expanded,
             maxCodePreviewLines,
             showPrologueOmission,
+            options.profile,
         );
 
         if (preview.code.length === 0) {
             return wrapPrefixedLine("", width, header, "  ");
         }
 
-        const fullLines = trimEdgeBlankLines(preview.code.split("\n"));
-        const fullHighlighted = highlightScriptPreviewLines(fullLines, retained.language, theme);
+        let fullLines = preview.code.split("\n");
+        if (!expanded || options.profile === undefined) {
+            fullLines = trimEdgeBlankLines(fullLines);
+        }
+
+        const fullHighlighted = highlightScriptPreviewLines(
+            fullLines,
+            retained.language,
+            theme,
+            options.invalidate,
+        );
         const collapsedPreview = expanded
             ? undefined
             : collapsedPreviewLinesFromText(
@@ -555,19 +598,35 @@ export function renderScriptCall(
                   : collapsedPreview.lines;
         const rendered: string[] = [];
         const headerLayout = resolveScriptHeaderLayout(headerLayoutOption, retained, highlighted);
+        let prefixWidth = 4;
+        if (headerLayout === "inline") prefixWidth = visibleWidth(`${header} `);
+        options.onContentWidth?.(Math.max(1, width - Math.max(prefixWidth, 6)), width);
+
         if (headerLayout === "block") {
             rendered.push(...wrapPrefixedLine("", width, header, "  "));
         }
 
-        let contentRows = 0;
-        let softWrapTruncated = false;
-        for (const [index, line] of highlighted.entries()) {
+        const wrappedLines = highlighted.map((line, index) => {
             const meta = isPreviewMetaLine(line);
             const styled = meta ? muted(theme, line) : line;
             const firstPrefix =
                 headerLayout === "inline" && index === 0 ? `${header} ` : dim(theme, "  │ ");
-            const wrapped = wrapScriptLine(theme, styled, width, firstPrefix);
-            if (expanded || meta) {
+            return { meta, wrapped: wrapScriptLine(theme, styled, width, firstPrefix) };
+        });
+        const hasTailOmission = highlighted.some(
+            (line) => isPreviewMetaLine(line) && !line.includes("import/setup lines omitted"),
+        );
+        const totalContentRows = wrappedLines
+            .filter((line) => !line.meta)
+            .reduce((rows, line) => rows + line.wrapped.length, 0);
+        if (expanded || (!hasTailOmission && totalContentRows <= maxCodePreviewLines + 1)) {
+            return [...rendered, ...wrappedLines.flatMap((line) => line.wrapped)];
+        }
+
+        let contentRows = 0;
+        let softWrapTruncated = false;
+        for (const { meta, wrapped } of wrappedLines) {
+            if (meta) {
                 rendered.push(...wrapped);
                 continue;
             }
@@ -604,11 +663,22 @@ function tokenizeShellLine(line: string): string[] {
         return [];
     }
 
-    return (
-        line.match(
-            /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|&&|\|\||2>>|2>|>>|\[\[|\]\]|[|;&<>{}!]|\s+|[^\s|;&<>{}!]+/g,
-        ) ?? [line]
-    );
+    const gapTokens = (text: string): string[] =>
+        text.match(
+            /(?:\d+)?(?:<<-|<<<|<<|>>|<>|<&|>&|>\||[<>])|&>>|&>|&&|\|\||\[\[|\]\]|[|;&{}!]|\s+|[^\s|;&<>{}!]+/gu,
+        ) ?? [];
+
+    const tokens: string[] = [];
+    let cursor = 0;
+    for (const word of shellWords(line)) {
+        if (word.pos < cursor) continue;
+        tokens.push(...gapTokens(line.slice(cursor, word.pos)), word.text);
+        cursor = word.end;
+    }
+
+    tokens.push(...gapTokens(line.slice(cursor)));
+
+    return tokens;
 }
 
 function shellCommentStart(line: string): number | undefined {
@@ -714,8 +784,52 @@ function styleShellFlagToken(theme: GlowupRenderTheme, token: string): string {
     return shellFlag(theme, token);
 }
 
+function shellPart(theme: GlowupRenderTheme, part: WordPart, quoted: boolean): string {
+    switch (part.type) {
+        case "SingleQuoted":
+        case "AnsiCQuoted":
+            return shellString(theme, part.text);
+        case "DoubleQuoted":
+        case "LocaleString": {
+            let openingLength = 1;
+            if (part.type === "LocaleString") openingLength = 2;
+
+            const childrenLength = part.parts.reduce(
+                (length, child) => length + child.text.length,
+                0,
+            );
+
+            return `${shellString(theme, part.text.slice(0, openingLength))}${part.parts.map((child) => shellPart(theme, child, true)).join("")}${shellString(theme, part.text.slice(openingLength + childrenLength))}`;
+        }
+        case "SimpleExpansion":
+        case "ParameterExpansion":
+        case "CommandExpansion":
+        case "ArithmeticExpansion":
+            return theme.fg("syntaxVariable", part.text);
+        case "BraceExpansion":
+        case "ExtendedGlob":
+        case "Literal":
+        case "ProcessSubstitution":
+            break;
+    }
+
+    if (quoted) return shellString(theme, part.text);
+    return shellText(theme, part.text);
+}
+
 function shellValue(theme: GlowupRenderTheme, token: string): string {
-    return isQuotedShellString(token) ? shellString(theme, token) : shellText(theme, token);
+    try {
+        const command = parse(`: ${token}`).commands[0]?.command;
+        if (command?.type === "Command") {
+            const parts = command.suffix[0]?.parts;
+            if (parts !== undefined)
+                return parts.map((part) => shellPart(theme, part, false)).join("");
+        }
+    } catch {
+        return shellText(theme, token);
+    }
+
+    return shellText(theme, token);
 }
 
 function shellFlagConsumesValue(token: string): boolean {
@@ -767,25 +881,21 @@ function styleShellToken(
         return { styled: token, state };
     }
 
-    if (
-        [
-            "|",
-            "||",
-            "&&",
-            "&",
-            ";",
-            ">",
-            ">>",
-            "<",
-            "2>",
-            "2>>",
-            "{",
-            "}",
-            "!",
-            "[[",
-            "]]",
-        ].includes(token)
-    ) {
+    if (/^(?:\d+)?(?:<<-|<<<|<<|>>|<>|<&|>&|>\||[<>])$|^&>>?$/u.test(token)) {
+        return {
+            styled: shellOperator(theme, token),
+            state: { ...state, expectsRedirectTarget: true },
+        };
+    }
+
+    if (state.expectsRedirectTarget) {
+        return {
+            styled: shellValue(theme, token),
+            state: { ...state, expectsRedirectTarget: false },
+        };
+    }
+
+    if (["|", "||", "&&", "&", ";", "{", "}", "!", "[[", "]]"].includes(token)) {
         return { styled: shellOperator(theme, token), state: initialShellHighlightState };
     }
 
@@ -815,12 +925,16 @@ function styleShellToken(
         };
     }
 
-    if (/^[A-Za-z_][A-Za-z0-9_]*=.*/.test(token)) {
-        return { styled: shellString(theme, token), state };
+    const assignment = /^(?<name>[A-Za-z_][A-Za-z0-9_]*)(?<operator>\+?=)/u.exec(token);
+    if (assignment?.groups !== undefined) {
+        return {
+            styled: `${theme.fg("syntaxVariable", assignment.groups.name ?? "")}${shellOperator(theme, assignment.groups.operator ?? "")}${shellValue(theme, token.slice(assignment[0].length))}`,
+            state,
+        };
     }
 
-    if (isQuotedShellString(token)) {
-        return { styled: shellString(theme, token), state: shellStateAfterOperand(state) };
+    if (isQuotedShellString(token) || token.includes("$")) {
+        return { styled: shellValue(theme, token), state: shellStateAfterOperand(state) };
     }
 
     if (state.expectsCommand) {
@@ -832,6 +946,7 @@ function styleShellToken(
             styled: shellCommand(theme, token),
             state: {
                 expectsCommand: false,
+                expectsRedirectTarget: false,
                 expectingFlagValue: false,
                 commandKind: shellCommandKind(token),
                 sawScriptOperand: false,

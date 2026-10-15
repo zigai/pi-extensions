@@ -1,4 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+import { stripVTControlCharacters } from "node:util";
+import { createCodemodePreview } from "../../src/tools/external/codemode.ts";
+import {
+    createCommandScriptFormatter,
+    parseScriptFormatterCommandsValue,
+    type ScriptBlockFormatter,
+    type ScriptBlockFormatterInput,
+    type ScriptBlockFormatterOptions,
+} from "../../src/tools/built-in/bash/formatter.ts";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
@@ -1218,6 +1229,115 @@ describe("third-party tool renderers", () => {
 
         expect(rendered).toContain("questions: 1 item");
         expect(rendered).not.toContain("questions: 1 items");
+    });
+
+    it("publishes Codemode decoration only after completion, uses content width, and expands original source", async () => {
+        const previews = createCodemodePreview();
+        const executable = join(
+            dirname(createRequire(import.meta.url).resolve("oxfmt/package.json")),
+            "bin",
+            "oxfmt",
+        );
+        const backend = createCommandScriptFormatter(
+            parseScriptFormatterCommandsValue({
+                javascript: { kind: "javascript", command: [executable], imports: "omit" },
+            }),
+        );
+        if (backend === undefined) throw new Error("Expected formatter");
+
+        const restored = createCodemodePreview(() => backend);
+        let prepared = false;
+        const formatter: ScriptBlockFormatter = Object.assign(
+            async (input: ScriptBlockFormatterInput, options?: ScriptBlockFormatterOptions) => {
+                const output = await backend(input, options);
+                if (output !== undefined && options?.signal?.aborted !== true) prepared = true;
+                return output;
+            },
+            { profileFor: (language: string) => backend.profileFor?.(language) },
+        );
+        const code =
+            'import fs from "node:fs";\n\nconst entry = {\n  alpha: 100,\n  beta: 200,\n  gamma: 300,\n};\n\ntext(entry);';
+        const args = { code };
+        const renderer = createThirdPartyToolRenderer("codemode", { codemodePreview: previews });
+        let finished = false;
+
+        const context = {
+            ...renderContext,
+            toolCallId: "profile-code",
+            args,
+            invalidate: () => {},
+        };
+        const render = (width = 120, expanded = false) =>
+            stripVTControlCharacters(
+                renderer
+                    .renderCall(args, plainTheme, {
+                        ...context,
+                        isPartial: !finished,
+                        expanded,
+                        ...(finished && { result: { content: [] } }),
+                    })
+                    .render(width)
+                    .join("\n"),
+            );
+        try {
+            previews.schedule({
+                toolCallId: context.toolCallId,
+                code,
+                formatter,
+                isCurrent: () => true,
+                invalidate: () => {},
+            });
+
+            render();
+            await vi.waitUntil(() => prepared);
+            expect(render()).toContain('import fs from "node:fs";');
+            expect(render()).toContain("const entry = {\n");
+            finished = true;
+            renderer.renderResult(
+                { content: [] },
+                { expanded: false, isPartial: false },
+                plainTheme,
+                context,
+            );
+            await vi.waitUntil(() =>
+                render().includes("const entry = { alpha: 100, beta: 200, gamma: 300 };"),
+            );
+            expect(render()).not.toContain("import fs");
+            expect(render(120, true)).toContain('import fs from "node:fs";');
+            expect(render(120, true)).toContain("const entry = {\n");
+            render(42);
+            await vi.waitUntil(() => render(42).includes("const entry = {\n"));
+            render();
+            await vi.waitUntil(() =>
+                render().includes("const entry = { alpha: 100, beta: 200, gamma: 300 };"),
+            );
+            expect(args).toEqual({ code });
+            const restoredRenderer = createThirdPartyToolRenderer("codemode", {
+                codemodePreview: restored,
+            });
+            const renderRestored = (expanded = false) =>
+                stripVTControlCharacters(
+                    restoredRenderer
+                        .renderCall(args, plainTheme, {
+                            ...context,
+                            toolCallId: "restored-profile",
+                            expanded,
+                            result: { content: [] },
+                        })
+                        .render(120)
+                        .join("\n"),
+                );
+            expect(renderRestored()).toContain('import fs from "node:fs";');
+            await vi.waitUntil(() =>
+                renderRestored().includes("const entry = { alpha: 100, beta: 200, gamma: 300 };"),
+            );
+            expect(renderRestored()).not.toContain("import fs");
+            expect(renderRestored(true)).toContain('import fs from "node:fs";');
+            expect(renderRestored(true)).toContain("const entry = {\n");
+        } finally {
+            restored.clear();
+            previews.clear();
+        }
     });
 
     it("shows codemode source and nested outcomes without script envelopes or raw result JSON", () => {

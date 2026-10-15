@@ -1,3 +1,4 @@
+import type { ExtensionSettingsDefinitionInput } from "@zigai/pi-extension-settings";
 import Type, { type StaticDecode } from "typebox";
 import { DEFAULT_MUTATION_SETTINGS } from "./rendering/preview-settings.ts";
 
@@ -292,9 +293,111 @@ const patchesSchema = Type.Object(
     },
 );
 
-const formatterCommandSchema = Type.Array(Type.String({ minLength: 1 }), {
+const formatterCommandSchema = Type.Array(Type.String({ minLength: 1, pattern: "^[^\\u0000]+$" }), {
     minItems: 1,
+    description: "Executable followed by arguments; no shell expansion is performed.",
 });
+
+const formatterImportsSchema = Type.Optional(
+    Type.Union([Type.Literal("show"), Type.Literal("omit")], {
+        description:
+            "Leading import/setup visibility in collapsed display; expansion shows original source.",
+        default: "omit",
+    }),
+);
+
+const javascriptFormatterProperties = {
+    command: formatterCommandSchema,
+    imports: formatterImportsSchema,
+    tabWidth: Type.Optional(
+        Type.Integer({ minimum: 1, default: 2, description: "Oxfmt indentation width." }),
+    ),
+    objectWrap: Type.Optional(
+        Type.Union([Type.Literal("collapse"), Type.Literal("preserve")], {
+            default: "collapse",
+            description: "Collapse object literals when they fit the actual content width.",
+        }),
+    ),
+};
+
+export const scriptFormatterProfileSchema = Type.Union([
+    Type.Object(
+        {
+            kind: Type.Literal("command", {
+                description: "Run custom argv without generated formatter configuration.",
+            }),
+            command: formatterCommandSchema,
+        },
+        { additionalProperties: false, title: "CommandFormatter" },
+    ),
+    Type.Object(
+        {
+            kind: Type.Literal("python", { description: "Use Tuff's Python formatter." }),
+            command: formatterCommandSchema,
+            imports: formatterImportsSchema,
+            indentWidth: Type.Optional(
+                Type.Integer({ minimum: 1, default: 4, description: "Python indentation width." }),
+            ),
+            collections: Type.Optional(
+                Type.Union([Type.Literal("fill"), Type.Literal("ruff-default")], {
+                    default: "ruff-default",
+                    description:
+                        "Collapse collections that fit; fill instead packs items within multiline brackets.",
+                }),
+            ),
+            magicTrailingComma: Type.Optional(
+                Type.Boolean({
+                    default: false,
+                    description: "Treat trailing commas as requests for vertical expansion.",
+                }),
+            ),
+        },
+        { additionalProperties: false, title: "PythonFormatter" },
+    ),
+    Type.Object(
+        {
+            kind: Type.Literal("javascript", { description: "Use Oxfmt's JavaScript parser." }),
+            ...javascriptFormatterProperties,
+        },
+        { additionalProperties: false, title: "JavaScriptFormatter" },
+    ),
+    Type.Object(
+        {
+            kind: Type.Literal("typescript", { description: "Use Oxfmt's TypeScript parser." }),
+            ...javascriptFormatterProperties,
+        },
+        { additionalProperties: false, title: "TypeScriptFormatter" },
+    ),
+    Type.Object(
+        {
+            kind: Type.Literal("bash", {
+                description: "Use shfmt's Bash formatter without minification.",
+            }),
+            command: formatterCommandSchema,
+            indentWidth: Type.Optional(
+                Type.Integer({ minimum: 1, default: 2, description: "Bash indentation width." }),
+            ),
+            caseIndent: Type.Optional(
+                Type.Boolean({ default: true, description: "Indent Bash case arms." }),
+            ),
+            spaceRedirects: Type.Optional(
+                Type.Boolean({
+                    default: true,
+                    description: "Separate redirect operators from targets.",
+                }),
+            ),
+            binaryNextLine: Type.Optional(
+                Type.Boolean({
+                    default: false,
+                    description: "Start continued Bash chains with their operator.",
+                }),
+            ),
+        },
+        { additionalProperties: false, title: "BashFormatter" },
+    ),
+]);
+
+export type ScriptFormatterProfile = StaticDecode<typeof scriptFormatterProfileSchema>;
 
 const scriptPreviewSchema = Type.Object(
     {
@@ -321,8 +424,9 @@ const scriptPreviewSchema = Type.Object(
         shellOperatorPosition: Type.Union([Type.Literal("trailing"), Type.Literal("leading")], {
             description: "Place Bash chain operators before or after reflowed line breaks.",
         }),
-        formatters: Type.Record(Type.String(), formatterCommandSchema, {
-            description: "Commands that format script previews through stdin/stdout.",
+        formatters: Type.Record(Type.String(), scriptFormatterProfileSchema, {
+            description:
+                "Display-only profiles keyed by matching language id; expansion shows original source.",
         }),
     },
     {
@@ -360,6 +464,14 @@ export const extensionSettingsInput = {
     schemaId:
         "https://raw.githubusercontent.com/zigai/pi-tweaks/master/extensions/pi-glowup/config.schema.json",
     schema: settingsSchema,
-} as const;
+    exampleSettings: {
+        scriptPreview: {
+            formatters: {
+                javascript: { kind: "javascript", command: ["oxfmt"], objectWrap: "collapse" },
+                python: { kind: "python", command: ["tuff"], collections: "ruff-default" },
+            },
+        },
+    },
+} as const satisfies ExtensionSettingsDefinitionInput<typeof settingsSchema>;
 
 export default extensionSettingsInput;

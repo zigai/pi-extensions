@@ -137,7 +137,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
 
     const edit = createNativeEditFeature();
     const bash = createNativeBashFeature();
-    const codemode = createCodemodePreview();
+    const codemode = createCodemodePreview(() => formatter);
     const deletion = createNativeDeleteFeature();
     const exploration = createExplorationFeature();
     const { captureNativeEditSnapshot, finishNativeEditSnapshot } = edit;
@@ -158,6 +158,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
 
     let restoreAbort: AbortController | undefined;
     const clearSessionState = (): void => {
+        syntax.cancel();
         restoreAbort?.abort();
         restoreAbort = undefined;
         edit.clear();
@@ -381,6 +382,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
                     toolCallId: event.toolCallId,
                     code,
                     formatter,
+                    completed: true,
                     isCurrent: () => sessionGeneration === formatterGeneration,
                     invalidate: () => refreshToolRows(ctx),
                 });

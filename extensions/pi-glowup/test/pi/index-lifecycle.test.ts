@@ -2,7 +2,8 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import {
     createEditTool,
@@ -558,7 +559,10 @@ describe("extension lifecycle", () => {
         const root = mkdtempSync(join(tmpdir(), "pi-glowup-lifecycle-"));
         process.env[AGENT_DIR_ENV] = join(root, "agent");
         process.env[SCRIPT_FORMATTERS_ENV] = JSON.stringify({
-            python: [process.execPath, "-e", "setTimeout(() => {}, 1000)"],
+            python: {
+                kind: "command",
+                command: [process.execPath, "-e", "setTimeout(() => {}, 1000)"],
+            },
         });
         const pi = new FakeExtensionApi();
 
@@ -575,11 +579,16 @@ describe("extension lifecycle", () => {
         const root = mkdtempSync(join(tmpdir(), "pi-glowup-restored-node-"));
         process.env[AGENT_DIR_ENV] = join(root, "agent");
         process.env[SCRIPT_FORMATTERS_ENV] = JSON.stringify({
-            javascript: [
-                process.execPath,
-                "-e",
-                "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>process.stdout.write(s.replace('; ', ';\\n')))",
-            ],
+            javascript: {
+                kind: "javascript",
+                command: [
+                    join(
+                        dirname(createRequire(import.meta.url).resolve("oxfmt/package.json")),
+                        "bin",
+                        "oxfmt",
+                    ),
+                ],
+            },
         });
         const command = `node -e 'const item = "RESTORED_NODE"; console.log(item)'`;
         const call = {

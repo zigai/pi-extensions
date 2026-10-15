@@ -75,7 +75,9 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-glowup.json`.
 | `scriptPreview.showPrologueOmission` | boolean | `false` | Show a count row when collapsed previews omit leading setup imports. |
 | `scriptPreview.shellLayout` | `preserve` \| `auto` \| `always` | `"auto"` | Choose when composed Bash commands are reflowed at safe syntax boundaries. |
 | `scriptPreview.shellOperatorPosition` | `trailing` \| `leading` | `"trailing"` | Place Bash chain operators before or after reflowed line breaks. |
-| `scriptPreview.formatters` | Record<string, string[]> | `{}` | Commands that format script previews through stdin/stdout. |
+| `scriptPreview.formatters` | Record<string, CommandFormatter \| PythonFormatter \| JavaScriptFormatter \| TypeScriptFormatter \| BashFormatter> | `{}` | Display-only profiles keyed by matching language id; expansion shows original source. |
+
+### Defaults
 
 ```json
 {
@@ -151,6 +153,32 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-glowup.json`.
     "shellLayout": "auto",
     "shellOperatorPosition": "trailing",
     "formatters": {}
+  }
+}
+```
+
+### Advanced example
+
+```json
+{
+  "$schema": "./schemas/pi-glowup.schema.json",
+  "scriptPreview": {
+    "formatters": {
+      "javascript": {
+        "kind": "javascript",
+        "command": [
+          "oxfmt"
+        ],
+        "objectWrap": "collapse"
+      },
+      "python": {
+        "kind": "python",
+        "command": [
+          "tuff"
+        ],
+        "collections": "ruff-default"
+      }
+    }
   }
 }
 ```

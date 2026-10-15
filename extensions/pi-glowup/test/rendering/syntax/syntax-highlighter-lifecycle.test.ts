@@ -17,6 +17,8 @@ import {
     getLoadedSyntaxHighlighterForLanguage,
     getSyntaxHighlighterForLanguage,
     highlightSyntaxCode,
+    highlightSyntaxCodeAsync,
+    settleSyntaxHighlights,
     initializeSyntaxHighlighting,
     isSyntaxHighlightingReady,
     loadSyntaxLanguageIfReady,
@@ -737,7 +739,7 @@ describe("syntax highlighter lifecycle", () => {
             "const value: string = 'ok';",
             "TS",
         ].join("\n");
-        let component: Component = renderScriptCall(
+        const component: Component = renderScriptCall(
             plainTheme,
             { label: "Bash", language: "bash", code },
             {
@@ -745,25 +747,15 @@ describe("syntax highlighter lifecycle", () => {
                 expanded: false,
                 invalidate() {
                     invalidations += 1;
+                    component.invalidate();
                 },
             },
         );
 
         expect(component.render(120).join("\n")).not.toContain("\u001b[");
         await waitForCondition(() => invalidations > 0);
-
-        component = renderScriptCall(
-            plainTheme,
-            { label: "Bash", language: "bash", code },
-            {
-                state: "success",
-                expanded: false,
-                invalidate() {
-                    invalidations += 1;
-                },
-            },
-        );
-
+        component.render(120);
+        await settleSyntaxHighlights();
         const rendered = component.render(120).join("\n");
 
         expect(rendered).toContain("\u001b[");
@@ -776,7 +768,10 @@ describe("syntax highlighter lifecycle", () => {
     it("disposes and resets highlighter state between sessions", async () => {
         await initializeSyntaxHighlighting();
         expect(isSyntaxHighlightingReady()).toBe(true);
-        expect(highlightSyntaxCode("import sys", "python").join("\n")).toContain("\u001b[");
+        expect((await highlightSyntaxCodeAsync("import sys", "python")).join("\n")).toContain(
+            "\u001b[",
+        );
+
         expect(syntaxHighlightCacheStats().entries).toBeGreaterThan(0);
 
         await disposeSyntaxHighlighting();
@@ -795,11 +790,11 @@ describe("syntax highlighter lifecycle", () => {
         await initializeSyntaxHighlighting();
         clearSyntaxHighlightCache();
 
-        highlightSyntaxCode("streamed = 1", "python", { cache: false });
+        await highlightSyntaxCodeAsync("streamed = 1", "python", { cache: false });
 
         expect(syntaxHighlightCacheStats()).toEqual({ entries: 0, bytes: 0 });
 
-        highlightSyntaxCode("final_value = 1", "python");
+        await highlightSyntaxCodeAsync("final_value = 1", "python");
 
         expect(syntaxHighlightCacheStats().entries).toBe(1);
         expect(syntaxHighlightCacheStats().bytes).toBeGreaterThan(0);

@@ -7,6 +7,7 @@ import { boundedScriptPreview } from "./preview-store.ts";
 import { parseScriptInvocation, type ScriptInvocation } from "./invocation.ts";
 
 type ScriptPreviewSink = {
+    get(toolCallId: string): ScriptInvocation | undefined;
     set(toolCallId: string, preview: ScriptInvocation): void;
 };
 
@@ -21,13 +22,25 @@ export type FormatScriptPreviewOptions = {
     readonly invalidate?: () => void;
 };
 
+export function scriptForPreview(
+    command: string,
+    formatter: ScriptBlockFormatter | undefined,
+): ScriptInvocation | undefined {
+    const script = parseScriptInvocation(command);
+    if (script !== undefined) return script;
+    if (formatter?.profileFor?.("bash") === undefined) return undefined;
+
+    return { label: "Bash", language: "bash", code: command };
+}
+
 /** Stores the cheap raw script preview for the command currently associated with a tool call. */
 export function rememberRawScriptPreview(
     sink: ScriptPreviewSink,
     toolCallId: string,
     command: string,
+    formatter?: ScriptBlockFormatter,
 ): void {
-    const script = parseScriptInvocation(command);
+    const script = scriptForPreview(command, formatter);
     if (script === undefined) {
         return;
     }
@@ -38,9 +51,9 @@ export function rememberRawScriptPreview(
 /** Formats and stores a script preview after the final bash command is known. */
 export async function formatAndStoreScriptPreview(
     options: FormatScriptPreviewOptions,
-): Promise<void> {
-    const script = parseScriptInvocation(options.command);
-    if (options.formatter === undefined || script === undefined) return;
+): Promise<boolean> {
+    const script = scriptForPreview(options.command, options.formatter);
+    if (options.formatter === undefined || script === undefined) return false;
 
     const formatterOptions: ScriptBlockFormatterOptions = {
         ...(options.signal !== undefined && { signal: options.signal }),
@@ -51,10 +64,13 @@ export async function formatAndStoreScriptPreview(
         options.formatter,
         formatterOptions,
     );
-    if (formattedScript.code !== script.code && (options.isCurrent?.() ?? true)) {
+    const previousCode = options.sink.get(options.toolCallId)?.code ?? script.code;
+    if (formattedScript.code !== previousCode && (options.isCurrent?.() ?? true)) {
         options.sink.set(options.toolCallId, boundedScriptPreview(formattedScript));
         options.invalidate?.();
     }
+
+    return formattedScript !== script;
 }
 
 /** Starts best-effort formatter work without blocking Pi tool preflight or result delivery. */

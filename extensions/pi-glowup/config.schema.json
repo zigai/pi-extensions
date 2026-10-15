@@ -507,15 +507,269 @@
           "type": "object",
           "patternProperties": {
             "^.*$": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1
-              },
-              "minItems": 1
+              "anyOf": [
+                {
+                  "type": "object",
+                  "required": [
+                    "kind",
+                    "command"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "command",
+                      "description": "Run custom argv without generated formatter configuration."
+                    },
+                    "command": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "^[^\\u0000]+$"
+                      },
+                      "minItems": 1,
+                      "description": "Executable followed by arguments; no shell expansion is performed."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "title": "CommandFormatter"
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "kind",
+                    "command"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "python",
+                      "description": "Use Tuff's Python formatter."
+                    },
+                    "command": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "^[^\\u0000]+$"
+                      },
+                      "minItems": 1,
+                      "description": "Executable followed by arguments; no shell expansion is performed."
+                    },
+                    "imports": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "show"
+                        },
+                        {
+                          "type": "string",
+                          "const": "omit"
+                        }
+                      ],
+                      "description": "Leading import/setup visibility in collapsed display; expansion shows original source.",
+                      "default": "omit"
+                    },
+                    "indentWidth": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "default": 4,
+                      "description": "Python indentation width."
+                    },
+                    "collections": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "fill"
+                        },
+                        {
+                          "type": "string",
+                          "const": "ruff-default"
+                        }
+                      ],
+                      "default": "ruff-default",
+                      "description": "Collapse collections that fit; fill instead packs items within multiline brackets."
+                    },
+                    "magicTrailingComma": {
+                      "type": "boolean",
+                      "default": false,
+                      "description": "Treat trailing commas as requests for vertical expansion."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "title": "PythonFormatter"
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "kind",
+                    "command"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "javascript",
+                      "description": "Use Oxfmt's JavaScript parser."
+                    },
+                    "command": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "^[^\\u0000]+$"
+                      },
+                      "minItems": 1,
+                      "description": "Executable followed by arguments; no shell expansion is performed."
+                    },
+                    "imports": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "show"
+                        },
+                        {
+                          "type": "string",
+                          "const": "omit"
+                        }
+                      ],
+                      "description": "Leading import/setup visibility in collapsed display; expansion shows original source.",
+                      "default": "omit"
+                    },
+                    "tabWidth": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "default": 2,
+                      "description": "Oxfmt indentation width."
+                    },
+                    "objectWrap": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "collapse"
+                        },
+                        {
+                          "type": "string",
+                          "const": "preserve"
+                        }
+                      ],
+                      "default": "collapse",
+                      "description": "Collapse object literals when they fit the actual content width."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "title": "JavaScriptFormatter"
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "kind",
+                    "command"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "typescript",
+                      "description": "Use Oxfmt's TypeScript parser."
+                    },
+                    "command": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "^[^\\u0000]+$"
+                      },
+                      "minItems": 1,
+                      "description": "Executable followed by arguments; no shell expansion is performed."
+                    },
+                    "imports": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "show"
+                        },
+                        {
+                          "type": "string",
+                          "const": "omit"
+                        }
+                      ],
+                      "description": "Leading import/setup visibility in collapsed display; expansion shows original source.",
+                      "default": "omit"
+                    },
+                    "tabWidth": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "default": 2,
+                      "description": "Oxfmt indentation width."
+                    },
+                    "objectWrap": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "collapse"
+                        },
+                        {
+                          "type": "string",
+                          "const": "preserve"
+                        }
+                      ],
+                      "default": "collapse",
+                      "description": "Collapse object literals when they fit the actual content width."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "title": "TypeScriptFormatter"
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "kind",
+                    "command"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "bash",
+                      "description": "Use shfmt's Bash formatter without minification."
+                    },
+                    "command": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "^[^\\u0000]+$"
+                      },
+                      "minItems": 1,
+                      "description": "Executable followed by arguments; no shell expansion is performed."
+                    },
+                    "indentWidth": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "default": 2,
+                      "description": "Bash indentation width."
+                    },
+                    "caseIndent": {
+                      "type": "boolean",
+                      "default": true,
+                      "description": "Indent Bash case arms."
+                    },
+                    "spaceRedirects": {
+                      "type": "boolean",
+                      "default": true,
+                      "description": "Separate redirect operators from targets."
+                    },
+                    "binaryNextLine": {
+                      "type": "boolean",
+                      "default": false,
+                      "description": "Start continued Bash chains with their operator."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "title": "BashFormatter"
+                }
+              ]
             }
           },
-          "description": "Commands that format script previews through stdin/stdout."
+          "description": "Display-only profiles keyed by matching language id; expansion shows original source."
         }
       },
       "additionalProperties": false,

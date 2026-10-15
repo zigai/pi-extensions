@@ -474,7 +474,10 @@ describe("glowup config", () => {
                     projectLanguageDetection: { enabled: true },
                 },
                 patches: { workingWidgetSpacing: false, markdownSyntax: false },
-                scriptPreview: { maxCodePreviewLines: 4, formatters: { python: ["black", "-"] } },
+                scriptPreview: {
+                    maxCodePreviewLines: 4,
+                    formatters: { python: { kind: "command", command: ["black", "-"] } },
+                },
             }),
         );
 
@@ -553,7 +556,10 @@ describe("glowup config", () => {
                     projectLanguageDetection: { enabled: true },
                 },
                 patches: { workingWidgetSpacing: false, markdownSyntax: false },
-                scriptPreview: { maxCodePreviewLines: 4, formatters: { python: ["black", "-"] } },
+                scriptPreview: {
+                    maxCodePreviewLines: 4,
+                    formatters: { python: { kind: "command", command: ["black", "-"] } },
+                },
             }),
         );
 
@@ -574,7 +580,11 @@ describe("glowup config", () => {
 
         expect(config.scriptHeaderLayout).toBe("block");
         expect(config.scriptMaxCodePreviewLines).toBe(4);
-        expect(config.scriptFormatters.get("python")).toEqual(["black", "-"]);
+        expect(config.scriptFormatters.get("python")).toEqual({
+            kind: "command",
+            command: ["black", "-"],
+        });
+
         expect(config.toolCallIndicator).toEqual({ symbol: "·", bold: true });
         expect(config.toolLabels.mode).toBe("static");
         expect(config.writePreview.movingViewport).toBe(true);

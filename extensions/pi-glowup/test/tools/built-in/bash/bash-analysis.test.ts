@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -181,6 +182,41 @@ describe("bash command analysis", () => {
         ).toBe(`git add src/one.ts &&\ngit commit -m "fix: handle imports for scripts"`);
     });
 
+    it.each([
+        ["else # else\n", "else # else\n"],
+        ["else # the else branch\n", "else # the else branch\n"],
+        ["else\n# else\n", "else\n# else\n"],
+    ])("keeps branch comments lexical: %s", (branch, preserved) => {
+        const source = `if check; then first; ${branch}second; fi`;
+        const displayed = reflowBashCommand(source);
+        expect(displayed).toBe(`if check; then\n  first;\n${preserved}second;\nfi`);
+        expect(spawnSync("bash", ["--noprofile", "--norc", "-n"], { input: source }).status).toBe(
+            0,
+        );
+
+        expect(
+            spawnSync("bash", ["--noprofile", "--norc", "-n"], { input: displayed }).status,
+        ).toBe(0);
+    });
+
+    it.each([
+        "if check; then printf '%s' 'else fi'; elif other; then if nested; then first; else # else\nsecond; fi; else third; fi",
+        "for item in done; do if check; then first; else # else done\nsecond; fi; # done\ndone",
+        "while check; do case value in first) printf '%s' 'esac done';; *) if other; then first; else # else esac\nsecond; fi;; esac; done",
+        "if check; then cat <<'DATA'\nelse fi done esac\n# else\nDATA\nelse # else\nsecond; fi",
+    ])("preserves nested structure and keyword-bearing literals: %s", (source) => {
+        const displayed = reflowBashCommand(source);
+        expect(displayed).toBeDefined();
+        expect(displayed).toContain("else # else");
+        expect(spawnSync("bash", ["--noprofile", "--norc", "-n"], { input: source }).status).toBe(
+            0,
+        );
+
+        expect(
+            spawnSync("bash", ["--noprofile", "--norc", "-n"], { input: displayed }).status,
+        ).toBe(0);
+    });
+
     it("keeps leading operators selectable", () => {
         expect(reflowBashCommand(`one && two && three`, "leading")).toBe(`one\n&& two\n&& three`);
         expect(reflowBashCommand(`case "$x" in a) one && two;; esac`, "leading")).toContain(
@@ -192,6 +228,33 @@ describe("bash command analysis", () => {
         const heredoc = `cat > check.py <<'PY'\nimport json\nprint(json)\nPY`;
         expect(reflowBashCommand(heredoc)).toBeUndefined();
         expect(analyzeBashCommand(heredoc).pureScript).toBeUndefined();
+    });
+
+    it("splits shell statements around heredocs without changing their content", () => {
+        const command = "first; second\ncat <<'DATA'\n  literal; data  \n\nDATA\nthird; fourth";
+        expect(reflowBashCommand(command)).toBe(
+            "first;\nsecond\ncat <<'DATA'\n  literal; data  \n\nDATA\nthird;\nfourth",
+        );
+
+        expect(
+            reflowBashCommand("first; cat <<'DATA'; attached\nbody; text\nDATA\nlast; final"),
+        ).toBe("first;\ncat <<'DATA'; attached\nbody; text\nDATA\nlast;\nfinal");
+
+        expect(
+            reflowBashCommand(
+                "first; cat <<-ONE <<'TWO'\n\tdata; first\n\tONE\n  data; second\nTWO\nlast; final",
+            ),
+        ).toBe(
+            "first;\ncat <<-ONE <<'TWO'\n\tdata; first\n\tONE\n  data; second\nTWO\nlast;\nfinal",
+        );
+
+        expect(reflowBashCommand('printf "first\n  second; still text"; final')).toBe(
+            'printf "first\n  second; still text";\nfinal',
+        );
+
+        expect(
+            reflowBashCommand("if check; then cat <<'DATA'\nfi else done\nDATA\nelse other; fi"),
+        ).toBe("if check; then\n  cat <<'DATA'\nfi else done\nDATA\nelse\n  other;\nfi");
     });
 
     it("falls back without reflowing malformed syntax", () => {

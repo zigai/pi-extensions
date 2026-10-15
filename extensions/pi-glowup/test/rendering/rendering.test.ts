@@ -662,7 +662,10 @@ describe("Glowup rendering helpers", () => {
         expect(rendered).toContain("<toolTitle>/tmp/sample-session/env.sh</toolTitle>");
 
         expect(rendered).toContain("<dim># Ensure a clean input before demo 1.</dim>");
-        expect(rendered).toContain('<syntaxString>"$target"</syntaxString>');
+        expect(rendered).toContain(
+            '<syntaxString>"</syntaxString><syntaxVariable>$target</syntaxVariable><syntaxString>"</syntaxString>',
+        );
+
         expect(rendered).not.toContain("<syntaxFunction></syntaxFunction>");
         expect(rendered).toContain("<syntaxKeyword>-maxdepth</syntaxKeyword>");
         expect(rendered).toContain("<syntaxKeyword>-name</syntaxKeyword>");

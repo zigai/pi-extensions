@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import type { BundledLanguage, CreateHighlighterFactory, HighlighterGeneric } from "shiki";
 import { normalizedCodeLines } from "../../text-boundaries.ts";
-import { tokensToAnsiLines } from "./ansi.ts";
+import type { DiffSection } from "../diff/text-diff.ts";
+import { createSyntaxTokenizer } from "./tokenizer.ts";
 import { configureBracketPairColoring } from "./brackets.ts";
 import {
     isBundledSyntaxLanguage,
@@ -23,12 +24,12 @@ import {
 const MAX_CODE_BYTES = 40 * 1024;
 const MAX_CACHEABLE_CODE_BYTES = 8 * 1024;
 const MAX_CACHE_BYTES = 512 * 1024;
-const MAX_LINE_LENGTH = 2_000;
-const TOKENIZE_MAX_LINE_LENGTH = MAX_LINE_LENGTH;
 const CACHE_LIMIT = 100;
 
 export type SyntaxHighlightOptions = {
     readonly cache?: boolean | undefined;
+    readonly invalidate?: (() => void) | undefined;
+    readonly signal?: AbortSignal;
 };
 
 export type SyntaxHighlightCacheStats = {
@@ -97,6 +98,7 @@ type SyntaxState =
           readonly config: SyntaxConfig;
           readonly theme: LoadedSyntaxTheme;
           readonly highlighter: HighlighterGeneric<string, string>;
+          readonly tokenizer: ReturnType<typeof createSyntaxTokenizer>;
           readonly loadedLanguages: Set<string>;
           readonly dynamicLanguages: Set<string>;
       };
@@ -109,6 +111,22 @@ const highlightedCodeCache = new Map<
     string,
     { readonly lines: string[]; readonly bytes: number }
 >();
+
+type HighlightOwner = {
+    readonly source: string | readonly DiffSection[];
+    readonly controller: AbortController;
+    readonly results: Map<string, string[]>;
+    readonly pending: Map<string, Promise<string[]>>;
+};
+
+let bracketPairColoringEnabled = true;
+let highlightOwners = new WeakMap<() => void, HighlightOwner>();
+const pendingHighlights = new Map<string, Promise<string[]>>();
+const highlightControllers = new Set<AbortController>();
+const tokenizerDisposals = new Set<Promise<void>>();
+const highlightCompletionListeners = new Set<() => void>();
+const activeHighlights = new Set<Promise<string[]>>();
+const completedUnownedHighlights = new Map<string, WeakRef<string[]>>();
 
 let highlightedCodeCacheBytes = 0;
 const syntaxStateListeners = new Set<SyntaxStateListener>();
@@ -253,6 +271,7 @@ export function configureSyntaxBracketPairColoring(enabled: boolean): void {
         return;
     }
 
+    bracketPairColoringEnabled = enabled;
     clearSyntaxHighlightCache();
     syntaxRenderingVersion += 1;
 }
@@ -266,7 +285,19 @@ export function onSyntaxHighlightingStateChange(listener: SyntaxStateListener): 
     };
 }
 
-/** Highlights code synchronously for render-time callers, falling back to plain lines when unavailable. */
+export function onSyntaxHighlightComplete(listener: () => void): () => void {
+    highlightCompletionListeners.add(listener);
+
+    return () => {
+        highlightCompletionListeners.delete(listener);
+    };
+}
+
+export async function settleSyntaxHighlights(): Promise<void> {
+    while (activeHighlights.size > 0) await Promise.allSettled(activeHighlights);
+}
+
+/** Returns completed worker colors or plain lines while owned tokenization is pending. */
 export function highlightSyntaxCode(
     code: string,
     language: string | undefined,
@@ -288,40 +319,159 @@ export function highlightSyntaxCode(
         return normalizedCodeLines(code);
     }
 
-    const shouldCache = options.cache !== false && codeByteLength <= MAX_CACHEABLE_CODE_BYTES;
-    const cacheKey = shouldCache
-        ? highlightedCodeCacheKey(state.theme.name, normalizedLanguage, code, codeByteLength)
-        : undefined;
-    if (cacheKey !== undefined) {
-        const cached = highlightedCodeCache.get(cacheKey);
-        if (cached) {
-            return cached.lines;
-        }
+    const key = highlightedCodeCacheKey(state.theme.name, normalizedLanguage, code, codeByteLength);
+    const invalidate = options.invalidate;
+    if (invalidate !== undefined && !highlightOwners.has(invalidate))
+        observeSyntaxHighlightSource(code, invalidate);
+
+    const owned = invalidate === undefined ? undefined : highlightOwners.get(invalidate);
+    const completed = owned?.results.get(key);
+    if (completed !== undefined) return completed;
+
+    const cached = options.cache === false ? undefined : highlightedCodeCache.get(key);
+    if (cached !== undefined) {
+        owned?.results.set(key, cached.lines);
+        return cached.lines;
     }
 
+    const unowned = completedUnownedHighlights.get(key)?.deref();
+    if (unowned !== undefined && options.cache !== false) {
+        owned?.results.set(key, unowned);
+        return unowned;
+    }
+
+    void highlightSyntaxCodeAsync(code, normalizedLanguage, options);
+
+    return normalizedCodeLines(code);
+}
+
+/** Cancels obsolete work when a renderer observes a different submitted source. */
+export function observeSyntaxHighlightSource(
+    source: string | readonly DiffSection[],
+    invalidate: () => void,
+): () => boolean {
+    const previous = highlightOwners.get(invalidate);
+    if (previous?.source === source) return () => highlightOwners.get(invalidate) === previous;
+
+    previous?.controller.abort();
+    previous?.results.clear();
+
+    const owner: HighlightOwner = {
+        source,
+        controller: new AbortController(),
+        results: new Map(),
+        pending: new Map(),
+    };
+    highlightOwners.set(invalidate, owner);
+
+    return () => highlightOwners.get(invalidate) === owner;
+}
+
+/** Computes complete code colors off the TUI thread, preserving grammar state across all lines. */
+export async function highlightSyntaxCodeAsync(
+    code: string,
+    language: string | undefined,
+    options: SyntaxHighlightOptions = {},
+): Promise<string[]> {
+    const state = syntaxState;
+    const normalizedLanguage = normalizeSyntaxLanguage(language);
     const plainLines = normalizedCodeLines(code);
-    if (plainLines.some((line) => line.length > MAX_LINE_LENGTH)) {
+    const size = Buffer.byteLength(code, "utf8");
+
+    if (
+        state?.status !== "ready" ||
+        normalizedLanguage === undefined ||
+        normalizedLanguage === "text" ||
+        !state.loadedLanguages.has(normalizedLanguage) ||
+        size > MAX_CODE_BYTES ||
+        options.signal?.aborted === true
+    )
         return plainLines;
+
+    const key = highlightedCodeCacheKey(state.theme.name, normalizedLanguage, code, size);
+    const shouldCache = options.cache !== false && size <= MAX_CACHEABLE_CODE_BYTES;
+    const invalidate = options.invalidate;
+    if (invalidate !== undefined && !highlightOwners.has(invalidate))
+        observeSyntaxHighlightSource(code, invalidate);
+
+    const owner = invalidate === undefined ? undefined : highlightOwners.get(invalidate);
+    const ownedResult = owner?.results.get(key);
+    if (ownedResult !== undefined) return ownedResult;
+
+    const cached = shouldCache ? highlightedCodeCache.get(key) : undefined;
+    if (cached !== undefined) {
+        owner?.results.set(key, cached.lines);
+        return cached.lines;
     }
 
-    try {
-        const tokenRows = state.highlighter.codeToTokensBase(code, {
-            lang: normalizedLanguage,
-            theme: state.theme.registration,
-            tokenizeMaxLineLength: TOKENIZE_MAX_LINE_LENGTH,
-        });
-        const highlighted = normalizeHighlightedLineCount(
-            tokensToAnsiLines(tokenRows, normalizedLanguage),
-            plainLines.length,
-        );
-        if (cacheKey !== undefined) {
-            rememberHighlightedCode(cacheKey, highlighted);
-        }
+    const generation = syntaxRenderingVersion;
+    const controller = new AbortController();
+    const signals = [controller.signal];
+    if (owner !== undefined) signals.push(owner.controller.signal);
+    if (options.signal !== undefined) signals.push(options.signal);
 
-        return highlighted;
-    } catch {
-        return plainLines;
+    const signal = AbortSignal.any(signals);
+    const pendingKey = owner === undefined && options.signal === undefined ? key : undefined;
+    let pending =
+        owner?.pending.get(key) ??
+        (pendingKey === undefined ? undefined : pendingHighlights.get(pendingKey));
+    if (pending === undefined) {
+        highlightControllers.add(controller);
+        pending = state.tokenizer
+            .tokenize(plainLines.join("\n"), normalizedLanguage, bracketPairColoringEnabled, {
+                signal,
+            })
+            .then((lines) => {
+                if (
+                    signal.aborted ||
+                    syntaxState !== state ||
+                    syntaxRenderingVersion !== generation ||
+                    lines === undefined
+                )
+                    return plainLines;
+
+                const highlighted = normalizeHighlightedLineCount(lines, plainLines.length);
+                if (shouldCache) rememberHighlightedCode(key, highlighted);
+
+                if (
+                    owner !== undefined &&
+                    invalidate !== undefined &&
+                    highlightOwners.get(invalidate) === owner
+                ) {
+                    owner.results.set(key, highlighted);
+                    invalidate();
+                } else if (!shouldCache && options.cache !== false) {
+                    if (completedUnownedHighlights.size >= CACHE_LIMIT) {
+                        const oldest = completedUnownedHighlights.keys().next().value;
+                        if (oldest !== undefined) completedUnownedHighlights.delete(oldest);
+                    }
+
+                    completedUnownedHighlights.set(key, new WeakRef(highlighted));
+                }
+
+                for (const listener of highlightCompletionListeners) listener();
+
+                return highlighted;
+            })
+            .catch(() => plainLines)
+            .finally(() => {
+                highlightControllers.delete(controller);
+
+                if (pending !== undefined) activeHighlights.delete(pending);
+
+                if (pendingKey !== undefined && pendingHighlights.get(pendingKey) === pending)
+                    pendingHighlights.delete(pendingKey);
+
+                if (owner !== undefined && owner.pending.get(key) === pending)
+                    owner.pending.delete(key);
+            });
+        activeHighlights.add(pending);
+
+        if (pendingKey !== undefined) pendingHighlights.set(pendingKey, pending);
+        owner?.pending.set(key, pending);
     }
+
+    return pending;
 }
 
 export type LoadedSyntaxHighlighter = {
@@ -437,6 +587,13 @@ export async function loadSyntaxLanguageIfReady(language: string | undefined): P
 }
 
 export function clearSyntaxHighlightCache(): void {
+    syntaxRenderingVersion += 1;
+
+    for (const controller of highlightControllers) controller.abort();
+    highlightControllers.clear();
+    pendingHighlights.clear();
+    highlightOwners = new WeakMap();
+    completedUnownedHighlights.clear();
     highlightedCodeCache.clear();
     highlightedCodeCacheBytes = 0;
 }
@@ -510,6 +667,7 @@ export async function disposeSyntaxHighlighting(): Promise<void> {
     activeConfigurationKey = undefined;
 
     disposeReadySyntaxState(state);
+    await Promise.allSettled(tokenizerDisposals);
     syntaxRenderingVersion += 1;
     notifySyntaxStateListeners("uninitialized");
 }
@@ -565,6 +723,12 @@ function notifySyntaxStateListeners(status: SyntaxStateStatus): void {
 function disposeReadySyntaxState(state: SyntaxState | undefined): void {
     if (state?.status === "ready") {
         state.highlighter.dispose();
+
+        const disposal = state.tokenizer.dispose();
+        tokenizerDisposals.add(disposal);
+        void disposal.finally(() => {
+            tokenizerDisposals.delete(disposal);
+        });
     }
 }
 
@@ -600,11 +764,20 @@ async function initializeSyntaxHighlightingOnce(
             themes: [theme.registration],
             langs: [...preloadSelection.languages],
         });
+
         return {
             status: "ready",
             config,
             theme,
             highlighter,
+            tokenizer: createSyntaxTokenizer(theme.registration, {
+                maxJobs: CACHE_LIMIT,
+                maxBytes: MAX_CACHE_BYTES,
+                reportWarning: options.reportWarning,
+                async waitForDisposals() {
+                    await Promise.all(tokenizerDisposals);
+                },
+            }),
             loadedLanguages: new Set(highlighter.getLoadedLanguages()),
             dynamicLanguages: new Set(),
         };

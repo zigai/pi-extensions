@@ -49,6 +49,13 @@ function scriptCallRenderOptions(
         renderOptions = { ...renderOptions, invalidate: options.invalidate };
     }
 
+    if (options.onContentWidth !== undefined) {
+        renderOptions = { ...renderOptions, onContentWidth: options.onContentWidth };
+    }
+
+    if (options.profile !== undefined)
+        renderOptions = { ...renderOptions, profile: options.profile };
+
     return renderOptions;
 }
 
@@ -119,6 +126,8 @@ export type BashCommandRenderOptions = {
     readonly shellOperatorPosition: ShellOperatorPosition;
     readonly pureScriptOverride?: ScriptInvocation;
     readonly invalidate?: () => void;
+    readonly onContentWidth?: (contentWidth: number, renderWidth: number) => void;
+    readonly profile?: ScriptCallRenderOptions["profile"];
 };
 
 /** Renders a clean standalone interpreter call or a losslessly reflowed Bash command. */
@@ -129,6 +138,15 @@ export function renderBashCommandCall(
 ): Component {
     const analysis = analyzeBashCommand(command, options.shellOperatorPosition);
     const pureScript = options.pureScriptOverride ?? analysis.pureScript;
+    if (pureScript?.language === "bash" && options.profile !== undefined) {
+        return renderFullShellCommand(
+            theme,
+            pureScript.code,
+            analyzeBashCommand(pureScript.code, options.shellOperatorPosition),
+            options,
+        );
+    }
+
     if (pureScript !== undefined) {
         return renderScriptCall(
             theme,

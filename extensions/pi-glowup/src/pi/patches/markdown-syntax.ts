@@ -1,6 +1,11 @@
 import { Markdown, type MarkdownTheme } from "@earendil-works/pi-tui";
-import { highlightSyntaxCode } from "../../rendering/syntax/highlighter.ts";
+import {
+    highlightSyntaxCode,
+    observeSyntaxHighlightSource,
+    syntaxHighlightingVersion,
+} from "../../rendering/syntax/highlighter.ts";
 import { normalizedCodeLines } from "../../text-boundaries.ts";
+import { scheduleCodeOutputSyntaxLoad } from "../../rendering/syntax/code-component.ts";
 
 const MARKDOWN_PATCH_KEY = Symbol.for("zigai.pi-glowup.syntax-markdown");
 const MARKDOWN_PATCH_STATE_KEY = Symbol.for("zigai.pi-glowup.syntax-markdown.state");
@@ -15,6 +20,8 @@ let markdownThinkingThemeSuppressionFailures = 0;
 
 type MarkdownInstance = {
     readonly theme?: MarkdownTheme;
+    readonly text?: string;
+    invalidate?: () => void;
     readonly defaultTextStyle?: { readonly italic?: boolean };
 };
 
@@ -42,8 +49,24 @@ export type MarkdownSyntaxPatchStats = {
     readonly thinkingThemeSuppressionFailures: number;
 };
 
+const markdownOwners = new WeakMap<
+    MarkdownInstance,
+    { readonly invalidate: () => void; version: number }
+>();
+let activeMarkdownInvalidation: (() => void) | undefined;
+let activeMarkdownSource: (() => boolean) | undefined;
+
 function highlightMarkdownCode(code: string, lang?: string): string[] {
-    return markdownSyntaxEnabled ? highlightSyntaxCode(code, lang) : normalizedCodeLines(code);
+    if (!markdownSyntaxEnabled) return normalizedCodeLines(code);
+
+    scheduleCodeOutputSyntaxLoad(
+        { ...(lang !== undefined && { language: lang }) },
+        activeMarkdownInvalidation,
+        code,
+        activeMarkdownSource,
+    );
+
+    return highlightSyntaxCode(code, lang, { invalidate: activeMarkdownInvalidation });
 }
 
 /** Returns Markdown syntax patch counters for debug diagnostics. */
@@ -96,6 +119,32 @@ export function configureMarkdownSyntaxPatch(
 
     const originalRender = prototype.render;
     const wrapperRender = function renderWithGlowupSyntax(this: MarkdownInstance, width: number) {
+        let owner = markdownOwners.get(this);
+        if (owner === undefined) {
+            owner = {
+                invalidate: () => {
+                    this.invalidate?.();
+                },
+                version: syntaxHighlightingVersion(),
+            };
+            markdownOwners.set(this, owner);
+        }
+
+        const version = syntaxHighlightingVersion();
+        if (owner.version !== version) {
+            owner.version = version;
+            owner.invalidate();
+        }
+
+        let current: (() => boolean) | undefined;
+        if (this.text !== undefined)
+            current = observeSyntaxHighlightSource(this.text, owner.invalidate);
+
+        const previousInvalidation = activeMarkdownInvalidation;
+        const previousSource = activeMarkdownSource;
+        activeMarkdownInvalidation = owner.invalidate;
+        activeMarkdownSource = current;
+
         const restoreSyntaxTheme =
             prototype[MARKDOWN_PATCH_STATE_KEY]?.enabled !== false
                 ? prepareSyntaxTheme(this)
@@ -104,6 +153,8 @@ export function configureMarkdownSyntaxPatch(
         try {
             return originalRender?.call(this, width) ?? [];
         } finally {
+            activeMarkdownInvalidation = previousInvalidation;
+            activeMarkdownSource = previousSource;
             restoreSyntaxTheme?.();
         }
     };

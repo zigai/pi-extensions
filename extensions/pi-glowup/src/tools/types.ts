@@ -71,8 +71,21 @@ export type ThirdPartyToolRenderingOptions = {
     readonly mutationSettings?: MutationSettings;
 
     readonly codemodePreview?: {
-        get(toolCallId: string, source: string): string | undefined;
-        observe(toolCallId: string, invalidate: (() => void) | undefined): void;
+        get(
+            toolCallId: string,
+            source: string,
+            options?: {
+                readonly contentWidth: number;
+                readonly completed: boolean;
+                readonly expanded: boolean;
+            },
+        ): string | undefined;
+
+        observe(
+            toolCallId: string,
+            invalidate: (() => void) | undefined,
+            completed?: boolean,
+        ): (() => void) | undefined;
     };
 };
 

@@ -32,7 +32,7 @@ Reflowed chain and case operators stay at the end of the preceding row by defaul
 
 Reflow uses the Bash syntax tree to place logical operators, pipelines, statements, and compound
 shell bodies on readable rows. It retains the original shell tokens, never extracts language
-blocks from a composed command, and leaves submitted multiline commands and heredocs unchanged.
+blocks from a composed command, and preserves existing newlines, quoted text, and heredoc bodies.
 Only clean standalone interpreter calls render as Python, Node, TypeScript, Bun, or Deno previews.
 Single-quoted inline source inside a composed command remains in the Bash block but receives its
 language's syntax highlighting when the interpreter can be identified safely.
@@ -41,20 +41,45 @@ language's syntax highlighting when the interpreter can be identified safely.
 
 Collapsed script previews show up to `scriptPreview.maxCodePreviewLines` lines before adding a
 hint with Pi's configured tool-expansion key. The default is `8`, and values below `4` are rejected
-so four-line-or-shorter previews are never truncated.
+while wrapping also counts against the terminal-row budget.
 
-Short scripts keep their imports. Long Python, JavaScript, and TypeScript previews silently omit
+Unformatted short scripts keep their imports. Long Python, JavaScript, and TypeScript previews omit
 only a complete leading import/setup prologue. Set `scriptPreview.showPrologueOmission` to `true`
 to show the omitted-line count. Expanding the tool call always restores the complete code.
 
 ## Formatters
 
-Script previews are not formatted by default. Configure `scriptPreview.formatters` to map rendered language ids to formatter command argv arrays.
+Formatting is off by default. `scriptPreview.formatters` maps language ids to explicit profiles:
 
-Formatters apply to clean standalone language calls and codemode JavaScript blocks. Composed Bash
-commands are never passed to a language formatter. Successful formatter output is cached by
-language, target width, and source for the session.
+```json
+{
+  "javascript": { "kind": "javascript", "command": ["oxfmt"], "objectWrap": "collapse" },
+  "typescript": { "kind": "typescript", "command": ["oxfmt"], "tabWidth": 2 },
+  "python": { "kind": "python", "command": ["tuff"], "collections": "ruff-default" },
+  "bash": { "kind": "bash", "command": ["shfmt"], "indentWidth": 2 }
+}
+```
 
-`pi-glowup` dynamically adapts formatting to the available terminal rendering width. You can use `{width}`, `{line_length}`, or `{cols}` placeholders in your command arguments (e.g. `["tuff", "format", "--line-length", "{width}", "--stdin-filename", "script.py", "-"]`), and `pi-glowup` will also automatically export environment variables (`TUFF_LINE_LENGTH`, `RUFF_LINE_LENGTH`, `COLUMNS`) containing the available content width for tool rendering.
+Python collapses collections that fit, ignores magic trailing commas by default, and retains
+comments and literal contents. Explicit `collections: "fill"` keeps multiline brackets and packs rows. JavaScript/TypeScript use Oxfmt object collapse and two-space
+indentation. Bash uses two-space shfmt without simplification or minification; only a Bash profile
+formats whole shell commands. Executables must already be installed and reachable, or use an
+explicit executable path. `kind: "command"` accepts arbitrary formatter argv through `command`.
 
-Formatter failures, missing commands, invalid JSON, and empty output are ignored; the original script preview is rendered unchanged.
+Profiles format asynchronously at the available content width and after resize. Oxfmt receives
+`printWidth` through an owned temporary configuration; Tuff receives line length and an isolated
+collection profile. Blank-line decisions belong to the formatter, never a text-stripping pass.
+Python/JS/TS profiles omit complete leading imports by default; `imports: "show"` retains them.
+Bash keeps setup statements and heredocs. Expanded Bash-tool and Codemode previews show original source.
+
+Streaming previews keep raw source until execution completes. Prepared decoration is then
+published in one update, or once ready if the result arrives first. Formatting never delays tool
+execution or changes submitted arguments. Successful output is cached by language, width, and
+source. Command profiles also accept `{width}`, `{line_length}`, and `{cols}` argv placeholders.
+Missing or failed executables produce a content-free warning; undecorated source remains visible.
+
+## Highlighting
+
+Code within the 40 KiB source budget is tokenized off the TUI thread without a logical-line cutoff.
+Plain source remains visible while full grammar-aware colors are pending. Superseded work is cancelled;
+the existing cache budgets remain. Tokenizer CPU time is not bounded by an elapsed-time limit.

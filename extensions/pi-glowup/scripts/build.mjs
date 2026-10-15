@@ -42,7 +42,10 @@ const result = await esbuild.build({
   platform: "node",
   format: "esm",
   target: "node22.19",
-  define: { "import.meta.glowupThemeDirectory": JSON.stringify("../../themes") },
+  define: {
+    "import.meta.glowupThemeDirectory": JSON.stringify("../../themes"),
+    "import.meta.glowupSyntaxWorker": JSON.stringify("./tokenize-worker.mjs"),
+  },
   treeShaking: true,
   sourcemap: true,
   sourcesContent: true,
@@ -67,12 +70,31 @@ const result = await esbuild.build({
   metafile: true,
 });
 
+const workerResult = await esbuild.build({
+  absWorkingDir: packageRoot,
+  entryPoints: ["src/rendering/syntax/tokenize-worker.ts"],
+  outfile: path.join(outputRoot, "src", "tokenize-worker.mjs"),
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  target: "node22.19",
+  treeShaking: true,
+  sourcemap: true,
+  sourcesContent: true,
+  legalComments: "none",
+  external,
+  metafile: true,
+});
+
 await copyFile(
   path.join(packageRoot, "config.schema.json"),
   path.join(outputRoot, "config.schema.json"),
 );
 
-const bundledHostInputs = Object.keys(result.metafile.inputs).filter((input) =>
+const bundledHostInputs = [
+  ...Object.keys(result.metafile.inputs),
+  ...Object.keys(workerResult.metafile.inputs),
+].filter((input) =>
   /node_modules\/(?:@earendil-works|@mariozechner|@sinclair\/typebox|shiki|typebox)\//u.test(input),
 );
 if (bundledHostInputs.length > 0) {
