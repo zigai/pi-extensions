@@ -67,10 +67,10 @@
     "@earendil-works/pi-coding-agent": "1.0.0",
     "@earendil-works/pi-tui": "1.0.0",
     "@types/node": "^24.10.1",
-    "@vitest/coverage-v8": "4.1.9",
+    "@vitest/coverage-v8": "4.1.11",
     "fast-check": "^4.8.0",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.11"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
