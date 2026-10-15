@@ -17,8 +17,7 @@ import {
 import {
     formatAndStoreScriptPreview,
     rememberRawScriptPreview,
-    scheduleFormattedScriptPreview,
-    type FormatScriptPreviewOptions,
+    scriptForPreview,
 } from "./format-preview.ts";
 import type { ScriptBlockFormatter } from "./formatter.ts";
 import {
@@ -30,17 +29,30 @@ import { renderBashCommandCall, type BashCommandRenderOptions } from "./renderer
 import { StreamingScriptIdentityStore } from "./streaming-identity.ts";
 import { renderExpandableSection } from "../../section-expansion.ts";
 
-function scriptPreviewTargetWidth(targetWidth?: number): number | undefined {
-    // SAFETY: process.stdout.columns is number | undefined at runtime in Node.js.
-    const stdoutColumns = process.stdout.columns as number | undefined;
-    return (
-        targetWidth ?? (stdoutColumns !== undefined ? Math.max(20, stdoutColumns - 4) : undefined)
-    );
-}
+type ScriptPreviewSchedule = {
+    readonly toolCallId: string;
+    readonly command: string;
+    readonly formatter: ScriptBlockFormatter | undefined;
+    readonly signal: AbortSignal | undefined;
+    readonly targetWidth?: number;
+    readonly completed?: boolean;
+    readonly isCurrent: () => boolean;
+    readonly invalidate: () => void;
+};
+
+type ScheduledPreview = {
+    readonly options: ScriptPreviewSchedule;
+    targetWidth: number | undefined;
+    controller: AbortController;
+    completion: Promise<void>;
+    completed: boolean;
+    ready: boolean;
+};
 
 export function createNativeBashFeature() {
     const scriptPreviews = createScriptPreviewStore();
-    const scheduledCommands = new Map<string, string>();
+    const scheduledCommands = new Map<string, ScheduledPreview>();
+    const renderWidths = new Map<string, { contentWidth: number; renderWidth: number }>();
     const PARTIAL_BASH_COMMAND_PREVIEW_CHARS = 4_000;
     const streamingScriptIdentities = new StreamingScriptIdentityStore();
     const bashRenderInvalidations = new Map<string, () => void>();
@@ -102,10 +114,19 @@ export function createNativeBashFeature() {
         }
 
         const displayCommand = context.argsComplete ? command : partialBashCommandPreview(command);
-        const parsedScript = parseScriptInvocation(displayCommand);
-        const script =
-            scriptPreviews.get(context.toolCallId) ??
-            (parsedScript === undefined ? undefined : boundedScriptPreview(parsedScript));
+        const scheduled = scheduledCommands.get(context.toolCallId);
+
+        if (context.result !== undefined && !context.isPartial) completePreview(context.toolCallId);
+
+        const parsedScript = scriptForPreview(displayCommand, scheduled?.options.formatter);
+        const profile = scheduled?.options.formatter?.profileFor?.(parsedScript?.language ?? "");
+        const profiled = profile !== undefined;
+        let script = scriptPreviews.get(context.toolCallId);
+        if (profiled && scheduled?.completed !== true) script = undefined;
+
+        if (script === undefined && parsedScript !== undefined)
+            script = boundedScriptPreview(parsedScript);
+
         const stableScript = context.argsComplete
             ? streamingScriptIdentities.finalize(context.toolCallId, script)
             : script;
@@ -119,13 +140,30 @@ export function createNativeBashFeature() {
             shellOperatorPosition: shellOperatorPosition(),
             invalidate: context.invalidate,
         };
+        if (stableScript !== undefined && context.argsComplete) {
+            bashOptions = {
+                ...bashOptions,
+                onContentWidth: (contentWidth, renderWidth) =>
+                    rememberRenderWidth(context.toolCallId, contentWidth, renderWidth),
+            };
+        }
+
         if (stableScript !== undefined) {
             bashOptions = { ...bashOptions, pureScriptOverride: stableScript };
         }
 
-        return renderExpandableSection(context, "call", (expanded) =>
-            renderBashCommandCall(theme, displayCommand, { ...bashOptions, expanded }),
-        );
+        if (profile !== undefined && scheduled?.completed === true && scheduled.ready) {
+            bashOptions = { ...bashOptions, profile };
+        }
+
+        return renderExpandableSection(context, "call", (expanded) => {
+            let options = { ...bashOptions, expanded };
+            if (expanded && profiled && parsedScript !== undefined) {
+                options = { ...options, pureScriptOverride: parsedScript, shellLayout: "preserve" };
+            }
+
+            return renderBashCommandCall(theme, displayCommand, options);
+        });
     }
 
     function renderBashResult(
@@ -135,6 +173,8 @@ export function createNativeBashFeature() {
         context: BuiltInRenderContext,
         headerLayout: () => ScriptPreviewHeaderLayout,
     ) {
+        if (!options.isPartial) completePreview(context.toolCallId);
+
         const output = textOutput(result);
         const language = detectStructuredOutputLanguage(output);
         const script = parseScriptInvocation(commandField(context.args));
@@ -164,60 +204,143 @@ export function createNativeBashFeature() {
 
     function clear(): void {
         scriptPreviews.clear();
+
+        for (const scheduled of scheduledCommands.values()) scheduled.controller.abort();
         scheduledCommands.clear();
+        renderWidths.clear();
         bashRenderInvalidations.clear();
         streamingScriptIdentities.clear();
     }
 
-    function remember(toolCallId: string, command: string): void {
-        rememberRawScriptPreview(scriptPreviews, toolCallId, command);
+    function remember(toolCallId: string, command: string, formatter?: ScriptBlockFormatter): void {
+        rememberRawScriptPreview(scriptPreviews, toolCallId, command, formatter);
     }
 
-    function schedule(options: {
-        readonly toolCallId: string;
-        readonly command: string;
-        readonly formatter: ScriptBlockFormatter | undefined;
-        readonly signal: AbortSignal | undefined;
-        readonly targetWidth?: number;
-        readonly isCurrent: () => boolean;
-        readonly invalidate: () => void;
-    }): boolean {
-        if (
-            options.formatter !== undefined &&
-            scheduledCommands.get(options.toolCallId) === options.command
-        ) {
-            return true;
-        }
+    function invalidatePreview(scheduled: ScheduledPreview): void {
+        bashRenderInvalidations.get(scheduled.options.toolCallId)?.();
+        scheduled.options.invalidate();
+    }
 
-        remember(options.toolCallId, options.command);
-        scheduledCommands.delete(options.toolCallId);
+    function completePreview(toolCallId: string): void {
+        const scheduled = scheduledCommands.get(toolCallId);
+        if (scheduled === undefined || scheduled.completed) return;
 
-        if (options.formatter !== undefined) {
-            scheduledCommands.set(options.toolCallId, options.command);
-            trimOldestMapEntries(scheduledCommands, MAX_BASH_RENDER_INVALIDATIONS);
-        }
+        scheduled.completed = true;
+        if (!scheduled.ready) return;
 
-        const columns = scriptPreviewTargetWidth(options.targetWidth);
+        queueMicrotask(() => {
+            if (scheduledCommands.get(toolCallId) === scheduled && scheduled.options.isCurrent()) {
+                invalidatePreview(scheduled);
+            }
+        });
+    }
 
-        const formatOptions: FormatScriptPreviewOptions = {
+    async function formatPreview(scheduled: ScheduledPreview): Promise<void> {
+        scheduled.controller.abort();
+
+        const controller = new AbortController();
+        scheduled.controller = controller;
+
+        const { options, targetWidth } = scheduled;
+        let signal = controller.signal;
+        if (options.signal !== undefined) signal = AbortSignal.any([signal, options.signal]);
+
+        const formatted = await formatAndStoreScriptPreview({
             sink: scriptPreviews,
             toolCallId: options.toolCallId,
             command: options.command,
             formatter: options.formatter,
-            ...(columns !== undefined && { targetWidth: columns }),
-            ...(options.signal !== undefined && { signal: options.signal }),
+            signal,
+            ...(targetWidth !== undefined && { targetWidth }),
             isCurrent: () =>
+                !signal.aborted &&
                 options.isCurrent() &&
-                scheduledCommands.get(options.toolCallId) === options.command,
-            invalidate: () => {
-                bashRenderInvalidations.get(options.toolCallId)?.();
-                options.invalidate();
-            },
+                scheduledCommands.get(options.toolCallId) === scheduled &&
+                scheduled.controller === controller,
+        }).catch(() => false);
+
+        if (
+            signal.aborted ||
+            !options.isCurrent() ||
+            scheduledCommands.get(options.toolCallId) !== scheduled ||
+            scheduled.controller !== controller
+        )
+            return;
+
+        if (!formatted) return;
+
+        scheduled.ready = true;
+
+        const script = scriptPreviews.get(options.toolCallId);
+        const profile = options.formatter?.profileFor?.(script?.language ?? "");
+        if (profile !== undefined && !scheduled.completed) return;
+
+        invalidatePreview(scheduled);
+    }
+
+    function rememberRenderWidth(
+        toolCallId: string,
+        contentWidth: number,
+        renderWidth: number,
+    ): void {
+        const previous = renderWidths.get(toolCallId);
+        if (previous?.renderWidth === renderWidth) {
+            contentWidth = Math.min(previous.contentWidth, contentWidth);
+        }
+
+        renderWidths.delete(toolCallId);
+        renderWidths.set(toolCallId, { contentWidth, renderWidth });
+        trimOldestMapEntries(renderWidths, MAX_BASH_RENDER_INVALIDATIONS);
+
+        const scheduled = scheduledCommands.get(toolCallId);
+        if (scheduled === undefined || scheduled.targetWidth === contentWidth) return;
+
+        scheduled.targetWidth = contentWidth;
+        queueMicrotask(() => {
+            if (
+                scheduledCommands.get(toolCallId) !== scheduled ||
+                scheduled.targetWidth !== contentWidth ||
+                !scheduled.options.isCurrent() ||
+                scheduled.options.signal?.aborted === true
+            )
+                return;
+
+            scheduled.completion = formatPreview(scheduled);
+        });
+    }
+
+    function schedule(options: ScriptPreviewSchedule): boolean {
+        const previous = scheduledCommands.get(options.toolCallId);
+        if (options.formatter !== undefined && previous?.options.command === options.command)
+            return true;
+
+        previous?.controller.abort();
+        remember(options.toolCallId, options.command, options.formatter);
+        scheduledCommands.delete(options.toolCallId);
+
+        if (options.formatter === undefined) return false;
+
+        const scheduled: ScheduledPreview = {
+            options,
+            targetWidth: renderWidths.get(options.toolCallId)?.contentWidth ?? options.targetWidth,
+            controller: new AbortController(),
+            completion: Promise.resolve(),
+            completed: options.completed ?? false,
+            ready: false,
         };
 
-        scheduleFormattedScriptPreview(formatOptions);
+        scheduledCommands.set(options.toolCallId, scheduled);
 
-        return options.formatter !== undefined;
+        while (scheduledCommands.size > MAX_BASH_RENDER_INVALIDATIONS) {
+            const oldest = scheduledCommands.keys().next().value;
+            if (oldest === undefined) break;
+
+            scheduledCommands.get(oldest)?.controller.abort();
+            scheduledCommands.delete(oldest);
+        }
+
+        scheduled.completion = formatPreview(scheduled);
+        return true;
     }
 
     async function restore(options: {
@@ -229,27 +352,23 @@ export function createNativeBashFeature() {
     }): Promise<void> {
         if (options.formatter === undefined) return;
 
-        const targetWidth = scriptPreviewTargetWidth();
         let restored = 0;
         for (const call of options.calls) {
             if (options.signal.aborted || !options.isCurrent()) return;
-            if (parseScriptInvocation(call.command) === undefined) continue;
+            if (scriptForPreview(call.command, options.formatter) === undefined) continue;
             if (restored >= MAX_SCRIPT_PREVIEW_ENTRIES) return;
 
             restored += 1;
-            await formatAndStoreScriptPreview({
-                sink: scriptPreviews,
+            schedule({
                 toolCallId: call.toolCallId,
                 command: call.command,
+                completed: true,
                 formatter: options.formatter,
                 signal: options.signal,
-                ...(targetWidth !== undefined && { targetWidth }),
                 isCurrent: options.isCurrent,
-                invalidate: () => {
-                    bashRenderInvalidations.get(call.toolCallId)?.();
-                    options.invalidate();
-                },
-            }).catch(() => {});
+                invalidate: options.invalidate,
+            });
+            await scheduledCommands.get(call.toolCallId)?.completion;
         }
     }
 

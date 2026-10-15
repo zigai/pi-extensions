@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import { Markdown, type MarkdownTheme } from "@earendil-works/pi-tui";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Theme, type ThemeColor } from "@earendil-works/pi-coding-agent";
@@ -18,6 +19,8 @@ import {
     disposeSyntaxHighlighting,
     configureSyntaxBracketPairColoring,
     highlightSyntaxCode,
+    highlightSyntaxCodeAsync,
+    settleSyntaxHighlights,
     initializeSyntaxHighlighting,
 } from "../../../src/rendering/syntax/highlighter.ts";
 import { normalizeSyntaxLanguage } from "../../../src/rendering/syntax/language.ts";
@@ -61,6 +64,7 @@ const piTheme = new Theme(
         syntaxFunction: "#dcdcaa",
         syntaxOperator: "#d4d4d4",
         syntaxString: "#ce9178",
+        syntaxVariable: "#9cdcfe",
         toolOutput: "#d4d4d4",
         success: "#89d185",
         thinkingXhigh: "#777777",
@@ -101,6 +105,18 @@ const renderContext = {
 };
 const bundledThemePath = join(process.cwd(), "themes", "darker-modern-theme.json");
 
+async function renderReadyDiff(
+    sections: Parameters<typeof renderGlowupDiff>[1],
+    expanded: boolean,
+    width: number,
+): Promise<string> {
+    const component = renderGlowupDiff(plainTheme, sections, expanded);
+    component.render(width);
+    await settleSyntaxHighlights();
+
+    return component.render(width).join("\n");
+}
+
 describe("central syntax highlighting", () => {
     beforeAll(async () => {
         await disposeSyntaxHighlighting();
@@ -140,35 +156,92 @@ describe("central syntax highlighting", () => {
         });
     });
 
-    it("highlights TypeScript with the VS Code theme colors", () => {
-        const lines = highlightSyntaxCode('const value = "ok";', "typescript");
+    it("highlights TypeScript with the VS Code theme colors", async () => {
+        const lines = await highlightSyntaxCodeAsync('const value = "ok";', "typescript");
 
         expect(lines.join("\n")).toContain(TYPESCRIPT_KEYWORD_COLOR);
         expect(lines.join("\n")).toContain("const");
     });
 
-    it("highlights accepted one-line scripts longer than 1000 characters", () => {
+    it("preserves grammar state through an oversized multiline comment", async () => {
+        const code = `const before = "safe";\n/* ${"x".repeat(9_000)}\nconst inside = "not code";\n*/\nconst after = 1;`;
+        const lines = await highlightSyntaxCodeAsync(code, "javascript", { cache: false });
+        expect(lines[0]).toContain(TYPESCRIPT_KEYWORD_COLOR);
+        expect(lines[1]).toContain(ANSI_ESCAPE);
+        expect(lines[2]).not.toContain(TYPESCRIPT_KEYWORD_COLOR);
+        expect(lines[4]).toContain(TYPESCRIPT_KEYWORD_COLOR);
+        expect(stripVTControlCharacters(lines.join("\n"))).toBe(code);
+    });
+
+    it("highlights accepted one-line scripts longer than 1000 characters", async () => {
         const code = `const values = [${Array.from({ length: 140 }, (_value, index) => `"value-${index}"`).join(",")}];`;
 
         expect(code.length).toBeGreaterThan(1_000);
         expect(code.length).toBeLessThanOrEqual(2_000);
-        expect(highlightSyntaxCode(code, "javascript").join("\n")).toContain(
+        expect((await highlightSyntaxCodeAsync(code, "javascript")).join("\n")).toContain(
             TYPESCRIPT_KEYWORD_COLOR,
         );
     });
 
-    it("does not reset surrounding backgrounds after highlighted lines", () => {
-        const rendered = highlightSyntaxCode('const value = "ok";', "typescript").join("\n");
+    it("highlights long logical lines verbatim within the block budget", async () => {
+        const code = `const values = [${Array.from({ length: 230 }, (_value, index) => `"item-${index}"`).join(",")}];`;
+        const highlighted = (await highlightSyntaxCodeAsync(code, "javascript")).join("\n");
+        expect(highlighted).toContain(TYPESCRIPT_KEYWORD_COLOR);
+        expect(stripVTControlCharacters(highlighted)).toBe(code);
+        const excessive = `const value = "${"x".repeat(16_000)}";`;
+        const large = (await highlightSyntaxCodeAsync(excessive, "javascript")).join("\n");
+        expect(large).toContain(TYPESCRIPT_KEYWORD_COLOR);
+        expect(stripVTControlCharacters(large)).toBe(excessive);
+    });
+
+    it("distinguishes Bash variables from literal quoted text and redirect operands", () => {
+        const rendered = renderScriptCall(
+            piTheme,
+            {
+                label: "Bash",
+                language: "bash",
+                code: `result=$?; printf '%s\\n' "literal $result"; rg word 2>/dev/null; > before.log git status`,
+            },
+            { state: "success", expanded: true },
+        )
+            .render(240)
+            .join("\n");
+        expect(rendered).toContain("38;2;156;220;254mresult");
+        expect(rendered).toContain("38;2;156;220;254m$?");
+        expect(rendered).toContain("38;2;156;220;254m$result");
+        expect(rendered).toContain(`${STRING_RGB_CODE}m'%s\\n'`);
+        expect(rendered).toContain("38;2;255;255;255m/dev/null");
+        expect(rendered).toContain("38;2;255;255;255mbefore.log");
+        expect(rendered).toContain("38;2;220;220;170mgit");
+        const command = `NAME="literal $value" printf 'literal $value' "\\$value" "\${value:-fallback}" 3>log.txt 4>&1`;
+        const mixed = renderScriptCall(
+            piTheme,
+            { label: "Bash", language: "bash", code: command },
+            { state: "success", expanded: true },
+        )
+            .render(240)
+            .join("\n");
+        expect(stripVTControlCharacters(mixed)).toBe(`• Bash ${command}`);
+        expect(mixed).toContain(`${STRING_RGB_CODE}m'literal $value'`);
+        expect(mixed).toContain("38;2;156;220;254m$\u007bvalue:-fallback}");
+    });
+
+    it("does not reset surrounding backgrounds after highlighted lines", async () => {
+        const rendered = (await highlightSyntaxCodeAsync('const value = "ok";', "typescript")).join(
+            "\n",
+        );
 
         expect(rendered).not.toContain("\u001b[0m");
         expect(rendered).not.toContain("\u001b[49m");
         expect(rendered).not.toContain("\u001b[48;");
     });
 
-    it("colors Python import identifiers like VS Code semantic highlighting", () => {
-        const rendered = highlightSyntaxCode(
-            "import sys\nfrom collections.abc import Callable",
-            "python",
+    it("colors Python import identifiers like VS Code semantic highlighting", async () => {
+        const rendered = (
+            await highlightSyntaxCodeAsync(
+                "import sys\nfrom collections.abc import Callable",
+                "python",
+            )
         ).join("\n");
 
         expect(rendered).toContain(`${TYPE_RGB_CODE}msys`);
@@ -176,10 +249,12 @@ describe("central syntax highlighting", () => {
         expect(rendered).toContain(`${TYPE_RGB_CODE}mCallable`);
     });
 
-    it("colors Python neutral identifiers as variables, constants, and calls", () => {
-        const rendered = highlightSyntaxCode(
-            "if IGNORE_BREAKS:\n    handler(line)\n    value = get_terminal_size().columns",
-            "python",
+    it("colors Python neutral identifiers as variables, constants, and calls", async () => {
+        const rendered = (
+            await highlightSyntaxCodeAsync(
+                "if IGNORE_BREAKS:\n    handler(line)\n    value = get_terminal_size().columns",
+                "python",
+            )
         ).join("\n");
 
         expect(rendered).toContain(`${TYPE_RGB_CODE}mIGNORE_BREAKS`);
@@ -189,10 +264,9 @@ describe("central syntax highlighting", () => {
         expect(rendered).toContain(`${FUNCTION_RGB_CODE}mget_terminal_size`);
     });
 
-    it("adds VS Code bracket pair colors without recoloring strings", () => {
-        const rendered = highlightSyntaxCode(
-            'const value = make([]Item, "(text)");',
-            "typescript",
+    it("adds VS Code bracket pair colors without recoloring strings", async () => {
+        const rendered = (
+            await highlightSyntaxCodeAsync('const value = make([]Item, "(text)");', "typescript")
         ).join("\n");
 
         expect(rendered).toContain(BRACKET_PAIR_1_RGB_CODE);
@@ -200,12 +274,14 @@ describe("central syntax highlighting", () => {
         expect(rendered).toContain(`${STRING_RGB_CODE}m"(text)"`);
     });
 
-    it("preserves syntax-theme bracket colors when pair coloring is disabled", () => {
+    it("preserves syntax-theme bracket colors when pair coloring is disabled", async () => {
         configureSyntaxBracketPairColoring(false);
         try {
-            const rendered = highlightSyntaxCode(
-                'const value = make([]Item, "(text)");',
-                "typescript",
+            const rendered = (
+                await highlightSyntaxCodeAsync(
+                    'const value = make([]Item, "(text)");',
+                    "typescript",
+                )
             ).join("\n");
 
             expect(rendered).not.toContain(BRACKET_PAIR_1_RGB_CODE);
@@ -230,7 +306,8 @@ describe("central syntax highlighting", () => {
         expect(normalizeSyntaxLanguage("golang")).toBe("go");
     });
 
-    it("injects the central highlighter into Markdown code fences", () => {
+    it("injects the central highlighter into Markdown code fences", async () => {
+        await highlightSyntaxCodeAsync("const value = 1;", "typescript");
         installMarkdownSyntaxPatch();
         const rendered = new Markdown("```ts\nconst value = 1;\n```", 0, 0, markdownTheme)
             .render(100)
@@ -253,7 +330,8 @@ describe("central syntax highlighting", () => {
         expect(rendered).toContain("const value = 1;");
     });
 
-    it("highlights bash command and executable script previews", () => {
+    it("highlights bash command and executable script previews", async () => {
+        await highlightSyntaxCodeAsync("const value = 1;", "javascript");
         const rendered = renderScriptCall(
             plainTheme,
             { label: "Node", language: "javascript", code: "const value = 1;" },
@@ -292,7 +370,7 @@ describe("central syntax highlighting", () => {
         expect(rendered).not.toContain(`${STRING_RGB_CODE}minstall`);
     });
 
-    it("preserves multiline TypeScript comment highlighting in script previews", () => {
+    it("preserves multiline TypeScript comment highlighting in script previews", async () => {
         const code = [
             "/**",
             " * Expands the collapsed paste marker currently under the editor cursor.",
@@ -301,7 +379,7 @@ describe("central syntax highlighting", () => {
             "    return true;",
             "}",
         ].join("\n");
-        const expectedCommentLine = highlightSyntaxCode(code, "typescript")[1];
+        const expectedCommentLine = (await highlightSyntaxCodeAsync(code, "typescript"))[1];
         const renderedCommentLine = renderScriptCall(
             plainTheme,
             { label: "TypeScript", language: "typescript", code },
@@ -314,7 +392,7 @@ describe("central syntax highlighting", () => {
         expect(renderedCommentLine).toContain(expectedCommentLine);
     });
 
-    it("preserves multiline TypeScript highlighting inside bash heredocs", () => {
+    it("preserves multiline TypeScript highlighting inside bash heredocs", async () => {
         const code = [
             "/**",
             " * Expands the collapsed paste marker currently under the editor cursor.",
@@ -327,7 +405,7 @@ describe("central syntax highlighting", () => {
             code,
             "TS",
         ].join("\n");
-        const expectedCommentLine = highlightSyntaxCode(code, "typescript")[1];
+        const expectedCommentLine = (await highlightSyntaxCodeAsync(code, "typescript"))[1];
         const rendered = renderScriptCall(
             plainTheme,
             { label: "Bash", language: "bash", code: command },
@@ -340,7 +418,11 @@ describe("central syntax highlighting", () => {
         expect(renderedCommentLine).toContain(expectedCommentLine);
     });
 
-    it("highlights embedded Python heredocs inside bash previews as Python", () => {
+    it("highlights embedded Python heredocs inside bash previews as Python", async () => {
+        await highlightSyntaxCodeAsync(
+            "import json, sys\npath = sys.argv[1]\nprint(json.load(open(path)).get('$schema'))",
+            "python",
+        );
         const command = [
             'for f in /tmp/*.json; do [ -f "$f" ] || continue;',
             "printf '%s: ' \"$f\"; python3 - <<'PY' \"$f\"",
@@ -364,7 +446,11 @@ describe("central syntax highlighting", () => {
         expect(rendered).not.toContain(`${STRING_RGB_CODE}mimport json, sys`);
     });
 
-    it("highlights single-quoted inline Python inside a composed Bash pipeline", () => {
+    it("highlights single-quoted inline Python inside a composed Bash pipeline", async () => {
+        await highlightSyntaxCodeAsync(
+            'import sys\nfor line in sys.stdin:\n    value, name = line.split()\n    print(f"{int(value):04d} {name}")\n',
+            "python",
+        );
         const command = [
             "printf '%s\\n' '8 read' '13 patch' | python3 -c 'import sys",
             "for line in sys.stdin:",
@@ -414,7 +500,8 @@ describe("central syntax highlighting", () => {
         expect(rendered.join("\n")).not.toContain(`\u001b[${TOML_INVALID_RGB_CODE}m`);
     });
 
-    it("highlights code output previews when a path is known", () => {
+    it("highlights code output previews when a path is known", async () => {
+        await highlightSyntaxCodeAsync("const value = 1;", "typescript");
         const rendered = renderGlowupOutput(plainTheme, "const value = 1;", {
             expanded: false,
             syntax: { path: "src/example.ts" },
@@ -426,7 +513,7 @@ describe("central syntax highlighting", () => {
         expect(rendered).toContain("const");
     });
 
-    it("preserves multiline TypeScript comment highlighting in code output previews", () => {
+    it("preserves multiline TypeScript comment highlighting in code output previews", async () => {
         const code = [
             "/**",
             " * Expands the collapsed paste marker currently under the editor cursor.",
@@ -435,7 +522,7 @@ describe("central syntax highlighting", () => {
             "    return true;",
             "}",
         ].join("\n");
-        const expectedCommentLine = highlightSyntaxCode(code, "typescript")[1];
+        const expectedCommentLine = (await highlightSyntaxCodeAsync(code, "typescript"))[1];
         const renderedCommentLine = renderGlowupOutput(plainTheme, code, {
             expanded: false,
             maxPreviewLines: 8,
@@ -448,7 +535,8 @@ describe("central syntax highlighting", () => {
         expect(renderedCommentLine).toContain(expectedCommentLine);
     });
 
-    it("highlights partial write previews while streaming", () => {
+    it("highlights partial write previews while streaming", async () => {
+        await highlightSyntaxCodeAsync("const value = 1;\n", "typescript");
         const rendered = renderWriteCallPreview(
             { path: "src/example.ts", content: "const value = 1;\n" },
             plainTheme,
@@ -461,7 +549,8 @@ describe("central syntax highlighting", () => {
         expect(rendered).toContain("const");
     });
 
-    it("highlights third-party JSON fallback previews", () => {
+    it("highlights third-party JSON fallback previews", async () => {
+        await highlightSyntaxCodeAsync('{"ok": true}', "json");
         const renderer = createThirdPartyToolRenderer("custom_tool");
         const rendered = renderer
             .renderResult(
@@ -477,7 +566,7 @@ describe("central syntax highlighting", () => {
         expect(rendered).toContain("ok");
     });
 
-    it("highlights fallback diff previews when a path is known", () => {
+    it("highlights fallback diff previews when a path is known", async () => {
         configureRenderingAppearance({
             diffBackgroundStyle: "two-tone",
             diffLineNumberStyle: "dual",
@@ -490,24 +579,21 @@ describe("central syntax highlighting", () => {
             instructionPathColor: null,
             dimUnchangedDiffText: false,
         });
-        const rendered = renderGlowupDiff(
-            plainTheme,
+        const rendered = await renderReadyDiff(
             parseDiffSections(
                 " 7 import pytest\n+9 def test_value():\n-9 def old_value():",
                 "tests/example.py",
             ),
             false,
-        )
-            .render(120)
-            .join("\n");
+            120,
+        );
 
         expect(rendered).toContain("def");
         expect(rendered).toContain("38;2");
     });
 
-    it("uses surrounding TOML diff context for inline table braces", () => {
-        const rendered = renderGlowupDiff(
-            plainTheme,
+    it("uses surrounding TOML diff context for inline table braces", async () => {
+        const rendered = await renderReadyDiff(
             parseDiffSections(
                 [
                     " 1 [[package]]",
@@ -519,17 +605,15 @@ describe("central syntax highlighting", () => {
                 "config/services/sample.toml",
             ),
             true,
-        )
-            .render(180)
-            .join("\n");
+            180,
+        );
 
         expect(rendered).toContain(BRACKET_PAIR_2_RGB_CODE);
         expect(rendered).not.toContain(TOML_INVALID_RGB_CODE);
     });
 
-    it("does not highlight TOML after diff ellipses as invalid", () => {
-        const rendered = renderGlowupDiff(
-            plainTheme,
+    it("does not highlight TOML after diff ellipses as invalid", async () => {
+        const rendered = await renderReadyDiff(
             parseDiffSections(
                 [
                     " 1 [[package]]",
@@ -554,9 +638,8 @@ describe("central syntax highlighting", () => {
                 "config/services/sample.toml",
             ),
             false,
-        )
-            .render(180)
-            .join("\n");
+            180,
+        );
 
         expect(rendered).toContain(BRACKET_PAIR_2_RGB_CODE);
         expect(rendered).not.toContain(TOML_INVALID_RGB_CODE);

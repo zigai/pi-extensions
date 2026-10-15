@@ -22,7 +22,8 @@ import { wrapStyledText, makeComponent, toolExpandHint, wrapPrefixedLine } from 
 import { truncateToWidth, visibleWidth, type Component } from "@earendil-works/pi-tui";
 import { expandTerminalTabs } from "../../text-boundaries.ts";
 import { strongerDiffBackgroundAnsi } from "./ansi-colors.ts";
-import { highlightCodeOutput } from "../syntax/code-component.ts";
+import { highlightCodeOutput, scheduleCodeOutputSyntaxLoad } from "../syntax/code-component.ts";
+import { observeSyntaxHighlightSource, syntaxHighlightingVersion } from "../syntax/highlighter.ts";
 import {
     selectSemanticDiffIndices,
     type SemanticDiffRowKind,
@@ -366,6 +367,8 @@ function styleDiffContent(
 function highlightDiffContents(
     lines: ReadonlyArray<string>,
     filePath: string | undefined,
+    invalidate: () => void,
+    isCurrent: () => boolean,
 ): ReadonlyArray<string | undefined> {
     if (filePath === undefined) {
         return [];
@@ -380,9 +383,10 @@ function highlightDiffContents(
             return;
         }
 
-        const highlightedLines = highlightCodeOutput(run.map((row) => row.content).join("\n"), {
-            path: syntaxPath,
-        });
+        const content = run.map((row) => row.content).join("\n");
+        scheduleCodeOutputSyntaxLoad({ path: syntaxPath }, invalidate, content, isCurrent);
+
+        const highlightedLines = highlightCodeOutput(content, { path: syntaxPath, invalidate });
         if (highlightedLines.length === run.length) {
             for (const [rowIndex, row] of run.entries()) {
                 const highlighted = highlightedLines[rowIndex];
@@ -476,7 +480,13 @@ export function renderGlowupDiff(
     expanded: boolean,
     options: GlowupDiffRenderOptions = {},
 ): Component {
-    return makeComponent((width) => {
+    let isCurrent = (): boolean => false;
+    let syntaxVersion: number | undefined;
+    const invalidate = (): void => {
+        if (isCurrent()) component.invalidate();
+    };
+
+    const component = makeComponent((width) => {
         const allDiffLineCount = sections.reduce(
             (count, section) => count + section.lines.length,
             0,
@@ -547,7 +557,12 @@ export function renderGlowupDiff(
                 section.lines,
                 section.lineCoordinates,
             );
-            const highlightedContents = highlightDiffContents(section.lines, section.path);
+            const highlightedContents = highlightDiffContents(
+                section.lines,
+                section.path,
+                invalidate,
+                isCurrent,
+            );
             const changedRanges = changedRangesForDiffLines(section.lines);
             const renderLines = (
                 lines: ReadonlyArray<{ readonly line: string; readonly index: number }>,
@@ -596,4 +611,20 @@ export function renderGlowupDiff(
 
         return rendered;
     });
+
+    return {
+        render(width) {
+            const version = syntaxHighlightingVersion();
+            if (syntaxVersion !== version) {
+                syntaxVersion = version;
+                isCurrent = observeSyntaxHighlightSource(sections, invalidate);
+                component.invalidate();
+            }
+
+            return component.render(width);
+        },
+        invalidate() {
+            component.invalidate();
+        },
+    };
 }

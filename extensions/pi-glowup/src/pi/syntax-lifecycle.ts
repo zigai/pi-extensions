@@ -1,7 +1,11 @@
 import { type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { type GlowupConfig } from "../config/normalize.ts";
 import { DebugFileLogger, type DebugLogFields } from "../diagnostics/logger.ts";
-import { refreshSyntaxHighlighting } from "../rendering/syntax/highlighter.ts";
+import {
+    clearSyntaxHighlightCache,
+    onSyntaxHighlightComplete,
+    refreshSyntaxHighlighting,
+} from "../rendering/syntax/highlighter.ts";
 import { refreshToolRows } from "./session.ts";
 
 const SYNTAX_WARMUP_DELAY_MS = 5_000;
@@ -52,6 +56,7 @@ export function createSyntaxLifecycle(options: {
           }
         | undefined;
     let syntaxTimer: NodeJS.Timeout | undefined;
+    let stopCompletionNotifications: (() => void) | undefined;
 
     const startPendingSyntaxHighlighting = (): void => {
         const pending = pendingSyntaxStart;
@@ -89,6 +94,13 @@ export function createSyntaxLifecycle(options: {
         context: ExtensionContext,
     ): void => {
         if (syntaxTimer !== undefined) clearTimeout(syntaxTimer);
+        stopCompletionNotifications?.();
+
+        const currentGeneration = generation();
+
+        stopCompletionNotifications = onSyntaxHighlightComplete(() => {
+            if (generation() === currentGeneration) refreshToolRows(context);
+        });
 
         pendingSyntaxStart = {
             generation: generation(),
@@ -100,6 +112,9 @@ export function createSyntaxLifecycle(options: {
     };
 
     function cancel(): void {
+        stopCompletionNotifications?.();
+        stopCompletionNotifications = undefined;
+        clearSyntaxHighlightCache();
         pendingSyntaxStart = undefined;
 
         if (syntaxTimer !== undefined) {

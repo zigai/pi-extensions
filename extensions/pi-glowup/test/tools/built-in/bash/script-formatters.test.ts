@@ -1,6 +1,8 @@
 import { existsSync, readFileSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { createRequire } from "node:module";
+import type { ScriptFormatterProfile } from "../../../../src/settings-input.ts";
 import { describe, expect, it, vi } from "vitest";
 import {
     createCommandScriptFormatter,
@@ -11,6 +13,76 @@ import {
 } from "../../../../src/tools/built-in/bash/formatter.ts";
 
 describe("script formatter settings", () => {
+    it("compacts JavaScript objects with Oxfmt at the requested display width", async () => {
+        const executable = join(
+            dirname(createRequire(import.meta.url).resolve("oxfmt/package.json")),
+            "bin",
+            "oxfmt",
+        );
+        const formatter = createCommandScriptFormatter(
+            parseScriptFormatterCommandsValue({
+                javascript: { kind: "javascript", command: [executable] },
+            }),
+        );
+        const invocation = {
+            label: "Node",
+            language: "javascript",
+            code: "const entry = {\n  alpha: 1,\n  beta: 2,\n};",
+        };
+        const wide = await formatScriptInvocation(invocation, formatter, { targetWidth: 80 });
+        expect(wide.code).toBe("const entry = { alpha: 1, beta: 2 };");
+        const narrow = await formatScriptInvocation(invocation, formatter, { targetWidth: 20 });
+        expect(narrow.code).toBe("const entry = {\n  alpha: 1,\n  beta: 2,\n};");
+        expect(invocation.code).toBe("const entry = {\n  alpha: 1,\n  beta: 2,\n};");
+    });
+
+    it("selects the TypeScript parser for compact typed scripts", async () => {
+        const executable = join(
+            dirname(createRequire(import.meta.url).resolve("oxfmt/package.json")),
+            "bin",
+            "oxfmt",
+        );
+        const formatter = createCommandScriptFormatter(
+            parseScriptFormatterCommandsValue({
+                typescript: { kind: "typescript", command: [executable] },
+            }),
+        );
+        const formatted = await formatScriptInvocation(
+            {
+                label: "TypeScript",
+                language: "typescript",
+                code: "const entries:number[]=[1,2,3];",
+            },
+            formatter,
+            { targetWidth: 80 },
+        );
+        expect(formatted.code).toBe("const entries: number[] = [1, 2, 3];");
+    });
+
+    it("reports an unavailable configured formatter once without exposing source", async () => {
+        const warnings: string[] = [];
+        const formatter = createCommandScriptFormatter(
+            parseScriptFormatterCommandsValue({
+                javascript: { kind: "javascript", command: ["/missing/display-formatter"] },
+            }),
+            (message) => {
+                warnings.push(message);
+            },
+        );
+        const invocation = {
+            label: "Node",
+            language: "javascript",
+            code: "const privateValue = 1;",
+        };
+        await expect(
+            formatScriptInvocation(invocation, formatter, { targetWidth: 80 }),
+        ).resolves.toEqual(invocation);
+        await expect(
+            formatScriptInvocation(invocation, formatter, { targetWidth: 40 }),
+        ).resolves.toEqual(invocation);
+        expect(warnings).toEqual(["[pi-glowup] javascript display formatter executable not found"]);
+    });
+
     it("leaves formatter commands empty by default", () => {
         expect(parseScriptFormatterCommands(undefined).size).toBe(0);
         expect(parseScriptFormatterCommands("").size).toBe(0);
@@ -37,10 +109,10 @@ describe("script formatter settings", () => {
         const warnings: string[] = [];
         const commands = parseScriptFormatterCommandsValue(
             {
-                python: ["black", "-"],
-                javascript: [],
-                typescript: [""],
-                ruby: ["ruby\0"],
+                python: { kind: "command", command: ["black", "-"] },
+                javascript: { kind: "command", command: [] },
+                typescript: { kind: "command", command: [""] },
+                ruby: { kind: "command", command: ["ruby\0"] },
             },
             {
                 source: "config.scriptPreview.formatters",
@@ -50,7 +122,7 @@ describe("script formatter settings", () => {
             },
         );
 
-        expect(commands.get("python")).toEqual(["black", "-"]);
+        expect(commands.get("python")).toEqual({ kind: "command", command: ["black", "-"] });
         expect(commands.has("javascript")).toBe(false);
         expect(commands.has("typescript")).toBe(false);
         expect(commands.has("ruby")).toBe(false);
@@ -62,19 +134,25 @@ describe("script formatter settings", () => {
     it("parses language formatter commands from JSON", () => {
         const commands = parseScriptFormatterCommands(
             JSON.stringify({
-                python: ["black", "-q", "-"],
-                javascript: ["prettier", "--parser", "babel"],
+                python: { kind: "command", command: ["black", "-q", "-"] },
+                javascript: { kind: "command", command: ["prettier", "--parser", "babel"] },
             }),
         );
 
-        expect(commands.get("python")).toEqual(["black", "-q", "-"]);
-        expect(commands.get("javascript")).toEqual(["prettier", "--parser", "babel"]);
+        expect(commands.get("python")).toEqual({ kind: "command", command: ["black", "-q", "-"] });
+        expect(commands.get("javascript")).toEqual({
+            kind: "command",
+            command: ["prettier", "--parser", "babel"],
+        });
     });
 
     it("applies configured command formatters by language", async () => {
         const commands = parseScriptFormatterCommands(
             JSON.stringify({
-                python: [process.execPath, "-e", "process.stdin.pipe(process.stdout)"],
+                python: {
+                    kind: "command",
+                    command: [process.execPath, "-e", "process.stdin.pipe(process.stdout)"],
+                },
             }),
         );
         const formatter = createCommandScriptFormatter(commands);
@@ -96,12 +174,15 @@ describe("script formatter settings", () => {
     it("substitutes width placeholders and passes environment variables", async () => {
         const commands = parseScriptFormatterCommands(
             JSON.stringify({
-                python: [
-                    process.execPath,
-                    "-e",
-                    "process.stdout.write(process.argv[1] + ':' + process.env.TUFF_LINE_LENGTH)",
-                    "{width}",
-                ],
+                python: {
+                    kind: "command",
+                    command: [
+                        process.execPath,
+                        "-e",
+                        "process.stdout.write(process.argv[1] + ':' + process.env.TUFF_LINE_LENGTH)",
+                        "{width}",
+                    ],
+                },
             }),
         );
         const formatter = createCommandScriptFormatter(commands);
@@ -121,12 +202,15 @@ describe("script formatter settings", () => {
         try {
             const commands = parseScriptFormatterCommands(
                 JSON.stringify({
-                    python: [
-                        process.execPath,
-                        "-e",
-                        "require('node:fs').writeFileSync(process.argv[1], 'started');process.stdout.write('FORMATTER_RAN')",
-                        marker,
-                    ],
+                    python: {
+                        kind: "command",
+                        command: [
+                            process.execPath,
+                            "-e",
+                            "require('node:fs').writeFileSync(process.argv[1], 'started');process.stdout.write('FORMATTER_RAN')",
+                            marker,
+                        ],
+                    },
                 }),
             );
             const formatter = createCommandScriptFormatter(commands);
@@ -143,14 +227,17 @@ describe("script formatter settings", () => {
 
     it("reuses successful formatting for identical language source", async () => {
         const formatter = createCommandScriptFormatter(
-            new Map([
+            new Map<string, ScriptFormatterProfile>([
                 [
                     "python",
-                    [
-                        process.execPath,
-                        "-e",
-                        "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>process.stdout.write(process.pid+':'+s))",
-                    ],
+                    {
+                        kind: "command",
+                        command: [
+                            process.execPath,
+                            "-e",
+                            "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>process.stdout.write(process.pid+':'+s))",
+                        ],
+                    },
                 ],
             ]),
         );
@@ -166,10 +253,23 @@ describe("script formatter settings", () => {
     it("falls back when command formatters fail or return empty output", async () => {
         const invocation = { label: "Python", language: "python", code: "print(1)" };
         const failingFormatter = createCommandScriptFormatter(
-            new Map([["python", [process.execPath, "-e", "process.exit(1)"]]]),
+            new Map<string, ScriptFormatterProfile>([
+                [
+                    "python",
+                    { kind: "command", command: [process.execPath, "-e", "process.exit(1)"] },
+                ],
+            ]),
         );
         const emptyFormatter = createCommandScriptFormatter(
-            new Map([["python", [process.execPath, "-e", "process.stdin.resume()"]]]),
+            new Map<string, ScriptFormatterProfile>([
+                [
+                    "python",
+                    {
+                        kind: "command",
+                        command: [process.execPath, "-e", "process.stdin.resume()"],
+                    },
+                ],
+            ]),
         );
 
         await expect(formatScriptInvocation(invocation, failingFormatter)).resolves.toEqual(
@@ -189,7 +289,11 @@ describe("script formatter settings", () => {
             "process.stdin.on('data', chunk => input += chunk);",
             "process.stdin.on('end', () => process.stdout.write(input + ' formatted'));",
         ].join("\n");
-        const commands = new Map([["python", [process.execPath, "-e", script]]]);
+
+        const commands = new Map<string, ScriptFormatterProfile>([
+            ["python", { kind: "command", command: [process.execPath, "-e", script] }],
+        ]);
+
         const formatter = createCommandScriptFormatter(commands);
         const invocation = { label: "Python", language: "python", code: "print(1)" };
         const controller = new AbortController();
@@ -228,7 +332,9 @@ describe("script formatter settings", () => {
         ].join("\n");
 
         const formatter = createCommandScriptFormatter(
-            new Map([["python", [process.execPath, "-e", delayedEcho]]]),
+            new Map<string, ScriptFormatterProfile>([
+                ["python", { kind: "command", command: [process.execPath, "-e", delayedEcho] }],
+            ]),
         );
         const first = { label: "Python", language: "python", code: "print(1)" };
         const second = { label: "Python", language: "python", code: "print(2)" };
@@ -294,7 +400,9 @@ describe("script formatter settings", () => {
             "});",
         ].join("\n");
         const formatter = createCommandScriptFormatter(
-            new Map([["python", [process.execPath, "-e", script]]]),
+            new Map<string, ScriptFormatterProfile>([
+                ["python", { kind: "command", command: [process.execPath, "-e", script] }],
+            ]),
         );
         const controller = new AbortController();
         const invoke = async (code: string, signal?: AbortSignal) =>
@@ -347,7 +455,9 @@ describe("script formatter settings", () => {
             failure === "overflow" ? "process.stdout.write('x'.repeat(1024 * 1024 + 1));" : "",
         ].join("\n");
         const formatter = createCommandScriptFormatter(
-            new Map([["python", [process.execPath, "-e", script]]]),
+            new Map<string, ScriptFormatterProfile>([
+                ["python", { kind: "command", command: [process.execPath, "-e", script] }],
+            ]),
         );
         const controller = new AbortController();
         const invocation = { label: "Python", language: "python", code: failure };
@@ -372,14 +482,17 @@ describe("script formatter settings", () => {
 
     it("accounts repeated same-key concurrent replacements without evicting retained outputs", async () => {
         const formatter = createCommandScriptFormatter(
-            new Map([
+            new Map<string, ScriptFormatterProfile>([
                 [
                     "python",
-                    [
-                        process.execPath,
-                        "-e",
-                        "process.stdin.resume();process.stdin.on('end',()=>process.stdout.write(process.pid+':'+'é'.repeat(350000)))",
-                    ],
+                    {
+                        kind: "command",
+                        command: [
+                            process.execPath,
+                            "-e",
+                            "process.stdin.resume();process.stdin.on('end',()=>process.stdout.write(process.pid+':'+'é'.repeat(350000)))",
+                        ],
+                    },
                 ],
             ]),
         );

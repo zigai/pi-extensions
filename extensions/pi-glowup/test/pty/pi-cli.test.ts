@@ -1,12 +1,18 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { createRequire } from "node:module";
 import { afterEach, describe, expect, it } from "vitest";
 import { getGlowupGlobalConfigPath } from "../../src/config/load.ts";
 import { PiPtyProcess, type PiProcessOptions, type PtyScreenFrame } from "./pi-process-harness.ts";
 
 const CTRL_O = "\u000f";
+const oxfmtExecutable = join(
+    dirname(createRequire(import.meta.url).resolve("oxfmt/package.json")),
+    "bin",
+    "oxfmt",
+);
 const PTY_TIMEOUT_MS = process.env.CI !== undefined ? 40_000 : 20_000;
 
 type FixtureWorkspace = {
@@ -476,11 +482,7 @@ describe("actual Pi CLI in a real PTY", () => {
             JSON.stringify({
                 scriptPreview: {
                     formatters: {
-                        javascript: [
-                            process.execPath,
-                            "-e",
-                            "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>process.stdout.write(s.replace('; ', ';\\n')))",
-                        ],
+                        javascript: { kind: "javascript", command: [oxfmtExecutable] },
                     },
                 },
             }),
@@ -568,11 +570,7 @@ describe("actual Pi CLI in a real PTY", () => {
             JSON.stringify({
                 scriptPreview: {
                     formatters: {
-                        javascript: [
-                            process.execPath,
-                            "-e",
-                            "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>process.stdout.write(s.replace('; ', ';\\n')))",
-                        ],
+                        javascript: { kind: "javascript", command: [oxfmtExecutable] },
                     },
                 },
             }),
@@ -600,7 +598,7 @@ describe("actual Pi CLI in a real PTY", () => {
         }
     }, 45_000);
 
-    it("formats a standalone Node preview while the command is still running", async () => {
+    it("keeps original Node source while running and decorates after completion", async () => {
         const fixture = createFixtureWorkspace();
         fixtures.push(fixture);
         writeFileSync(
@@ -608,11 +606,7 @@ describe("actual Pi CLI in a real PTY", () => {
             JSON.stringify({
                 scriptPreview: {
                     formatters: {
-                        javascript: [
-                            process.execPath,
-                            "-e",
-                            "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>process.stdout.write(s.replace('; ', ';\\n')))",
-                        ],
+                        javascript: { kind: "javascript", command: [oxfmtExecutable] },
                     },
                 },
             }),
@@ -624,13 +618,23 @@ describe("actual Pi CLI in a real PTY", () => {
             const running = await pi.waitForFrame(
                 (frame) =>
                     frame.text.includes("NODE_BEGIN") &&
-                    frame.rows.some((row) => row.text.includes("│ await new Promise")) &&
                     !frame.rows.some((row) => row.text.trim() === "NODE_DONE"),
                 PTY_TIMEOUT_MS,
             );
 
             expect(running.text).toContain("Node");
             expect(running.text).not.toContain("STREAM_COMPLETE");
+            expect(running.text).toContain('console.log("NODE_BEGIN");');
+            expect(running.rows.some((row) => row.text.includes("│ await new Promise"))).toBe(
+                false,
+            );
+            const completed = await pi.waitForFrame(
+                (frame) =>
+                    frame.text.includes("STREAM_COMPLETE") &&
+                    frame.rows.some((row) => row.text.includes("│ await new Promise")),
+                PTY_TIMEOUT_MS,
+            );
+            expectTerminalInvariants(completed, [resolve("test/pty/fixtures/offline-provider.ts")]);
             expectTerminalInvariants(running, [resolve("test/pty/fixtures/offline-provider.ts")]);
         } catch (cause: unknown) {
             await pi.writeFailureArtifacts("running-node-formatter-preview", cause);
@@ -648,11 +652,14 @@ describe("actual Pi CLI in a real PTY", () => {
             JSON.stringify({
                 scriptPreview: {
                     formatters: {
-                        javascript: [
-                            process.execPath,
-                            "-e",
-                            "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>setTimeout(()=>process.stdout.write(s.replace('; ', ';\\n')), 350))",
-                        ],
+                        javascript: {
+                            kind: "command",
+                            command: [
+                                process.execPath,
+                                "-e",
+                                "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>setTimeout(()=>process.stdout.write(s.replace('; ', ';\\n')), 350))",
+                            ],
+                        },
                     },
                 },
             }),
@@ -688,11 +695,14 @@ describe("actual Pi CLI in a real PTY", () => {
             JSON.stringify({
                 scriptPreview: {
                     formatters: {
-                        python: [
-                            process.execPath,
-                            "-e",
-                            "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>process.stdout.write(s.replace('; ', '\\n')))",
-                        ],
+                        python: {
+                            kind: "command",
+                            command: [
+                                process.execPath,
+                                "-e",
+                                "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>process.stdout.write(s.replace('; ', '\\n')))",
+                            ],
+                        },
                     },
                 },
             }),

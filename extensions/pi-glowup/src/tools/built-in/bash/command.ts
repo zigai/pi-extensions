@@ -1,4 +1,11 @@
-import { parse, type CompoundList, type If, type Node, type ParsedScript } from "unbash";
+import {
+    parse,
+    type CompoundList,
+    type If,
+    type Node,
+    type ParsedScript,
+    type Redirect,
+} from "unbash";
 
 import { parseScriptInvocation, type ScriptInvocation } from "./invocation.ts";
 
@@ -27,9 +34,38 @@ function keywordIndex(
     start: number,
     end: number,
     keyword: string,
+    protectedRanges: readonly { readonly start: number; readonly end: number }[],
 ): number | undefined {
-    const match = new RegExp(`\\b${keyword}\\b`, "gu").exec(source.slice(start, end));
-    return match === null ? undefined : start + match.index;
+    let index = start;
+    while (index < end) {
+        const protectedRange = protectedRanges.find(
+            (range) => index >= range.start && index < range.end,
+        );
+        if (protectedRange !== undefined) {
+            index = protectedRange.end;
+        } else if (/[\s;&]/u.test(source[index] ?? "")) {
+            index += 1;
+        } else if (source[index] === "#") {
+            const newline = source.indexOf("\n", index);
+            if (newline < 0) return undefined;
+
+            index = newline + 1;
+        } else if (source.startsWith("\\\n", index)) {
+            index += 2;
+        } else {
+            const keywordEnd = index + keyword.length;
+            if (
+                keywordEnd <= end &&
+                source.slice(index, keywordEnd) === keyword &&
+                (keywordEnd === end || /[\s;&|()<>]/u.test(source[keywordEnd] ?? ""))
+            )
+                return index;
+
+            return undefined;
+        }
+    }
+
+    return undefined;
 }
 
 function operatorIndex(
@@ -44,6 +80,7 @@ function operatorIndex(
 
 class BashLayoutCollector {
     readonly #breakpoints = new Map<number, number>();
+    readonly #heredocs: Redirect[] = [];
     readonly #source: string;
     readonly #operatorPosition: ShellOperatorPosition;
     #structurallyComplex = false;
@@ -96,6 +133,12 @@ class BashLayoutCollector {
         }
     }
 
+    keywordIndex(start: number, end: number, keyword: string): number | undefined {
+        const ranges = this.heredocRanges();
+        if (ranges === undefined) return undefined;
+        return keywordIndex(this.#source, start, end, keyword, ranges);
+    }
+
     walkIf(node: If, indent: number, depth: number): void {
         this.walkCompoundList(node.clause, indent + 1, depth + 1);
         this.add(node.then.pos, indent + 1);
@@ -109,14 +152,14 @@ class BashLayoutCollector {
 
         let closingSearchStart = node.then.end;
         if (node.else !== undefined) {
-            const elseIndex = keywordIndex(this.#source, node.then.end, node.else.pos, "else");
+            const elseIndex = this.keywordIndex(node.then.end, node.else.pos, "else");
             if (elseIndex !== undefined) this.add(elseIndex, indent);
             this.add(node.else.pos, indent + 1);
             this.walkCompoundList(node.else, indent + 1, depth + 1);
             closingSearchStart = node.else.end;
         }
 
-        const closingIndex = keywordIndex(this.#source, closingSearchStart, node.end, "fi");
+        const closingIndex = this.keywordIndex(closingSearchStart, node.end, "fi");
         if (closingIndex !== undefined) this.add(closingIndex, indent);
     }
 
@@ -128,13 +171,20 @@ class BashLayoutCollector {
     ): void {
         this.add(node.body.pos, indent + 1);
         this.walkCompoundList(node.body, indent + 1, depth + 1);
-
-        const closingIndex = keywordIndex(this.#source, node.body.end, node.end, closingKeyword);
+        const closingIndex = this.keywordIndex(node.body.end, node.end, closingKeyword);
         if (closingIndex !== undefined) this.add(closingIndex, indent);
     }
 
     walkNode(node: Node, indent: number, depth: number): void {
         if (depth > MAX_LAYOUT_DEPTH) return;
+
+        if ("redirects" in node) {
+            this.#heredocs.push(
+                ...node.redirects.filter(
+                    (redirect) => redirect.operator === "<<" || redirect.operator === "<<-",
+                ),
+            );
+        }
 
         switch (node.type) {
             case "Statement":
@@ -207,7 +257,7 @@ class BashLayoutCollector {
                 }
 
                 const finalItemEnd = node.items.at(-1)?.end ?? node.word.end;
-                const closingIndex = keywordIndex(this.#source, finalItemEnd, node.end, "esac");
+                const closingIndex = this.keywordIndex(finalItemEnd, node.end, "esac");
                 if (closingIndex !== undefined) this.add(closingIndex, indent);
                 return;
             }
@@ -244,26 +294,71 @@ class BashLayoutCollector {
         }
     }
 
+    heredocRanges(): Array<{ start: number; end: number }> | undefined {
+        const protectedRanges: Array<{ start: number; end: number }> = [];
+        const headerEnds = new Map<number, number>();
+        for (const heredoc of this.#heredocs.sort((left, right) => left.pos - right.pos)) {
+            const headerEnd = this.#source.indexOf("\n", heredoc.end);
+            if (headerEnd < 0 || heredoc.content === undefined) return undefined;
+
+            const bodyStart = this.#source.indexOf(
+                heredoc.content,
+                headerEnds.get(headerEnd) ?? headerEnd + 1,
+            );
+            if (bodyStart < 0) return undefined;
+
+            const bodyEnd = bodyStart + heredoc.content.length;
+            const delimiterEnd = this.#source.indexOf("\n", bodyEnd);
+            let end = this.#source.length;
+            if (delimiterEnd >= 0) end = delimiterEnd + 1;
+            protectedRanges.push({ start: heredoc.pos, end });
+            headerEnds.set(headerEnd, end);
+        }
+
+        return protectedRanges;
+    }
+
     render(): string | undefined {
         const breakpoints: DisplayBreakpoint[] = [...this.#breakpoints]
             .map(([index, indent]) => ({ index, indent }))
             .sort((left, right) => left.index - right.index);
         if (breakpoints.length === 0) return undefined;
 
-        const lines: string[] = [];
+        const protectedRanges = this.heredocRanges();
+        if (protectedRanges === undefined) return undefined;
+
+        let rendered = "";
         let start = 0;
-        let indent = 0;
+        let changed = false;
         for (const breakpoint of breakpoints) {
-            const text = this.#source.slice(start, breakpoint.index).trim();
-            if (text.length > 0) lines.push(`${INDENT.repeat(indent)}${text}`);
+            if (
+                protectedRanges.some(
+                    (range) => breakpoint.index > range.start && breakpoint.index < range.end,
+                )
+            )
+                continue;
+
+            if (breakpoint.index <= start) {
+                rendered = rendered.replace(/[\t ]*$/u, INDENT.repeat(breakpoint.indent));
+                continue;
+            }
+
+            const segment = this.#source.slice(start, breakpoint.index);
+
             start = breakpoint.index;
-            indent = breakpoint.indent;
+            if (/\n[\t ]*$/u.test(segment) || /^[\t ]*\r?\n/u.test(this.#source.slice(start))) {
+                rendered += segment;
+            } else {
+                rendered += `${segment.replace(/[\t ]+$/u, "")}\n${INDENT.repeat(breakpoint.indent)}`;
+
+                while (this.#source[start] === " " || this.#source[start] === "\t") start += 1;
+                changed = true;
+            }
         }
 
-        const tail = this.#source.slice(start).trim();
-        if (tail.length > 0) lines.push(`${INDENT.repeat(indent)}${tail}`);
-
-        return lines.length > 1 ? lines.join("\n") : undefined;
+        rendered += this.#source.slice(start);
+        if (changed) return rendered;
+        return undefined;
     }
 }
 
@@ -277,11 +372,7 @@ function analyzeBashLayout(
     operatorPosition: ShellOperatorPosition,
 ): BashLayoutAnalysis {
     const unchanged = { reflowedCommand: undefined, structurallyComplex: false } as const;
-    if (
-        command.includes("\n") ||
-        command.trim().length === 0 ||
-        command.length > MAX_LAYOUT_SOURCE_CHARACTERS
-    ) {
+    if (command.trim().length === 0 || command.length > MAX_LAYOUT_SOURCE_CHARACTERS) {
         return unchanged;
     }
 
@@ -303,7 +394,7 @@ function analyzeBashLayout(
     };
 }
 
-/** Reflows a complete one-line Bash program while retaining its original non-whitespace text. */
+/** Reflows a complete Bash program while preserving quoted text and heredoc content. */
 export function reflowBashCommand(
     command: string,
     operatorPosition: ShellOperatorPosition = "trailing",

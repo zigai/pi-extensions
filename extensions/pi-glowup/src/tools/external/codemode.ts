@@ -1,5 +1,6 @@
 import { makeComponent, wrapPrefixedLine, toolExpandHint } from "../../rendering/component.ts";
-import { formatScriptInvocation, type ScriptBlockFormatter } from "../built-in/bash/formatter.ts";
+import type { ScriptBlockFormatter } from "../built-in/bash/formatter.ts";
+import { omitLeadingImportPrologue } from "../built-in/bash/prologue.ts";
 import { PreviewStore } from "../built-in/file-previews.ts";
 import { renderGlowupOutput } from "../../rendering/output.ts";
 import {
@@ -27,104 +28,233 @@ const SCRIPT_HEADER = /^Script (?:completed|failed)\nWall time [\d.]+ seconds\nO
 const VISIBLE_CALLS = 8;
 const MAX_CALLS = 256;
 
-type FormattedCode = { readonly source: string; readonly code: string };
+type CodemodeSchedule = {
+    readonly toolCallId: string;
+    readonly code: string;
+    readonly formatter: ScriptBlockFormatter | undefined;
+    readonly isCurrent: () => boolean;
+    readonly invalidate: () => void;
+    readonly completed?: boolean;
+    readonly signal?: AbortSignal;
+};
 
-export function createCodemodePreview() {
-    const previews = new PreviewStore<FormattedCode>({
+type CodemodeInvalidation = { callback: () => void; readonly invalidate: () => void };
+
+type CodemodeWork = {
+    options: CodemodeSchedule;
+    width: number | undefined;
+    controller: AbortController;
+    completed: boolean;
+    ready: boolean;
+};
+
+export type CodemodePreviewReadOptions = {
+    readonly contentWidth: number;
+    readonly completed: boolean;
+    readonly expanded: boolean;
+};
+
+export function createCodemodePreview(formatterAccessor?: () => ScriptBlockFormatter | undefined) {
+    const previews = new PreviewStore<{ readonly work: CodemodeWork; readonly code: string }>({
         maxEntries: 300,
         maxBytes: 4 * 1024 * 1024,
-        measureBytes: ({ source, code }) =>
-            Buffer.byteLength(source, "utf8") + Buffer.byteLength(code, "utf8"),
+        measureBytes: ({ code }) => Buffer.byteLength(code, "utf8"),
     });
-    const invalidations = new Map<string, () => void>();
-    const scheduled = new Map<
-        string,
-        {
-            code: string;
-            isCurrent: () => boolean;
-            invalidate: () => void;
-        }
-    >();
+    const invalidations = new Map<string, CodemodeInvalidation>();
+    const scheduled = new Map<string, CodemodeWork>();
     let generation = 0;
-    let controller = new AbortController();
 
-    return {
-        observe(toolCallId: string, invalidate: (() => void) | undefined): void {
-            if (invalidate === undefined) return;
+    function invalidate(work: CodemodeWork): void {
+        invalidations.get(work.options.toolCallId)?.invalidate();
+        work.options.invalidate();
+    }
+
+    function complete(work: CodemodeWork): void {
+        if (work.completed) return;
+
+        work.completed = true;
+        if (work.ready)
+            queueMicrotask(() => {
+                if (scheduled.get(work.options.toolCallId) === work && work.options.isCurrent())
+                    invalidate(work);
+            });
+    }
+
+    async function format(work: CodemodeWork): Promise<void> {
+        if (work.width === undefined) return;
+
+        work.controller.abort();
+
+        const controller = new AbortController();
+        work.controller = controller;
+
+        const { options, width } = work;
+        let signal = controller.signal;
+        if (options.signal !== undefined) signal = AbortSignal.any([signal, options.signal]);
+
+        const code = await options
+            .formatter?.(
+                { label: "Codemode", language: "javascript", code: options.code },
+                { signal, targetWidth: width },
+            )
+            .catch(() => undefined);
+        if (
+            code === undefined ||
+            signal.aborted ||
+            scheduled.get(options.toolCallId) !== work ||
+            work.controller !== controller ||
+            !work.options.isCurrent()
+        )
+            return;
+
+        previews.set(options.toolCallId, { work, code });
+        work.ready = true;
+        if (work.completed) invalidate(work);
+    }
+
+    const feature = {
+        observe(
+            toolCallId: string,
+            callback: (() => void) | undefined,
+            completed = false,
+        ): (() => void) | undefined {
+            const work = scheduled.get(toolCallId);
+            if (completed && work !== undefined) complete(work);
+            if (callback === undefined) return invalidations.get(toolCallId)?.invalidate;
+
+            let observation = invalidations.get(toolCallId);
+            if (observation === undefined) {
+                const owner: CodemodeInvalidation = {
+                    callback,
+                    invalidate: () => owner.callback(),
+                };
+
+                observation = owner;
+            } else observation.callback = callback;
 
             invalidations.delete(toolCallId);
-            invalidations.set(toolCallId, invalidate);
+            invalidations.set(toolCallId, observation);
 
             if (invalidations.size > 300) {
                 const oldest = invalidations.keys().next().value;
                 if (oldest !== undefined) invalidations.delete(oldest);
             }
+
+            return observation.invalidate;
         },
-        get(toolCallId: string, source: string): string | undefined {
+        get(
+            toolCallId: string,
+            source: string,
+            read?: CodemodePreviewReadOptions,
+        ): string | undefined {
+            let work = scheduled.get(toolCallId);
+            if ((work === undefined || work.options.code !== source) && read?.completed === true) {
+                const formatter = formatterAccessor?.();
+                const callback = invalidations.get(toolCallId)?.invalidate;
+                if (formatter !== undefined && callback !== undefined) {
+                    const currentGeneration = generation;
+
+                    feature.schedule({
+                        toolCallId,
+                        code: source,
+                        formatter,
+                        completed: true,
+                        isCurrent: () => generation === currentGeneration,
+                        invalidate: callback,
+                    });
+                    work = scheduled.get(toolCallId);
+                }
+            }
+
+            if (work === undefined || work.options.code !== source || !work.options.isCurrent())
+                return undefined;
+
+            if (read !== undefined) {
+                if (read.completed) complete(work);
+
+                if (work.width !== read.contentWidth) {
+                    work.controller.abort();
+                    work.ready = false;
+                    work.width = read.contentWidth;
+                    queueMicrotask(() => {
+                        if (
+                            scheduled.get(toolCallId) === work &&
+                            work.options.isCurrent() &&
+                            work.width === read.contentWidth
+                        )
+                            void format(work);
+                    });
+                }
+
+                if (read.expanded) return undefined;
+            }
+
+            if (!work.completed || !work.ready) return undefined;
+
             const preview = previews.get(toolCallId);
-            return preview?.source === source ? preview.code : undefined;
+            if (preview?.work !== work) return undefined;
+
+            const profile = work.options.formatter?.profileFor?.("javascript");
+            if (
+                profile === undefined ||
+                profile.kind === "command" ||
+                profile.kind === "bash" ||
+                profile.imports === "show"
+            )
+                return preview.code;
+
+            const omission = omitLeadingImportPrologue(preview.code, "javascript", 0);
+            return omission !== undefined
+                ? `… ${omission.omittedLines} import/setup lines omitted\n${omission.code}`
+                : preview.code;
         },
-        schedule(options: {
-            readonly toolCallId: string;
-            readonly code: string;
-            readonly formatter: ScriptBlockFormatter | undefined;
-            readonly isCurrent: () => boolean;
-            readonly invalidate: () => void;
-        }): void {
+        schedule(options: CodemodeSchedule): void {
+            const previous = scheduled.get(options.toolCallId);
+            if (
+                previous?.options.code === options.code &&
+                previous.options.formatter === options.formatter
+            ) {
+                previous.options = options;
+
+                if (options.completed === true) complete(previous);
+                return;
+            }
+
+            previous?.controller.abort();
+            scheduled.delete(options.toolCallId);
+
             if (options.formatter === undefined) return;
 
-            const previous = scheduled.get(options.toolCallId);
-            scheduled.set(options.toolCallId, {
-                code: options.code,
-                isCurrent: options.isCurrent,
-                invalidate: options.invalidate,
-            });
-
-            if (previous?.code === options.code) return;
+            const work: CodemodeWork = {
+                options,
+                width: previous?.width,
+                controller: new AbortController(),
+                completed: options.completed ?? false,
+                ready: false,
+            };
+            scheduled.set(options.toolCallId, work);
 
             if (scheduled.size > 300) {
                 const oldest = scheduled.keys().next().value;
-                if (oldest !== undefined) scheduled.delete(oldest);
+                if (oldest !== undefined) {
+                    scheduled.get(oldest)?.controller.abort();
+                    scheduled.delete(oldest);
+                }
             }
 
-            const currentGeneration = generation;
-            const columns = process.stdout.columns;
-            const targetWidth = Number.isFinite(columns) ? Math.max(20, columns - 4) : undefined;
-
-            void formatScriptInvocation(
-                { label: "Codemode", language: "javascript", code: options.code },
-                options.formatter,
-                { signal: controller.signal, ...(targetWidth !== undefined && { targetWidth }) },
-            )
-                .then((formatted) => {
-                    const current = scheduled.get(options.toolCallId);
-                    if (
-                        formatted.code === options.code ||
-                        generation !== currentGeneration ||
-                        current?.code !== options.code ||
-                        !current.isCurrent()
-                    )
-                        return;
-
-                    previews.set(options.toolCallId, {
-                        source: options.code,
-                        code: formatted.code,
-                    });
-
-                    invalidations.get(options.toolCallId)?.();
-                    current.invalidate();
-                })
-                .catch(() => {});
+            void format(work);
         },
         clear(): void {
             generation += 1;
-            controller.abort();
-            controller = new AbortController();
+
+            for (const work of scheduled.values()) work.controller.abort();
             previews.clear();
             invalidations.clear();
             scheduled.clear();
         },
     };
+
+    return feature;
 }
 
 function formatCost(cost: number): string {
@@ -280,22 +410,20 @@ function callRows(
 
 export function createCodemodeRenderer(
     labelMode: ToolLabelMode = "static",
-    preview?: Pick<ReturnType<typeof createCodemodePreview>, "get" | "observe">,
+    preview: Pick<
+        ReturnType<typeof createCodemodePreview>,
+        "get" | "observe"
+    > = createCodemodePreview(),
 ): ThirdPartyToolRenderer {
     return {
         renderCall(args, theme, context) {
             const record = jsonObjectParser.parse(args);
             const sourceCode = record === undefined ? undefined : getString(record, "code");
 
-            preview?.observe(context.toolCallId, context.invalidate);
-
-            const code =
-                sourceCode === undefined
-                    ? undefined
-                    : (preview?.get(context.toolCallId, sourceCode) ?? sourceCode);
-            if (code !== undefined) {
-                scheduleCodeOutputSyntaxLoad({ language: "javascript" }, context.invalidate, code);
-            }
+            const completed =
+                context.phase === "complete" ||
+                (context.result !== undefined && !context.isPartial);
+            const invalidate = preview.observe(context.toolCallId, context.invalidate, completed);
 
             return renderExpandableSection(context, "call", (expanded) => {
                 const header = renderGlowupCall(theme, {
@@ -306,21 +434,37 @@ export function createCodemodeRenderer(
                         completed: "Ran code",
                     }),
                 });
-                const source = renderGlowupOutput(theme, code, {
-                    expanded,
-                    mode: "head",
-                    maxPreviewLines: 8,
-                    prefixFirst: dim(theme, "  │ "),
-                    prefixRest: dim(theme, "  │ "),
-                    dimContent: false,
-                    noOutputLabel: null,
-                    syntax: { language: "javascript" },
-                });
 
-                return makeComponent((width) => [...header.render(width), ...source.render(width)]);
+                return makeComponent((width) => {
+                    const code =
+                        sourceCode === undefined
+                            ? undefined
+                            : (preview.get(context.toolCallId, sourceCode, {
+                                  contentWidth: Math.max(1, width - 4),
+                                  completed,
+                                  expanded,
+                              }) ?? sourceCode);
+                    if (code !== undefined)
+                        scheduleCodeOutputSyntaxLoad({ language: "javascript" }, invalidate, code);
+
+                    const source = renderGlowupOutput(theme, code, {
+                        expanded,
+                        mode: "head",
+                        maxPreviewLines: 8,
+                        prefixFirst: dim(theme, "  │ "),
+                        prefixRest: dim(theme, "  │ "),
+                        dimContent: false,
+                        noOutputLabel: null,
+                        syntax: { language: "javascript", invalidate },
+                    });
+
+                    return [...header.render(width), ...source.render(width)];
+                });
             });
         },
         renderResult(result, options, theme, context) {
+            preview.observe(context.toolCallId, context.invalidate, !options.isPartial);
+
             const text = options.isPartial ? undefined : scriptOutput(result);
 
             return renderExpandableSection(

@@ -1,9 +1,10 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { copyFile, cp, mkdir, mkdtemp, readdir, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { stripVTControlCharacters } from "node:util";
 import { readModuleGraph } from "./module-graph.ts";
 import { describe, expect, it, onTestFinished } from "vitest";
 import Type, { type Static } from "typebox";
@@ -132,6 +133,89 @@ describe("package manifest", () => {
 
         expect(manifest.devDependencies?.typebox).toBeDefined();
     });
+
+    it("tokenizes long lines from the packed worker with extension-local host peers absent", async () => {
+        const packageRoot = resolve(import.meta.dirname, "..");
+        const root = await mkdtemp(join(homedir(), ".cache", "glowup-worker-"));
+        onTestFinished(async () => {
+            await rm(root, { recursive: true, force: true });
+        });
+        const buildRoot = join(root, "build");
+        await mkdir(buildRoot);
+
+        for (const file of ["package.json", "config.schema.json", "LICENSE", "README.md"])
+            await copyFile(join(packageRoot, file), join(buildRoot, file));
+
+        for (const folder of ["src", "scripts", "themes"])
+            await cp(join(packageRoot, folder), join(buildRoot, folder), { recursive: true });
+
+        for (const dependency of [
+            "esbuild",
+            "typescript",
+            "@pierre/diffs",
+            "ansi-styles",
+            "unbash",
+            "shiki",
+        ]) {
+            const destination = join(buildRoot, "node_modules", dependency);
+            await mkdir(dirname(destination), { recursive: true });
+            await symlink(resolvedPackageRoot(dependency), destination, "dir");
+        }
+
+        execFileSync(process.execPath, [join(buildRoot, "scripts", "build.mjs")], {
+            cwd: buildRoot,
+            stdio: "pipe",
+        });
+
+        execFileSync("npm", ["pack", "--ignore-scripts", "--pack-destination", root], {
+            cwd: buildRoot,
+            stdio: "pipe",
+        });
+        const archive = (await readdir(root)).find((name) => name.endsWith(".tgz"));
+        if (archive === undefined) throw new Error("Missing tarball");
+
+        const consumerRoot = join(root, "consumer");
+        const installedRoot = join(consumerRoot, "node_modules", "@zigai", "pi-glowup");
+        await mkdir(installedRoot, { recursive: true });
+        execFileSync("tar", [
+            "-xzf",
+            join(root, archive),
+            "-C",
+            installedRoot,
+            "--strip-components=1",
+        ]);
+        await symlink(
+            resolvedPackageRoot("shiki"),
+            join(consumerRoot, "node_modules", "shiki"),
+            "dir",
+        );
+        const source = `const before = 1;\n/* ${"note ".repeat(1_800)}\nconst hidden = 2;\n*/ const after = 3;`;
+        const consumer = join(consumerRoot, "consumer.mjs");
+        await writeFile(
+            consumer,
+            `import { Worker } from "node:worker_threads";
+import fs from "node:fs";
+const theme = JSON.parse(fs.readFileSync(new URL("./node_modules/@zigai/pi-glowup/themes/darker-modern-theme.json", import.meta.url), "utf8"));
+const worker = new Worker(new URL("./node_modules/@zigai/pi-glowup/dist/src/tokenize-worker.mjs", import.meta.url), { execArgv: [] });
+try {
+    const response = new Promise((resolve, reject) => { worker.once("message", resolve); worker.once("error", reject); });
+    worker.postMessage({ id: 1, code: ${JSON.stringify(source)}, language: "javascript", brackets: true, theme });
+    console.log(JSON.stringify(await response));
+} finally { await worker.terminate(); }
+`,
+        );
+        const raw: unknown = JSON.parse(
+            execFileSync(process.execPath, [consumer], { cwd: consumerRoot, encoding: "utf8" }),
+        );
+        const result = Value.Parse(
+            Type.Object({ id: Type.Number(), lines: Type.Array(Type.String()) }),
+            raw,
+        );
+        expect(result.lines[1]).toContain("\u001b[");
+        expect(result.lines[2]).toContain("\u001b[38;2;106;153;85mconst hidden");
+        expect(result.lines[3]).toContain("\u001b[38;2;86;156;214mconst");
+        expect(result.lines.map((line) => stripVTControlCharacters(line)).join("\n")).toBe(source);
+    }, 30_000);
 
     it("publishes a callable root factory with checked consumer types", async () => {
         const packageRoot = resolve(import.meta.dirname, "..");

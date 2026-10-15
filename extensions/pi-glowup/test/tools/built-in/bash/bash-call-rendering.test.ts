@@ -64,6 +64,27 @@ describe("bash command rendering", () => {
         expect(rendered).toContain("│ && two");
     });
 
+    it.each(["auto", "always"] as const)("retains branch comments in %s layout", (shellLayout) => {
+        const command = "if check; then first; else # the else branch\nsecond; fi";
+        const rows = renderBashCommandCall(theme, command, {
+            state: "success",
+            expanded: true,
+            maxCodePreviewLines: 8,
+            showPrologueOmission: false,
+            headerLayout: "auto",
+            shellLayout,
+            shellOperatorPosition: "trailing",
+        }).render(120);
+        expect(rows).toEqual([
+            "• Bash",
+            "  │ if check; then",
+            "  │   first;",
+            "  │ else # the else branch",
+            "  │ second;",
+            "  │ fi",
+        ]);
+    });
+
     it("keeps pipelines and fallbacks on their step line when they fit", () => {
         const command =
             `pwd && opencode debug --help | head -80 ` +
@@ -164,6 +185,28 @@ describe("bash command rendering", () => {
         expect(rendered).toContain("• Bash");
         expect(rendered).toContain("node --import tsx --input-type=module");
         expect(rendered).not.toContain("• Python");
+    });
+
+    it("reveals nine fitting terminal rows but keeps taller script content capped", () => {
+        const command = `python -c '${["x=1", "x=2", "x=3", "x=4", "x=5", "x=6", "x=7", "print(12345678)"].join("\n")}'`;
+        const component = renderBashCommandCall(theme, command, {
+            state: "success",
+            expanded: false,
+            maxCodePreviewLines: 8,
+            showPrologueOmission: false,
+            headerLayout: "block",
+            shellLayout: "auto",
+            shellOperatorPosition: "trailing",
+        });
+        const fitting = component.render(18);
+        expect(fitting).toHaveLength(10);
+        expect(fitting.at(-1)).toContain("78)");
+        expect(fitting.join("\n")).not.toContain("…");
+        const taller = component.render(12);
+        expect(taller.join("\n")).toContain("…");
+        expect(taller.join("\n")).not.toContain("78)");
+        expect(taller.every((line) => visibleWidth(line) <= 12)).toBe(true);
+        expect(component.render(18)).toEqual(fitting);
     });
 
     it("renders clean standalone interpreter calls as language previews", () => {
