@@ -86,11 +86,17 @@ it("loads the packed production install in Pi and restores persisted naming prog
             throw new Error("npm pack did not describe the settings archive.");
         }
 
+        const hostManifest = Value.Parse(
+            Type.Object({ overrides: Type.Record(Type.String(), Type.String()) }),
+            JSON.parse(await readFile(new URL("../../../package.json", import.meta.url), "utf8")),
+        );
+
         await writeFile(
             join(installDir, "package.json"),
             JSON.stringify({
                 private: true,
                 type: "module",
+                overrides: hostManifest.overrides,
                 dependencies: {
                     "@zigai/pi-autoname-session": `file:${join(installDir, archive)}`,
                     "@zigai/pi-extension-settings": `file:${join(installDir, packedSettings.filename)}`,

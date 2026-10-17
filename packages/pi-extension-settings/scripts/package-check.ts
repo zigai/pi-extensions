@@ -162,12 +162,18 @@ try {
         }
     }
 
+    const hostManifest = Value.Parse(
+        Type.Object({ overrides: Type.Record(Type.String(), Type.String()) }),
+        JSON.parse(await readFile(new URL("../../../package.json", import.meta.url), "utf8")),
+    );
+
     await writeFile(
         path.join(consumerDirectory, "package.json"),
         `${JSON.stringify(
             {
                 private: true,
                 type: "module",
+                overrides: hostManifest.overrides,
                 piExtensionSettings: {
                     definition: "./settings-input.ts",
                     prevalidation: "./settings.prevalidated.ts",
@@ -189,6 +195,7 @@ try {
         npmExecutable,
         [
             "install",
+            "--save-exact",
             "--dry-run=false",
             "--ignore-scripts",
             "--no-audit",
