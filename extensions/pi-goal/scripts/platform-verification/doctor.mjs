@@ -86,10 +86,10 @@ function crabbox(cbox, args, timeout = 300_000) {
   }
 }
 
-function disposableWindowsSshProbe(cbox, config) {
+function disposableWindowsSshProbe(cbox, config, probes) {
   const slug = `${packageSlug(config)}-doctor-windows`;
   const baseArgs = windowsCrabboxBaseArgs(config);
-  const warm = crabbox(
+  const warm = probes.crabbox(
     cbox,
     ["warmup", ...baseArgs, "--slug", slug, "--keep", "--reclaim"],
     300_000,
@@ -105,7 +105,7 @@ function disposableWindowsSshProbe(cbox, config) {
 
     const probeCommand =
       "powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command 'Get-Command node,npm,git,tar -ErrorAction Stop | Out-Null; node --version; npm --version; git --version; tar --version | Select-Object -First 1; whoami'";
-    const run = crabbox(
+    const run = probes.crabbox(
       cbox,
       ["run", ...baseArgs, "--id", leaseId, "--no-sync", "--shell", probeCommand],
       120_000,
@@ -149,7 +149,7 @@ function disposableWindowsSshProbe(cbox, config) {
 
     return { ok: true, message: lines.join(" | ") };
   } finally {
-    crabbox(cbox, ["stop", ...baseArgs, "--id", leaseId], 60_000);
+    probes.crabbox(cbox, ["stop", ...baseArgs, "--id", leaseId], 60_000);
   }
 }
 
@@ -174,8 +174,8 @@ function versionAtLeast(actual, minimum) {
   return true;
 }
 
-function npmPackFiles() {
-  const output = silent("npm", ["pack", "--dry-run", "--json"]);
+function npmPackFiles(probes) {
+  const output = probes.silent("npm", ["pack", "--dry-run", "--json"]);
   if (!output) return null;
   try {
     const parsed = JSON.parse(output);
@@ -187,7 +187,7 @@ function npmPackFiles() {
   }
 }
 
-function checkForbiddenProjectFiles(failures) {
+function checkForbiddenProjectFiles(failures, probes) {
   const trackedForbidden = trackedForbiddenProjectPaths(repositoryRoot);
   if (trackedForbidden.length === 0) ok("tracked source files exclude forbidden local artifacts");
   else fail(`forbidden tracked source path(s): ${trackedForbidden.join(", ")}`, failures);
@@ -197,7 +197,7 @@ function checkForbiddenProjectFiles(failures) {
     ok("no local .env or package tarball artifacts at repo top level");
   else fail(forbiddenArtifactMessage(localForbidden), failures);
 
-  const packFiles = npmPackFiles();
+  const packFiles = npmPackFiles(probes);
   if (!packFiles) {
     fail("could not inspect npm pack contents", failures);
     return;
@@ -208,8 +208,8 @@ function checkForbiddenProjectFiles(failures) {
   else fail(`forbidden npm package path(s): ${packedForbidden.join(", ")}`, failures);
 }
 
-function crabboxProviders(cbox) {
-  const output = silent(cbox, ["providers"]);
+function crabboxProviders(cbox, probes) {
+  const output = probes.silent(cbox, ["providers"]);
   if (!output) return [];
   return output
     .split(/\r?\n/)
@@ -218,21 +218,21 @@ function crabboxProviders(cbox) {
     .filter(Boolean);
 }
 
-function checkRequiredProviders(cbox, failures) {
-  const providers = crabboxProviders(cbox);
+function checkRequiredProviders(cbox, requiredProviders, failures, probes) {
+  const providers = crabboxProviders(cbox, probes);
   if (providers.length === 0) {
     fail("could not read crabbox providers", failures);
     return;
   }
 
-  for (const provider of ["ssh", "local-container", "parallels"]) {
+  for (const provider of requiredProviders) {
     if (providers.includes(provider)) ok(`crabbox provider available: ${provider}`);
     else fail(`crabbox provider missing: ${provider}`, failures);
   }
 }
 
-function checkCrabboxProvider(cbox, args, label, failures) {
-  const output = silent(cbox, ["doctor", ...args, "--json"]);
+function checkCrabboxProvider(cbox, args, label, failures, probes) {
+  const output = probes.silent(cbox, ["doctor", ...args, "--json"]);
   if (!output) {
     fail(`${label} crabbox doctor failed`, failures);
     return;
@@ -248,18 +248,25 @@ function checkCrabboxProvider(cbox, args, label, failures) {
 }
 
 export async function runDoctor(config, options = {}) {
+  const probes = options.probes ?? { silent, shell, hasCommand, commandPath, crabbox };
   const failures = { count: 0 };
   const skipWindowsDisposableProbe = options.skipWindowsDisposableProbe === true;
   const packageName = config?.packageName ?? "@zigai/pi-goal";
   const artifactRoot = config?.artifactRoot ?? ".artifacts/platform-verification";
   const nodeMajor = config?.nodeValidationMajor ?? 24;
+  const requiredTargets = config?.requiredTargets ?? [];
+
+  const requiredProviders = [
+    ...new Set(requiredTargets.map((target) => buildTargetBaseArgs(target, config)[1])),
+  ];
+
   console.log("\n── Platform verification config ──");
   ok(`package: ${packageName}`);
   ok(`targets: ${(config?.requiredTargets ?? []).join(", ")}`);
   ok(`suites: ${(config?.requiredSuites ?? []).join(", ")}`);
   console.log("\n── Crabbox binary ──");
   const cbox = env("PLATFORM_VERIFICATION_CRABBOX") || "crabbox";
-  const cboxPath = env("PLATFORM_VERIFICATION_CRABBOX") || commandPath("crabbox");
+  const cboxPath = env("PLATFORM_VERIFICATION_CRABBOX") || probes.commandPath("crabbox");
   if (!cboxPath) {
     fail(
       "crabbox not found on PATH; install with Homebrew or set PLATFORM_VERIFICATION_CRABBOX",
@@ -277,7 +284,7 @@ export async function runDoctor(config, options = {}) {
       ok(`binary: ${cboxPath}`);
     }
 
-    const version = silent(cbox, ["--version"]);
+    const version = probes.silent(cbox, ["--version"]);
     if (version) {
       const displayVersion = version.split(/\r?\n/)[0];
       ok(`version: ${displayVersion}`);
@@ -293,19 +300,19 @@ export async function runDoctor(config, options = {}) {
     }
   }
 
-  console.log("\n── Model verification configuration ──");
-  const model = process.env.PLATFORM_VERIFICATION_MODEL || config?.defaultModel || "zai/glm-5.2";
-  const authEnv = (
-    process.env.PLATFORM_VERIFICATION_AUTH_ENV
-      ? process.env.PLATFORM_VERIFICATION_AUTH_ENV.split(",")
-      : (config?.defaultAuthEnv ?? ["ZAI_API_KEY", "Z_AI_API_KEY"])
-  )
-    .map((name) => String(name).trim())
-    .filter(Boolean);
-
-  ok(`model: ${model}`);
-
   if ((config?.requiredSuites ?? []).includes("goal-runtime-verification")) {
+    console.log("\n── Model verification configuration ──");
+    const model = process.env.PLATFORM_VERIFICATION_MODEL || config?.defaultModel || "zai/glm-5.2";
+    const authEnv = (
+      process.env.PLATFORM_VERIFICATION_AUTH_ENV
+        ? process.env.PLATFORM_VERIFICATION_AUTH_ENV.split(",")
+        : (config?.defaultAuthEnv ?? ["ZAI_API_KEY", "Z_AI_API_KEY"])
+    )
+      .map((name) => String(name).trim())
+      .filter(Boolean);
+
+    ok(`model: ${model}`);
+
     const presentAuth = authEnv.filter((name) => env(name).length > 0);
     if (presentAuth.length > 0)
       ok(
@@ -326,49 +333,65 @@ export async function runDoctor(config, options = {}) {
     ["git", "git --version"],
     ["tar", "tar --version"],
   ]) {
-    const output = shell(command);
+    const output = probes.shell(command);
     if (!output) fail(`${name} not found`, failures);
     else ok(`${name}: ${output.split(/\r?\n/)[0]}`);
   }
 
-  const localNode = shell("node --version");
+  const localNode = probes.shell("node --version");
   const localNodeMajor = Number(localNode?.replace(/^v/, "").split(".")[0] ?? 0);
   if (localNodeMajor >= nodeMajor) ok(`host Node major ${localNodeMajor} >= ${nodeMajor}`);
   else fail(`host Node major ${localNodeMajor || "unknown"} < ${nodeMajor}`, failures);
 
-  console.log("\n── Crabbox providers ──");
+  if (requiredProviders.length > 0) {
+    console.log("\n── Crabbox providers ──");
 
-  if (cboxPath) {
-    checkRequiredProviders(cbox, failures);
-    checkCrabboxProvider(
-      cbox,
-      buildTargetBaseArgs("ubuntu", config),
-      "ubuntu local-container",
-      failures,
-    );
+    if (cboxPath) {
+      checkRequiredProviders(cbox, requiredProviders, failures, probes);
 
-    checkCrabboxProvider(cbox, buildTargetBaseArgs("macos", config), "macOS ssh", failures);
+      if (requiredTargets.includes("ubuntu"))
+        checkCrabboxProvider(
+          cbox,
+          buildTargetBaseArgs("ubuntu", config),
+          "ubuntu local-container",
+          failures,
+          probes,
+        );
+
+      if (requiredTargets.includes("macos"))
+        checkCrabboxProvider(
+          cbox,
+          buildTargetBaseArgs("macos", config),
+          "macOS ssh",
+          failures,
+          probes,
+        );
+    }
   }
 
-  console.log("\n── Docker / Ubuntu ──");
-  const dockerVersion = shell("docker info --format '{{.ServerVersion}}'");
-  if (dockerVersion) ok(`Docker ${dockerVersion}`);
-  else fail("Docker is not available or not running", failures);
+  if (requiredTargets.includes("ubuntu")) {
+    console.log("\n── Docker / Ubuntu ──");
+    const dockerVersion = probes.shell("docker info --format '{{.ServerVersion}}'");
+    if (dockerVersion) ok(`Docker ${dockerVersion}`);
+    else fail("Docker is not available or not running", failures);
+  }
 
-  console.log("\n── macOS SSH ──");
-  const sshUser = env("PLATFORM_VERIFICATION_MAC_USER") || env("USER");
-  const sshHost =
-    env("PLATFORM_VERIFICATION_MAC_HOST") || config?.macosStaticSsh?.host || "localhost";
-  const sshProbe = shell(
-    `ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no ${sshUser}@${sshHost} 'node --version && npm --version && git --version'`,
-  );
-  if (sshProbe) ok(`SSH ${sshUser}@${sshHost}: ${sshProbe.split(/\r?\n/).join(" | ")}`);
-  else fail(`SSH probe failed for ${sshUser}@${sshHost}`, failures);
+  if (requiredTargets.includes("macos")) {
+    console.log("\n── macOS SSH ──");
+    const sshUser = env("PLATFORM_VERIFICATION_MAC_USER") || env("USER");
+    const sshHost =
+      env("PLATFORM_VERIFICATION_MAC_HOST") || config?.macosStaticSsh?.host || "localhost";
+    const sshProbe = probes.shell(
+      `ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no ${sshUser}@${sshHost} 'node --version && npm --version && git --version'`,
+    );
+    if (sshProbe) ok(`SSH ${sshUser}@${sshHost}: ${sshProbe.split(/\r?\n/).join(" | ")}`);
+    else fail(`SSH probe failed for ${sshUser}@${sshHost}`, failures);
+  }
 
-  if ((config?.requiredTargets ?? []).includes("windows-native")) {
+  if (requiredTargets.includes("windows-native")) {
     console.log("\n── Windows native / Parallels ──");
 
-    if (!hasCommand("prlctl")) {
+    if (!probes.hasCommand("prlctl")) {
       fail("prlctl not found", failures);
     } else {
       ok("prlctl found");
@@ -385,7 +408,7 @@ export async function runDoctor(config, options = {}) {
         env("PLATFORM_VERIFICATION_WINDOWS_WORK_ROOT") ||
         windows.workRoot ||
         `C:\\crabbox\\${packageName}`;
-      const list = shell("prlctl list -a --no-header 2>/dev/null");
+      const list = probes.shell("prlctl list -a --no-header 2>/dev/null");
 
       if (!list) {
         fail("prlctl list returned no VMs", failures);
@@ -394,7 +417,7 @@ export async function runDoctor(config, options = {}) {
       } else {
         ok(`Windows VM ${vmName} found`);
 
-        const status = shell(`prlctl status "${vmName.replace(/"/g, '\\"')}" 2>/dev/null`);
+        const status = probes.shell(`prlctl status "${vmName.replace(/"/g, '\\"')}" 2>/dev/null`);
         if (/\bstopped\b/i.test(status ?? "")) ok(`Windows source VM ${vmName} is stopped`);
         else
           fail(
@@ -402,7 +425,7 @@ export async function runDoctor(config, options = {}) {
             failures,
           );
 
-        const snapshotsJson = shell(
+        const snapshotsJson = probes.shell(
           `prlctl snapshot-list "${vmName.replace(/"/g, '\\"')}" -j 2>/dev/null`,
         );
         let snapshotMatch = null;
@@ -447,9 +470,10 @@ export async function runDoctor(config, options = {}) {
           }),
           "windows parallels",
           failures,
+          probes,
         );
 
-        const ipLine = shell(
+        const ipLine = probes.shell(
           `prlctl list -f --no-header "${vmName.replace(/"/g, '\\"')}" 2>/dev/null`,
         );
         if (!ipLine) {
@@ -460,7 +484,9 @@ export async function runDoctor(config, options = {}) {
           if (ip && ip !== "-") {
             ok(`Windows template IP: ${ip}`);
 
-            const portCheck = shell(`nc -z -w 3 ${ip} 22 2>/dev/null && echo open || echo closed`);
+            const portCheck = probes.shell(
+              `nc -z -w 3 ${ip} 22 2>/dev/null && echo open || echo closed`,
+            );
             if (portCheck?.includes("open")) ok(`SSH open on ${ip}:22`);
             else
               fail(
@@ -476,16 +502,20 @@ export async function runDoctor(config, options = {}) {
               `template ${vmName} has no IP; verifying Windows SSH/tools through a disposable Crabbox clone`,
             );
 
-            const probe = disposableWindowsSshProbe(cbox, {
-              ...config,
-              windowsParallels: {
-                ...windows,
-                sourceVm: vmName,
-                snapshot,
-                user,
-                workRoot,
+            const probe = disposableWindowsSshProbe(
+              cbox,
+              {
+                ...config,
+                windowsParallels: {
+                  ...windows,
+                  sourceVm: vmName,
+                  snapshot,
+                  user,
+                  workRoot,
+                },
               },
-            });
+              probes,
+            );
             if (probe.ok) ok(`disposable Windows clone SSH/tool probe OK: ${probe.message}`);
             else fail(probe.message, failures);
           } else {
@@ -497,9 +527,6 @@ export async function runDoctor(config, options = {}) {
         }
       }
     }
-  } else {
-    console.log("\n── Windows native / Parallels ──");
-    warn("windows-native is not listed in requiredTargets for this configuration");
   }
 
   console.log("\n── Artifact root ──");
@@ -517,14 +544,14 @@ export async function runDoctor(config, options = {}) {
   }
 
   console.log("\n── Repository hygiene ──");
-  const status = shell("git status --short");
+  const status = probes.shell("git status --short");
   if (status)
     warn(
       `${status.split(/\r?\n/).length} uncommitted change(s) recorded for verification evidence`,
     );
   else ok("git status clean");
 
-  checkForbiddenProjectFiles(failures);
+  checkForbiddenProjectFiles(failures, probes);
   console.log(`\n=== Results: ${failures.count} failure(s) ===`);
 
   if (failures.count > 0) {

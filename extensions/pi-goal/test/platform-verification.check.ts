@@ -1,5 +1,16 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { test } from "vitest";
 import { Type } from "typebox";
@@ -37,6 +48,260 @@ function run(command: string, args: string[]) {
     shell: process.platform === "win32" && command === "npm",
   });
 }
+
+const DoctorProbeSchema = Type.Array(
+  Type.Object({ command: Type.String(), args: Type.Array(Type.String()) }),
+);
+
+type DoctorScenario = {
+  targets: string[];
+  providers: string[];
+  suites?: string[];
+  unavailable?: string;
+  unreadyProvider?: string;
+  skipWindowsDisposableProbe?: boolean;
+  auth?: boolean;
+};
+
+function runDoctorFixture(scenario: DoctorScenario) {
+  const fixtures = resolve(".artifacts/platform-verification/doctor-tests");
+  mkdirSync(fixtures, { recursive: true });
+
+  const root = mkdtempSync(join(fixtures, "pi-goal-doctor-"));
+  const workspace = join(root, "extensions", "pi-goal");
+  mkdirSync(workspace, { recursive: true });
+
+  try {
+    cpSync("scripts", join(workspace, "scripts"), { recursive: true });
+    symlinkSync(resolve("../../node_modules"), join(root, "node_modules"), "junction");
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        String.raw`
+import { writeFileSync } from "node:fs";
+import { runDoctor } from "./scripts/platform-verification/doctor.mjs";
+const scenario = JSON.parse(process.env.DOCTOR_SCENARIO);
+const calls = [];
+const probes = {
+  commandPath(command) {
+    calls.push({ command: "which", args: [command] });
+    return "/fixture/crabbox";
+  },
+  hasCommand(command) {
+    calls.push({ command: "which", args: [command] });
+    return scenario.unavailable !== command;
+  },
+  silent(command, args) {
+    calls.push({ command, args });
+    if (command === "npm") return JSON.stringify([{ files: [] }]);
+    if (args[0] === "--version") return "crabbox 0.26.0";
+    if (args[0] === "providers") return scenario.providers.join("\n");
+    if (args[0] === "doctor") {
+      const provider = args[args.indexOf("--provider") + 1];
+      return JSON.stringify({ ok: provider !== scenario.unreadyProvider, error: "fixture not ready" });
+    }
+    throw new Error("Unexpected command: " + command + " " + args.join(" "));
+  },
+  shell(command) {
+    calls.push({ command, args: [] });
+    if (scenario.unavailable && command.startsWith(scenario.unavailable + " ")) return null;
+    if (command === "node --version") return "v24.0.0";
+    if (command === "npm --version") return "11.0.0";
+    if (command === "git --version") return "git version 2.50.0";
+    if (command === "tar --version") return "tar 1.35";
+    if (command === "git status --short") return "";
+    if (command.startsWith("docker ")) return "28.0.0";
+    if (command.startsWith("ssh ")) return "v24.0.0\n11.0.0\ngit version 2.50.0";
+    if (command.startsWith("prlctl list -a")) return "fixture-template";
+    if (command.startsWith("prlctl status")) return "stopped";
+    if (command.startsWith("prlctl snapshot-list")) return JSON.stringify({ fixture: { name: "ready", state: "poweroff" } });
+    if (command.startsWith("prlctl list -f")) return "fixture stopped - fixture-template";
+    throw new Error("Unexpected shell command: " + command);
+  },
+  crabbox(command, args) {
+    calls.push({ command, args });
+    if (args[0] === "warmup") return { ok: true, stdout: "leased fixture-clone", stderr: "" };
+    if (args[0] === "run") return { ok: true, stdout: "v24.0.0\n11.0.0\ngit version 2.50.0\ntar 1.35\nfixture-user", stderr: "" };
+    if (args[0] === "stop") return { ok: true, stdout: "stopped", stderr: "" };
+    throw new Error("Unexpected Crabbox action: " + args[0]);
+  },
+};
+if (scenario.auth) process.env.FIXTURE_MODEL_AUTH = "fixture-only-not-a-credential";
+await runDoctor({
+  packageName: "fixture-goal",
+  artifactRoot: process.env.DOCTOR_ARTIFACT_ROOT,
+  requiredTargets: scenario.targets,
+  requiredSuites: scenario.suites ?? ["platform-build"],
+  defaultAuthEnv: ["FIXTURE_MODEL_AUTH"],
+  windowsParallels: { sourceVm: "fixture-template", snapshot: "ready", user: "fixture-user" },
+}, { probes, skipWindowsDisposableProbe: scenario.skipWindowsDisposableProbe });
+writeFileSync(process.env.DOCTOR_PROBE_RECORD, JSON.stringify(calls));
+`,
+      ],
+      {
+        cwd: workspace,
+        encoding: "utf8",
+        env: {
+          PATH: process.env.PATH,
+          HOME: root,
+          USERPROFILE: root,
+          USER: "fixture-user",
+          SystemRoot: process.env.SystemRoot,
+          DOCTOR_SCENARIO: JSON.stringify(scenario),
+          DOCTOR_ARTIFACT_ROOT: join(root, "artifacts"),
+          DOCTOR_PROBE_RECORD: join(root, "probes.json"),
+        },
+      },
+    );
+
+    assert.equal(result.error, undefined);
+
+    const calls = Value.Parse(
+      DoctorProbeSchema,
+      JSON.parse(readFileSync(join(root, "probes.json"), "utf8")),
+    );
+    return { ...result, calls };
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+test.each([
+  { target: "ubuntu", provider: "local-container", heading: "Docker / Ubuntu" },
+  { target: "macos", provider: "ssh", heading: "macOS SSH" },
+  { target: "windows-native", provider: "parallels", heading: "Windows native / Parallels" },
+])(
+  "doctor applicability only probes selected $target requirements",
+  ({ target, provider, heading }) => {
+    const result = runDoctorFixture({ targets: [target], providers: [provider] });
+    assert.equal(result.status, 0, result.stderr + result.stdout);
+    assert.ok(result.stdout.includes(`── ${heading} ──`));
+    assert.doesNotMatch(
+      result.stdout,
+      /Model verification configuration|model:|not listed in requiredTargets/,
+    );
+    assert.match(result.stdout, /Results: 0 failure\(s\)/);
+    const providerChecks = result.calls.filter((call) => call.args[0] === "doctor");
+
+    assert.deepEqual(
+      providerChecks.map((call) => call.args[call.args.indexOf("--provider") + 1]),
+      [provider],
+    );
+
+    if (target !== "ubuntu") {
+      assert.doesNotMatch(result.stdout, /Docker \/ Ubuntu|ubuntu local-container/);
+      assert.equal(
+        result.calls.some((call) => call.command.startsWith("docker ")),
+        false,
+      );
+    }
+
+    if (target !== "macos") {
+      assert.doesNotMatch(result.stdout, /macOS SSH|macOS ssh/);
+      assert.equal(
+        result.calls.some((call) => call.command.startsWith("ssh ")),
+        false,
+      );
+    }
+
+    if (target !== "windows-native") {
+      assert.doesNotMatch(result.stdout, /Windows native \/ Parallels/);
+      assert.equal(
+        result.calls.some(
+          (call) => call.command.startsWith("prlctl") || call.args.includes("prlctl"),
+        ),
+        false,
+      );
+    }
+  },
+);
+
+test("doctor applicability omits provider and model checks when no targets or model suite are selected", () => {
+  const result = runDoctorFixture({ targets: [], providers: [] });
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  assert.doesNotMatch(
+    result.stdout,
+    /Crabbox providers|Docker \/ Ubuntu|macOS SSH|Windows native|Model verification/,
+  );
+  assert.equal(
+    result.calls.some((call) => ["providers", "doctor"].includes(call.args[0] ?? "")),
+    false,
+  );
+});
+
+test.each([
+  { targets: ["ubuntu"], providers: ["ssh"], message: "crabbox provider missing: local-container" },
+  { targets: ["macos"], providers: ["local-container"], message: "crabbox provider missing: ssh" },
+  {
+    targets: ["windows-native"],
+    providers: ["ssh"],
+    message: "crabbox provider missing: parallels",
+  },
+  {
+    targets: ["ubuntu"],
+    providers: ["local-container"],
+    unavailable: "docker",
+    message: "Docker is not available",
+  },
+  { targets: ["macos"], providers: ["ssh"], unavailable: "ssh", message: "SSH probe failed" },
+  {
+    targets: ["windows-native"],
+    providers: ["parallels"],
+    unavailable: "prlctl",
+    message: "prlctl not found",
+  },
+  {
+    targets: ["ubuntu"],
+    providers: ["local-container"],
+    unreadyProvider: "local-container",
+    message: "ubuntu local-container provider not ready",
+  },
+])("doctor applicability retains selected failure: $message", ({ message, ...scenario }) => {
+  const result = runDoctorFixture(scenario);
+  assert.equal(result.status, 1, result.stderr + result.stdout);
+  assert.ok(result.stderr.includes(message), result.stderr);
+  assert.match(result.stdout, /Results: 1 failure\(s\)/);
+});
+
+test("doctor applicability preserves all-target model requirements and redacts configured auth", () => {
+  const scenario = {
+    targets: ["macos", "ubuntu", "windows-native"],
+    providers: ["ssh", "local-container", "parallels"],
+    suites: ["platform-build", "goal-runtime-verification"],
+  };
+  const missingAuth = runDoctorFixture(scenario);
+  assert.equal(missingAuth.status, 1, missingAuth.stderr + missingAuth.stdout);
+  assert.match(missingAuth.stdout, /Model verification configuration/);
+  assert.match(missingAuth.stdout, /Results: 1 failure\(s\)/);
+  assert.match(missingAuth.stderr, /no model auth env present/);
+  const ready = runDoctorFixture({ ...scenario, auth: true });
+  assert.equal(ready.status, 0, ready.stderr + ready.stdout);
+  assert.match(ready.stdout, /FIXTURE_MODEL_AUTH=\(present, redacted\)/);
+  assert.doesNotMatch(ready.stdout + ready.stderr, /fixture-only-not-a-credential/);
+  assert.deepEqual(
+    ready.calls
+      .filter((call) => call.args[0] === "doctor")
+      .map((call) => call.args[call.args.indexOf("--provider") + 1]),
+    ["local-container", "ssh", "parallels"],
+  );
+});
+
+test("doctor applicability preserves the selected Windows disposable-probe skip", () => {
+  const result = runDoctorFixture({
+    targets: ["windows-native"],
+    providers: ["parallels"],
+    skipWindowsDisposableProbe: true,
+  });
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  assert.match(result.stdout, /skipping disposable Windows clone probe/);
+  assert.equal(
+    result.calls.some((call) => ["warmup", "run", "stop"].includes(call.args[0] ?? "")),
+    false,
+  );
+});
 
 function readScriptInventory() {
   const result = run(process.execPath, [
