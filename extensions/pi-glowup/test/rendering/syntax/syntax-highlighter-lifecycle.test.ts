@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import type { Component } from "@earendil-works/pi-tui";
 import type { HighlighterGeneric } from "shiki";
 import Type from "typebox";
@@ -18,6 +19,7 @@ import {
     getSyntaxHighlighterForLanguage,
     highlightSyntaxCode,
     highlightSyntaxCodeAsync,
+    observeSyntaxHighlightSource,
     settleSyntaxHighlights,
     initializeSyntaxHighlighting,
     isSyntaxHighlightingReady,
@@ -784,6 +786,103 @@ describe("syntax highlighter lifecycle", () => {
 
         expect(isSyntaxHighlightingReady()).toBe(false);
         expect(highlightSyntaxCode("import sys", "python")).toEqual(["import sys"]);
+    });
+
+    it.each([' + "more"', "\nprint(title)"])(
+        "retains completed prefix colors while appended source is pending: %j",
+        async (suffix) => {
+            await initializeSyntaxHighlighting({}, { preloadLanguages: ["python"] });
+            const invalidate = (): void => {};
+            const source = 'title = "café 🧪"';
+            observeSyntaxHighlightSource(source, invalidate);
+            const completed = await highlightSyntaxCodeAsync(source, "python", { invalidate });
+            expect(completed[0]).toContain("\u001b[");
+            const next = source + suffix;
+
+            observeSyntaxHighlightSource(next, invalidate);
+            const pending = highlightSyntaxCode(next, "python", { invalidate });
+
+            expect(pending.join("\n")).toContain(completed[0]);
+            expect(stripVTControlCharacters(pending.join("\n"))).toBe(next);
+            await settleSyntaxHighlights();
+        },
+    );
+
+    it("retains growing-block colors when another block already has complete colors", async () => {
+        await initializeSyntaxHighlighting({}, { preloadLanguages: ["python"] });
+        const invalidate = (): void => {};
+        const stable = 'first = "UNCHANGED"';
+        const growing = 'second = "PROGRESS"';
+        observeSyntaxHighlightSource(stable + "\n" + growing, invalidate);
+        await highlightSyntaxCodeAsync(stable, "python", { invalidate });
+        const colored = await highlightSyntaxCodeAsync(growing, "python", { invalidate });
+
+        try {
+            const next = growing + "\nvalue = 1";
+            observeSyntaxHighlightSource(stable + "\n" + next, invalidate);
+            highlightSyntaxCode(stable, "python", { invalidate });
+            expect(highlightSyntaxCode(next, "python", { invalidate })[0]).toBe(colored[0]);
+
+            const latest = next + "\nvalue = 2";
+            observeSyntaxHighlightSource(stable + "\n" + latest, invalidate);
+            highlightSyntaxCode(stable, "python", { invalidate });
+            const pending = highlightSyntaxCode(latest, "python", { invalidate });
+
+            expect(pending[0]).toBe(colored[0]);
+            expect(stripVTControlCharacters(pending.join("\n"))).toBe(latest);
+        } finally {
+            await settleSyntaxHighlights();
+        }
+    });
+
+    it("keeps matching prefix lines colored when a later line changes", async () => {
+        await initializeSyntaxHighlighting({}, { preloadLanguages: ["python"] });
+        const invalidate = (): void => {};
+        const source = 'title = "PREFIX_COLOR"\ncount = 1';
+        observeSyntaxHighlightSource(source, invalidate);
+        const completed = await highlightSyntaxCodeAsync(source, "python", { invalidate });
+        const next = 'title = "PREFIX_COLOR"\ncount = 2';
+
+        observeSyntaxHighlightSource(next, invalidate);
+        const pending = highlightSyntaxCode(next, "python", { invalidate });
+
+        expect(pending[0]).toBe(completed[0]);
+        expect(stripVTControlCharacters(pending.join("\n"))).toBe(next);
+        await settleSyntaxHighlights();
+    });
+
+    it.each(['other = "new"', "title"])(
+        "never retains old source text when a preview is rewritten: %j",
+        async (next) => {
+            await initializeSyntaxHighlighting({}, { preloadLanguages: ["python"] });
+            const invalidate = (): void => {};
+            const source = 'title = "old"';
+            observeSyntaxHighlightSource(source, invalidate);
+            await highlightSyntaxCodeAsync(source, "python", { invalidate });
+
+            observeSyntaxHighlightSource(next, invalidate);
+            const pending = highlightSyntaxCode(next, "python", { invalidate });
+
+            expect(stripVTControlCharacters(pending.join("\n"))).toBe(next);
+            await settleSyntaxHighlights();
+        },
+    );
+
+    it("counts concurrent highlights of the same source only once in the cache", async () => {
+        await initializeSyntaxHighlighting({}, { preloadLanguages: ["javascript"] });
+        clearSyntaxHighlightCache();
+        const code = 'const label = "café";\nconsole.log(label);';
+
+        const [first, second] = await Promise.all([
+            highlightSyntaxCodeAsync(code, "javascript", { invalidate() {} }),
+            highlightSyntaxCodeAsync(code, "javascript", { invalidate() {} }),
+        ]);
+
+        expect(second).toEqual(first);
+        expect(syntaxHighlightCacheStats()).toEqual({
+            entries: 1,
+            bytes: Buffer.byteLength(first.join(""), "utf8"),
+        });
     });
 
     it("does not cache highlights when cache is disabled", async () => {

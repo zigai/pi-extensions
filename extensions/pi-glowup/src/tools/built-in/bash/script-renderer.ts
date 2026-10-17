@@ -13,6 +13,7 @@ import {
     type ScriptInvocation,
 } from "./invocation.ts";
 import { highlightSyntaxCode } from "../../../rendering/syntax/highlighter.ts";
+import { createSyntaxComponent } from "../../../rendering/syntax/component-owner.ts";
 import {
     isPreviewMetaLine,
     highlightCodePreviewRuns,
@@ -532,6 +533,7 @@ export type ScriptCallRenderOptions = {
     readonly omittedHint?: string;
     readonly headerLayout?: ScriptPreviewHeaderLayout;
     readonly invalidate?: () => void;
+    readonly lastComponent?: Component | undefined;
     readonly onContentWidth?: (contentWidth: number, renderWidth: number) => void;
     readonly profile?: ScriptFormatterProfile;
 };
@@ -540,6 +542,18 @@ export function renderScriptCall(
     theme: GlowupRenderTheme,
     invocation: ScriptInvocation,
     options: ScriptCallRenderOptions,
+): Component {
+    const { lastComponent, ...renderOptions } = options;
+
+    return createSyntaxComponent(lastComponent, renderOptions.invalidate, (invalidate) =>
+        createScriptCallComponent(theme, invocation, { ...renderOptions, invalidate }),
+    );
+}
+
+function createScriptCallComponent(
+    theme: GlowupRenderTheme,
+    invocation: ScriptInvocation,
+    options: Omit<ScriptCallRenderOptions, "lastComponent">,
 ): Component {
     const expanded = options.expanded;
     const state = options.state;

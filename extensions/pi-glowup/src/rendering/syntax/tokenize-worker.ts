@@ -11,7 +11,14 @@ export type TokenizeRequest = {
     readonly brackets: boolean;
 };
 
+export type TokenizeInitialization = {
+    readonly type: "initialize";
+    readonly language: BundledLanguage;
+    readonly theme: ThemeRegistration;
+};
+
 export type TokenizeResponse =
+    | { readonly type: "ready" }
     | { readonly id: number; readonly lines: string[] }
     | { readonly id: number; readonly error: string };
 
@@ -21,13 +28,19 @@ if (port === null) throw new Error("Syntax worker requires a parent port");
 const { createHighlighter } = await import("shiki");
 let highlighter: Awaited<ReturnType<typeof createHighlighter>> | undefined;
 
+async function initialize(request: TokenizeInitialization): Promise<void> {
+    highlighter = await createHighlighter({ themes: [request.theme], langs: [request.language] });
+}
+
 async function tokenize(request: TokenizeRequest): Promise<TokenizeResponse> {
     try {
-        highlighter ??= await createHighlighter({ themes: [request.theme], langs: [] });
-        await highlighter.loadLanguage(request.language);
+        const syntax = highlighter;
+        if (syntax === undefined) throw new Error("Syntax worker is not initialized");
+
+        await syntax.loadLanguage(request.language);
         configureBracketPairColoring(request.brackets);
 
-        const tokens = highlighter.codeToTokensBase(request.code, {
+        const tokens = syntax.codeToTokensBase(request.code, {
             lang: request.language,
             theme: request.theme,
             tokenizeMaxLineLength: 0,
@@ -42,7 +55,15 @@ async function tokenize(request: TokenizeRequest): Promise<TokenizeResponse> {
     }
 }
 
-port.on("message", (request: TokenizeRequest) => {
+port.on("message", (request: TokenizeRequest | TokenizeInitialization) => {
+    if ("type" in request) {
+        void initialize(request)
+            .then(() => port.postMessage({ type: "ready" } satisfies TokenizeResponse))
+            .catch(() => port.close());
+
+        return;
+    }
+
     void tokenize(request)
         .then((response) => {
             port.postMessage(response);

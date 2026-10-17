@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
-import { Markdown, type MarkdownTheme } from "@earendil-works/pi-tui";
+import { Markdown, type Component, type MarkdownTheme } from "@earendil-works/pi-tui";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Theme, type ThemeColor } from "@earendil-works/pi-coding-agent";
 import { buildPierreDiffPayload } from "../../../src/rendering/diff/payload.ts";
@@ -12,6 +12,7 @@ import { parseDiffSections } from "../../../src/rendering/diff/text-diff.ts";
 import { renderGlowupDiff } from "../../../src/rendering/diff/text-renderer.ts";
 import { renderGlowupOutput } from "../../../src/rendering/output.ts";
 import { renderScriptCall } from "../../../src/tools/built-in/bash/script-renderer.ts";
+import { createNativeBashFeature } from "../../../src/tools/built-in/bash/preview.ts";
 import { renderWriteCallPreview } from "../../../src/tools/built-in/write-preview.ts";
 import { TEST_THEME_BACKGROUND_COLORS, TEST_THEME_COLORS } from "../../support/theme-colors.ts";
 import { createThirdPartyToolRenderer } from "../../../src/tools/renderers.ts";
@@ -161,6 +162,110 @@ describe("central syntax highlighting", () => {
 
         expect(lines.join("\n")).toContain(TYPESCRIPT_KEYWORD_COLOR);
         expect(lines.join("\n")).toContain("const");
+    });
+
+    it("keeps unchanged script colors visible while native Bash arguments grow", async () => {
+        const bash = createNativeBashFeature();
+        let current: Component | undefined;
+        const context = {
+            ...renderContext,
+            toolCallId: "stream-call",
+            executionStarted: false,
+            argsComplete: false,
+            isPartial: true,
+            cwd: "/workspace",
+            state: {},
+            lastComponent: undefined,
+        };
+        const source = 'title = "STREAM_COLOR_SAMPLE"\ncount = 1';
+        const args = { command: `python -c '${source}'` };
+        const first = bash.renderBashCall(
+            args,
+            piTheme,
+            { ...context, args, invalidate: () => current?.invalidate() },
+            () => "block",
+            () => 8,
+            () => false,
+            () => "auto",
+            () => "trailing",
+        );
+        current = first;
+        first.render(120);
+        await settleSyntaxHighlights();
+        const colored = first.render(120);
+        expect(colored[1]).toContain(STRING_RGB_CODE);
+        const nextArgs = { command: `python -c '${source}\nprint(title, count)'` };
+
+        try {
+            const next = bash.renderBashCall(
+                nextArgs,
+                piTheme,
+                {
+                    ...context,
+                    args: nextArgs,
+                    lastComponent: first,
+                    invalidate: () => current?.invalidate(),
+                },
+                () => "block",
+                () => 8,
+                () => false,
+                () => "auto",
+                () => "trailing",
+            );
+            current = next;
+            const pending = next.render(120);
+
+            expect(pending[1]).toBe(colored[1]);
+            expect(stripVTControlCharacters(pending.join("\n"))).toContain("print(title, count)");
+        } finally {
+            await settleSyntaxHighlights();
+            bash.clear();
+        }
+    });
+
+    it("keeps unchanged write-preview colors visible while content grows", async () => {
+        let current: Component | undefined;
+        const context = {
+            ...renderContext,
+            toolCallId: "write-stream-call",
+            executionStarted: false,
+            argsComplete: false,
+            isPartial: true,
+            movingViewport: false,
+        };
+        const source = 'title = "STREAM_WRITE_COLOR_SAMPLE"\ncount = 1';
+        const first = renderWriteCallPreview({ path: "stream.py", content: source }, piTheme, {
+            ...context,
+            invalidate: () => current?.invalidate(),
+        });
+        current = first;
+        first.render(120);
+        await settleSyntaxHighlights();
+        const colored = first.render(120);
+        const coloredRow = colored.find((line) => line.includes("STREAM_WRITE_COLOR_SAMPLE"));
+        expect(coloredRow).toContain(STRING_RGB_CODE);
+
+        try {
+            const next = renderWriteCallPreview(
+                { path: "stream.py", content: source + "\nprint(title, count)" },
+                piTheme,
+                {
+                    ...context,
+                    lastComponent: first,
+                    invalidate: () => current?.invalidate(),
+                },
+            );
+            current = next;
+            const pending = next.render(120);
+
+            expect(pending.find((line) => line.includes("STREAM_WRITE_COLOR_SAMPLE"))).toBe(
+                coloredRow,
+            );
+
+            expect(stripVTControlCharacters(pending.join("\n"))).toContain("print(title, count)");
+        } finally {
+            await settleSyntaxHighlights();
+        }
     });
 
     it("preserves grammar state through an oversized multiline comment", async () => {

@@ -198,6 +198,9 @@ import fs from "node:fs";
 const theme = JSON.parse(fs.readFileSync(new URL("./node_modules/@zigai/pi-glowup/themes/darker-modern-theme.json", import.meta.url), "utf8"));
 const worker = new Worker(new URL("./node_modules/@zigai/pi-glowup/dist/src/tokenize-worker.mjs", import.meta.url), { execArgv: [] });
 try {
+    const ready = new Promise((resolve, reject) => { worker.once("message", resolve); worker.once("error", reject); });
+    worker.postMessage({ type: "initialize", language: "javascript", theme });
+    await ready;
     const response = new Promise((resolve, reject) => { worker.once("message", resolve); worker.once("error", reject); });
     worker.postMessage({ id: 1, code: ${JSON.stringify(source)}, language: "javascript", brackets: true, theme });
     console.log(JSON.stringify(await response));

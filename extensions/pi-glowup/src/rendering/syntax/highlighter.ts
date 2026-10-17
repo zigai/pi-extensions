@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { stripVTControlCharacters } from "node:util";
 import type { BundledLanguage, CreateHighlighterFactory, HighlighterGeneric } from "shiki";
 import { normalizedCodeLines } from "../../text-boundaries.ts";
 import type { DiffSection } from "../diff/text-diff.ts";
@@ -112,10 +113,18 @@ const highlightedCodeCache = new Map<
     { readonly lines: string[]; readonly bytes: number }
 >();
 
+type HighlightedSource = {
+    readonly source: string;
+    readonly language: string;
+    readonly themeName: string;
+    readonly lines: string[];
+};
+
 type HighlightOwner = {
     readonly source: string | readonly DiffSection[];
     readonly controller: AbortController;
-    readonly results: Map<string, string[]>;
+    readonly results: Map<string, HighlightedSource>;
+    readonly previousResults: ReadonlyMap<string, HighlightedSource>;
     readonly pending: Map<string, Promise<string[]>>;
 };
 
@@ -297,7 +306,7 @@ export async function settleSyntaxHighlights(): Promise<void> {
     while (activeHighlights.size > 0) await Promise.allSettled(activeHighlights);
 }
 
-/** Returns completed worker colors or plain lines while owned tokenization is pending. */
+/** Returns completed colors, retaining unchanged prefixes while owned tokenization is pending. */
 export function highlightSyntaxCode(
     code: string,
     language: string | undefined,
@@ -325,24 +334,33 @@ export function highlightSyntaxCode(
         observeSyntaxHighlightSource(code, invalidate);
 
     const owned = invalidate === undefined ? undefined : highlightOwners.get(invalidate);
-    const completed = owned?.results.get(key);
-    if (completed !== undefined) return completed;
+    const completed = owned?.results.get(key) ?? owned?.previousResults.get(key);
+    if (completed !== undefined) {
+        owned?.results.set(key, completed);
+        return completed.lines;
+    }
 
     const cached = options.cache === false ? undefined : highlightedCodeCache.get(key);
     if (cached !== undefined) {
-        owned?.results.set(key, cached.lines);
+        owned?.results.set(
+            key,
+            highlightedSource(code, normalizedLanguage, state.theme.name, cached.lines),
+        );
         return cached.lines;
     }
 
     const unowned = completedUnownedHighlights.get(key)?.deref();
     if (unowned !== undefined && options.cache !== false) {
-        owned?.results.set(key, unowned);
+        owned?.results.set(
+            key,
+            highlightedSource(code, normalizedLanguage, state.theme.name, unowned),
+        );
         return unowned;
     }
 
     void highlightSyntaxCodeAsync(code, normalizedLanguage, options);
 
-    return normalizedCodeLines(code);
+    return pendingHighlightLines(code, normalizedLanguage, state.theme.name, owned);
 }
 
 /** Cancels obsolete work when a renderer observes a different submitted source. */
@@ -354,12 +372,23 @@ export function observeSyntaxHighlightSource(
     if (previous?.source === source) return () => highlightOwners.get(invalidate) === previous;
 
     previous?.controller.abort();
+
+    let previousResults: ReadonlyMap<string, HighlightedSource> = new Map();
+    if (previous !== undefined) {
+        if (previous.results.size > 0) {
+            previousResults = new Map(previous.results);
+        } else {
+            previousResults = previous.previousResults;
+        }
+    }
+
     previous?.results.clear();
 
     const owner: HighlightOwner = {
         source,
         controller: new AbortController(),
         results: new Map(),
+        previousResults,
         pending: new Map(),
     };
     highlightOwners.set(invalidate, owner);
@@ -395,12 +424,18 @@ export async function highlightSyntaxCodeAsync(
         observeSyntaxHighlightSource(code, invalidate);
 
     const owner = invalidate === undefined ? undefined : highlightOwners.get(invalidate);
-    const ownedResult = owner?.results.get(key);
-    if (ownedResult !== undefined) return ownedResult;
+    const ownedResult = owner?.results.get(key) ?? owner?.previousResults.get(key);
+    if (ownedResult !== undefined) {
+        owner?.results.set(key, ownedResult);
+        return ownedResult.lines;
+    }
 
     const cached = shouldCache ? highlightedCodeCache.get(key) : undefined;
     if (cached !== undefined) {
-        owner?.results.set(key, cached.lines);
+        owner?.results.set(
+            key,
+            highlightedSource(code, normalizedLanguage, state.theme.name, cached.lines),
+        );
         return cached.lines;
     }
 
@@ -438,7 +473,11 @@ export async function highlightSyntaxCodeAsync(
                     invalidate !== undefined &&
                     highlightOwners.get(invalidate) === owner
                 ) {
-                    owner.results.set(key, highlighted);
+                    owner.results.set(
+                        key,
+                        highlightedSource(code, normalizedLanguage, state.theme.name, highlighted),
+                    );
+
                     invalidate();
                 } else if (!shouldCache && options.cache !== false) {
                     if (completedUnownedHighlights.size >= CACHE_LIMIT) {
@@ -861,6 +900,76 @@ function normalizeHighlightedLineCount(lines: string[], expectedCount: number): 
     return [...lines, ...Array.from({ length: expectedCount - lines.length }, () => "")];
 }
 
+function highlightedSource(
+    code: string,
+    language: string,
+    themeName: string,
+    lines: string[],
+): HighlightedSource {
+    return { source: normalizedCodeLines(code).join("\n"), language, themeName, lines };
+}
+
+function pendingHighlightLines(
+    code: string,
+    language: string,
+    themeName: string,
+    owner: HighlightOwner | undefined,
+): string[] {
+    const lines = normalizedCodeLines(code);
+    if (owner === undefined) return lines;
+
+    let previous: readonly [key: string, source: HighlightedSource] | undefined;
+    let retainedCount = 0;
+    let retainedLength = 0;
+    let appended = "";
+
+    for (const entry of owner.previousResults) {
+        const result = entry[1];
+        if (result.language !== language || result.themeName !== themeName) continue;
+        if (result.lines.map(stripVTControlCharacters).join("\n") !== result.source) continue;
+
+        const previousLines = result.source.split("\n");
+        let count = 0;
+        let length = 0;
+        let suffix = "";
+
+        for (const [index, plain] of previousLines.entries()) {
+            const current = lines[index];
+            if (current === undefined) break;
+
+            if (current === plain) {
+                count += 1;
+                length += plain.length + 1;
+                continue;
+            }
+
+            if (index === previousLines.length - 1 && current.startsWith(plain)) {
+                count += 1;
+                length += plain.length;
+                suffix = current.slice(plain.length);
+            }
+            break;
+        }
+
+        if (length <= retainedLength) continue;
+
+        previous = entry;
+        retainedCount = count;
+        retainedLength = length;
+        appended = suffix;
+    }
+
+    if (previous === undefined) return lines;
+
+    const [key, result] = previous;
+    owner.results.set(key, result);
+
+    const retained = result.lines.slice(0, retainedCount);
+    const last = retained.at(-1);
+    if (last !== undefined) retained[retained.length - 1] = last + appended;
+    return [...retained, ...lines.slice(retainedCount)];
+}
+
 function highlightedCodeCacheKey(
     themeName: string,
     language: string,
@@ -900,6 +1009,12 @@ function rememberHighlightedCode(cacheKey: string, lines: string[]): void {
     const bytes = cachedLineBytes(lines);
     if (bytes > MAX_CACHE_BYTES) {
         return;
+    }
+
+    const previous = highlightedCodeCache.get(cacheKey);
+    if (previous !== undefined) {
+        highlightedCodeCache.delete(cacheKey);
+        highlightedCodeCacheBytes -= previous.bytes;
     }
 
     while (

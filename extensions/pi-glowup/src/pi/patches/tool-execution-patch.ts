@@ -439,11 +439,12 @@ function renderCompletedSlot(options: {
 
     clearCompletedRender(options.cache, options.instance, options.slot);
 
+    const { cache, instance, invalidate: invalidateHost } = options;
     let rendered: Component | undefined;
     const invalidate = (): void => {
-        clearCompletedRendersForInstance(options.cache, options.instance);
+        clearCompletedRendersForInstance(cache, instance);
         rendered?.invalidate();
-        options.invalidate();
+        invalidateHost();
     };
 
     rendered = options.render(invalidate);

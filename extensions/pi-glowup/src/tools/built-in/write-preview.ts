@@ -1,5 +1,6 @@
 import type { Component } from "@earendil-works/pi-tui";
 import { scheduleCodeOutputSyntaxLoad } from "../../rendering/syntax/code-component.ts";
+import { inheritSyntaxComponent } from "../../rendering/syntax/component-owner.ts";
 import {
     countContentLines,
     hasNonWhitespaceText,
@@ -94,6 +95,7 @@ type PartialWritePreviewUpdate = {
     readonly movingViewport: boolean;
     readonly expanded: boolean;
     readonly maxWritePreviewBytes: number | null;
+    readonly invalidate: (() => void) | undefined;
 };
 
 function boundedPartialWriteLine(line: string): string {
@@ -339,6 +341,12 @@ class PartialWriteCallPreviewComponent implements Component {
     private expandedContent = "";
     private cachedWidth: number | undefined;
     private cachedLines: string[] | undefined;
+    private invalidateHost: (() => void) | undefined;
+
+    private readonly invalidateSyntax = (): void => {
+        this.invalidate();
+        this.invalidateHost?.();
+    };
 
     constructor(update: PartialWritePreviewUpdate) {
         this.toolCallId = update.toolCallId;
@@ -357,6 +365,7 @@ class PartialWriteCallPreviewComponent implements Component {
         this.mutationLabelColumnWidth = update.mutationLabelColumnWidth;
         this.movingViewport = update.movingViewport;
         this.expanded = update.expanded;
+        this.invalidateHost = update.invalidate;
         this.expandedContent = update.expanded
             ? boundedWriteContentPreview(update.content, update.maxWritePreviewBytes)
             : "";
@@ -385,8 +394,15 @@ class PartialWriteCallPreviewComponent implements Component {
                       this.theme,
                       [writeDiffSection(this.path, previewText, added)],
                       true,
-                      writeDiffRenderOptions(PARTIAL_WRITE_PREVIEW_LINES, this.expanded),
+                      {
+                          ...writeDiffRenderOptions(PARTIAL_WRITE_PREVIEW_LINES, this.expanded),
+                          lastComponent: this,
+                          invalidate: this.invalidateSyntax,
+                      },
                   );
+
+        inheritSyntaxComponent(this, body);
+
         const component = renderMutationCall(
             this.theme,
             {
@@ -458,8 +474,6 @@ export function renderWriteCallPreview(
         });
     }
 
-    scheduleCodeOutputSyntaxLoad({ path }, context.invalidate, content);
-
     if (context.isPartial) {
         const update = {
             toolCallId: context.toolCallId ?? "",
@@ -471,6 +485,7 @@ export function renderWriteCallPreview(
             movingViewport: context.movingViewport !== false,
             expanded: context.expanded,
             maxWritePreviewBytes: mutationSettings.limits.maxWritePreviewBytes,
+            invalidate: context.invalidate,
         };
         if (
             context.lastComponent instanceof PartialWriteCallPreviewComponent &&
@@ -482,6 +497,8 @@ export function renderWriteCallPreview(
 
         return new PartialWriteCallPreviewComponent(update);
     }
+
+    scheduleCodeOutputSyntaxLoad({ path }, context.invalidate, content);
 
     const added = countContentLines(content);
     const boundedContent = boundedWriteContentPreview(
@@ -501,10 +518,14 @@ export function renderWriteCallPreview(
                   theme,
                   [writeDiffSection(path, boundedContent, added)],
                   showAllRows,
-                  writeDiffRenderOptions(mutationSettings.previewLines, showAllRows),
+                  {
+                      ...writeDiffRenderOptions(mutationSettings.previewLines, showAllRows),
+                      lastComponent: context.lastComponent,
+                      invalidate: context.invalidate,
+                  },
               );
 
-    return renderMutationCall(
+    const component = renderMutationCall(
         theme,
         {
             label: statusText,
@@ -514,6 +535,9 @@ export function renderWriteCallPreview(
         },
         writeMutationCallOptions(context.mutationLabelColumnWidth, body, "success"),
     );
+    inheritSyntaxComponent(component, body);
+
+    return component;
 }
 
 /** Returns an empty successful write result when the call renderer already showed content. */

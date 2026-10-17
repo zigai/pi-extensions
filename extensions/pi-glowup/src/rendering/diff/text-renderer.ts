@@ -24,6 +24,7 @@ import { expandTerminalTabs } from "../../text-boundaries.ts";
 import { strongerDiffBackgroundAnsi } from "./ansi-colors.ts";
 import { highlightCodeOutput, scheduleCodeOutputSyntaxLoad } from "../syntax/code-component.ts";
 import { observeSyntaxHighlightSource, syntaxHighlightingVersion } from "../syntax/highlighter.ts";
+import { createSyntaxComponent } from "../syntax/component-owner.ts";
 import {
     selectSemanticDiffIndices,
     type SemanticDiffRowKind,
@@ -472,6 +473,8 @@ function collapsedDiffLineIndices(
 export type GlowupDiffRenderOptions = {
     readonly collapsedLineBudget?: number;
     readonly maxWrappedRows?: number;
+    readonly lastComponent?: Component | undefined;
+    readonly invalidate?: (() => void) | undefined;
 };
 
 export function renderGlowupDiff(
@@ -480,11 +483,22 @@ export function renderGlowupDiff(
     expanded: boolean,
     options: GlowupDiffRenderOptions = {},
 ): Component {
+    const { lastComponent, invalidate, ...renderOptions } = options;
+
+    return createSyntaxComponent(lastComponent, invalidate, (invalidateSyntax) =>
+        createDiffComponent(theme, sections, expanded, renderOptions, invalidateSyntax),
+    );
+}
+
+function createDiffComponent(
+    theme: GlowupRenderTheme,
+    sections: ReadonlyArray<DiffSection>,
+    expanded: boolean,
+    options: Omit<GlowupDiffRenderOptions, "lastComponent" | "invalidate">,
+    invalidate: () => void,
+): Component {
     let isCurrent = (): boolean => false;
     let syntaxVersion: number | undefined;
-    const invalidate = (): void => {
-        if (isCurrent()) component.invalidate();
-    };
 
     const component = makeComponent((width) => {
         const allDiffLineCount = sections.reduce(

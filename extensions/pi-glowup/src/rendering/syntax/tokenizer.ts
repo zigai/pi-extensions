@@ -1,6 +1,10 @@
 import { Worker } from "node:worker_threads";
 import type { BundledLanguage, ThemeRegistration } from "shiki";
-import type { TokenizeRequest, TokenizeResponse } from "./tokenize-worker.ts";
+import type {
+    TokenizeInitialization,
+    TokenizeRequest,
+    TokenizeResponse,
+} from "./tokenize-worker.ts";
 
 declare global {
     interface ImportMeta {
@@ -29,6 +33,7 @@ export function createSyntaxTokenizer(
     const terminations = new Set<Promise<number>>();
     let active: Work | undefined;
     let worker: Worker | undefined;
+    let ready = false;
     let starting: Promise<void> | undefined;
     let nextId = 0;
     let bytes = 0;
@@ -44,6 +49,7 @@ export function createSyntaxTokenizer(
     function stopWorker(): void {
         const previous = worker;
         worker = undefined;
+        ready = false;
 
         if (previous === undefined) return;
 
@@ -77,7 +83,8 @@ export function createSyntaxTokenizer(
         try {
             await options.waitForDisposals();
 
-            if (disposed || failed || queue.length === 0) return;
+            const initial = queue[0];
+            if (disposed || failed || initial === undefined) return;
 
             const current = new Worker(
                 new URL(import.meta.glowupSyntaxWorker ?? "./tokenize-worker.ts", import.meta.url),
@@ -93,7 +100,15 @@ export function createSyntaxTokenizer(
             });
 
             current.on("message", (response: TokenizeResponse) => {
-                if (worker !== current || active?.request.id !== response.id) return;
+                if (worker !== current) return;
+
+                if ("type" in response) {
+                    ready = true;
+                    dispatch();
+                    return;
+                }
+
+                if (active?.request.id !== response.id) return;
 
                 const completed = active;
                 active = undefined;
@@ -106,6 +121,13 @@ export function createSyntaxTokenizer(
                     dispatch();
                 }
             });
+
+            const initialization: TokenizeInitialization = {
+                type: "initialize",
+                language: initial.request.language,
+                theme,
+            };
+            current.postMessage(initialization);
         } catch {
             fail();
         }
@@ -140,6 +162,11 @@ export function createSyntaxTokenizer(
                 },
             );
 
+            return;
+        }
+
+        if (!ready) {
+            worker.ref();
             return;
         }
 

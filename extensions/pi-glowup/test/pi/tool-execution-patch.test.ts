@@ -1,3 +1,4 @@
+import { queryObjects } from "node:v8";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import Type from "typebox";
 import { Value } from "typebox/value";
@@ -7,6 +8,9 @@ import { createPlainTheme } from "../support/plain-theme.ts";
 import { call, text } from "../../src/tools/protocol/contract.ts";
 import { jsonValueParser, type JsonValue } from "../../src/json-value.ts";
 import { stringField } from "../../src/unknown-values.ts";
+import { createNativeBashFeature } from "../../src/tools/built-in/bash/preview.ts";
+import { renderWriteCallPreview } from "../../src/tools/built-in/write-preview.ts";
+import { disposeSyntaxHighlighting } from "../../src/rendering/syntax/highlighter.ts";
 import type { ThirdPartyToolRendererPlugin, ThirdPartyToolResult } from "../../src/tools/types.ts";
 import {
     configureBuiltInToolRendererPatch,
@@ -1159,6 +1163,146 @@ describe("tool execution patches", () => {
         });
         expect(afterThemeChange).not.toBe(afterInvalidation);
         expect(callRenders).toBe(4);
+    });
+
+    it("releases previous components while completed Bash previews remain live", async () => {
+        class PreviousPreview {
+            render(): string[] {
+                return ["previous"];
+            }
+
+            invalidate(): void {}
+        }
+
+        const prototype = createPrototype();
+        const bash = createNativeBashFeature();
+        installBuiltInToolRendererPatch(
+            {
+                renderCall: (_toolName, args, theme, context) =>
+                    bash.renderBashCall(
+                        jsonValueParser.parse(args),
+                        theme,
+                        context,
+                        () => "auto",
+                        () => 8,
+                        () => false,
+                        () => "auto",
+                        () => "trailing",
+                    ),
+                renderResult: (_toolName, result, options, theme, context) =>
+                    bash.renderBashResult(result, options, theme, context, () => "auto"),
+            },
+            prototype,
+        );
+        const instance: FakeToolExecutionInstance = {
+            toolName: "bash",
+            builtInToolDefinition: {},
+        };
+        const args = { command: 'python -c "print(1)"' };
+        const context = { ...renderContext, args, cwd: "/workspace", state: {}, invalidate: noop };
+
+        function renderCall(): FakeComponent | undefined {
+            return prototype.getCallRenderer.call(instance)?.(args, plainTheme, {
+                ...context,
+                lastComponent: new PreviousPreview(),
+            });
+        }
+
+        function renderResult(): FakeComponent | undefined {
+            return prototype.getResultRenderer.call(instance)?.(
+                { content: [{ type: "text", text: "ready" }] },
+                { expanded: false, isPartial: false },
+                plainTheme,
+                { ...context, lastComponent: new PreviousPreview() },
+            );
+        }
+
+        try {
+            const currentCall = renderCall();
+            const currentResult = renderResult();
+
+            expect(queryObjects(PreviousPreview, { format: "count" })).toBe(0);
+            expect(currentCall?.render(80).join("\n")).toContain("print(1)");
+            expect(currentResult?.render(80).join("\n")).toContain("ready");
+        } finally {
+            bash.clear();
+            configureBuiltInToolRendererPatch(false, undefined, prototype);
+            await disposeSyntaxHighlighting();
+        }
+    });
+
+    it("reuses streaming write previews as their content grows", () => {
+        const prototype = createPrototype();
+        const writeArgsSchema = Type.Object({ path: Type.String(), content: Type.String() });
+        installBuiltInToolRendererPatch(
+            {
+                renderCall: (_toolName, args, theme, context) =>
+                    renderWriteCallPreview(Value.Parse(writeArgsSchema, args), theme, context),
+                renderResult: () => undefined,
+            },
+            prototype,
+        );
+        const instance: FakeToolExecutionInstance = {
+            toolName: "write",
+            builtInToolDefinition: {},
+        };
+        const context = {
+            ...renderContext,
+            argsComplete: false,
+            isPartial: true,
+            cwd: "/workspace",
+            invalidate: noop,
+            state: {},
+        };
+        const first = prototype.getCallRenderer.call(instance)?.(
+            { path: "notes.txt", content: "first" },
+            plainTheme,
+            context,
+        );
+        const updated = prototype.getCallRenderer.call(instance)?.(
+            { path: "notes.txt", content: "first\nsecond" },
+            plainTheme,
+            { ...context, lastComponent: first },
+        );
+
+        expect(updated).toBe(first);
+        expect(updated?.render(80).join("\n")).toContain("second");
+    });
+
+    it.each([false, true])("preserves original renderer reuse with partial=%s", (isPartial) => {
+        const prototype = createPrototype();
+        const previous = { render: () => ["reused original"], invalidate: noop };
+        prototype.getCallRenderer = () => (_args, _theme, context) =>
+            context.lastComponent ?? previous;
+        prototype.getResultRenderer = () => (_result, _options, _theme, context) =>
+            context.lastComponent ?? previous;
+        installBuiltInToolRendererPatch(
+            { renderCall: () => undefined, renderResult: () => undefined },
+            prototype,
+        );
+        const instance: FakeToolExecutionInstance = {
+            toolName: "bash",
+            builtInToolDefinition: {},
+        };
+        const context = {
+            ...renderContext,
+            isPartial,
+            cwd: "/workspace",
+            invalidate: noop,
+            state: {},
+            lastComponent: { render: () => ["previous original"], invalidate: noop },
+        };
+
+        const callComponent = prototype.getCallRenderer.call(instance)?.({}, plainTheme, context);
+        const resultComponent = prototype.getResultRenderer.call(instance)?.(
+            { content: [] },
+            { expanded: false, isPartial },
+            plainTheme,
+            context,
+        );
+
+        expect(callComponent?.render(80)).toEqual(["previous original"]);
+        expect(resultComponent?.render(80)).toEqual(["previous original"]);
     });
 
     it("does not cache streaming rows", () => {

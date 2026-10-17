@@ -110,6 +110,7 @@ export function createNativeBashFeature() {
                 showPrologueOmission: showPrologueOmission(),
                 headerLayout: headerLayout(),
                 invalidate: context.invalidate,
+                lastComponent: context.lastComponent,
             });
         }
 
@@ -141,10 +142,12 @@ export function createNativeBashFeature() {
             invalidate: context.invalidate,
         };
         if (stableScript !== undefined && context.argsComplete) {
+            const { toolCallId } = context;
+
             bashOptions = {
                 ...bashOptions,
                 onContentWidth: (contentWidth, renderWidth) =>
-                    rememberRenderWidth(context.toolCallId, contentWidth, renderWidth),
+                    rememberRenderWidth(toolCallId, contentWidth, renderWidth),
             };
         }
 
