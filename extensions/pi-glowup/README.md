@@ -75,7 +75,7 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-glowup.json`.
 | `scriptPreview.showPrologueOmission` | boolean | `false` | Show a count row when collapsed previews omit leading setup imports. |
 | `scriptPreview.shellLayout` | `preserve` \| `auto` \| `always` | `"auto"` | Choose when composed Bash commands are reflowed at safe syntax boundaries. |
 | `scriptPreview.shellOperatorPosition` | `trailing` \| `leading` | `"trailing"` | Place Bash chain operators before or after reflowed line breaks. |
-| `scriptPreview.formatters` | Record<string, CommandFormatter \| PythonFormatter \| JavaScriptFormatter \| TypeScriptFormatter \| BashFormatter> | `{}` | Display-only profiles keyed by matching language id; expansion shows original source. |
+| `scriptPreview.formatters` | Record<string, [CommandFormatter](#settings-type-CommandFormatter) \| [PythonFormatter](#settings-type-PythonFormatter) \| [JavaScriptFormatter](#settings-type-JavaScriptFormatter) \| [TypeScriptFormatter](#settings-type-TypeScriptFormatter) \| [BashFormatter](#settings-type-BashFormatter)> | `{}` | Display-only profiles keyed by matching language id; expansion shows original source. |
 
 ### Defaults
 
@@ -182,6 +182,77 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-glowup.json`.
   }
 }
 ```
+
+### Structural types
+
+<a id="settings-type-CommandFormatter"></a>
+
+#### CommandFormatter
+
+Additional fields are not allowed.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `kind` | `command` | Yes | Run custom argv without generated formatter configuration. |
+| `command` | string[] | Yes | Executable followed by arguments; no shell expansion is performed. |
+
+<a id="settings-type-PythonFormatter"></a>
+
+#### PythonFormatter
+
+Additional fields are not allowed.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `kind` | `python` | Yes | Use Tuff's Python formatter. |
+| `command` | string[] | Yes | Executable followed by arguments; no shell expansion is performed. |
+| `imports` | `show` \| `omit` | No | Leading import/setup visibility in collapsed display; expansion shows original source. |
+| `indentWidth` | integer | No | Python indentation width. |
+| `collections` | `fill` \| `ruff-default` | No | Collapse collections that fit; fill instead packs items within multiline brackets. |
+| `magicTrailingComma` | boolean | No | Treat trailing commas as requests for vertical expansion. |
+
+<a id="settings-type-JavaScriptFormatter"></a>
+
+#### JavaScriptFormatter
+
+Additional fields are not allowed.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `kind` | `javascript` | Yes | Use Oxfmt's JavaScript parser. |
+| `command` | string[] | Yes | Executable followed by arguments; no shell expansion is performed. |
+| `imports` | `show` \| `omit` | No | Leading import/setup visibility in collapsed display; expansion shows original source. |
+| `tabWidth` | integer | No | Oxfmt indentation width. |
+| `objectWrap` | `collapse` \| `preserve` | No | Collapse object literals when they fit the actual content width. |
+
+<a id="settings-type-TypeScriptFormatter"></a>
+
+#### TypeScriptFormatter
+
+Additional fields are not allowed.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `kind` | `typescript` | Yes | Use Oxfmt's TypeScript parser. |
+| `command` | string[] | Yes | Executable followed by arguments; no shell expansion is performed. |
+| `imports` | `show` \| `omit` | No | Leading import/setup visibility in collapsed display; expansion shows original source. |
+| `tabWidth` | integer | No | Oxfmt indentation width. |
+| `objectWrap` | `collapse` \| `preserve` | No | Collapse object literals when they fit the actual content width. |
+
+<a id="settings-type-BashFormatter"></a>
+
+#### BashFormatter
+
+Additional fields are not allowed.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `kind` | `bash` | Yes | Use shfmt's Bash formatter without minification. |
+| `command` | string[] | Yes | Executable followed by arguments; no shell expansion is performed. |
+| `indentWidth` | integer | No | Bash indentation width. |
+| `caseIndent` | boolean | No | Indent Bash case arms. |
+| `spaceRedirects` | boolean | No | Separate redirect operators from targets. |
+| `binaryNextLine` | boolean | No | Start continued Bash chains with their operator. |
 <!-- pi-extension-settings:end -->
 
 ## License

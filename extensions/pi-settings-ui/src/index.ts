@@ -71,6 +71,7 @@ async function openSettingsEditor(pi: ExtensionAPI, ctx: ExtensionContext): Prom
             tui,
             theme,
             keybindings,
+            header: ownSettings.settings.header,
             save: store.saveSettingsLayers,
             close: () => done(undefined),
         });

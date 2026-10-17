@@ -19,12 +19,13 @@ import {
     commandDisplayName,
     commandInvocationForEditorText,
     helperInvocationForEditorText,
+    slashCommandMatch,
     type EditorTypedCommandInvocation,
 } from "./editor-invocation.ts";
 import { notifyDetailedHelp } from "./help.ts";
 import { resolveTypedCommandFormTitle } from "./form-title.ts";
 import { resolveGhostText, withGhostText } from "./ghost-text.ts";
-import { setHelperWidget, WIDGET_KEY } from "./helper.ts";
+import { setCommandDescriptionWidget, setHelperWidget, WIDGET_KEY } from "./helper.ts";
 import { renderTypedSkillInput } from "./skill-input.ts";
 import {
     registerSubmittedInvalidCommandHandler,
@@ -344,6 +345,7 @@ export class TypedCommandUxSession {
     }
 
     async start(ctx: ExtensionContext): Promise<void> {
+        this.clearWidget(ctx);
         await this.stop();
         this.helperWidgetSignature = undefined;
         this.active = true;
@@ -433,10 +435,12 @@ export class TypedCommandUxSession {
             return;
         }
 
-        const helperInvocation = helperInvocationForEditorText(
-            ctx.ui.getEditorText(),
-            this.registry,
-        );
+        const editorText = ctx.ui.getEditorText();
+        let helperInvocation = helperInvocationForEditorText(editorText, this.registry);
+        if (this.options.appearance.inlineHelp.style === "contextual") {
+            helperInvocation = commandInvocationForEditorText(editorText, this.registry);
+        }
+
         this.syncHelperWidget(ctx, helperInvocation, {
             submittedInvalidEditorText: this.submittedInvalidEditorText,
         });
@@ -585,7 +589,43 @@ export class TypedCommandUxSession {
         state: { submittedInvalidEditorText?: string | undefined } = {},
     ): void {
         if (invocation === undefined) {
+            if (
+                this.options.appearance.inlineHelp.style === "contextual" &&
+                ctx.mode === "tui" &&
+                ctx.hasUI
+            ) {
+                const match = slashCommandMatch(ctx.ui.getEditorText());
+                if (match === undefined) {
+                    this.clearHelperWidget(ctx);
+                    return;
+                }
+
+                const command = this.pi
+                    .getCommands()
+                    .find((candidate) => candidate.name === match.commandName);
+                if (command !== undefined) {
+                    const signature = JSON.stringify([
+                        "description",
+                        command.name,
+                        command.description,
+                        this.options.helperPlacement,
+                    ]);
+                    if (signature !== this.helperWidgetSignature) {
+                        setCommandDescriptionWidget(
+                            ctx,
+                            command,
+                            this.options.helperPlacement,
+                            this.options.appearance.inlineHelp,
+                        );
+                        this.helperWidgetSignature = signature;
+                    }
+
+                    return;
+                }
+            }
+
             this.clearHelperWidget(ctx);
+
             return;
         }
 

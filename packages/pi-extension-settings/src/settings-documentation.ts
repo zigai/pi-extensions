@@ -10,9 +10,9 @@ import {
 } from "./json-value.ts";
 import { defaultGlobalSettingsDisplayPath } from "./paths.ts";
 import {
+    createAuthoredSettingsSchema,
     createDefaultSettingsDocument,
     createSettingsDocument,
-    createSettingsFileSchema,
 } from "./schema-document.ts";
 
 export const README_GENERATED_START = "<!-- pi-extension-settings:start -->";
@@ -117,7 +117,11 @@ function schemaTypeTitle(schema: JsonObject): string | undefined {
     return TYPE_NAME_PATTERN.test(title) ? title : undefined;
 }
 
-function schemaType(schema: JsonObject): string {
+function schemaType(
+    schema: JsonObject,
+    types: Map<string, JsonObject>,
+    format: "plain" | "linked",
+): string {
     if (schema.const !== undefined) return literalType(schema.const);
 
     if (isJsonArray(schema.enum)) {
@@ -143,7 +147,7 @@ function schemaType(schema: JsonObject): string {
 
                 return !schemaCoveredByPrimitiveTypes(alternative, primitiveTypes);
             })
-            .map(schemaType)
+            .map((alternative) => schemaType(alternative, types, format))
             .filter((value, index, values) => values.indexOf(value) === index)
             .join(" | ");
     }
@@ -151,14 +155,24 @@ function schemaType(schema: JsonObject): string {
     if (schema.type === "array") {
         if (!isJsonObject(schema.items)) return "array";
 
-        const itemType = schemaType(schema.items);
+        const itemType = schemaType(schema.items, types, format);
         if (itemType.includes(" | ")) return `(${itemType})[]`;
         return `${itemType}[]`;
     }
 
     if (schema.type === "object") {
         const title = schemaTypeTitle(schema);
-        if (title !== undefined) return title;
+        if (title !== undefined) {
+            const previous = types.get(title);
+            if (previous !== undefined && JSON.stringify(previous) !== JSON.stringify(schema)) {
+                throw new TypeError(`Conflicting README structures named "${title}".`);
+            }
+
+            types.set(title, schema);
+
+            if (format === "linked") return `[${title}](#settings-type-${title})`;
+            return title;
+        }
 
         if (isJsonObject(schema.properties)) {
             const required = new Set(
@@ -166,7 +180,9 @@ function schemaType(schema: JsonObject): string {
             );
             const fields = Object.entries(schema.properties).map(([key, value]) => {
                 const optional = required.has(key) ? "" : "?";
-                const type = isJsonObject(value) ? schemaType(value) : "JSON value";
+                let type = "JSON value";
+                if (isJsonObject(value)) type = schemaType(value, types, format);
+
                 return `${key}${optional}: ${type}`;
             });
 
@@ -175,7 +191,10 @@ function schemaType(schema: JsonObject): string {
 
         if (isJsonObject(schema.patternProperties)) {
             const valueTypes = Object.values(schema.patternProperties)
-                .map((value) => (isJsonObject(value) ? schemaType(value) : "JSON value"))
+                .map((value) => {
+                    if (isJsonObject(value)) return schemaType(value, types, format);
+                    return "JSON value";
+                })
                 .filter((value, index, values) => values.indexOf(value) === index);
             if (valueTypes.length > 0) return `Record<string, ${valueTypes.join(" | ")}>`;
         }
@@ -200,9 +219,20 @@ function schemaType(schema: JsonObject): string {
     return "JSON value";
 }
 
+function documentedType(schema: JsonObject, types: Map<string, JsonObject>, path: string): string {
+    if (schemaType(schema, types, "plain").length > MAX_INLINE_TYPE_CHARACTERS) {
+        throw new TypeError(
+            `Generated README type for "${path}" is too long; add a concise PascalCase title to the complex item or record-value schema.`,
+        );
+    }
+
+    return schemaType(schema, types, "linked");
+}
+
 function collectRows(
     properties: JsonObject,
     defaults: JsonObject,
+    types: Map<string, JsonObject>,
     prefix: readonly string[] = [],
 ): readonly SettingsRow[] {
     const rows: SettingsRow[] = [];
@@ -211,20 +241,13 @@ function collectRows(
 
         const path = [...prefix, key];
         if (value.type === "object" && isJsonObject(value.properties)) {
-            rows.push(...collectRows(value.properties, defaults, path));
+            rows.push(...collectRows(value.properties, defaults, types, path));
             continue;
-        }
-
-        const type = schemaType(value);
-        if (type.length > MAX_INLINE_TYPE_CHARACTERS) {
-            throw new TypeError(
-                `Generated README type for "${path.join(".")}" is too long; add a concise PascalCase title to the complex item or record-value schema.`,
-            );
         }
 
         rows.push({
             path: path.join("."),
-            type,
+            type: documentedType(value, types, path.join(".")),
             defaultValue: valueAtPath(defaults, path),
             description: isJsonString(value.description) ? value.description : "",
         });
@@ -235,6 +258,47 @@ function collectRows(
 
 function markdownCell(value: string): string {
     return value.replaceAll("|", "\\|").replaceAll("\n", " ");
+}
+
+function renderStructuralTypes(types: Map<string, JsonObject>): string[] {
+    if (types.size === 0) return [];
+
+    const lines = ["", "### Structural types"];
+    for (const [name, schema] of types) {
+        lines.push("", `<a id="settings-type-${name}"></a>`, "", `#### ${name}`, "");
+
+        if (isJsonString(schema.description)) lines.push(schema.description, "");
+        if (schema.additionalProperties === false)
+            lines.push("Additional fields are not allowed.", "");
+
+        lines.push("| Field | Type | Required | Description |", "| --- | --- | --- | --- |");
+
+        const required = new Set<string>();
+        if (isJsonArray(schema.required)) {
+            for (const field of schema.required) {
+                if (isJsonString(field)) required.add(field);
+            }
+        }
+
+        const properties = schema.properties ?? schema.patternProperties;
+        if (!isJsonObject(properties)) continue;
+
+        for (const [field, value] of Object.entries(properties)) {
+            if (!isJsonObject(value)) continue;
+
+            let requiredLabel = "No";
+            if (required.has(field)) requiredLabel = "Yes";
+
+            let description = "";
+            if (isJsonString(value.description)) description = value.description;
+
+            lines.push(
+                `| ${markdownCell(markdownCode(field))} | ${markdownCell(documentedType(value, types, `${name}.${field}`))} | ${requiredLabel} | ${markdownCell(description)} |`,
+            );
+        }
+    }
+
+    return lines;
 }
 
 function canRenderDefaultInline(value: JsonValue): boolean {
@@ -264,13 +328,14 @@ export function renderReadmeSettingsSection(
     definition: ExtensionSettingsDefinition,
     options: RenderReadmeOptions = {},
 ): string {
-    const fileSchema = createSettingsFileSchema(definition);
-    /* v8 ignore next -- createSettingsFileSchema always returns an object properties map */
-    if (!isJsonObject(fileSchema.properties)) {
+    const schema = createAuthoredSettingsSchema(definition.schema);
+    /* v8 ignore next -- validated settings definitions always have an object properties map */
+    if (!isJsonObject(schema.properties)) {
         throw new TypeError("Generated settings schema does not contain properties.");
     }
 
-    const rows = collectRows(fileSchema.properties, definition.defaultSettings);
+    const types = new Map<string, JsonObject>();
+    const rows = collectRows(schema.properties, definition.defaultSettings, types);
     const tableRows = rows.map(
         (row) =>
             `| ${markdownCell(markdownCode(row.path))} | ${markdownCell(row.type)} | ${formatDefault(row.defaultValue)} | ${markdownCell(row.description)} |`,
@@ -306,6 +371,8 @@ export function renderReadmeSettingsSection(
             "```",
         );
     }
+
+    documentation.push(...renderStructuralTypes(types));
 
     return documentation.join("\n");
 }

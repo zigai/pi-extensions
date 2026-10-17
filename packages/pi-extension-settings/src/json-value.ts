@@ -1,3 +1,5 @@
+import { Compile } from "typebox/compile";
+
 import { Typebox, Value } from "./typebox-runtime.ts";
 
 const {
@@ -26,10 +28,10 @@ export interface JsonObject {
     readonly [key: string]: JsonValue;
 }
 
-const JsonObjectCandidateSchema = RecordType(StringType(), Unknown());
+const JsonObjectCandidateValidator = Compile(RecordType(StringType(), Unknown()));
 
 function isPlainJsonObject(value: JsonValue): value is JsonObject {
-    if (!Value.Check(JsonObjectCandidateSchema, value)) return false;
+    if (!JsonObjectCandidateValidator.Check(value)) return false;
 
     const prototype = Reflect.getPrototypeOf(value);
     return (

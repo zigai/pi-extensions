@@ -1,4 +1,8 @@
-import type { ExtensionContext, WidgetPlacement } from "@earendil-works/pi-coding-agent";
+import type {
+    ExtensionContext,
+    SlashCommandInfo,
+    WidgetPlacement,
+} from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { resolveTypedCommandRoute } from "../command/subcommands.ts";
 import { casesHandled } from "../exhaustive.ts";
@@ -968,6 +972,22 @@ function renderContextualChoiceLines(
     });
 }
 
+function renderInvocationHeading(
+    invocation: EditorTypedCommandInvocation,
+    width: number,
+    theme: HelperTheme,
+    appearance: ResolvedInlineHelpAppearance,
+): string[] {
+    if (appearance.style !== "contextual") return [];
+
+    const heading = theme.fg(
+        appearance.colors.active,
+        `Arguments  /${commandDisplayName(invocation.command)}`,
+    );
+    const description = theme.fg(appearance.colors.metadata, invocation.command.description);
+    return [...wrapTextWithAnsi(heading, width), ...wrapTextWithAnsi(description, width)];
+}
+
 function renderCompactInlineHelper(
     invocation: EditorTypedCommandInvocation,
     width: number,
@@ -976,7 +996,9 @@ function renderCompactInlineHelper(
     appearance: ResolvedInlineHelpAppearance,
 ): string[] {
     const commandPrefix = `/${commandDisplayName(invocation.command)}`;
-    const helperIndent = " ".repeat(commandPrefix.length + 2);
+    let helperIndent = " ".repeat(commandPrefix.length + 2);
+    if (appearance.style === "contextual") helperIndent = "  ";
+
     const choiceContext = activeChoiceContext(invocation);
     const items = collectInlineHelperItems(invocation, appearance);
     const tokenGroups = orderedInlineHelpItems(items, appearance).map((group) =>
@@ -985,9 +1007,9 @@ function renderCompactInlineHelper(
             .join(appearance.format.itemSeparator),
     );
     const commandLine = `${helperIndent}${tokenGroups.join(appearance.format.groupSeparator)}`;
-    let rendered: string[] = [];
+    const rendered = renderInvocationHeading(invocation, width, theme, appearance);
     if (commandLine.trim().length > 0) {
-        rendered = wrapTextWithAnsi(commandLine, width);
+        rendered.push(...wrapTextWithAnsi(commandLine, width));
     }
 
     const formOnlyCount = Object.values(invocation.command.args).filter(
@@ -1072,7 +1094,9 @@ export function renderInlineHelper(
             invocation.rawArgs.trim().length === 0)
     ) {
         const commandPrefix = `/${commandDisplayName(invocation.command)}`;
-        const indent = " ".repeat(commandPrefix.length + 2);
+        let indent = " ".repeat(commandPrefix.length + 2);
+        if (appearance.style === "contextual") indent = "  ";
+
         const tokens = Object.entries(invocation.command.subcommands).map(([name, subcommand]) => {
             let aliases = "";
             if (appearance.metadata.aliases) {
@@ -1091,6 +1115,7 @@ export function renderInlineHelper(
         });
 
         const lines = [
+            ...renderInvocationHeading(invocation, width, theme, appearance),
             truncateToWidth(`${indent}${tokens.join(appearance.format.itemSeparator)}`, width, "…"),
         ];
         if (route.status === "unknown") {
@@ -1115,6 +1140,46 @@ export function renderInlineHelper(
         default:
             return casesHandled(appearance.layout);
     }
+}
+
+export function setCommandDescriptionWidget(
+    ctx: ExtensionContext,
+    command: Pick<SlashCommandInfo, "name" | "description">,
+    placement: WidgetPlacement,
+    appearance: ResolvedInlineHelpAppearance,
+): void {
+    const { name, description } = command;
+
+    ctx.ui.setWidget(
+        WIDGET_KEY,
+        (_tui, theme) => ({
+            render(width: number): string[] {
+                const lines = wrapTextWithAnsi(
+                    theme.fg(appearance.colors.active, `Command  /${name}`),
+                    width,
+                );
+                if (description !== undefined && description.length > 0) {
+                    lines.push(
+                        ...wrapTextWithAnsi(
+                            theme.fg(appearance.colors.metadata, description),
+                            width,
+                        ),
+                    );
+                }
+
+                lines.push(
+                    ...wrapTextWithAnsi(
+                        theme.fg(appearance.colors.metadata, "Argument metadata unavailable"),
+                        width,
+                    ),
+                );
+
+                return lines;
+            },
+            invalidate(): void {},
+        }),
+        { placement },
+    );
 }
 
 /** Set or clear the Pi helper widget for one extension context. */

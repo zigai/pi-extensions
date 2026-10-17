@@ -1,11 +1,8 @@
 import type { ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import type { TypedCommandUxOptions } from "../types.ts";
-import {
-    notifySkillDiagnosticsForText,
-    refreshTypedSkills,
-    transformTypedSkillInput,
-} from "./skill-input.ts";
+import { notifySkillDiagnosticsForText, transformTypedSkillInput } from "./skill-input.ts";
 import { TypedCommandUxSession } from "./ux-session.ts";
+import { refreshTypedSkills } from "./skill-resources.ts";
 import { getPiTypedCommandRegistry } from "./registry.ts";
 
 const PI_UX_INSTALLATIONS_KEY = Symbol.for("pi-typed-args.ux-installations.v1");
@@ -62,8 +59,8 @@ export function installTypedCommandUx(pi: ExtensionAPI, options: TypedCommandUxO
 
     installations.set(key, installation);
 
-    pi.on("session_start", async (_event, ctx) => {
-        refreshTypedSkills(pi, registry);
+    pi.on("session_start", async (event, ctx) => {
+        refreshTypedSkills(pi, registry, event);
         await session.start(ctx);
     });
 

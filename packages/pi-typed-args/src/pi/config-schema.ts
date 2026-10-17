@@ -14,6 +14,7 @@ export const DEFAULT_PI_TYPED_COMMANDS_CONFIG_JSON = {
     $schema: PI_TYPED_COMMANDS_CONFIG_SCHEMA_REFERENCE,
     helperPlacement: DEFAULT_HELPER_PLACEMENT,
     appearance: {
+        style: DEFAULT_PI_TYPED_COMMANDS_APPEARANCE.form.style,
         form: {
             colors: { ...DEFAULT_PI_TYPED_COMMANDS_APPEARANCE.form.colors },
             symbols: { ...DEFAULT_PI_TYPED_COMMANDS_APPEARANCE.form.symbols },
@@ -76,6 +77,13 @@ export const PiTypedCommandsConfigSchema = Type.Object(
         appearance: Type.Optional(
             Type.Object(
                 {
+                    style: Type.Optional(
+                        Type.Enum(["compact", "contextual"], {
+                            default: DEFAULT_PI_TYPED_COMMANDS_CONFIG_JSON.appearance.style,
+                            description:
+                                "Use compact presentation or contextual headings for helpers, help, and forms.",
+                        }),
+                    ),
                     form: Type.Optional(
                         Type.Object(
                             {

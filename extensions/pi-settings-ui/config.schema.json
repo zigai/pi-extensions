@@ -11,6 +11,35 @@
       "default": "./schemas/pi-settings-ui.schema.json",
       "description": "JSON Schema used by editors for this settings file."
     },
+    "header": {
+      "type": "object",
+      "properties": {
+        "layout": {
+          "enum": [
+            "stacked",
+            "compact"
+          ],
+          "default": "stacked",
+          "description": "Separate navigation and scope, or combine them when space allows."
+        },
+        "showHints": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the tab-picker shortcut in the settings header."
+        },
+        "showFieldCounter": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the current field position in the settings header."
+        }
+      },
+      "default": {
+        "layout": "stacked",
+        "showHints": true,
+        "showFieldCounter": true
+      },
+      "additionalProperties": false
+    },
     "projectOverrides": {
       "type": "boolean",
       "default": true,

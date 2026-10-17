@@ -3,6 +3,7 @@ import {
     stripTerminalSequences,
     TuiAltScreen,
     TuiMainScreen as TUI,
+    visibleWidth,
     type Terminal,
 } from "@earendil-works/pi-tui";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
@@ -492,6 +493,84 @@ describe("settings TUI", () => {
         await expect.poll(() => model.hasDirtySettings()).toBe(false);
         expect(saveCount).toBe(1);
         expect(component.render(100).join("\n")).not.toContain("Second Extension*");
+    });
+
+    it.each([24, 40, 80, 120])("keeps navigation and scope distinct at %s columns", (width) => {
+        const model = new SettingsEditorModel(
+            editableCatalog([fixtureExtension("pi-sample", "Sample")]),
+            false,
+        );
+        const component = new SettingsEditorComponent({
+            cwd: "/project",
+            model,
+            piSettings: fakePiSettingsPane(),
+            tui: new TUI(fakeTerminal(width)),
+            theme: ansiTheme,
+            keybindings: defaultKeys,
+            save: async () => [],
+            close() {},
+            header: { layout: "stacked", showHints: true, showFieldCounter: true },
+        });
+        component.handleInput("\t");
+        const lines = component.render(width);
+        expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+        const location = lines.find((line) => line.includes("Sample"));
+        const scope = lines.find((line) => line.includes("Scope:"));
+        expect(location).toBeDefined();
+        expect(scope).toBeDefined();
+        expect(location).not.toBe(scope);
+        expect(lines.join("\n")).toContain("Global");
+        expect(lines.join("\n")).toContain("(1/10)");
+    });
+
+    it("lets users choose a compact header and hide secondary header information", () => {
+        const model = new SettingsEditorModel(
+            editableCatalog([fixtureExtension("pi-sample", "Sample")]),
+            false,
+        );
+        const component = new SettingsEditorComponent({
+            cwd: "/project",
+            model,
+            piSettings: fakePiSettingsPane(),
+            tui: new TUI(fakeTerminal()),
+            theme: plainTheme,
+            keybindings: defaultKeys,
+            save: async () => [],
+            close() {},
+            header: { layout: "compact", showHints: false, showFieldCounter: false },
+        });
+        component.handleInput("\t");
+        const first = component.render(120)[0];
+        expect(first).toContain("Sample");
+        expect(first).toContain("Scope:");
+        expect(first).not.toContain("Ctrl+P");
+        expect(first).not.toContain("(1/10)");
+    });
+
+    it("shows the tab-picker hint in a compact header when field counters are hidden", () => {
+        const model = new SettingsEditorModel(
+            editableCatalog([fixtureExtension("pi-sample", "Sample")]),
+            false,
+        );
+        const component = new SettingsEditorComponent({
+            cwd: "/project",
+            model,
+            piSettings: fakePiSettingsPane(),
+            tui: new TUI(fakeTerminal(160)),
+            theme: plainTheme,
+            keybindings: defaultKeys,
+            save: async () => [],
+            close() {},
+            header: { layout: "compact", showHints: true, showFieldCounter: false },
+        });
+        component.handleInput("\t");
+
+        const first = component.render(160)[0];
+
+        expect(first).toContain("Sample");
+        expect(first).toContain("Scope:");
+        expect(first).toContain("Ctrl+P choose");
+        expect(first).not.toContain("(1/10)");
     });
 
     it("offers every settings tab through a searchable compact picker", () => {

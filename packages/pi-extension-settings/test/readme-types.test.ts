@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import { Type } from "typebox";
 
 import { defineExtensionSettings } from "../src/definition.ts";
+import { createSettingsFileSchema } from "../src/schema-document.ts";
 import { renderReadmeSettingsSection } from "../src/settings-documentation.ts";
+import { Value } from "../src/typebox-runtime.ts";
 
 describe("README schema rendering", () => {
     it("documents optional values, arrays, and escaped descriptions", () => {
@@ -160,7 +162,10 @@ describe("README schema rendering", () => {
             "| `entriesByName` | Record<string, { count: integer }> | `{}` | Named entries. |",
         );
 
-        expect(rendered).toContain("| `namedEntries` | ModelMode[] | `[]` | Named model modes. |");
+        expect(rendered).toContain(
+            "| `namedEntries` | [ModelMode](#settings-type-ModelMode)[] | `[]` | Named model modes. |",
+        );
+
         expect(rendered).toContain('| `color` | integer \\| string | `"#123456"`');
         expect(rendered).toContain(
             "| `primitiveUnion` | number \\| null \\| boolean | `true` | Primitive alternatives. |",
@@ -192,6 +197,177 @@ describe("README schema rendering", () => {
         expect(rendered).not.toContain("### Defaults");
         expect(rendered).not.toContain("### Advanced example");
         expect(definition.schemaId).toBe("urn:pi-extension-settings:pi-types");
+    });
+
+    it("links array and record value types to their schema fields and keeps examples valid", () => {
+        const entry = Type.Object(
+            {
+                label: Type.String({ description: "Display label." }),
+                payload: Type.Optional(
+                    Type.Unsafe({
+                        type: "object",
+                        title: "Payload",
+                        description: "Arbitrary payload fields.",
+                    }),
+                ),
+                tone: Type.Optional(Type.Enum(["plain", "strong"], { description: "Label tone." })),
+                notes: Type.Optional(
+                    Type.Object(
+                        { message: Type.Optional(Type.String()) },
+                        {
+                            title: "Note",
+                            description: "Optional note fields.",
+                            additionalProperties: false,
+                        },
+                    ),
+                ),
+                weights: Type.Optional(
+                    Type.Record(Type.String({ pattern: "^metric-" }), Type.Number(), {
+                        title: "Weights",
+                        description: "Named weights.",
+                        additionalProperties: false,
+                    }),
+                ),
+            },
+            { additionalProperties: false, title: "Entry" },
+        );
+        const definition = defineExtensionSettings({
+            id: "pi-structured",
+            title: "Structured",
+            description: "Structured settings.",
+            schema: Type.Object(
+                {
+                    entries: Type.Array(entry, { default: [], description: "Ordered entries." }),
+                    named: Type.Record(Type.String(), entry, {
+                        default: {},
+                        description: "Named entries.",
+                    }),
+                },
+                { additionalProperties: false },
+            ),
+            exampleSettings: { entries: [{ label: "sample", tone: "strong" }] },
+        });
+        const text = renderReadmeSettingsSection(definition);
+        expect(text).toContain("[Entry](#settings-type-Entry)[]");
+        expect(text).toContain("Record<string, [Entry](#settings-type-Entry)>");
+        expect(text).toContain('<a id="settings-type-Entry"></a>');
+        expect(text).toContain("| `label` | string | Yes | Display label. |");
+        expect(text).toContain("| `tone` | `plain` \\| `strong` | No | Label tone. |");
+        expect(text).toContain(
+            "| `notes` | [Note](#settings-type-Note) | No | Optional note fields. |",
+        );
+
+        expect(text).toContain("#### Payload");
+        expect(text).toContain("Arbitrary payload fields.");
+        expect(text).toContain("#### Note");
+        expect(text).toContain("| `message` | string | No |  |");
+        expect(text).toContain("#### Weights");
+        expect(text).toContain("| `^metric-` | number | No |  |");
+        expect(text).toContain('"label": "sample"');
+        expect(text).toContain('"tone": "strong"');
+        expect(definition.defaultSettings).toEqual({ entries: [], named: {} });
+    });
+
+    it("reuses one authored named structure across arrays and nullable object settings", () => {
+        const entry = Type.Object(
+            { label: Type.String({ description: "Display label." }) },
+            { title: "Entry", additionalProperties: false },
+        );
+        const definition = defineExtensionSettings({
+            id: "pi-shared-entry",
+            title: "Shared Entry",
+            description: "Shared entry settings.",
+            schema: Type.Object(
+                {
+                    entries: Type.Array(entry, { default: [], description: "Ordered entries." }),
+                    selected: Type.Union([entry, Type.Null()], {
+                        default: null,
+                        description: "Selected entry.",
+                    }),
+                },
+                { additionalProperties: false },
+            ),
+        });
+        const fileSchema = createSettingsFileSchema(definition);
+        expect(Value.Check(fileSchema, { selected: {} })).toBe(true);
+        expect(Value.Check(fileSchema, { selected: null })).toBe(true);
+        expect(Value.Check(fileSchema, { entries: [{}] })).toBe(false);
+        expect(Value.Check(fileSchema, { entries: [{ label: "sample" }] })).toBe(true);
+
+        const text = renderReadmeSettingsSection(definition);
+
+        expect(text).toContain(
+            "| `entries` | [Entry](#settings-type-Entry)[] | `[]` | Ordered entries. |",
+        );
+        expect(text).toContain(
+            "| `selected` | [Entry](#settings-type-Entry) \\| null | `null` | Selected entry. |",
+        );
+        expect(text.match(/<a id="settings-type-Entry"><\/a>/g)).toHaveLength(1);
+        expect(text.match(/^#### Entry$/gm)).toHaveLength(1);
+        expect(text).toContain("| `label` | string | Yes | Display label. |");
+    });
+
+    it("rejects conflicting named structures instead of linking to the wrong fields", () => {
+        const definition = defineExtensionSettings({
+            id: "pi-conflicting",
+            title: "Conflicting",
+            description: "Conflicting settings.",
+            schema: Type.Object(
+                {
+                    first: Type.Array(
+                        Type.Object(
+                            { label: Type.String() },
+                            { title: "Entry", additionalProperties: false },
+                        ),
+                        { default: [], description: "First entries." },
+                    ),
+                    second: Type.Array(
+                        Type.Object(
+                            { count: Type.Number() },
+                            { title: "Entry", additionalProperties: false },
+                        ),
+                        { default: [], description: "Second entries." },
+                    ),
+                },
+                { additionalProperties: false },
+            ),
+        });
+        expect(() => renderReadmeSettingsSection(definition)).toThrow(/Conflicting.*Entry/);
+    });
+
+    it("rejects named structures that differ only in authored required fields", () => {
+        const definition = defineExtensionSettings({
+            id: "pi-required-conflict",
+            title: "Required Conflict",
+            description: "Conflicting entry requirements.",
+            schema: Type.Object(
+                {
+                    requiredEntry: Type.Union(
+                        [
+                            Type.Object(
+                                { label: Type.String() },
+                                { title: "Entry", additionalProperties: false },
+                            ),
+                            Type.Null(),
+                        ],
+                        { default: null, description: "An entry requiring a label." },
+                    ),
+                    optionalEntry: Type.Union(
+                        [
+                            Type.Object(
+                                { label: Type.Optional(Type.String()) },
+                                { title: "Entry", additionalProperties: false },
+                            ),
+                            Type.Null(),
+                        ],
+                        { default: null, description: "An entry with an optional label." },
+                    ),
+                },
+                { additionalProperties: false },
+            ),
+        });
+
+        expect(() => renderReadmeSettingsSection(definition)).toThrow(/Conflicting.*Entry/);
     });
 
     it("rejects complex table types without a concise schema title", () => {

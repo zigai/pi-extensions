@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { describe, it } from "vitest";
 import type { AutocompleteProvider } from "@earendil-works/pi-tui";
 import { normalizeRegisteredCommand } from "../src/command/registered-command.ts";
@@ -7,7 +9,14 @@ import { createTypedCommandRegistry } from "../src/registry.ts";
 import { typedSkillCommandFromMetadata } from "../src/skills/command.ts";
 import type { RegisteredTypedCommand } from "../src/pi/command-types.ts";
 import { TypedCommandUxSession } from "../src/pi/ux-session.ts";
-import { createTestExtensionApi, createTestExtensionContext } from "./pi-test-adapter.ts";
+import {
+    createTestExtensionApi,
+    createTestExtensionContext,
+    createTestTheme,
+    createTestTui,
+    requireTestWidgetFactory,
+    type TestWidgetFactory,
+} from "./pi-test-adapter.ts";
 
 function isAutocompleteProviderFactory(
     value: unknown,
@@ -75,6 +84,77 @@ function createSessionHarness(
 }
 
 describe("typed command UX session", () => {
+    it("shows description-only command coverage without inventing forms or retaining stale helpers", async () => {
+        const directory = mkdtempSync(join(tmpdir(), "command-description-"));
+        const previous = process.env.PI_CODING_AGENT_DIR;
+        process.env.PI_CODING_AGENT_DIR = directory;
+        mkdirSync(join(directory, "pi-typed-args"));
+        writeFileSync(
+            join(directory, "pi-typed-args/config.json"),
+            JSON.stringify({ appearance: { style: "contextual" } }),
+        );
+        let text = "/sample";
+        let widget: TestWidgetFactory | undefined;
+        let terminalInput: ((data: string) => { consume?: boolean } | undefined) | undefined;
+        const ctx = createTestExtensionContext({
+            cwd: directory,
+            ui: {
+                getEditorText: () => text,
+                setWidget(_key, value) {
+                    if (value === undefined) widget = undefined;
+                    else widget = requireTestWidgetFactory(value);
+                },
+                onTerminalInput(handler) {
+                    terminalInput = handler;
+
+                    return () => {
+                        terminalInput = undefined;
+                    };
+                },
+            },
+        });
+        const pi = createTestExtensionApi({
+            getCommands: () => [
+                {
+                    name: "sample",
+                    description: "Describe the sample",
+                    source: "extension",
+                    sourceInfo: {
+                        path: join(directory, "sample.ts"),
+                        source: "test",
+                        scope: "temporary",
+                        origin: "top-level",
+                    },
+                },
+            ],
+        });
+        const session = new TypedCommandUxSession(pi, {}, createTypedCommandRegistry());
+        try {
+            await session.start(ctx);
+            assert.ok(widget);
+            assert.match(
+                widget(createTestTui(), createTestTheme()).render(80).join("\n"),
+                /Describe the sample/,
+            );
+            assert.match(
+                widget(createTestTui(), createTestTheme()).render(80).join("\n"),
+                /Argument metadata unavailable/,
+            );
+            assert.ok(terminalInput);
+            assert.equal(terminalInput("\t"), undefined);
+            text = "/settings";
+            await session.start(ctx);
+            assert.equal(widget, undefined);
+        } finally {
+            await session.stop();
+
+            if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+            else process.env.PI_CODING_AGENT_DIR = previous;
+
+            rmSync(directory, { recursive: true });
+        }
+    });
+
     it.each([
         ["missing", "/workspace"],
         ["unknown", "/workspace typo"],

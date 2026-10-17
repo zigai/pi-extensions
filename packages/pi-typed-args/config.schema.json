@@ -9,6 +9,11 @@
     "appearance": {
       "type": "object",
       "properties": {
+        "style": {
+          "enum": ["compact", "contextual"],
+          "default": "compact",
+          "description": "Use compact presentation or contextual headings for helpers, help, and forms."
+        },
         "form": {
           "type": "object",
           "properties": {
@@ -1063,6 +1068,7 @@
       },
       "additionalProperties": true,
       "default": {
+        "style": "compact",
         "form": {
           "colors": {
             "title": "accent",

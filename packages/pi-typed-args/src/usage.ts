@@ -40,6 +40,7 @@ export type DetailedHelpMetadataOptions = {
 
 /** Options for generated detailed help output. */
 export type DetailedHelpFormatOptions = {
+    style?: "compact" | "contextual";
     metadata?: DetailedHelpMetadataOptions;
     order?: "definition" | "required-first";
 };
@@ -323,8 +324,11 @@ export function formatDetailedHelp<TDefinitions extends ArgumentDefinitions>(
         ...options?.metadata,
     };
 
+    let title = `/${command.invocationName ?? command.name}`;
+    if (options?.style === "contextual") title = `Help  ${title}`;
+
     const lines = [
-        `/${command.invocationName ?? command.name}`,
+        title,
         "",
         command.description,
         "",

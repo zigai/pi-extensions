@@ -4,15 +4,9 @@ import { combineSkillAdditionalInput, decideArgumentIssueAction } from "../invoc
 import { parseTypedCommandArgs } from "../parser.ts";
 import type { TypedCommandRegistry } from "../registry.ts";
 import { createPiCompletionCapabilities } from "./completions.ts";
-import {
-    isTypedSkillCommand,
-    skillPathFromCommand,
-    typedSkillCommandFromMetadata,
-} from "../skills/command.ts";
+import { isTypedSkillCommand } from "../skills/command.ts";
 import { formatTypedSkillDiagnostics } from "../skills/diagnostics.ts";
-import { readTypedSkillMetadataResult } from "../skills/metadata.ts";
 import { renderTypedSkillInvocation } from "../skills/prompt.ts";
-import type { TypedSkillDiagnostics } from "../skills/types.ts";
 import type { FormMode, ParsedCommandArguments } from "../types.ts";
 import type { RegisteredTypedCommand } from "./command-types.ts";
 import { commandInvocationForEditorText, slashCommandMatch } from "./editor-invocation.ts";
@@ -27,30 +21,6 @@ type SkillParseResult = {
 };
 
 type TypedSkillInputResult = { action: "handled" } | { action: "transform"; text: string };
-
-/** Refresh process-local typed skill metadata from Pi's current skill command list. */
-export function refreshTypedSkills(pi: ExtensionAPI, registry: TypedCommandRegistry): void {
-    const commands: RegisteredTypedCommand[] = [];
-    const diagnostics: TypedSkillDiagnostics[] = [];
-    for (const command of pi.getCommands()) {
-        const skillPath = skillPathFromCommand(command);
-        if (skillPath === undefined) {
-            continue;
-        }
-
-        const fallbackName = command.name.replace(/^skill:/, "");
-        const result = readTypedSkillMetadataResult(skillPath, { fallbackName });
-        if (result.status === "ok") {
-            commands.push(typedSkillCommandFromMetadata(result.metadata));
-        }
-
-        if (result.status === "invalid") {
-            diagnostics.push(result.diagnostics);
-        }
-    }
-
-    registry.replaceSkills(commands, diagnostics);
-}
 
 /** Notify when editor text targets a skill whose typed arguments could not be registered. */
 export function notifySkillDiagnosticsForText(

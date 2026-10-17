@@ -718,8 +718,11 @@ export class ArgumentFormComponent implements Component, Focusable {
     }
 
     private renderHeader(width: number): string {
+        let title = this.title;
+        if (this.appearance.style === "contextual") title = `Arguments  ${title}`;
+
         return this.fitLine(
-            this.theme.fg(this.appearance.colors.title, this.theme.bold(this.title)),
+            this.theme.fg(this.appearance.colors.title, this.theme.bold(title)),
             width,
         );
     }

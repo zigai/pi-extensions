@@ -91,11 +91,12 @@ installTypedCommandUx(pi, { helperPlacement: "belowEditor" });
 
 ## Configuration
 
-Use global config at `~/.pi/agent/pi-typed-args/config.json`.
+Use global config at `~/.pi/agent/pi-typed-args/config.json`. Set `appearance.style` to `"contextual"` for matching helper, help, and form headings. Commands exposed by Pi without typed metadata get description-only helpers; built-ins are not exposed by that API.
 
 | Option                                          | Default                       | Purpose                                                |
 | ----------------------------------------------- | ----------------------------- | ------------------------------------------------------ |
 | `helperPlacement`                               | `"aboveEditor"`               | Place the live helper above or below the input editor. |
+| `appearance.style`                              | `"compact"`                   | Use compact presentation or contextual headings.       |
 | `appearance.form.colors.title`                  | `"accent"`                    | Color the dense form title.                            |
 | `appearance.form.colors.focusedLabel`           | `"accent"`                    | Color the focused field label.                         |
 | `appearance.form.colors.focusedValue`           | `"accent"`                    | Color the focused field value.                         |
@@ -152,6 +153,7 @@ Use global config at `~/.pi/agent/pi-typed-args/config.json`.
   "$schema": "./config.schema.json",
   "helperPlacement": "aboveEditor",
   "appearance": {
+    "style": "compact",
     "form": {
       "colors": {
         "title": "accent",

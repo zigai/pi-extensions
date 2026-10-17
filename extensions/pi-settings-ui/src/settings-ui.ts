@@ -39,6 +39,7 @@ import {
 } from "./settings-schema.ts";
 import { type EditorFieldView, SettingsEditorModel } from "./settings-editor.ts";
 import type { PiSettingsPane } from "./pi-settings-tab.ts";
+import { defaultHeaderSettings, type SettingsHeaderSettings } from "./settings-input.ts";
 import { type SaveSettingsLayerOutcome, type SaveSettingsLayerRequest } from "./settings-store.ts";
 import {
     addStructuredEntry,
@@ -65,6 +66,7 @@ export type SettingsEditorComponentOptions = {
     readonly tui: TUI;
     readonly theme: SettingsUiTheme;
     readonly keybindings: Pick<KeybindingsManager, "matches">;
+    readonly header?: SettingsHeaderSettings;
 
     readonly save: (
         requests: readonly SaveSettingsLayerRequest[],
@@ -933,33 +935,58 @@ export class SettingsEditorComponent implements Component, Focusable {
     }
 
     private renderHeader(width: number): string[] {
+        const header = this.options.header ?? defaultHeaderSettings;
         const title = this.options.theme.fg("accent", this.options.theme.bold("Settings"));
         const navigation = this.renderNavigation();
-        const scope = this.renderScope();
-        const combined = `${title}  ${navigation}  ${scope}`;
-        let lines: string[];
-
-        if (visibleWidth(combined) <= width) {
-            lines = [combined];
-        } else {
-            const primary = `${title}  ${navigation}`;
-
-            lines =
-                visibleWidth(primary) <= width
-                    ? [primary, truncateToWidth(scope, width, "")]
-                    : [
-                          truncateToWidth(title, width, ""),
-                          truncateToWidth(navigation, width, ""),
-                          truncateToWidth(scope, width, ""),
-                      ];
-        }
-
+        const primary = `${title}  ${navigation}`;
+        const scope = this.renderScope(width);
         const counter = this.activeFieldCounter();
-        if (counter !== undefined && lines[0] !== undefined) {
-            lines[0] = rightAlignedLine(lines[0], this.options.theme.fg("dim", counter), width);
+        const hint = this.options.theme.fg("dim", "Ctrl+P choose");
+        const lines = [primary];
+        if (visibleWidth(primary) > width) lines.splice(0, 1, title, navigation);
+
+        if (
+            header.layout === "compact" &&
+            lines.length === 1 &&
+            visibleWidth(`${primary}  ${scope}`) <= width
+        ) {
+            let compact = `${primary}  ${scope}`;
+            let counterWidth = 0;
+            if (header.showFieldCounter && counter !== undefined) {
+                counterWidth = visibleWidth(counter) + 1;
+            }
+
+            if (
+                header.showHints &&
+                visibleWidth(compact) + visibleWidth(hint) + 2 + counterWidth <= width
+            ) {
+                compact = `${compact}  ${hint}`;
+            }
+
+            lines[0] = compact;
+        } else {
+            let secondary = scope;
+            if (header.showHints && visibleWidth(scope) + visibleWidth(hint) + 2 <= width) {
+                secondary = rightAlignedLine(scope, hint, width);
+            }
+
+            lines.push(secondary);
         }
 
-        return lines;
+        const locationIndex = Math.min(1, lines.length - 1);
+        let counterIndex = 0;
+        if (visibleWidth(primary) > width) counterIndex = locationIndex;
+
+        const location = lines[counterIndex];
+        if (header.showFieldCounter && counter !== undefined && location !== undefined) {
+            lines[counterIndex] = rightAlignedLine(
+                location,
+                this.options.theme.fg("dim", counter),
+                width,
+            );
+        }
+
+        return lines.map((line) => truncateToWidth(line, width, ""));
     }
 
     private activeFieldCounter(): string | undefined {
@@ -998,8 +1025,7 @@ export class SettingsEditorComponent implements Component, Focusable {
             activeTitle = `${title}${marker}`;
         }
 
-        const choose = this.options.theme.fg("dim", "  Ctrl+P");
-        return `${selected(activeTitle)}${choose}`;
+        return selected(activeTitle);
     }
 
     private renderTabPicker(width: number): string[] {
@@ -1118,7 +1144,7 @@ export class SettingsEditorComponent implements Component, Focusable {
         return lines;
     }
 
-    private renderScope(): string {
+    private renderScope(width: number): string {
         const active = this.activeScopeValue;
         const scopeTitle = this.options.theme.fg("dim", "Scope:");
         const globalAvailable =
@@ -1139,7 +1165,13 @@ export class SettingsEditorComponent implements Component, Focusable {
                 : this.options.theme.fg("muted", ` ${label} `);
         };
 
-        return `${scopeTitle} ${scopeLabel("Global", active === "global", globalAvailable)} ${scopeLabel("Project", active === "project", projectAvailable)}`;
+        const choices = `${scopeTitle} ${scopeLabel("Global", active === "global", globalAvailable)} ${scopeLabel("Project", active === "project", projectAvailable)}`;
+        if (visibleWidth(choices) <= width) return choices;
+
+        if (active === "project")
+            return `${scopeTitle} ${scopeLabel("Project", true, projectAvailable)}`;
+
+        return `${scopeTitle} ${scopeLabel("Global", true, globalAvailable)}`;
     }
 
     private renderFields(width: number): string[] {

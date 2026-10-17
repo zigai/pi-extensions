@@ -48,10 +48,10 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-toggles.json`.
 | `defaults.lazyToolLimit` | integer | `5` | Maximum tools activated by one lazy capability search. |
 | `defaults.showStatus` | boolean | `true` | Show a compact footer status when policy changes Pi or has diagnostics. |
 | `activeProfile` | string | — | Persistent profile selected at this settings scope. |
-| `overrides` | PolicyDecision[] | `[]` | Explicit persistent capability decisions. |
-| `profiles` | Record<string, CapabilityProfile> | `{}` | Named bundles of capability decisions and prompt fragments. |
-| `promptFragments` | PromptFragment[] | `[]` | Owned system-prompt fragments available to profiles and conditions. |
-| `rules` | PolicyRule[] | `[]` | Conditional decisions and profile activations. |
+| `overrides` | [PolicyDecision](#settings-type-PolicyDecision)[] | `[]` | Explicit persistent capability decisions. |
+| `profiles` | Record<string, [CapabilityProfile](#settings-type-CapabilityProfile)> | `{}` | Named bundles of capability decisions and prompt fragments. |
+| `promptFragments` | [PromptFragment](#settings-type-PromptFragment)[] | `[]` | Owned system-prompt fragments available to profiles and conditions. |
+| `rules` | [PolicyRule](#settings-type-PolicyRule)[] | `[]` | Conditional decisions and profile activations. |
 
 ### Defaults
 
@@ -105,6 +105,57 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-toggles.json`.
   ]
 }
 ```
+
+### Structural types
+
+<a id="settings-type-PolicyDecision"></a>
+
+#### PolicyDecision
+
+Additional fields are not allowed.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `target` | { kind: `tool` \| `skill` \| `command` \| `system-fragment`; name?: string; source?: string; path?: string } | Yes |  |
+| `state` | `inherit` \| `on` \| `off` \| `lazy` \| `name-only` \| `user-only` | Yes | Desired capability state. Available states depend on the capability kind. |
+
+<a id="settings-type-CapabilityProfile"></a>
+
+#### CapabilityProfile
+
+Additional fields are not allowed.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `decisions` | [PolicyDecision](#settings-type-PolicyDecision)[] | Yes | Capability decisions activated by this profile. |
+| `promptFragments` | string[] | Yes | System-prompt fragment IDs activated by this profile. |
+
+<a id="settings-type-PromptFragment"></a>
+
+#### PromptFragment
+
+Additional fields are not allowed.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | string | Yes |  |
+| `content` | { kind: `inline`; text: string } \| { kind: `file`; path: string } | Yes |  |
+| `priority` | integer | Yes |  |
+| `when` | Condition | No | Declarative condition evaluated against typed Pi and project context facts. |
+
+<a id="settings-type-PolicyRule"></a>
+
+#### PolicyRule
+
+Additional fields are not allowed.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | string | Yes |  |
+| `priority` | integer | Yes |  |
+| `when` | Condition | Yes | Declarative condition evaluated against typed Pi and project context facts. |
+| `decisions` | [PolicyDecision](#settings-type-PolicyDecision)[] | Yes | Capability decisions contributed while this rule matches. |
+| `activateProfiles` | string[] | Yes | Profiles contributed while this rule matches. |
 <!-- pi-extension-settings:end -->
 
 Trusted-project settings use `.pi/extension-settings/pi-toggles.json` and are ignored until Pi trusts the project.

@@ -140,6 +140,47 @@ function choiceHelperCommand(): RegisteredTypedCommand {
 }
 
 describe("global presentation config", () => {
+    it("uses contextual headings across helpers, help and forms without losing custom tokens", async () => {
+        const appearance = resolvePiTypedCommandsAppearance({
+            style: "contextual",
+            inlineHelp: { format: { tokenPrefix: "<", tokenSuffix: ">" } },
+        });
+        const command = helperCommand();
+        const lines = renderInlineHelper(
+            { command, rawArgs: "", trailingBody: "" },
+            80,
+            identityTheme,
+            {},
+            appearance.inlineHelp,
+        );
+        assert.match(lines.join("\n"), /Arguments.*\/appearance-helper/);
+        assert.match(lines.join("\n"), /Appearance helper/);
+        assert.match(lines.join("\n"), /<--path/);
+        assert.match(
+            formatDetailedHelp(command, appearance.detailedHelp),
+            /Help.*\/appearance-helper/,
+        );
+        let form: string[] = [];
+        const ctx = createTestExtensionCommandContext({
+            ui: {
+                custom: async (factory) => {
+                    const component = await factory(tui, identityTheme, keybindings, () => {});
+                    form = component.render(80);
+                    return undefined;
+                },
+            },
+        });
+        await openArgumentForm(
+            command,
+            { values: { count: 1 }, provided: new Set(), issues: [], mode: "run" },
+            "all",
+            ctx,
+            { appearance },
+        );
+        assert.match(form.join("\n"), /Arguments.*appearance-helper/);
+        assert.match(form.join("\n"), /path/);
+    });
+
     it("scaffolds missing global config and schema files", () => {
         const agentDir = mkdtempSync(join(tmpdir(), "pi-typed-appearance-agent-"));
 

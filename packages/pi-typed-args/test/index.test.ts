@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "vitest";
-import { CONFIG_DIR_NAME, type ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import {
+    CONFIG_DIR_NAME,
+    type ExtensionCommandContext,
+    type SessionStartEvent,
+} from "@earendil-works/pi-coding-agent";
 import {
     defineTypedCommand,
     group,
@@ -18,7 +22,9 @@ import {
     parseSlashCommandText,
 } from "../src/invocation.ts";
 import { getPiTypedCommandRegistry } from "../src/pi/registry.ts";
-import { notifySkillDiagnosticsForText, refreshTypedSkills } from "../src/pi/skill-input.ts";
+import { createTypedCommandRegistry } from "../src/registry.ts";
+import { notifySkillDiagnosticsForText } from "../src/pi/skill-input.ts";
+import { refreshTypedSkills } from "../src/pi/skill-resources.ts";
 import { completeTypedCommandOnTab } from "../src/pi/tab-completion.ts";
 import { typedSkillCommandFromMetadata } from "../src/skills.ts";
 import type { ParseIssue } from "../src/types.ts";
@@ -738,6 +744,92 @@ function firstHandler(
 }
 
 describe("typed skill input transform", () => {
+    it("shares one resource snapshot across owners and refreshes changed and removed skills", () => {
+        const dir = mkdtempSync(join(tmpdir(), "typed-skills-"));
+        const path = join(dir, "SKILL.md");
+        const command = {
+            name: "skill:sample",
+            description: "Sample skill",
+            source: "skill",
+            sourceInfo: { path, source: "test", scope: "temporary", origin: "top-level" },
+        } as const;
+        let present = true;
+        const owner = () =>
+            createTestExtensionApi({
+                getCommands: () => {
+                    if (present) return [command];
+
+                    return [];
+                },
+            });
+
+        const first = createTypedCommandRegistry();
+        const second = createTypedCommandRegistry();
+        const snapshot: SessionStartEvent = { type: "session_start", reason: "startup" };
+        try {
+            writeFileSync(
+                path,
+                "---\nname: sample\ndescription: Sample skill\narguments:\n  label:\n    type: string\n---\nUse {args.label}.\n",
+            );
+
+            refreshTypedSkills(owner(), first, snapshot);
+            writeFileSync(
+                path,
+                "---\nname: sample\ndescription: Sample skill\narguments:\n  count:\n    type: number\n---\nUse {args.count}.\n",
+            );
+
+            refreshTypedSkills(owner(), second, snapshot);
+            assert.deepEqual(Object.keys(second.get("skill:sample")?.args ?? {}), ["label"]);
+            refreshTypedSkills(owner(), first, { type: "session_start", reason: "reload" });
+            assert.deepEqual(Object.keys(first.get("skill:sample")?.args ?? {}), ["count"]);
+            present = false;
+            refreshTypedSkills(owner(), second, { type: "session_start", reason: "new" });
+            assert.equal(second.get("skill:sample"), undefined);
+            assert.deepEqual(Object.keys(first.get("skill:sample")?.args ?? {}), ["count"]);
+        } finally {
+            rmSync(dir, { recursive: true });
+        }
+    });
+
+    it("shares invalid metadata without hiding diagnostics and retries at the next snapshot", () => {
+        const dir = mkdtempSync(join(tmpdir(), "typed-invalid-skills-"));
+        const path = join(dir, "SKILL.md");
+        const pi = createTestExtensionApi({
+            getCommands: () => [
+                {
+                    name: "skill:sample",
+                    description: "Sample skill",
+                    source: "skill",
+                    sourceInfo: { path, source: "test", scope: "temporary", origin: "top-level" },
+                },
+            ],
+        });
+        const first = createTypedCommandRegistry();
+        const second = createTypedCommandRegistry();
+        const snapshot: SessionStartEvent = { type: "session_start", reason: "startup" };
+        try {
+            writeFileSync(path, "---\nname: [invalid\n---\n");
+            refreshTypedSkills(pi, first, snapshot);
+            writeFileSync(
+                path,
+                "---\nname: sample\ndescription: Sample skill\narguments:\n  label:\n    type: string\n---\nUse {args.label}.\n",
+            );
+
+            refreshTypedSkills(pi, second, snapshot);
+            assert.deepEqual(
+                second.getSkillDiagnostics("skill:sample"),
+                first.getSkillDiagnostics("skill:sample"),
+            );
+            assert.equal(second.get("skill:sample"), undefined);
+            assert.notEqual(second.getSkillDiagnostics("skill:sample"), undefined);
+            refreshTypedSkills(pi, second, { type: "session_start", reason: "reload" });
+            assert.equal(second.getSkillDiagnostics("skill:sample"), undefined);
+            assert.notEqual(second.get("skill:sample"), undefined);
+        } finally {
+            rmSync(dir, { recursive: true });
+        }
+    });
+
     it("preserves dash-prefixed freeform text as additional input", async () => {
         const dir = mkdtempSync(join(tmpdir(), "pi-typed-skill-input-"));
         const skillPath = join(dir, "SKILL.md");
@@ -851,7 +943,7 @@ Body
         });
 
         try {
-            refreshTypedSkills(pi, registry);
+            refreshTypedSkills(pi, registry, { type: "session_start", reason: "startup" });
             assert.equal(getTypedSkillDiagnostics("skill:unknown"), undefined);
             assert.notEqual(getTypedSkillDiagnostics("skill:demo"), undefined);
             assert.equal(notifySkillDiagnosticsForText("/skill:demo", ctx, registry), true);
@@ -883,7 +975,10 @@ Body
             },
         });
 
-        assert.throws(() => refreshTypedSkills(pi, registry), /unexpected source metadata defect/);
+        assert.throws(
+            () => refreshTypedSkills(pi, registry, { type: "session_start", reason: "startup" }),
+            /unexpected source metadata defect/,
+        );
         assert.equal(getTypedSkillDiagnostics("skill:defect-proof"), undefined);
     });
 });

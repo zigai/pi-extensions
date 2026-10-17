@@ -1,6 +1,10 @@
 import type { PiTypedCommandsAppearanceConfig } from "./config-schema.ts";
 import type { TypedCommandFormSymbols } from "../types.ts";
 
+type CommandPresentationStyle = "compact" | "contextual";
+
+const DEFAULT_PRESENTATION_STYLE: CommandPresentationStyle = "compact";
+
 /** Pi TUI theme colour roles accepted by pi-typed-args appearance settings. */
 export const PI_THEME_COLOR_NAMES = [
     "accent",
@@ -152,6 +156,7 @@ export type DetailedHelpAppearanceSettings = {
 
 /** User-facing appearance settings accepted at appearance. */
 export type PiTypedCommandsAppearanceSettings = {
+    style?: CommandPresentationStyle;
     form?: FormAppearanceSettings;
     inlineHelp?: InlineHelpAppearanceSettings;
     detailedHelp?: DetailedHelpAppearanceSettings;
@@ -164,6 +169,7 @@ export type ResolvedFormSymbols = Required<TypedCommandFormSymbols> & {
 
 /** Fully resolved dense-form appearance used by renderers. */
 export type ResolvedFormAppearance = {
+    style: CommandPresentationStyle;
     colors: Record<FormAppearanceColorSlot, PiThemeColorName>;
     symbols: ResolvedFormSymbols;
     symbolOverrides: Partial<ResolvedFormSymbols>;
@@ -185,6 +191,7 @@ export type ResolvedHelpMetadata = Required<HelpMetadataSettings>;
 
 /** Fully resolved inline-helper appearance used by renderers. */
 export type ResolvedInlineHelpAppearance = {
+    style: CommandPresentationStyle;
     layout: InlineHelpLayout;
     choiceDisplay: InlineHelpChoiceDisplay;
     order: InlineHelpOrder;
@@ -203,6 +210,7 @@ export type ResolvedInlineHelpAppearance = {
 
 /** Fully resolved detailed-help appearance used by --help renderers. */
 export type ResolvedDetailedHelpAppearance = {
+    style: CommandPresentationStyle;
     metadata: ResolvedHelpMetadata;
     order: DetailedHelpOrder;
     configured: boolean;
@@ -270,9 +278,10 @@ const DEFAULT_DETAILED_METADATA: ResolvedHelpMetadata = {
     enumValues: true,
 };
 
-/** Default global appearance that preserves legacy rendering when no settings are present. */
+/** Default global appearance for command helpers, help, and forms. */
 export const DEFAULT_PI_TYPED_COMMANDS_APPEARANCE: ResolvedPiTypedCommandsAppearance = {
     form: {
+        style: DEFAULT_PRESENTATION_STYLE,
         colors: DEFAULT_FORM_COLORS,
         symbols: DEFAULT_FORM_SYMBOLS,
         symbolOverrides: {},
@@ -288,6 +297,7 @@ export const DEFAULT_PI_TYPED_COMMANDS_APPEARANCE: ResolvedPiTypedCommandsAppear
         },
     },
     inlineHelp: {
+        style: DEFAULT_PRESENTATION_STYLE,
         layout: "compact",
         choiceDisplay: "contextual",
         order: "active-required-available",
@@ -303,6 +313,7 @@ export const DEFAULT_PI_TYPED_COMMANDS_APPEARANCE: ResolvedPiTypedCommandsAppear
         },
     },
     detailedHelp: {
+        style: DEFAULT_PRESENTATION_STYLE,
         metadata: DEFAULT_DETAILED_METADATA,
         order: "definition",
         configured: false,
@@ -312,12 +323,14 @@ export const DEFAULT_PI_TYPED_COMMANDS_APPEARANCE: ResolvedPiTypedCommandsAppear
 function cloneDefaultAppearance(): ResolvedPiTypedCommandsAppearance {
     return {
         form: {
+            style: DEFAULT_PRESENTATION_STYLE,
             colors: { ...DEFAULT_PI_TYPED_COMMANDS_APPEARANCE.form.colors },
             symbols: { ...DEFAULT_PI_TYPED_COMMANDS_APPEARANCE.form.symbols },
             symbolOverrides: {},
             layout: { ...DEFAULT_PI_TYPED_COMMANDS_APPEARANCE.form.layout },
         },
         inlineHelp: {
+            style: DEFAULT_PRESENTATION_STYLE,
             layout: DEFAULT_PI_TYPED_COMMANDS_APPEARANCE.inlineHelp.layout,
             choiceDisplay: DEFAULT_PI_TYPED_COMMANDS_APPEARANCE.inlineHelp.choiceDisplay,
             order: DEFAULT_PI_TYPED_COMMANDS_APPEARANCE.inlineHelp.order,
@@ -326,6 +339,7 @@ function cloneDefaultAppearance(): ResolvedPiTypedCommandsAppearance {
             format: { ...DEFAULT_PI_TYPED_COMMANDS_APPEARANCE.inlineHelp.format },
         },
         detailedHelp: {
+            style: DEFAULT_PRESENTATION_STYLE,
             metadata: { ...DEFAULT_PI_TYPED_COMMANDS_APPEARANCE.detailedHelp.metadata },
             order: DEFAULT_PI_TYPED_COMMANDS_APPEARANCE.detailedHelp.order,
             configured: false,
@@ -445,6 +459,7 @@ function parseFormAppearance(settings: FormAppearanceSettings | undefined): Reso
     const symbolOverrides = parseFormSymbolOverrides(settings?.symbols);
     const layout = parseFormLayout(settings?.layout);
     return {
+        style: DEFAULT_PRESENTATION_STYLE,
         colors,
         symbols: { ...DEFAULT_FORM_SYMBOLS, ...symbolOverrides },
         symbolOverrides,
@@ -458,6 +473,7 @@ function parseInlineHelpAppearance(
     const defaults = DEFAULT_PI_TYPED_COMMANDS_APPEARANCE.inlineHelp;
     if (settings === undefined) {
         return {
+            style: DEFAULT_PRESENTATION_STYLE,
             layout: defaults.layout,
             choiceDisplay: defaults.choiceDisplay,
             order: defaults.order,
@@ -468,6 +484,7 @@ function parseInlineHelpAppearance(
     }
 
     return {
+        style: DEFAULT_PRESENTATION_STYLE,
         layout: settings.layout ?? defaults.layout,
         choiceDisplay: settings.choiceDisplay ?? defaults.choiceDisplay,
         order: settings.order ?? defaults.order,
@@ -482,6 +499,7 @@ function parseDetailedHelpAppearance(
 ): ResolvedDetailedHelpAppearance {
     if (settings === undefined) {
         return {
+            style: DEFAULT_PRESENTATION_STYLE,
             metadata: { ...DEFAULT_DETAILED_METADATA },
             order: DEFAULT_PI_TYPED_COMMANDS_APPEARANCE.detailedHelp.order,
             configured: false,
@@ -489,6 +507,7 @@ function parseDetailedHelpAppearance(
     }
 
     return {
+        style: DEFAULT_PRESENTATION_STYLE,
         metadata: mergeMetadata(settings.metadata, DEFAULT_DETAILED_METADATA),
         order: settings.order ?? DEFAULT_PI_TYPED_COMMANDS_APPEARANCE.detailedHelp.order,
         configured: true,
@@ -503,9 +522,16 @@ export function resolvePiTypedCommandsAppearance(
         return cloneDefaultAppearance();
     }
 
-    return {
+    const appearance = {
         form: parseFormAppearance(input.form),
         inlineHelp: parseInlineHelpAppearance(input.inlineHelp),
         detailedHelp: parseDetailedHelpAppearance(input.detailedHelp),
     };
+    const style = input.style ?? DEFAULT_PRESENTATION_STYLE;
+    appearance.form.style = style;
+    appearance.inlineHelp.style = style;
+    appearance.detailedHelp.style = style;
+    if (style === "contextual") appearance.detailedHelp.configured = true;
+
+    return appearance;
 }

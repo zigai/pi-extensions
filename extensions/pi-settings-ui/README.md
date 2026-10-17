@@ -54,11 +54,19 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-settings-ui.jso
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
+| `header.layout` | `stacked` \| `compact` | `"stacked"` | Separate navigation and scope, or combine them when space allows. |
+| `header.showHints` | boolean | `true` | Show the tab-picker shortcut in the settings header. |
+| `header.showFieldCounter` | boolean | `true` | Show the current field position in the settings header. |
 | `projectOverrides` | boolean | `true` | Let trusted projects have their own extension settings. |
 
 ```json
 {
   "$schema": "./schemas/pi-settings-ui.schema.json",
+  "header": {
+    "layout": "stacked",
+    "showHints": true,
+    "showFieldCounter": true
+  },
   "projectOverrides": true
 }
 ```

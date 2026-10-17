@@ -23,7 +23,7 @@ The CLI turns each package's `piExtensionSettings` manifest into checked-in arti
 
 Every configured path must be relative and remain inside its package. The README must already exist. If the package uses a `files` allowlist, its published artifact must include the definition and prevalidation modules named by the manifest.
 
-Definitions may include `exampleSettings` when structured or interacting options benefit from a realistic non-default example. Generation validates the example and includes it in the generated README section.
+Definitions may include `exampleSettings` for structured or interacting options. Generation validates the example. Named structural types link to schema-derived field tables with requiredness and descriptions; conflicting structures with the same title are rejected.
 
 ## Generate artifacts
 

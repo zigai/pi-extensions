@@ -51,7 +51,7 @@ function makeSettingsObjectPartial(schema: JsonObject): JsonObject {
 
         if (isJsonArray(property.anyOf)) {
             return {
-                ...cloneJson(property),
+                ...property,
                 anyOf: property.anyOf.map((alternative) =>
                     isJsonObject(alternative)
                         ? makeMergeablePropertyPartial(alternative)
@@ -60,7 +60,7 @@ function makeSettingsObjectPartial(schema: JsonObject): JsonObject {
             };
         }
 
-        return cloneJson(property);
+        return property;
     }
 
     const transformed: Record<string, JsonValue> = {};
@@ -71,14 +71,14 @@ function makeSettingsObjectPartial(schema: JsonObject): JsonObject {
             transformed[key] = Object.fromEntries(
                 Object.entries(value).map(([name, child]) => [
                     name,
-                    isJsonObject(child) ? makeMergeablePropertyPartial(child) : cloneJson(child),
+                    isJsonObject(child) ? makeMergeablePropertyPartial(child) : child,
                 ]),
             );
 
             continue;
         }
 
-        transformed[key] = cloneJson(value);
+        transformed[key] = value;
     }
 
     return transformed;
@@ -93,9 +93,7 @@ function stripTypeBoxMetadataFromSchema(schema: JsonObject): JsonObject {
             sanitized[key] = Object.fromEntries(
                 Object.entries(child).map(([name, nested]) => [
                     name,
-                    isJsonObject(nested)
-                        ? stripTypeBoxMetadataFromSchema(nested)
-                        : cloneJson(nested),
+                    isJsonObject(nested) ? stripTypeBoxMetadataFromSchema(nested) : nested,
                 ]),
             );
 
@@ -104,7 +102,7 @@ function stripTypeBoxMetadataFromSchema(schema: JsonObject): JsonObject {
 
         if (SCHEMA_ARRAY_KEYWORDS.has(key) && isJsonArray(child)) {
             sanitized[key] = child.map((nested) =>
-                isJsonObject(nested) ? stripTypeBoxMetadataFromSchema(nested) : cloneJson(nested),
+                isJsonObject(nested) ? stripTypeBoxMetadataFromSchema(nested) : nested,
             );
 
             continue;
@@ -115,13 +113,13 @@ function stripTypeBoxMetadataFromSchema(schema: JsonObject): JsonObject {
             continue;
         }
 
-        sanitized[key] = cloneJson(child);
+        sanitized[key] = child;
     }
 
     return sanitized;
 }
 
-function schemaRecord(schema: TSchema): JsonObject {
+export function createAuthoredSettingsSchema(schema: TSchema): JsonObject {
     const serialized = JSON.stringify(schema);
     if (serialized === undefined) {
         throw new TypeError("The TypeBox schema is not JSON serializable.");
@@ -162,12 +160,12 @@ function visitChildSchemas(
 }
 
 export function hasReservedSchemaProperty(schema: TSchema): boolean {
-    const root = schemaRecord(schema);
+    const root = createAuthoredSettingsSchema(schema);
     return isJsonObject(root.properties) && "$schema" in root.properties;
 }
 
 export function findUndocumentedSettings(schema: TSchema): readonly string[] {
-    const root = schemaRecord(schema);
+    const root = createAuthoredSettingsSchema(schema);
     if (!isJsonObject(root.properties)) return ["<root>"];
 
     const issues: string[] = [];
@@ -206,13 +204,13 @@ export function findNonStrictObjectSchemas(schema: TSchema): readonly string[] {
         visitChildSchemas(value, path, visit);
     }
 
-    visit(schemaRecord(schema), "#");
+    visit(createAuthoredSettingsSchema(schema), "#");
 
     return issues;
 }
 
 export function createSettingsFileSchema(input: SchemaDocumentInput): JsonObject {
-    const partial = makeSettingsObjectPartial(schemaRecord(input.schema));
+    const partial = makeSettingsObjectPartial(createAuthoredSettingsSchema(input.schema));
     if (!isJsonObject(partial.properties)) {
         throw new TypeError("The TypeBox settings schema must be an object with properties.");
     }
@@ -224,7 +222,7 @@ export function createSettingsFileSchema(input: SchemaDocumentInput): JsonObject
         description: "JSON Schema used by editors for this settings file.",
     };
     for (const [key, value] of Object.entries(partial.properties)) {
-        properties[key] = cloneJson(value);
+        properties[key] = value;
     }
 
     const schemaKeywords: Record<string, JsonValue> = {};
@@ -233,7 +231,7 @@ export function createSettingsFileSchema(input: SchemaDocumentInput): JsonObject
             continue;
         }
 
-        schemaKeywords[key] = cloneJson(value);
+        schemaKeywords[key] = value;
     }
 
     return {

@@ -37,7 +37,7 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-model-modes.jso
 | `modeShowThinkingLevelStatus` | boolean | `false` | Show thinking level alongside mode status. |
 | `shortcuts.forward` | string | — | Shortcut for cycling modes forward. |
 | `shortcuts.backward` | string | — | Shortcut for cycling modes backward. |
-| `modes` | Record<string, ModelMode> | `{}` | Named model-mode specifications keyed by mode ID. |
+| `modes` | Record<string, [ModelMode](#settings-type-ModelMode)> | `{}` | Named model-mode specifications keyed by mode ID. |
 
 ### Defaults
 
@@ -74,6 +74,21 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-model-modes.jso
   }
 }
 ```
+
+### Structural types
+
+<a id="settings-type-ModelMode"></a>
+
+#### ModelMode
+
+Additional fields are not allowed.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `provider` | string | No |  |
+| `modelId` | string | No |  |
+| `thinkingLevel` | `off` \| `minimal` \| `low` \| `medium` \| `high` \| `xhigh` \| `max` | No | Pi thinking level for this mode, clamped to the selected model's capabilities. |
+| `color` | string | No | Pi theme foreground color used for this mode. |
 <!-- pi-extension-settings:end -->
 
 ## License

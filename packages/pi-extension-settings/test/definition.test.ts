@@ -525,6 +525,41 @@ describe("generated schema documents", () => {
         });
     });
 
+    it("keeps replacement entries strict and owns nested document data", () => {
+        const entry = Type.Object(
+            { label: Type.String({ description: "Entry label." }) },
+            { additionalProperties: false },
+        );
+        const input = {
+            id: "pi-entries",
+            title: "Entries",
+            description: "Entry settings.",
+            schemaId: "urn:example:entries",
+            schema: Type.Object(
+                {
+                    entries: Type.Array(entry, { default: [{ label: "original" }] }),
+                    named: Type.Record(Type.String(), entry, { default: {} }),
+                },
+                { additionalProperties: false },
+            ),
+        };
+        const document = createSettingsFileSchema(input);
+        expect(Value.Check(document, { entries: [{}] })).toBe(false);
+        expect(Value.Check(document, { named: { sample: {} } })).toBe(false);
+        expect(Value.Check(document, { entries: [{ label: "valid" }] })).toBe(true);
+
+        if (!isJsonObject(document.properties)) throw new Error("missing properties");
+
+        const entries = document.properties.entries;
+        if (!isJsonObject(entries)) throw new Error("missing entries");
+
+        Object.assign(entries, { default: [] });
+        expect(Value.Create(input.schema).entries).toEqual([{ label: "original" }]);
+        expect(createSettingsFileSchema(input)).toMatchObject({
+            properties: { entries: { default: [{ label: "original" }] } },
+        });
+    });
+
     it("creates the exact scaffolded global document", () => {
         expect(createDefaultSettingsDocument(testDefinition())).toEqual({
             $schema: "./schemas/pi-example.schema.json",
