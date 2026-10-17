@@ -19,7 +19,7 @@ Preserve the current configuration owner; these instructions do not require a se
 On this machine, the canonical active install is the global/user package pointing at this local checkout:
 
 ```text
-../../Projects/pi-tweaks
+../../Projects/pi-extensions
 ```
 
 Do not leave project-local installs of this package in this repo. In particular, avoid release verification commands such as:

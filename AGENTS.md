@@ -12,7 +12,7 @@ Use explicit `.ts` suffixes for local imports. Let Oxfmt format code; Oxlint dis
 
 ## Live Pi and review
 
-The user's running Pi loads extensions directly from this checkout, including Glowup's built `dist/`. Until it loads from deployed live copies, make changes in a worktree under `$WORKTREE_DIR/pi-tweaks/<name>`, not here. Verify bug fixes with a recorded reproduction by running it before and after the fix; put features that need the user's judgment through the isolated review environment. The work plan, live copies, review environment, and extension lifecycle are in `~/Projects/config/pi/MONOREPO_PLAN.md`.
+The user's running Pi loads extensions directly from this checkout, including Glowup's built `dist/`. Until it loads from deployed live copies, make changes in a worktree under `$WORKTREE_DIR/pi-extensions/<name>`, not here. Verify bug fixes with a recorded reproduction by running it before and after the fix; put features that need the user's judgment through the isolated review environment. The work plan, live copies, review environment, and extension lifecycle are in `~/Projects/config/pi/MONOREPO_PLAN.md`.
 
 ## Code ownership
 

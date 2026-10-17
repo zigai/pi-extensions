@@ -4,10 +4,10 @@ Pi Typed Args is a TypeScript library for adding typed inputs to Pi slash comman
 
 ## Install
 
-Run `just setup` in a local `pi-tweaks` checkout, then add its library to the package that contains your Pi extension:
+Run `just setup` in a local `pi-extensions` checkout, then add its library to the package that contains your Pi extension:
 
 ```sh
-npm install /path/to/pi-tweaks/packages/pi-typed-args
+npm install /path/to/pi-extensions/packages/pi-typed-args
 ```
 
 Or add it manually to your extension package manifest:
@@ -15,7 +15,7 @@ Or add it manually to your extension package manifest:
 ```json
 {
   "dependencies": {
-    "pi-typed-args": "file:/path/to/pi-tweaks/packages/pi-typed-args"
+    "pi-typed-args": "file:/path/to/pi-extensions/packages/pi-typed-args"
   }
 }
 ```

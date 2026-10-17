@@ -1,4 +1,4 @@
-# Pi Tweaks
+# Pi Extensions
 
 A collection of small Pi extensions for improving interaction, display, and model selection.
 
