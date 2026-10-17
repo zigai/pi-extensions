@@ -1,6 +1,7 @@
 node_modules/
 dist/
 coverage/
+.cache/
 !AGENTS.md
 extensions/pi-autoname-session/**/.env
 extensions/pi-autoname-session/**/.DS_Store
