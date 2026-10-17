@@ -119,6 +119,7 @@ function spawnCrabbox(args, options = {}) {
   };
   if (process.platform === "win32" && /\.(?:cmd|bat)$/i.test(bin)) {
     const comspec = process.env.ComSpec || "cmd.exe";
+
     return spawn(
       comspec,
       ["/d", "/s", "/c", `"${[quoteCmd(bin), ...args.map(quoteCmd)].join(" ")}"`],

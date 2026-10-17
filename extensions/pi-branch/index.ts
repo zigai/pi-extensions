@@ -1738,6 +1738,7 @@ export default function (pi: ExtensionAPI): void {
         if (prompt === undefined) return;
 
         Value.Assert(Type.String(), prompt);
+
         if (prompt.length > 0) {
             pi.sendUserMessage(prompt, { expandPromptTemplates: true });
         }

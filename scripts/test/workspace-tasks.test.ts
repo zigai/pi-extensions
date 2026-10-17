@@ -69,6 +69,7 @@ test("makes built workspace executables available after a clean install", () => 
             pi: { extensions: [] },
         }),
     );
+
     writeFileSync(
         path.join(directory, "package.json"),
         JSON.stringify({
@@ -79,6 +80,7 @@ test("makes built workspace executables available after a clean install", () => 
             scripts: { "check:code": "fixture-command" },
         }),
     );
+
     writeFileSync(
         path.join(library, "package.json"),
         JSON.stringify({
@@ -96,6 +98,7 @@ test("makes built workspace executables available after a clean install", () => 
         path.join(library, "build.mjs"),
         `import { mkdirSync, writeFileSync } from "node:fs";\nmkdirSync("dist", { recursive: true });\nwriteFileSync("dist/cli.js", ${JSON.stringify(cli)});\n`,
     );
+
     writeFileSync(
         path.join(root, "package-lock.json"),
         JSON.stringify({
@@ -118,6 +121,7 @@ test("makes built workspace executables available after a clean install", () => 
             },
         }),
     );
+
     execFileSync("npm", ["ci", "--no-audit", "--no-fund"], { cwd: root });
 
     runWorkspaceTask(root, "build");
