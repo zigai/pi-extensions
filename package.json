@@ -51,7 +51,7 @@
     "test:package:built": "node scripts/package-check.mjs"
   },
   "dependencies": {
-    "@zigai/pi-extension-settings": "0.6.0"
+    "@zigai/pi-extension-settings": "0.6.1"
   },
   "devDependencies": {
     "@earendil-works/pi-agent-core": "1.0.0",

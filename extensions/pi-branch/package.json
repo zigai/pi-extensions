@@ -1,6 +1,6 @@
 {
   "name": "@zigai/pi-branch",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Pi package for branching the current session into parallel tmux or Ghostty panes.",
   "keywords": [
     "branch",
@@ -50,7 +50,7 @@
     "verify": "npm run check"
   },
   "dependencies": {
-    "pi-typed-args": "0.2.0"
+    "pi-typed-args": "0.2.1"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "1.0.0",

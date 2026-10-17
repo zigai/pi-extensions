@@ -1,6 +1,6 @@
 {
   "name": "@zigai/pi-keymap-tweaks",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Pi package for opinionated editor and message-submit key tweaks.",
   "keywords": [
     "keybindings",
@@ -39,7 +39,7 @@
   },
   "dependencies": {
     "@zigai/pi-extension-internals": "0.2.0",
-    "@zigai/pi-extension-settings": "0.6.0"
+    "@zigai/pi-extension-settings": "0.6.1"
   },
   "peerDependencies": {
     "@earendil-works/pi-agent-core": "^1.0.0",

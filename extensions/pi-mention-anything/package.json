@@ -1,6 +1,6 @@
 {
   "name": "@zigai/pi-mention-anything",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Define arbitrary mention sources and triggers for Pi.",
   "keywords": [
     "autocomplete",
@@ -37,7 +37,7 @@
   },
   "dependencies": {
     "@zigai/pi-extension-internals": "0.2.0",
-    "@zigai/pi-extension-settings": "0.6.0"
+    "@zigai/pi-extension-settings": "0.6.1"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "^1.0.0",

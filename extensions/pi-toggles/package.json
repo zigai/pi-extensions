@@ -1,6 +1,6 @@
 {
   "name": "@zigai/pi-toggles",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Central capability policy, profiles, conditions, and session overrides for Pi",
   "keywords": [
     "pi",
@@ -51,7 +51,7 @@
     "config:check": "pi-extension-settings check"
   },
   "dependencies": {
-    "@zigai/pi-extension-settings": "0.6.0",
+    "@zigai/pi-extension-settings": "0.6.1",
     "glob": "^13.0.6"
   },
   "devDependencies": {

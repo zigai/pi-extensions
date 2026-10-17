@@ -1,6 +1,6 @@
 {
   "name": "@zigai/pi-mention-skill",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "description": "Pi package that moves skill discovery from slash commands to $ mentions.",
   "keywords": [
     "mention",
@@ -35,8 +35,8 @@
     "access": "public"
   },
   "dependencies": {
-    "@zigai/pi-extension-settings": "0.6.0",
-    "@zigai/pi-mention-anything": "0.2.0"
+    "@zigai/pi-extension-settings": "0.6.1",
+    "@zigai/pi-mention-anything": "0.2.1"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "^1.0.0",

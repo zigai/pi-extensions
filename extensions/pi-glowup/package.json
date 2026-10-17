@@ -1,6 +1,6 @@
 {
   "name": "@zigai/pi-glowup",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "description": "Compact, high-signal rendering for Pi tool calls and results.",
   "keywords": [
     "glowup",
@@ -80,7 +80,7 @@
   },
   "dependencies": {
     "@pierre/diffs": "1.2.12",
-    "@zigai/pi-extension-settings": "0.6.0",
+    "@zigai/pi-extension-settings": "0.6.1",
     "ansi-styles": "^6.2.3",
     "shiki": "4.3.0",
     "unbash": "4.0.10"

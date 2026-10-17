@@ -1,6 +1,6 @@
 {
   "name": "@zigai/pi-tree",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Pi package that improves /tree with timestamps and preview behavior.",
   "keywords": [
     "pi",
@@ -36,7 +36,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@zigai/pi-extension-settings": "0.6.0"
+    "@zigai/pi-extension-settings": "0.6.1"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "^1.0.0",

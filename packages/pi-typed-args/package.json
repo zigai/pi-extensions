@@ -1,6 +1,6 @@
 {
   "name": "pi-typed-args",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Typed input definitions for Pi slash commands and Agent Skills — parsing, completions, help, and forms from a single definition.",
   "keywords": [
     "commands",

@@ -1,6 +1,6 @@
 {
   "name": "@zigai/pi-footer",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Pi package that replaces Pi's footer with a compact status line.",
   "keywords": [
     "footer",
@@ -37,7 +37,7 @@
   },
   "dependencies": {
     "@zigai/pi-extension-internals": "0.2.0",
-    "@zigai/pi-extension-settings": "0.6.0"
+    "@zigai/pi-extension-settings": "0.6.1"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "^1.0.0",
