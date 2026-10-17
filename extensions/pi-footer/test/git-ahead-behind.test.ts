@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { devNull, tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
 
@@ -13,14 +13,27 @@ async function waitForMicrotask(): Promise<void> {
 
 async function getGitOutput(cwd: string, args: readonly string[]): Promise<string> {
     return new Promise((resolve, reject) => {
-        execFile("git", args, { cwd, windowsHide: true }, (error, stdout) => {
-            if (error instanceof Error) {
-                reject(error);
-                return;
-            }
+        execFile(
+            "git",
+            args,
+            {
+                cwd,
+                windowsHide: true,
+                env: {
+                    ...process.env,
+                    GIT_CONFIG_GLOBAL: devNull,
+                    GIT_CONFIG_NOSYSTEM: "1",
+                },
+            },
+            (error, stdout) => {
+                if (error instanceof Error) {
+                    reject(error);
+                    return;
+                }
 
-            resolve(stdout);
-        });
+                resolve(stdout);
+            },
+        );
     });
 }
 
