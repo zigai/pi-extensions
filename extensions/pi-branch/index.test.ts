@@ -206,7 +206,7 @@ describe("branch worktrees", () => {
                 "commit",
                 "--quiet",
                 "-m",
-                "initial",
+                "chore: initial",
             ];
             execFileSync("git", ["-C", source, ...commitArgs]);
             execFileSync("git", ["-C", sibling, ...commitArgs]);
