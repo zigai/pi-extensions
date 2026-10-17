@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { SettingsManager, initTheme } from "@earendil-works/pi-coding-agent";
+import { stripTerminalSequences } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
 
 import { loadPiProjectSettings } from "../src/pi-project-settings.ts";
@@ -15,11 +16,12 @@ describe("Pi settings tab", () => {
             compaction: { enabled: true },
             theme: "dark",
         });
+        const projectSettings = SettingsManager.inMemory({ sessionShareDestination: "radius" });
         let cancelled = false;
         const notifications: string[] = [];
         const tab = new PiSettingsTab({
             globalSettings: settings,
-            projectSettings: SettingsManager.inMemory(),
+            projectSettings,
             projectSnapshot: {
                 _tag: "UnavailableProjectSettings",
                 path: "/project/.pi/settings.json",
@@ -55,14 +57,22 @@ describe("Pi settings tab", () => {
         expect(rendered).toContain("Auto-compact");
         expect(rendered).toContain("Auto-resize images");
         expect(rendered).toContain("Terminal progress");
-        expect(rendered.split("\n").find((line) => line.includes(">"))).toMatch(/\(1\/32\)$/);
-        expect(rendered.match(/\(1\/32\)/g)).toHaveLength(1);
+        expect(rendered.split("\n").find((line) => line.includes(">"))).toMatch(/\(1\/\d+\)$/);
+        expect(rendered.match(/\(1\/\d+\)/g)).toHaveLength(1);
         expect(tab.activeScope).toBe("global");
         expect(tab.selectScope("project")).toBe(false);
 
         tab.handleInput(" ");
         await tab.flush();
         expect(settings.getCompactionEnabled()).toBe(false);
+        tab.handleInput("share");
+        expect(stripTerminalSequences(tab.render(100).join("\n"))).toMatch(
+            /Session share destination +auto/,
+        );
+        tab.handleInput("\r");
+        await tab.flush();
+        expect(settings.getSessionShareDestination()).toBe("gist");
+        expect(projectSettings.getSessionShareDestination()).toBe("radius");
         expect(notifications).toEqual([]);
 
         tab.handleInput("\u001b");
@@ -73,9 +83,14 @@ describe("Pi settings tab", () => {
         initTheme("dark", false);
         const cwd = await mkdtemp(join(tmpdir(), "pi-settings-ui-tab-"));
         const projectSnapshot = await loadPiProjectSettings(cwd, true);
+        const globalSettings = SettingsManager.inMemory({
+            compaction: { enabled: true },
+            sessionShareDestination: "radius",
+        });
+        const projectSettings = SettingsManager.create(cwd, join(cwd, "agent"));
         const tab = new PiSettingsTab({
-            globalSettings: SettingsManager.inMemory({ compaction: { enabled: true } }),
-            projectSettings: SettingsManager.inMemory({ compaction: { enabled: true } }),
+            globalSettings,
+            projectSettings,
             projectSnapshot,
             pi: {
                 getThinkingLevel: () => "high",
@@ -105,9 +120,20 @@ describe("Pi settings tab", () => {
         expect(tab.render(100).join("\n")).toContain("Mermaid diagrams");
         tab.handleInput("\r");
         await tab.flush();
+        tab.handleInput("\u0015");
+        tab.handleInput("share");
+        expect(stripTerminalSequences(tab.render(100).join("\n"))).toMatch(
+            /Session share destination +auto/,
+        );
+        tab.handleInput("\r");
+        await tab.flush();
+        expect(projectSettings.getSessionShareDestination()).toBe("gist");
+        expect(globalSettings.getSessionShareDestination()).toBe("radius");
+        expect(globalSettings.getCompactionEnabled()).toBe(true);
         expect(JSON.parse(await readFile(join(cwd, ".pi", "settings.json"), "utf8"))).toEqual({
             compaction: { enabled: false },
             markdown: { mermaid: "off" },
+            sessionShareDestination: "gist",
         });
     });
 

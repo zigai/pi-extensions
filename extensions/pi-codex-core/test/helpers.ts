@@ -303,6 +303,7 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
             const result = await beforeAgentStart(
                 {
                     type: "before_agent_start",
+                    messageType: "user",
                     prompt: "test",
                     systemPrompt,
                     systemPromptOptions: normalizeBuildSystemPromptOptions(options),
@@ -419,6 +420,8 @@ type TestRenderContext<TState extends object, TArgs> = {
     expanded: boolean;
     showImages: boolean;
     isError: boolean;
+    durationMs: number | undefined;
+    outputPad: number;
 };
 
 export function renderComponent(component: { render(width: number): string[] }): string {
@@ -453,6 +456,8 @@ export function makeRenderContext<TArgs, TState extends object>(
         expanded: options.expanded ?? false,
         showImages: options.showImages ?? true,
         isError: false,
+        durationMs: undefined,
+        outputPad: 1,
     };
 }
 

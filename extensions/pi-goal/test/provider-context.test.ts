@@ -9,6 +9,7 @@ import {
 import { userContentFromUnknown } from "../src/queued-goal-messages.ts";
 import {
   assistantMessage,
+  beforeAgentStartEvent,
   createRuntimeHarness,
   emitProviderContext,
   emitQueuedTurnThroughContext,
@@ -243,12 +244,14 @@ test("latest active continuation remains runnable after provider-context dedupe"
   const latestContent = String(providerContextMessageAt(contextResult, 1).content);
   assert.equal(continuationGoalIdFromPrompt(latestContent), goal.goalId);
   harness.sentMessages.length = 0;
-  await harness.emit("before_agent_start", {
-    type: "before_agent_start",
-    prompt: latestContent,
-    systemPrompt: "",
-    systemPromptOptions: {},
-  });
+  await harness.emit(
+    "before_agent_start",
+    beforeAgentStartEvent({
+      messageType: "user",
+      prompt: latestContent,
+      systemPrompt: "",
+    }),
+  );
   await harness.emit("agent_end", {
     type: "agent_end",
     messages: [assistantMessage("stop", { input: 1, output: 1 })],

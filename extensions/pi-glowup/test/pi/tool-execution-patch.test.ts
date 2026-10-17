@@ -95,6 +95,8 @@ const renderContext: FakeRenderContext = {
     expanded: false,
     showImages: true,
     isError: false,
+    durationMs: undefined,
+    outputPad: 1,
 };
 
 function createPrototype(): FakeToolExecutionPrototype {
@@ -181,8 +183,8 @@ describe("tool execution patches", () => {
         expectTypeOf<PiRendererDefinition["renderShell"]>().toEqualTypeOf<
             "default" | "self" | undefined
         >();
-        const renderCall = (args: { query: string }): FakeComponent => ({
-            render: () => [args.query],
+        const renderCall: NonNullable<PiRendererDefinition["renderCall"]> = (args) => ({
+            render: () => [Value.Parse(Type.Object({ query: Type.String() }), args).query],
             invalidate: noop,
         });
 

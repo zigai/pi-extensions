@@ -3,6 +3,7 @@ import { test, vi } from "vitest";
 
 import {
   assistantMessage,
+  beforeAgentStartEvent,
   createRuntimeHarness,
   flushContinuationScheduler,
   sessionCompactEvent,
@@ -41,12 +42,14 @@ test("post-compaction goal continuation waits for the host pending queue", async
     assert.ok(initialContinuation);
     harness.sentMessages.length = 0;
 
-    await harness.emit("before_agent_start", {
-      type: "before_agent_start",
-      prompt: String(initialContinuation.message.content),
-      systemPrompt: "",
-      systemPromptOptions: {},
-    });
+    await harness.emit(
+      "before_agent_start",
+      beforeAgentStartEvent({
+        messageType: "custom",
+        message: { ...initialContinuation.message, role: "custom", timestamp: 1 },
+        systemPrompt: "",
+      }),
+    );
     await harness.emit("session_compact", sessionCompactEvent({ reason: "manual" }));
 
     vi.advanceTimersByTime(1);

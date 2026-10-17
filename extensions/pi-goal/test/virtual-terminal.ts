@@ -133,6 +133,8 @@ export class VirtualTerminal implements Terminal {
     void active;
   }
 
+  setProgramStatus(): void {}
+
   resize(columns: number, rows: number): void {
     this.terminal.resize(columns, rows);
     this.resizeHandler?.();

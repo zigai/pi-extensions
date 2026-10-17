@@ -48,6 +48,8 @@ class FakeTerminal implements Terminal {
     setTitle(): void {}
 
     setProgress(): void {}
+
+    setProgramStatus(): void {}
 }
 
 const identityStyle = (text: string): string => text;

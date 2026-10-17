@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test, vi } from "vitest";
 
 import {
+  beforeAgentStartEvent,
   createRuntimeHarness,
   flushContinuationScheduler,
   sessionCompactEvent,
@@ -14,12 +15,14 @@ async function startQueuedContinuation(harness: RuntimeHarness): Promise<void> {
   assert.ok(queued);
   harness.sentMessages.length = 0;
 
-  await harness.emit("before_agent_start", {
-    type: "before_agent_start",
-    prompt: String(queued.message.content),
-    systemPrompt: "",
-    systemPromptOptions: {},
-  });
+  await harness.emit(
+    "before_agent_start",
+    beforeAgentStartEvent({
+      messageType: "custom",
+      message: { ...queued.message, role: "custom", timestamp: 1 },
+      systemPrompt: "",
+    }),
+  );
 }
 
 test("willRetry session compaction falls back after grace when host retry never starts", async () => {
@@ -69,12 +72,14 @@ test("willRetry session compaction fallback survives preflight without an agent 
     await startQueuedContinuation(harness);
 
     await harness.emit("session_compact", sessionCompactEvent({ willRetry: true }));
-    await harness.emit("before_agent_start", {
-      type: "before_agent_start",
-      prompt: "preflight that never starts an agent run",
-      systemPrompt: "",
-      systemPromptOptions: {},
-    });
+    await harness.emit(
+      "before_agent_start",
+      beforeAgentStartEvent({
+        messageType: "user",
+        prompt: "preflight that never starts an agent run",
+        systemPrompt: "",
+      }),
+    );
 
     flushContinuationScheduler();
     assert.equal(harness.sentMessages.length, 1);

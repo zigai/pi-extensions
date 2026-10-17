@@ -722,6 +722,10 @@ export default function extension(pi: ExtensionAPI): void {
     };
 
     pi.on("before_agent_start", (event, ctx) => {
+        if (event.messageType !== "user") {
+            return;
+        }
+
         const imageSummary =
             event.images === undefined || event.images.length === 0
                 ? ""

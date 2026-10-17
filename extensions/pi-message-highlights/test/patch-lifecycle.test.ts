@@ -203,6 +203,8 @@ class FakeTerminal implements Terminal {
     setTitle(): void {}
 
     setProgress(): void {}
+
+    setProgramStatus(): void {}
 }
 
 const ESC = String.fromCharCode(0x1b);

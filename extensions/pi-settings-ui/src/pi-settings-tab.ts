@@ -213,6 +213,7 @@ export class PiSettingsTab implements PiSettingsPane {
             steeringMode: settings.getSteeringMode(),
             followUpMode: settings.getFollowUpMode(),
             transport: settings.getTransport(),
+            sessionShareDestination: settings.getSessionShareDestination(),
             httpIdleTimeoutMs: settings.getHttpIdleTimeoutMs(),
             cacheWarmingMode: this.options.globalSettings.getCacheWarmingMode(),
             thinkingLevel: settings.getDefaultThinkingLevel() ?? "medium",
@@ -285,6 +286,10 @@ export class PiSettingsTab implements PiSettingsPane {
                 this.persist(["followUpMode"], mode, () => settings.setFollowUpMode(mode)),
             onTransportChange: (transport) =>
                 this.persist(["transport"], transport, () => settings.setTransport(transport)),
+            onSessionShareDestinationChange: (destination) =>
+                this.persist(["sessionShareDestination"], destination, () =>
+                    settings.setSessionShareDestination(destination),
+                ),
             onHttpIdleTimeoutMsChange: (timeoutMs) =>
                 this.persist(["httpIdleTimeoutMs"], timeoutMs, () =>
                     settings.setHttpIdleTimeoutMs(timeoutMs),

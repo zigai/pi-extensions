@@ -96,7 +96,13 @@ export function createInputContextEventHandlers(
     }) satisfies ExtensionHandler<ContextEvent, ContextEventResult | undefined>,
 
     onBeforeAgentStart: (async (event, ctx) => {
-      const continuationGoalId = continuation.continuationGoalIdFromRuntimePrompt(event.prompt);
+      let continuationGoalId: string | null;
+      if (event.messageType === "user") {
+        continuationGoalId = continuation.continuationGoalIdFromRuntimePrompt(event.prompt);
+      } else {
+        continuationGoalId = queuedGoalWorkMessageIdForRuntime(event.message);
+      }
+
       if (continuationGoalId !== null) {
         continuation.clearContinuationStateFor(continuationGoalId);
 

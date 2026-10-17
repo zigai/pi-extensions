@@ -150,6 +150,8 @@ export class VirtualTerminal implements PiTerminal {
 
     setProgress(): void {}
 
+    setProgramStatus(): void {}
+
     dispose(): void {
         this.terminal.dispose();
     }

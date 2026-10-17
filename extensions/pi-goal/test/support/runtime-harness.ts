@@ -4,6 +4,9 @@ import { Type } from "typebox";
 import { Value } from "typebox/value";
 
 import type {
+  BeforeAgentStartEvent,
+  BeforeAgentStartUserEvent,
+  BeforeAgentStartCustomEvent,
   BeforeAgentStartEventResult,
   ExtensionAPI,
   ExtensionCommandContext,
@@ -133,6 +136,31 @@ export function sessionCompactEvent(options: CompactionEventOptions = {}) {
     fromExtension: false,
     reason: options.reason ?? "manual",
     willRetry: options.willRetry ?? false,
+  };
+}
+
+export function beforeAgentStartEvent(
+  trigger: (
+    | Pick<BeforeAgentStartUserEvent, "messageType" | "prompt" | "images">
+    | Pick<BeforeAgentStartCustomEvent, "messageType" | "message">
+  ) & { systemPrompt?: string },
+): BeforeAgentStartEvent {
+  return {
+    ...trigger,
+    type: "before_agent_start",
+    systemPrompt: trigger.systemPrompt ?? "",
+    systemPromptOptions: {
+      cwd: "/tmp",
+      selectedTools: [],
+      hiddenTools: [],
+      toolSnippets: {},
+      toolGuidelines: {},
+      promptGuidelines: [],
+      appendSystemPrompt: "",
+      sections: {},
+      contextFiles: [],
+      skills: [],
+    },
   };
 }
 
@@ -274,6 +302,9 @@ export function createRuntimeHarness(
       unsupportedHarnessMethod("pi.unregisterVirtualModel");
     },
     registerShortcut() {},
+    registerToolRenderer() {
+      unsupportedHarnessMethod("pi.registerToolRenderer");
+    },
     registerTool(tool) {
       availableToolNames.add(tool.name);
       activeToolNames.add(tool.name);

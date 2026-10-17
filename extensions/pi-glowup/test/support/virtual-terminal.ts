@@ -138,6 +138,8 @@ export class VirtualTerminal implements Terminal {
 
     setProgress(_active: boolean): void {}
 
+    setProgramStatus(): void {}
+
     sendInput(data: string): void {
         this.inputHandler?.(data);
     }

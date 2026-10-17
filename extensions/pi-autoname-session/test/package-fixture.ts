@@ -127,7 +127,7 @@ try {
         expandPromptTemplates: false,
     });
     await first.waitForIdle();
-    await first.extensionRunner.emit({ type: "agent_settled" });
+    await first.extensionRunner.emit({ type: "agent_settled", aborted: false });
 
     for (let i = 0; i < 200 && manager.getSessionName() === undefined; i++) {
         await new Promise((resolve) => setTimeout(resolve, 50));
@@ -150,7 +150,7 @@ try {
         expandPromptTemplates: false,
     });
     await first.waitForIdle();
-    await first.extensionRunner.emit({ type: "agent_settled" });
+    await first.extensionRunner.emit({ type: "agent_settled", aborted: false });
 
     for (let i = 0; i < 50 && manager.getSessionName() === undefined; i++) {
         await new Promise((resolve) => setTimeout(resolve, 50));

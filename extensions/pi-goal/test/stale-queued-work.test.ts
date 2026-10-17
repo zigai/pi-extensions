@@ -3,6 +3,7 @@ import { test } from "vitest";
 
 import {
   assistantMessage,
+  beforeAgentStartEvent,
   createRuntimeHarness,
   emitProviderContext,
   emitQueuedTurnThroughContext,
@@ -51,12 +52,14 @@ for (const source of ["interactive", "rpc"] as const) {
     });
     assert.equal(inputResults.at(-1), undefined);
 
-    const beforeAgentStartResults = await harness.emit("before_agent_start", {
-      type: "before_agent_start",
-      prompt,
-      systemPrompt: "base prompt",
-      systemPromptOptions: {},
-    });
+    const beforeAgentStartResults = await harness.emit(
+      "before_agent_start",
+      beforeAgentStartEvent({
+        messageType: "user",
+        prompt,
+        systemPrompt: "base prompt",
+      }),
+    );
     assert.equal(beforeAgentStartResults[0], undefined);
     const userMessage = goalUserContextMessage(prompt, 1);
     const contextResults = await emitQueuedTurnThroughContext(harness, [userMessage], 0);
@@ -88,12 +91,14 @@ test("stale queued continuation aborts if the goal became complete before launch
   const prompt = sentMessageText(queued);
 
   await harness.runTool("update_goal", { status: "complete" });
-  const results = await harness.emit("before_agent_start", {
-    type: "before_agent_start",
-    prompt,
-    systemPrompt: "base prompt",
-    systemPromptOptions: {},
-  });
+  const results = await harness.emit(
+    "before_agent_start",
+    beforeAgentStartEvent({
+      messageType: "user",
+      prompt,
+      systemPrompt: "base prompt",
+    }),
+  );
 
   assert.equal(results[0], undefined);
   assert.equal(harness.abortCount, 0);
@@ -386,12 +391,14 @@ test("goal follow-up guard resets when the queued prompt-based agent turn starts
   const prompt = sentMessageText(queued);
   harness.sentMessages.length = 0;
 
-  await harness.emit("before_agent_start", {
-    type: "before_agent_start",
-    prompt,
-    systemPrompt: "",
-    systemPromptOptions: {},
-  });
+  await harness.emit(
+    "before_agent_start",
+    beforeAgentStartEvent({
+      messageType: "user",
+      prompt,
+      systemPrompt: "",
+    }),
+  );
   await harness.emit("agent_end", {
     type: "agent_end",
     messages: [assistantMessage("stop", { input: 30, output: 12 })],

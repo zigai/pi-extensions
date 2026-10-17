@@ -505,8 +505,7 @@ describe("Pi Toggles extension runtime", () => {
             try {
                 const skills = loader.getSkills().skills;
                 const before = await created.session.extensionRunner.emitBeforeAgentStart(
-                    "Review this",
-                    undefined,
+                    { messageType: "user", prompt: "Review this" },
                     { cwd, skills },
                 );
                 expect(before.systemPromptOptions.forceSystemPrompt).not.toContain(
@@ -529,8 +528,7 @@ describe("Pi Toggles extension runtime", () => {
                     ),
                 ).toEqual({ action: "continue" });
                 const userOnly = await created.session.extensionRunner.emitBeforeAgentStart(
-                    "Review this",
-                    undefined,
+                    { messageType: "user", prompt: "Review this" },
                     { cwd, skills },
                 );
                 expect(userOnly.systemPromptOptions.forceSystemPrompt).not.toContain(

@@ -101,12 +101,14 @@ describe("OpenAI sidecar metadata", () => {
         const systemPrompt = `prefix${formatSkillsForPrompt([skill])}suffix`;
         const result = await handlers.beforeAgentStart({
             type: "before_agent_start",
+            messageType: "user",
             prompt: "hello",
             systemPrompt,
             systemPromptOptions: {
                 cwd: process.cwd(),
                 skills: [skill],
                 selectedTools: [],
+                hiddenTools: [],
                 toolSnippets: {},
                 toolGuidelines: {},
                 promptGuidelines: [],
@@ -140,12 +142,14 @@ describe("OpenAI sidecar metadata", () => {
         const systemPrompt = `prefix${formatSkillsForPrompt([skill])}suffix`;
         const result = await handlers.beforeAgentStart({
             type: "before_agent_start",
+            messageType: "user",
             prompt: "hello",
             systemPrompt,
             systemPromptOptions: {
                 cwd: process.cwd(),
                 skills: [skill],
                 selectedTools: [],
+                hiddenTools: [],
                 toolSnippets: {},
                 toolGuidelines: {},
                 promptGuidelines: [],

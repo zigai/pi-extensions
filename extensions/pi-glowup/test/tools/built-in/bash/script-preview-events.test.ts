@@ -75,6 +75,8 @@ describe("script preview events", () => {
             expanded: false,
             showImages: false,
             isError: false,
+            durationMs: undefined,
+            outputPad: 1,
             invalidate: () => {},
         };
         const render = (expanded = false) =>
@@ -159,6 +161,8 @@ describe("script preview events", () => {
             expanded: true,
             showImages: false,
             isError: false,
+            durationMs: undefined,
+            outputPad: 1,
             invalidate: () => finishInvalidation(),
         };
         const render = (width: number) =>

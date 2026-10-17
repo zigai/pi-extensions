@@ -265,12 +265,44 @@ class Harness {
         return this.pi.emit(
             {
                 type: "before_agent_start",
+                messageType: "user",
                 prompt,
                 systemPrompt: "",
                 systemPromptOptions: {
                     cwd: this.ctx.cwd,
                     contextFiles: [],
                     selectedTools: [],
+                    hiddenTools: [],
+                    toolSnippets: {},
+                    toolGuidelines: {},
+                    promptGuidelines: [],
+                    appendSystemPrompt: "",
+                    sections: {},
+                    skills: [],
+                },
+            },
+            this.ctx,
+        );
+    }
+
+    async beforeCustomAgentStart(content: string): Promise<void> {
+        return this.pi.emit(
+            {
+                type: "before_agent_start",
+                messageType: "custom",
+                message: {
+                    role: "custom",
+                    customType: "test-extension",
+                    content,
+                    display: false,
+                    timestamp: 1,
+                },
+                systemPrompt: "",
+                systemPromptOptions: {
+                    cwd: this.ctx.cwd,
+                    contextFiles: [],
+                    selectedTools: [],
+                    hiddenTools: [],
                     toolSnippets: {},
                     toolGuidelines: {},
                     promptGuidelines: [],
@@ -284,7 +316,7 @@ class Harness {
     }
 
     async settled(): Promise<void> {
-        return this.pi.emit({ type: "agent_settled" }, this.ctx);
+        return this.pi.emit({ type: "agent_settled", aborted: false }, this.ctx);
     }
 
     rename(name: string): void {
@@ -523,6 +555,39 @@ describe("extension orchestration", () => {
             expect(harness.pi.sessionName).toBe("Valid settings name");
             expect(readFileSync(settingsPath(harness))).toEqual(original);
             expect(readFileSync(schemaDirectory, "utf8")).toBe("do not replace\n");
+        } finally {
+            await harness.shutdown();
+            harness.dispose();
+        }
+    });
+
+    it("ignores custom-triggered runs and names from the next user prompt", async () => {
+        const harness = Harness.create();
+        try {
+            writeSettings(harness, createSettings());
+            await harness.startSession();
+            let capturedPrompt = "";
+            harness.faux.setResponses([
+                (context) => {
+                    capturedPrompt = JSON.stringify(context.messages);
+                    return fauxAssistantMessage("Fix parser tests");
+                },
+            ]);
+
+            await harness.beforeCustomAgentStart("PRIVATE-CUSTOM-CONTENT");
+            await setImmediate();
+            expect(harness.registry.authCalls).toBe(0);
+            expect(harness.faux.state.callCount).toBe(0);
+            expect(harness.pi.sessionNameCalls).toEqual([]);
+            expect(stateEntries(harness)).toEqual([]);
+            expect(harness.pi.execCalls).toEqual([]);
+
+            await harness.beforeAgentStart("Fix the parser");
+            await expect.poll(() => harness.pi.sessionName).toBe("Fix parser tests");
+            expect(capturedPrompt).toContain("Fix the parser");
+            expect(capturedPrompt).not.toContain("PRIVATE-CUSTOM-CONTENT");
+            expect(capturedPrompt).not.toContain("undefined");
+            expect(harness.pi.notified).toEqual([]);
         } finally {
             await harness.shutdown();
             harness.dispose();

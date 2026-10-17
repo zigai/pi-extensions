@@ -1,5 +1,10 @@
 import type { KeybindingsManager } from "@earendil-works/pi-coding-agent";
-import { TuiAltScreen, TuiMainScreen as TUI, type Terminal } from "@earendil-works/pi-tui";
+import {
+    stripTerminalSequences,
+    TuiAltScreen,
+    TuiMainScreen as TUI,
+    type Terminal,
+} from "@earendil-works/pi-tui";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -36,6 +41,7 @@ function fakeTerminal(columns = 100, rows = 30): Terminal {
         clearScreen() {},
         setTitle() {},
         setProgress() {},
+        setProgramStatus() {},
     };
 }
 
@@ -639,9 +645,7 @@ describe("settings TUI", () => {
             component.handleInput("\r");
             component.handleInput("\t");
             const completedPath = component.render(100).join("\n");
-            expect(
-                completedPath.replaceAll("\u001b[7m", "").replaceAll("\u001b[27m", ""),
-            ).toContain("alpha/");
+            expect(stripTerminalSequences(completedPath)).toContain("alpha/");
 
             expect(completedPath).toContain("Path completed.");
             component.handleInput("\u001b");

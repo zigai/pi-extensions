@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 import { CustomEditor, type ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import {
+    CURSOR_MARKER,
+    renderFakeCursor,
+    stripTerminalSequences,
     visibleWidth,
     type AutocompleteProvider,
     type EditorComponent,
@@ -227,11 +230,12 @@ describe("inline ghost text editor", () => {
 
     it("truncates inserted ghost text and leaves incompatible editors untouched", () => {
         const rendered = renderGhostTextOnEditorLines(
-            ["/deploy\u001b_pi:c\u0007\x1b[7m \x1b[0m       "],
+            [`/deploy${CURSOR_MARKER}${renderFakeCursor(" ")}       `],
             12,
             "very long ghost text",
             identity,
         );
+        assert.equal(stripTerminalSequences(rendered.join("\n")), "/deploy very");
         assert.equal(
             rendered.every((line) => visibleWidth(line) <= 12),
             true,
@@ -267,7 +271,7 @@ describe("inline ghost text editor", () => {
             getCursor(): { line: number; col: number };
         } = {
             focused: true,
-            render: () => [`/deploy\u001b_pi:c\u0007\x1b[7m \x1b[0m`],
+            render: () => [`/deploy${CURSOR_MARKER}${renderFakeCursor(" ")}`],
             invalidate() {
                 records.push("invalidate");
             },

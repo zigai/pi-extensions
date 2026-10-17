@@ -6,6 +6,7 @@ import { isGoalCustomEntry, setEntry } from "../src/state.ts";
 import { CUSTOM_ENTRY_TYPE } from "../src/types.ts";
 import {
   assistantMessage,
+  beforeAgentStartEvent,
   createRuntimeHarness,
   emitPersistentAssistantError,
   fireProviderLimitAutoResume,
@@ -52,12 +53,14 @@ test("a new user-driven agent start leaves a paused goal paused", async () => {
     toolResults: [],
   });
 
-  await harness.emit("before_agent_start", {
-    type: "before_agent_start",
-    prompt: "continue",
-    systemPrompt: "",
-    systemPromptOptions: {},
-  });
+  await harness.emit(
+    "before_agent_start",
+    beforeAgentStartEvent({
+      messageType: "user",
+      prompt: "continue",
+      systemPrompt: "",
+    }),
+  );
 
   assert.equal(harness.snapshot().goal?.status, "paused");
   assert.equal(harness.snapshot().goal?.usage.tokensUsed, 10);
@@ -457,6 +460,76 @@ test("goal follow-up guard resets when custom-message continuations start", asyn
   });
 });
 
+test("custom-triggered goal runs consume the queued continuation without a user prompt", async () => {
+  const harness = createRuntimeHarness();
+  await harness.runCommand("ship it");
+  const queued = harness.sentMessages[0];
+  assert.ok(queued);
+  harness.sentMessages.length = 0;
+
+  await harness.emit(
+    "before_agent_start",
+    beforeAgentStartEvent({
+      messageType: "custom",
+      message: { ...queued.message, role: "custom", timestamp: 1 },
+    }),
+  );
+  await harness.emit("agent_end", {
+    type: "agent_end",
+    messages: [assistantMessage("stop", { input: 1, output: 1 })],
+  });
+
+  assert.equal(harness.snapshot().goal?.status, "active");
+  assert.equal(harness.abortCount, 0);
+  assert.equal(harness.sentMessages.length, 1);
+  assert.deepEqual(harness.sentMessages[0]?.message.details, {
+    kind: "continuation",
+    goalId: harness.snapshot().goal?.goalId,
+  });
+});
+
+for (const { customType, expectedContinuations } of [
+  { customType: CUSTOM_ENTRY_TYPE, expectedContinuations: 0 },
+  { customType: "another-extension", expectedContinuations: 1 },
+]) {
+  test(`custom preflight preserves replacement continuation only for stale goal work (${customType})`, async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const harness = createRuntimeHarness();
+      await harness.runCommand("old goal");
+      const staleQueued = harness.sentMessages[0];
+      assert.ok(staleQueued);
+      await harness.runCommand("new goal");
+      const replacement = harness.snapshot().goal;
+      harness.sentMessages.length = 0;
+
+      await harness.emit(
+        "before_agent_start",
+        beforeAgentStartEvent({
+          messageType: "custom",
+          message: {
+            ...staleQueued.message,
+            role: "custom",
+            customType,
+            timestamp: 1,
+          },
+        }),
+      );
+      await harness.emit("session_compact", sessionCompactEvent());
+      vi.advanceTimersByTime(1);
+
+      // A stale goal preflight must not consume the replacement's queued work.
+      // Other extensions' content is not a goal prompt, even with the same marker/details.
+      assert.equal(harness.sentMessages.length, expectedContinuations);
+      assert.equal(harness.snapshot().goal?.goalId, replacement?.goalId);
+      assert.equal(harness.snapshot().goal?.status, "active");
+      assert.equal(harness.abortCount, 0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+}
+
 test("auto-queued continuations use the compact prompt", async () => {
   const harness = createRuntimeHarness();
   await harness.runCommand("ship it");
@@ -465,12 +538,14 @@ test("auto-queued continuations use the compact prompt", async () => {
   const startPrompt = String(commandStart.message.content);
   assert.match(startPrompt, /<untrusted_objective>/);
   harness.sentMessages.length = 0;
-  await harness.emit("before_agent_start", {
-    type: "before_agent_start",
-    prompt: startPrompt,
-    systemPrompt: "",
-    systemPromptOptions: {},
-  });
+  await harness.emit(
+    "before_agent_start",
+    beforeAgentStartEvent({
+      messageType: "custom",
+      message: { ...commandStart.message, role: "custom", timestamp: 1 },
+      systemPrompt: "",
+    }),
+  );
   await harness.emit("agent_end", {
     type: "agent_end",
     messages: [assistantMessage("stop", { input: 1, output: 1 })],
@@ -514,15 +589,16 @@ test("session compaction queues continuation for active goals after the compacti
     await harness.runCommand("ship it");
     const queued = harness.sentMessages[0];
     assert.ok(queued);
-    const content = String(queued.message.content);
     harness.sentMessages.length = 0;
 
-    await harness.emit("before_agent_start", {
-      type: "before_agent_start",
-      prompt: content,
-      systemPrompt: "",
-      systemPromptOptions: {},
-    });
+    await harness.emit(
+      "before_agent_start",
+      beforeAgentStartEvent({
+        messageType: "custom",
+        message: { ...queued.message, role: "custom", timestamp: 1 },
+        systemPrompt: "",
+      }),
+    );
     await harness.emit("session_compact", sessionCompactEvent());
 
     const goal = harness.snapshot().goal;
@@ -585,24 +661,27 @@ test("session compaction continuation is cancelled if a host retry starts before
     await harness.runCommand("ship it");
     const queued = harness.sentMessages[0];
     assert.ok(queued);
-    const content = String(queued.message.content);
     harness.sentMessages.length = 0;
 
-    await harness.emit("before_agent_start", {
-      type: "before_agent_start",
-      prompt: content,
-      systemPrompt: "",
-      systemPromptOptions: {},
-    });
+    await harness.emit(
+      "before_agent_start",
+      beforeAgentStartEvent({
+        messageType: "custom",
+        message: { ...queued.message, role: "custom", timestamp: 1 },
+        systemPrompt: "",
+      }),
+    );
     await harness.emit("session_compact", sessionCompactEvent());
     assert.equal(harness.sentMessages.length, 0);
 
-    await harness.emit("before_agent_start", {
-      type: "before_agent_start",
-      prompt: "host compact-and-retry prompt",
-      systemPrompt: "",
-      systemPromptOptions: {},
-    });
+    await harness.emit(
+      "before_agent_start",
+      beforeAgentStartEvent({
+        messageType: "user",
+        prompt: "host compact-and-retry prompt",
+        systemPrompt: "",
+      }),
+    );
     vi.advanceTimersByTime(1);
     assert.equal(harness.sentMessages.length, 0);
 
@@ -629,15 +708,16 @@ test("repeated session_compact events before the deferred check queue at most on
     await harness.runCommand("ship it");
     const queued = harness.sentMessages[0];
     assert.ok(queued);
-    const content = String(queued.message.content);
     harness.sentMessages.length = 0;
 
-    await harness.emit("before_agent_start", {
-      type: "before_agent_start",
-      prompt: content,
-      systemPrompt: "",
-      systemPromptOptions: {},
-    });
+    await harness.emit(
+      "before_agent_start",
+      beforeAgentStartEvent({
+        messageType: "custom",
+        message: { ...queued.message, role: "custom", timestamp: 1 },
+        systemPrompt: "",
+      }),
+    );
 
     for (let index = 0; index < 3; index += 1) {
       await harness.emit(
@@ -669,15 +749,16 @@ test("session shutdown cancels deferred session_compact continuations", async ()
     await harness.runCommand("ship it");
     const queued = harness.sentMessages[0];
     assert.ok(queued);
-    const content = String(queued.message.content);
     harness.sentMessages.length = 0;
 
-    await harness.emit("before_agent_start", {
-      type: "before_agent_start",
-      prompt: content,
-      systemPrompt: "",
-      systemPromptOptions: {},
-    });
+    await harness.emit(
+      "before_agent_start",
+      beforeAgentStartEvent({
+        messageType: "custom",
+        message: { ...queued.message, role: "custom", timestamp: 1 },
+        systemPrompt: "",
+      }),
+    );
     await harness.emit("session_compact", sessionCompactEvent());
     await harness.emit("session_shutdown", sessionShutdownEvent());
 

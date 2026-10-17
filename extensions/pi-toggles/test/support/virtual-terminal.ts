@@ -100,6 +100,8 @@ export class VirtualTerminal implements Terminal {
         void active;
     }
 
+    setProgramStatus(): void {}
+
     sendInput(data: string): void {
         this.inputHandler?.(data);
     }

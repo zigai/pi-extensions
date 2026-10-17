@@ -43,6 +43,8 @@ class QuietTerminal implements Terminal {
     setTitle(): void {}
 
     setProgress(): void {}
+
+    setProgramStatus(): void {}
 }
 
 const style = (text: string): string => text;

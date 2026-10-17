@@ -103,6 +103,8 @@ const renderContext = {
     expanded: true,
     showImages: true,
     isError: false,
+    durationMs: undefined,
+    outputPad: 1,
 };
 const bundledThemePath = join(process.cwd(), "themes", "darker-modern-theme.json");
 

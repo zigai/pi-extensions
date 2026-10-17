@@ -34,6 +34,8 @@ export class FakeTerminal implements Terminal {
     setTitle(): void {}
 
     setProgress(): void {}
+
+    setProgramStatus(): void {}
 }
 
 export class RenderCountingTui extends TuiMainScreen {

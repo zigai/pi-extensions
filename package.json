@@ -54,10 +54,10 @@
     "@zigai/pi-extension-settings": "0.6.1"
   },
   "devDependencies": {
-    "@earendil-works/pi-agent-core": "1.0.0",
-    "@earendil-works/pi-ai": "1.0.0",
-    "@earendil-works/pi-coding-agent": "1.0.0",
-    "@earendil-works/pi-tui": "1.0.0",
+    "@earendil-works/pi-agent-core": "1.3.0",
+    "@earendil-works/pi-ai": "1.3.0",
+    "@earendil-works/pi-coding-agent": "1.3.0",
+    "@earendil-works/pi-tui": "1.3.0",
     "@types/node": "^24.10.1",
     "@vitest/coverage-v8": "4.1.11",
     "oxfmt": "^0.71.0",
@@ -69,21 +69,20 @@
     "vitest": "^4.1.11"
   },
   "peerDependencies": {
-    "@earendil-works/pi-agent-core": "^1.0.0",
-    "@earendil-works/pi-ai": "^1.0.0",
-    "@earendil-works/pi-coding-agent": "^1.0.0",
-    "@earendil-works/pi-tui": "^1.0.0",
+    "@earendil-works/pi-agent-core": "^1.3.0",
+    "@earendil-works/pi-ai": "^1.3.0",
+    "@earendil-works/pi-coding-agent": "^1.3.0",
+    "@earendil-works/pi-tui": "^1.3.0",
     "typebox": "*"
   },
   "overrides": {
-    "@earendil-works/chord": "1.0.0",
-    "@earendil-works/pi-agent-core": "1.0.0",
-    "@earendil-works/pi-ai": "1.0.0",
-    "@earendil-works/pi-codemode": "1.0.0",
-    "@earendil-works/pi-coding-agent": "1.0.0",
-    "@earendil-works/pi-mcp": "1.0.0",
-    "@earendil-works/pi-telemetry": "1.0.0",
-    "@earendil-works/pi-tui": "1.0.0"
+    "@earendil-works/pi-agent-core": "1.3.0",
+    "@earendil-works/pi-ai": "1.3.0",
+    "@earendil-works/pi-codemode": "1.3.0",
+    "@earendil-works/pi-coding-agent": "1.3.0",
+    "@earendil-works/pi-mcp": "1.3.0",
+    "@earendil-works/pi-telemetry": "1.3.0",
+    "@earendil-works/pi-tui": "1.3.0"
   },
   "allowScripts": {
     "node-pty@1.1.0": true,

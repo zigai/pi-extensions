@@ -2,6 +2,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
     CURSOR_MARKER,
     isFocusable,
+    renderFakeCursor,
     truncateToWidth,
     type AutocompleteProvider,
     type EditorComponent,
@@ -17,7 +18,7 @@ import type {
 import { commandDisplayName } from "./editor-invocation.ts";
 
 const EXACT_INVOCATION_PATTERN = /^\/(\S+)(?:\s+(\S+))?\s?$/;
-const END_CURSOR = `${CURSOR_MARKER}\x1b[7m \x1b[0m`;
+const END_CURSOR = `${CURSOR_MARKER}${renderFakeCursor(" ")}`;
 
 type ResolvedGhostText = {
     readonly text: string;
