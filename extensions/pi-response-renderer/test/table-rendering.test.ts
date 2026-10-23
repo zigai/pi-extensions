@@ -8,6 +8,7 @@ import {
     type MarkdownTheme,
 } from "@earendil-works/pi-tui";
 import { stripVTControlCharacters } from "node:util";
+import { readFileSync } from "node:fs";
 import { renderCodexTable, registerTableRenderer, selectTableRenderer } from "../src/index.ts";
 import { installResponseRendering } from "../src/response-rendering.ts";
 import { markFencesHidden } from "../src/markdown-rendering.ts";
@@ -149,6 +150,65 @@ it.each([28, 32])("keeps short fields readable when a long column wraps at %i co
     expect(rows[0]).toContain("Size");
     expect(rows.some((row) => row.includes("alpha") && row.includes("42"))).toBe(true);
     expect(rows.every((row) => visibleWidth(row) <= width)).toBe(true);
+});
+
+it.each([
+    [100, 98, 39, 26],
+    [26, 39, 98, 100],
+    [1000, 100, 20, 2],
+])("balances constrained columns without starving any field (%j)", (...natural) => {
+    for (const width of [16, 17, 40, 80, 100, 173, 280]) {
+        const lines = renderCodexTable({
+            headers: natural.map(() => "H"),
+            rows: [natural.map((size) => "x".repeat(size))],
+            align: natural.map(() => null),
+            width,
+            header: identity,
+            rule: identity,
+        });
+        const widths = [...(lines[1] ?? "").matchAll(/─+/gu)].map((match) => match[0].length);
+        expect(widths).toHaveLength(natural.length);
+        expect(widths.reduce((sum, size) => sum + size, 0)).toBe(
+            Math.min(
+                width - 8,
+                natural.reduce((sum, size) => sum + size, 0),
+            ),
+        );
+        for (const [index, size] of widths.entries()) {
+            expect(size).toBeGreaterThanOrEqual(2);
+            expect(size).toBeLessThanOrEqual(natural[index] ?? 0);
+            if (size < (natural[index] ?? 0)) {
+                expect(Math.max(...widths) - size).toBeLessThanOrEqual(1);
+            }
+        }
+        expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+    }
+});
+
+it("keeps the screenshot's long prose columns readable through Markdown and resizing", async () => {
+    const handle = await installResponseRendering();
+    try {
+        selectTableRenderer("codex");
+        const source = readFileSync(
+            new URL("./fixtures/card-sources-table.md", import.meta.url),
+            "utf8",
+        );
+        const markdown = new Markdown(source, 0, 0, theme);
+        markFencesHidden(markdown);
+        for (const width of [173, 100, 180, 173]) {
+            const rendered = markdown.render(width);
+            const lines = rendered.map(stripVTControlCharacters);
+            const rule = lines.find((line) => line.includes("──")) ?? "";
+            const widths = [...rule.matchAll(/─+/gu)].map((match) => match[0].length);
+            expect(Math.min(...widths)).toBeGreaterThanOrEqual(23);
+            expect(lines.length).toBeLessThan(35);
+            expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+            if (width === 173) expect(widths).toEqual([39, 50, 50, 26]);
+            expect(rendered.join("\n")).toContain("\u001b[31mhsbg_data\u001b[39m");
+        }
+    } finally {
+        handle.dispose();
+    }
 });
 
 it("replaces actual table layout without replacing inline Markdown or adjacent prose", async () => {

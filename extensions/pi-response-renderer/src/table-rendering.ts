@@ -70,10 +70,13 @@ export const renderCodexTable: TableRenderer = (input) => {
     const widths = natural.map(() => 2);
     let remaining = available - columns * 2;
     while (remaining > 0) {
+        // Grow the narrowest unfinished column. Short fields stop at their natural
+        // width; long fields share the remaining space instead of starving one another.
         const column = widths.reduce((chosen, current, index) => {
-            const gap = (natural[index] ?? 0) - current;
-            const chosenGap = (natural[chosen] ?? 0) - (widths[chosen] ?? 0);
-            if (gap > 0 && (chosen < 0 || gap < chosenGap)) {
+            if (
+                current < (natural[index] ?? 0) &&
+                (chosen < 0 || current < (widths[chosen] ?? 0))
+            ) {
                 return index;
             }
 
