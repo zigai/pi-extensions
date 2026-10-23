@@ -861,6 +861,30 @@ function parseInlineScriptInvocation(displayCommand: string): ScriptInvocation |
         : buildScriptInvocationForInterpreter(direct.interpreter, inlineScript.code);
 }
 
+function inlineShellScriptCode(
+    words: readonly string[],
+    startIndex: number,
+): InlineScriptCode | undefined {
+    for (let index = startIndex; index < words.length; index += 1) {
+        const value = decodeShellWord(words[index] ?? "");
+        if (value === "-c" || value === "-lc") {
+            const codeWord = words[index + 1];
+            if (codeWord === undefined) return undefined;
+
+            return { code: decodeShellWord(codeWord), wordIndex: index + 1 };
+        }
+
+        if (value === "-o" || value === "-O" || value === "--rcfile" || value === "--init-file") {
+            index += 1;
+            continue;
+        }
+
+        if (value === "--" || !value.startsWith("-")) return undefined;
+    }
+
+    return undefined;
+}
+
 type EmbeddedInlineScript = {
     readonly start: number;
     readonly end: number;
@@ -882,16 +906,23 @@ export function embeddedInlineScripts(command: string): EmbeddedInlineScript[] {
             return;
         }
 
-        const inlineScript = inlineScriptCodeForInterpreter(
-            direct.interpreter,
-            words.map((word) => word.source),
-            direct.index + 1,
-        );
+        const sourceWords = words.map((word) => word.source);
+        let inlineScript: InlineScriptCode | undefined;
+        if (direct.interpreter.language === "bash") {
+            inlineScript = inlineShellScriptCode(sourceWords, direct.index + 1);
+        } else {
+            inlineScript = inlineScriptCodeForInterpreter(
+                direct.interpreter,
+                sourceWords,
+                direct.index + 1,
+            );
+        }
+
         const codeWord = inlineScript === undefined ? undefined : words[inlineScript.wordIndex];
         if (
-            codeWord?.source.startsWith("'") === true &&
-            codeWord.source.endsWith("'") &&
-            codeWord.source.length >= 2
+            codeWord !== undefined &&
+            isQuotedShellWord(codeWord.source) &&
+            (direct.interpreter.language === "bash" || codeWord.source.startsWith("'"))
         ) {
             scripts.push({
                 start: codeWord.start + 1,

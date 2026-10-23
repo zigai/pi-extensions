@@ -1,4 +1,5 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
+import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it } from "vitest";
 
 import { renderBashCommandCall } from "../../../../src/tools/built-in/bash/renderer.ts";
@@ -26,6 +27,132 @@ function render(command: string, options: { width: number; expanded?: boolean })
 }
 
 describe("bash command rendering", () => {
+    it.each([
+        "bash -c 'git status --short'",
+        'bash -lc "git status --short"',
+        "/bin/bash -lc 'git status --short'",
+        "env MODE=demo bash -c 'git status --short'",
+        "pwd && bash -c 'git status --short' && echo done",
+        "bash -o pipefail -lc 'git status --short'",
+        "bash -c 'bash -lc \"git status --short\"'",
+    ])("highlights quoted nested Bash as code: %s", (command) => {
+        const coloredTheme: GlowupRenderTheme = {
+            ...theme,
+            fg(token, text) {
+                return `<${token}>${text}</${token}>`;
+            },
+        };
+        const lines = renderBashCommandCall(coloredTheme, command, {
+            state: "success",
+            expanded: true,
+            maxCodePreviewLines: 8,
+            showPrologueOmission: false,
+            headerLayout: "inline",
+            shellLayout: "preserve",
+            shellOperatorPosition: "trailing",
+        }).render(2000);
+        const rendered = lines.join("\n");
+
+        expect(rendered).toContain("<syntaxFunction>git</syntaxFunction>");
+        expect(rendered).toContain("<syntaxFunction>status</syntaxFunction>");
+        expect(rendered).toContain("<syntaxKeyword>--short</syntaxKeyword>");
+        expect(rendered.replace(/<\/?[A-Za-z]+>/gu, "")).toBe(`• Bash ${command}`);
+    });
+
+    it.each([
+        String.raw`bash -c "echo \"a # b\"; git status --short"`,
+        String.raw`bash -c "bash -lc \"git status --short\""`,
+        String.raw`bash -c "printf '%s' '\$HOME'; git status --short"`,
+        String.raw`bash -c "printf '%s' '\\'; git status --short"`,
+    ])("highlights escaped nested code without changing its source: %s", (command) => {
+        const colors = new Map([
+            ["syntaxFunction", "\u001b[33m"],
+            ["syntaxKeyword", "\u001b[34m"],
+            ["syntaxString", "\u001b[32m"],
+        ]);
+
+        const coloredTheme: GlowupRenderTheme = {
+            ...theme,
+            fg(token, text) {
+                return `${colors.get(token) ?? "\u001b[37m"}${text}\u001b[0m`;
+            },
+        };
+        const rendered = renderBashCommandCall(coloredTheme, command, {
+            state: "success",
+            expanded: true,
+            maxCodePreviewLines: 8,
+            showPrologueOmission: false,
+            headerLayout: "inline",
+            shellLayout: "preserve",
+            shellOperatorPosition: "trailing",
+        })
+            .render(2000)
+            .join("\n");
+
+        expect(rendered).toContain("\u001b[33mgit\u001b[0m");
+        expect(rendered).toContain("\u001b[34m--short\u001b[0m");
+        expect(stripVTControlCharacters(rendered)).toBe(`• Bash ${command}`);
+    });
+
+    it.each([
+        'printf "%s" "git status --short"',
+        'bash script.sh "git status --short"',
+        'bash script.sh -c "git status --short"',
+        'bash -- -c "git status --short"',
+        'echo bash -c "git status --short"',
+    ])("keeps ordinary quoted arguments as strings: %s", (command) => {
+        const coloredTheme: GlowupRenderTheme = {
+            ...theme,
+            fg(token, text) {
+                return `<${token}>${text}</${token}>`;
+            },
+        };
+        const rendered = renderBashCommandCall(coloredTheme, command, {
+            state: "success",
+            expanded: true,
+            maxCodePreviewLines: 8,
+            showPrologueOmission: false,
+            headerLayout: "inline",
+            shellLayout: "preserve",
+            shellOperatorPosition: "trailing",
+        })
+            .render(2000)
+            .join("\n");
+
+        expect(rendered).toContain("<syntaxString>git status --short</syntaxString>");
+        expect(rendered).not.toContain("<syntaxFunction>git</syntaxFunction>");
+        expect(rendered.replace(/<\/?[A-Za-z]+>/gu, "")).toBe(`• Bash ${command}`);
+    });
+
+    it("preserves multiline nested Bash and its ordinary string arguments", () => {
+        const command = 'bash -c \'git status --short\nprintf "%s" "sample text"\'';
+
+        const coloredTheme: GlowupRenderTheme = {
+            ...theme,
+            fg(token, text) {
+                return `<${token}>${text}</${token}>`;
+            },
+        };
+        const lines = renderBashCommandCall(coloredTheme, command, {
+            state: "success",
+            expanded: true,
+            maxCodePreviewLines: 8,
+            showPrologueOmission: false,
+            headerLayout: "inline",
+            shellLayout: "preserve",
+            shellOperatorPosition: "trailing",
+        }).render(2000);
+        const rendered = lines.join("\n");
+
+        expect(rendered).toContain("<syntaxFunction>git</syntaxFunction>");
+        expect(rendered).toContain("<syntaxFunction>printf</syntaxFunction>");
+        expect(rendered).toContain("<syntaxString>sample text</syntaxString>");
+        expect(lines.map((line) => line.replace(/<\/?[A-Za-z]+>/gu, ""))).toEqual([
+            "• Bash bash -c 'git status --short",
+            '  │ printf "%s" "sample text"\'',
+        ]);
+    });
+
     it("preserves short composed commands on one line", () => {
         expect(render("one && two", { width: 80 })).toEqual(["• Bash one && two"]);
     });

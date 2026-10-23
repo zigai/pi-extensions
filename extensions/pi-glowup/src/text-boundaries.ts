@@ -21,7 +21,7 @@ function completeUnicodePrefix(text: string): string {
     return finalCodeUnit >= 0xd800 && finalCodeUnit <= 0xdbff ? text.slice(0, -1) : text;
 }
 
-function sgrSequenceEnd(text: string, start: number): number | undefined {
+export function sgrSequenceEnd(text: string, start: number): number | undefined {
     if (text.charCodeAt(start) !== ESCAPE_CODE || text.charAt(start + 1) !== "[") {
         return undefined;
     }

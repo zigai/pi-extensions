@@ -33,6 +33,7 @@ import {
 import { type Component, visibleWidth } from "@earendil-works/pi-tui";
 import { parse, type WordPart } from "unbash";
 import { shellWords } from "./shell-words.ts";
+import { highlightDoubleQuotedSource } from "./quoted-source.ts";
 import type { ScriptFormatterProfile } from "../../../settings-input.ts";
 
 export type ScriptPreviewHeaderLayout = "auto" | "inline" | "block";
@@ -237,6 +238,7 @@ type EmbeddedInlineHighlightRow = {
 
 function embeddedInlineHighlightRows(
     lines: ReadonlyArray<string>,
+    theme: GlowupRenderTheme,
     invalidate: (() => void) | undefined,
 ): ReadonlyMap<number, ReadonlyArray<EmbeddedInlineHighlightRow>> {
     const source = lines.join("\n");
@@ -251,7 +253,19 @@ function embeddedInlineHighlightRows(
     const rows = new Map<number, EmbeddedInlineHighlightRow[]>();
     for (const script of scripts) {
         const code = source.slice(script.start, script.end);
-        const highlightedLines = highlightSyntaxCode(code, script.language, { invalidate });
+        let highlightedLines: string[];
+        if (script.language === "bash") {
+            const highlight = (source: string): string[] =>
+                highlightBashScriptPreviewLines(source.split("\n"), theme, invalidate);
+            if (source[script.start - 1] === '"') {
+                highlightedLines = highlightDoubleQuotedSource(code, highlight);
+            } else {
+                highlightedLines = highlight(code);
+            }
+        } else {
+            highlightedLines = highlightSyntaxCode(code, script.language, { invalidate });
+        }
+
         let absoluteStart = script.start;
         for (const highlighted of highlightedLines) {
             let lineIndex = 0;
@@ -307,7 +321,7 @@ function highlightBashScriptPreviewLines(
     invalidate: (() => void) | undefined,
 ): string[] {
     const highlighted: string[] = [];
-    const embeddedRows = embeddedInlineHighlightRows(lines, invalidate);
+    const embeddedRows = embeddedInlineHighlightRows(lines, theme, invalidate);
     let heredoc: BashHeredocHighlight | undefined;
     let heredocBody: string[] = [];
 
