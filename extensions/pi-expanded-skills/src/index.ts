@@ -1,14 +1,18 @@
+import { reportExtensionDiagnostic } from "@zigai/pi-extension-internals";
 import { createHash } from "node:crypto";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { parseDocument } from "yaml";
+import { registerSystemPromptPreparation } from "@zigai/pi-extension-internals/prompt-preparation";
 
 import {
     type AgentStartEvent,
+    type BuildSystemPromptOptions,
+    type SessionShutdownEvent,
     type BeforeAgentStartEvent,
     type BeforeAgentStartEventResult,
     type BeforeProviderRequestEvent,
     type BeforeProviderRequestEventResult,
-    formatSkillsForPrompt,
     getAgentDir,
     isReadToolResult,
     parseFrontmatter,
@@ -78,7 +82,7 @@ type ExtensionOptions = {
     readonly skillUsageStore?: SkillUsageStore;
 };
 
-export type SkillExtensionContext = Pick<ExtensionContext, "cwd" | "hasUI"> & {
+export type SkillExtensionContext = Pick<ExtensionContext, "cwd" | "hasUI" | "abort"> & {
     readonly model:
         | {
               readonly provider: string;
@@ -113,6 +117,7 @@ export type SkillExtensionEventHandlers = {
     >;
     readonly input: SkillExtensionHandler<InputEvent, InputEventResult>;
     readonly session_start: SkillExtensionHandler<SessionStartEvent>;
+    readonly session_shutdown: SkillExtensionHandler<SessionShutdownEvent>;
     readonly tool_result: SkillExtensionHandler<
         ToolResultEvent,
         {
@@ -123,7 +128,7 @@ export type SkillExtensionEventHandlers = {
     >;
 };
 
-export type SkillExtensionAPI = Pick<ExtensionAPI, "exec" | "getCommands"> & {
+export type SkillExtensionAPI = Pick<ExtensionAPI, "exec" | "getCommands" | "events"> & {
     on<TEvent extends keyof SkillExtensionEventHandlers>(
         event: TEvent,
         handler: SkillExtensionEventHandlers[TEvent],
@@ -218,28 +223,85 @@ export default function extension(pi: SkillExtensionAPI, options?: ExtensionOpti
     const referencedSkillFiles = new Map<string, Promise<ReadonlySet<string>>>();
     const seenMentionExpansionKeys = new Set<string>();
 
-    pi.on("before_agent_start", async (event) => {
-        const filteredSkills = await filterModelInvocableSkills(
-            event.systemPromptOptions.skills ?? [],
-        );
-        if (filteredSkills.length === (event.systemPromptOptions.skills ?? []).length) {
-            return;
-        }
-
-        const originalSkillsPrompt = formatSkillsForPrompt(event.systemPromptOptions.skills ?? []);
-        if (!originalSkillsPrompt) {
-            return;
-        }
-
+    let generation = 0;
+    let active = true;
+    const ownedSkillUsageStore = (ctx: SkillExtensionContext): SkillUsageStore => {
+        const current = generation;
         return {
-            systemPrompt: event.systemPrompt.replace(
-                originalSkillsPrompt,
-                formatSkillsForPrompt(filteredSkills),
-            ),
+            async record(record) {
+                if (!active || current !== generation) return;
+                try {
+                    await skillUsageStore.record(record);
+                } catch (cause: unknown) {
+                    if (!active || current !== generation) return;
+                    reportExtensionDiagnostic(
+                        `[${packageName}] Failed to persist skill usage: ${formatSafeErrorSummary(cause)}`,
+                        "warning",
+                        ctx,
+                    );
+                }
+            },
         };
+    };
+    let preparations = new WeakMap<BuildSystemPromptOptions, Promise<void>>();
+    const prepareSkills = (
+        input: BuildSystemPromptOptions,
+        current = generation,
+    ): Promise<void> => {
+        if (!active || current !== generation) return Promise.resolve();
+        const pending = preparations.get(input);
+        if (pending !== undefined) return pending;
+        const operation = (async () => {
+            const skills = input.skills ?? [];
+            const filtered: Skill[] = [];
+            const metadataErrors: unknown[] = [];
+            for (const skill of skills) {
+                try {
+                    const metadata = await loadSkillMetadata(skill.filePath, skill);
+                    if (metadata !== undefined && !metadata.disableModelInvocation) {
+                        filtered.push(skill);
+                    }
+                } catch (cause: unknown) {
+                    metadataErrors.push(cause);
+                }
+            }
+
+            if (active && current === generation && filtered.length !== skills.length)
+                input.skills = filtered;
+            if (metadataErrors.length > 0) {
+                throw new AggregateError(
+                    metadataErrors,
+                    `Unable to validate skill metadata:\n${metadataErrors.map(String).join("\n")}`,
+                );
+            }
+        })();
+        preparations.set(input, operation);
+        return operation;
+    };
+    const registerPreparation = () => {
+        const current = generation;
+        return registerSystemPromptPreparation(pi.events, (input) => prepareSkills(input, current));
+    };
+    let unregisterPreparation = registerPreparation();
+
+    pi.on("before_agent_start", async (event, ctx) => {
+        const current = generation;
+        try {
+            await prepareSkills(event.systemPromptOptions, current);
+        } catch (cause) {
+            if (active && current === generation) ctx.abort();
+            throw cause;
+        }
+    });
+    pi.on("session_shutdown", () => {
+        unregisterPreparation();
+        active = false;
+        generation += 1;
+        preparations = new WeakMap();
     });
 
     pi.on("input", async (event, ctx): Promise<InputEventResult | void> => {
+        const usageStore = ownedSkillUsageStore(ctx);
         const invocation = parseSkillInvocation(event.text);
         if (!invocation) {
             return;
@@ -280,7 +342,7 @@ export default function extension(pi: SkillExtensionAPI, options?: ExtensionOpti
         );
         const text = appendSkillArguments(renderedContent, invocation.args);
 
-        await recordSkillUsage(skillUsageStore, {
+        await recordSkillUsage(usageStore, {
             ctx,
             event: "user_invocation",
             invocation: {
@@ -303,6 +365,7 @@ export default function extension(pi: SkillExtensionAPI, options?: ExtensionOpti
     });
 
     pi.on("tool_result", async (event, ctx) => {
+        const usageStore = ownedSkillUsageStore(ctx);
         if (!isReadToolResult(event) || event.isError) {
             return;
         }
@@ -318,7 +381,7 @@ export default function extension(pi: SkillExtensionAPI, options?: ExtensionOpti
             return;
         }
 
-        await recordSkillUsage(skillUsageStore, {
+        await recordSkillUsage(usageStore, {
             ctx,
             event: "agent_read",
             read: {
@@ -372,7 +435,7 @@ export default function extension(pi: SkillExtensionAPI, options?: ExtensionOpti
     });
 
     pi.on("context", async (event, ctx) => {
-        await recordMentionSkillUsageFromTexts(skillUsageStore, {
+        await recordMentionSkillUsageFromTexts(ownedSkillUsageStore(ctx), {
             commands: pi.getCommands(),
             ctx,
             seenMentionExpansionKeys,
@@ -382,7 +445,7 @@ export default function extension(pi: SkillExtensionAPI, options?: ExtensionOpti
     });
 
     pi.on("before_provider_request", async (event, ctx) => {
-        await recordMentionSkillUsageFromTexts(skillUsageStore, {
+        await recordMentionSkillUsageFromTexts(ownedSkillUsageStore(ctx), {
             commands: pi.getCommands(),
             ctx,
             seenMentionExpansionKeys,
@@ -392,6 +455,11 @@ export default function extension(pi: SkillExtensionAPI, options?: ExtensionOpti
     });
 
     pi.on("session_start", (_event, ctx) => {
+        unregisterPreparation();
+        generation += 1;
+        active = true;
+        preparations = new WeakMap();
+        unregisterPreparation = registerPreparation();
         if (!ctx.hasUI) {
             return;
         }
@@ -453,13 +521,7 @@ async function recordSkillUsage(
         readonly mention?: SkillUsageMention;
     },
 ): Promise<void> {
-    try {
-        await store.record(makeSkillUsageRecord(input));
-    } catch (cause: unknown) {
-        console.warn(
-            `[${packageName}] Failed to persist skill usage: ${formatSafeErrorSummary(cause)}`,
-        );
-    }
+    await store.record(makeSkillUsageRecord(input));
 }
 
 function makeSkillUsageRecord(input: {
@@ -856,17 +918,6 @@ function formatSafeErrorSummary(cause: unknown): string {
     return typeof cause;
 }
 
-async function filterModelInvocableSkills(skills: readonly Skill[]): Promise<Skill[]> {
-    const filtered: Skill[] = [];
-    for (const skill of skills) {
-        const metadata = await loadSkillMetadata(skill.filePath, skill);
-        if (metadata !== undefined && !metadata.disableModelInvocation) {
-            filtered.push(skill);
-        }
-    }
-    return filtered;
-}
-
 async function loadSkillMetadata(
     filePath: string,
     loadedSkill?: Skill,
@@ -916,38 +967,23 @@ async function loadOpenAiAllowImplicitInvocation(skillDir: string): Promise<bool
 }
 
 export function parseOpenAiAllowImplicitInvocation(rawContent: string): boolean | undefined {
-    const lines = rawContent.split(/\r?\n/);
-    let inPolicy = false;
-    let policyIndent = 0;
-
-    for (const line of lines) {
-        const withoutComment = line.replace(/[ \t]+#.*$/, "");
-        if (!withoutComment.trim()) {
-            continue;
-        }
-
-        const indent = withoutComment.search(/\S/);
-        const trimmed = withoutComment.trim();
-        if (/^policy\s*:\s*$/.test(trimmed)) {
-            inPolicy = true;
-            policyIndent = indent;
-            continue;
-        }
-
-        if (inPolicy && indent <= policyIndent) {
-            inPolicy = false;
-        }
-
-        if (!inPolicy) {
-            continue;
-        }
-
-        const match = /^allow_implicit_invocation\s*:\s*(true|false)\s*$/.exec(trimmed);
-        if (match) {
-            return match[1] === "true";
-        }
+    const document = parseDocument(rawContent);
+    if (document.errors.length !== 0) {
+        throw new Error("Invalid OpenAI skill policy YAML");
     }
-
+    let parsed: unknown;
+    try {
+        parsed = document.toJS();
+    } catch {
+        throw new Error("Invalid OpenAI skill policy YAML");
+    }
+    if (!isUnknownRecord(parsed) || !isUnknownRecord(parsed.policy)) {
+        return undefined;
+    }
+    const value = parsed.policy.allow_implicit_invocation;
+    if (typeof value === "boolean") {
+        return value;
+    }
     return undefined;
 }
 

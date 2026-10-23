@@ -3,7 +3,8 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 
 import {
-    formatSkillsForPrompt,
+    createEventBus,
+    type BuildSystemPromptOptions,
     type BeforeProviderRequestEvent,
     type BeforeAgentStartEvent,
     type ContextEvent,
@@ -41,6 +42,7 @@ const defaultSkillExtensionContext: SkillExtensionContext = {
         getSessionFile: () => join(process.cwd(), "test-session.jsonl"),
     },
     model: { provider: "test-provider", id: "test-model" },
+    abort: () => undefined,
 };
 
 describe("extension entrypoint", () => {
@@ -56,6 +58,7 @@ describe("extension entrypoint", () => {
         expect(extension(pi)).toBeUndefined();
         expect(events).toEqual([
             "before_agent_start",
+            "session_shutdown",
             "input",
             "tool_result",
             "agent_start",
@@ -66,7 +69,80 @@ describe("extension entrypoint", () => {
     });
 });
 
+describe("skill usage diagnostics", () => {
+    it.each(["current", "replaced", "shutdown"])(
+        "reports a failed usage write only to its current owner (%s)",
+        async (owner) => {
+            const skillPath = await writeSkill({
+                frontmatter: "name: visible\ndescription: Visible skill",
+                body: "# Visible",
+            });
+            try {
+                const harness = createExtensionHarness([makeSkillCommand("visible", skillPath)]);
+                let rejectWrite: (cause: Error) => void = () => undefined;
+                let startedWrite: () => void = () => undefined;
+                const started = new Promise<void>((resolve) => {
+                    startedWrite = resolve;
+                });
+                const write = new Promise<void>((_resolve, reject) => {
+                    rejectWrite = reject;
+                });
+                extension(harness.pi, {
+                    skillUsageStore: {
+                        record: () => {
+                            startedWrite();
+                            return write;
+                        },
+                    },
+                });
+                const notices: { message: string; type: string | undefined }[] = [];
+                const ctx = makeContext((message, type) => notices.push({ message, type }));
+                const pending = harness.handlers.input(
+                    {
+                        type: "input",
+                        text: "/skill:visible",
+                        source: "interactive",
+                    },
+                    ctx,
+                );
+                await started;
+                if (owner === "replaced") await harness.handlers.sessionStart();
+                if (owner === "shutdown") await harness.handlers.sessionShutdown();
+                rejectWrite(new Error("usage disk unavailable"));
+                await expect(pending).resolves.toMatchObject({ action: "transform" });
+                if (owner === "current") {
+                    expect(notices).toEqual([
+                        {
+                            message: `[${packageName}] Failed to persist skill usage: Error: usage disk unavailable`,
+                            type: "warning",
+                        },
+                    ]);
+                } else expect(notices).toEqual([]);
+            } finally {
+                await rm(dirname(skillPath), { recursive: true, force: true });
+            }
+        },
+    );
+});
+
 describe("OpenAI sidecar metadata", () => {
+    it.each([
+        ["policy: {allow_implicit_invocation: false}\n", false],
+        ["base: &policy {allow_implicit_invocation: false}\npolicy: *policy\n", false],
+        ['"policy":\n  "allow_implicit_invocation": true\n', true],
+        ["interface:\n  policy:\n    allow_implicit_invocation: false\n", undefined],
+        ["notes: |\n  policy:\n    allow_implicit_invocation: false\n", undefined],
+        ['policy:\n  allow_implicit_invocation: "false"\n', undefined],
+    ])("interprets the top-level YAML policy in %s", (content, expected) => {
+        expect(parseOpenAiAllowImplicitInvocation(content)).toBe(expected);
+    });
+
+    it("rejects malformed sidecars without exposing values", () => {
+        expect(() => parseOpenAiAllowImplicitInvocation("policy: [private-value\n")).toThrow(
+            "Invalid OpenAI skill policy YAML",
+        );
+    });
+
     it("reads only policy.allow_implicit_invocation", () => {
         expect(
             parseOpenAiAllowImplicitInvocation(
@@ -98,12 +174,112 @@ describe("OpenAI sidecar metadata", () => {
         const { pi, handlers } = createExtensionHarness([]);
         extension(pi);
 
-        const systemPrompt = `prefix${formatSkillsForPrompt([skill])}suffix`;
-        const result = await handlers.beforeAgentStart({
+        const systemPromptOptions = {
+            cwd: process.cwd(),
+            skills: [skill],
+            selectedTools: [],
+            hiddenTools: [],
+            toolSnippets: {},
+            toolGuidelines: {},
+            promptGuidelines: [],
+            appendSystemPrompt: "",
+            sections: {},
+            contextFiles: [],
+        };
+        await handlers.beforeAgentStart({
             type: "before_agent_start",
             messageType: "user",
             prompt: "hello",
-            systemPrompt,
+            systemPrompt: "Host-rendered prompt",
+            systemPromptOptions,
+        });
+        expect(systemPromptOptions.skills).toHaveLength(0);
+    });
+
+    it("prepares skill policy before another owner composes an opaque prompt", async () => {
+        const skillPath = await writeSkill({
+            frontmatter: "name: explicit-only\ndescription: Explicit invocation workflow",
+            body: "Sample instructions",
+            openAiPolicy: false,
+        });
+        try {
+            const { pi, handlers } = createExtensionHarness([]);
+            extension(pi);
+            const options = {
+                cwd: process.cwd(),
+                forceSystemPrompt: "Exact opaque instructions",
+                skills: [
+                    {
+                        name: "explicit-only",
+                        description: "Explicit invocation workflow",
+                        filePath: skillPath,
+                        baseDir: dirname(skillPath),
+                        sourceInfo: makeSourceInfo(skillPath),
+                        disableModelInvocation: false,
+                    },
+                ],
+            } satisfies BuildSystemPromptOptions;
+            const originalSkills = options.skills;
+            const preparations: Array<(input: BuildSystemPromptOptions) => Promise<void>> = [];
+            pi.events.emit("pi:system-prompt-preparation", {
+                version: 1,
+                accept: (prepare: (input: BuildSystemPromptOptions) => Promise<void>) => {
+                    preparations.push(prepare);
+                },
+            });
+            for (const prepare of preparations) await prepare(options);
+
+            expect(options.skills).toEqual([]);
+            expect(options.forceSystemPrompt).toBe("Exact opaque instructions");
+
+            const pendingOptions = { ...options, skills: originalSkills };
+            const pending = preparations[0]?.(pendingOptions);
+            await handlers.sessionShutdown();
+            await pending;
+            expect(pendingOptions.skills).toEqual(originalSkills);
+
+            await handlers.sessionStart();
+            const oldOptions = { ...options, skills: originalSkills };
+            await preparations[0]?.(oldOptions);
+            expect(oldOptions.skills).toEqual(originalSkills);
+
+            preparations.length = 0;
+            pi.events.emit("pi:system-prompt-preparation", {
+                version: 1,
+                accept: (prepare: (input: BuildSystemPromptOptions) => Promise<void>) => {
+                    preparations.push(prepare);
+                },
+            });
+            for (const prepare of preparations) await prepare(pendingOptions);
+            expect(pendingOptions.skills).toEqual([]);
+        } finally {
+            await rm(dirname(skillPath), { recursive: true, force: true });
+        }
+    });
+
+    it("cancels only the current owner when skill preparation rejects and permits repair", async () => {
+        const skillPath = await writeSkill({
+            frontmatter: "name: sample\ndescription: Sample workflow",
+            body: "Sample instructions",
+            openAiPolicy: false,
+        });
+        const sidecar = join(dirname(skillPath), "agents", "openai.yaml");
+        const skill = {
+            name: "sample",
+            description: "Sample workflow",
+            filePath: skillPath,
+            baseDir: dirname(skillPath),
+            sourceInfo: makeSourceInfo(skillPath),
+            disableModelInvocation: false,
+        };
+        const abort = vi.fn();
+        const { pi, handlers } = createExtensionHarness([]);
+        extension(pi);
+        const makeEvent = (): BeforeAgentStartEvent => ({
+            type: "before_agent_start",
+            messageType: "user",
+            prompt: "Generic task",
+            systemPrompt: "Host prompt",
             systemPromptOptions: {
                 cwd: process.cwd(),
                 skills: [skill],
@@ -117,9 +293,107 @@ describe("OpenAI sidecar metadata", () => {
                 contextFiles: [],
             },
         });
+        try {
+            await writeFile(sidecar, "policy: [private-sample", "utf-8");
+            await expect(
+                handlers.beforeAgentStart(makeEvent(), { ...defaultSkillExtensionContext, abort }),
+            ).rejects.toThrow("Invalid OpenAI skill policy YAML");
+            expect(abort).toHaveBeenCalledTimes(1);
 
-        expect(result?.systemPrompt).toBe("prefixsuffix");
+            const stale = makeEvent();
+            const pending = handlers.beforeAgentStart(stale, {
+                ...defaultSkillExtensionContext,
+                abort,
+            });
+            const rejected = expect(pending).rejects.toThrow("Invalid OpenAI skill policy YAML");
+            await handlers.sessionStart();
+            await rejected;
+            expect(abort).toHaveBeenCalledTimes(1);
+            expect(stale.systemPromptOptions.skills).toEqual([skill]);
+
+            await writeFile(sidecar, "policy: {allow_implicit_invocation: false}\n", "utf-8");
+            const repaired = makeEvent();
+            await handlers.beforeAgentStart(repaired, { ...defaultSkillExtensionContext, abort });
+            expect(repaired.systemPromptOptions.skills).toEqual([]);
+            expect(abort).toHaveBeenCalledTimes(1);
+        } finally {
+            await rm(dirname(skillPath), { recursive: true, force: true });
+        }
     });
+
+    it.each(["restricted-first", "malformed-first"])(
+        "keeps restricted skills out of the prompt when unrelated metadata is malformed (%s)",
+        async (order) => {
+            const restrictedPath = await writeSkill({
+                frontmatter: "name: restricted\ndescription: Explicit-only skill",
+                body: "# Restricted",
+                openAiPolicy: false,
+            });
+            const unrelatedPath = await writeSkill({
+                frontmatter: "name: unrelated\ndescription: Unrelated skill",
+                body: "# Unrelated",
+            });
+            try {
+                await mkdir(join(dirname(unrelatedPath), "agents"));
+                await writeFile(
+                    join(dirname(unrelatedPath), "agents", "openai.yaml"),
+                    "policy: [\n",
+                );
+                const restricted = {
+                    name: "restricted",
+                    description: "Explicit-only skill",
+                    filePath: restrictedPath,
+                    baseDir: dirname(restrictedPath),
+                    sourceInfo: makeSourceInfo(restrictedPath),
+                    disableModelInvocation: false,
+                };
+                const unrelated = {
+                    name: "unrelated",
+                    description: "Unrelated skill",
+                    filePath: unrelatedPath,
+                    baseDir: dirname(unrelatedPath),
+                    sourceInfo: makeSourceInfo(unrelatedPath),
+                    disableModelInvocation: false,
+                };
+                const skills = [restricted, unrelated];
+                if (order === "malformed-first") skills.reverse();
+
+                const { pi, handlers } = createExtensionHarness([]);
+                extension(pi);
+                const systemPromptOptions = {
+                    cwd: process.cwd(),
+                    skills,
+                    selectedTools: [],
+                    hiddenTools: [],
+                    toolSnippets: {},
+                    toolGuidelines: {},
+                    promptGuidelines: [],
+                    appendSystemPrompt: "",
+                    sections: {},
+                    contextFiles: [],
+                };
+
+                await handlers
+                    .beforeAgentStart({
+                        type: "before_agent_start",
+                        messageType: "user",
+                        prompt: "hello",
+                        systemPrompt: "Host-rendered prompt",
+                        systemPromptOptions,
+                    })
+                    .catch(() => undefined);
+
+                expect(systemPromptOptions.skills.map((skill) => skill.name)).not.toContain(
+                    "restricted",
+                );
+            } finally {
+                await Promise.all([
+                    rm(dirname(restrictedPath), { recursive: true, force: true }),
+                    rm(dirname(unrelatedPath), { recursive: true, force: true }),
+                ]);
+            }
+        },
+    );
 
     it("removes deleted skills from the model prompt", async () => {
         const skillPath = await writeSkill({
@@ -139,27 +413,26 @@ describe("OpenAI sidecar metadata", () => {
         const { pi, handlers } = createExtensionHarness([]);
         extension(pi);
 
-        const systemPrompt = `prefix${formatSkillsForPrompt([skill])}suffix`;
-        const result = await handlers.beforeAgentStart({
+        const systemPromptOptions = {
+            cwd: process.cwd(),
+            skills: [skill],
+            selectedTools: [],
+            hiddenTools: [],
+            toolSnippets: {},
+            toolGuidelines: {},
+            promptGuidelines: [],
+            appendSystemPrompt: "",
+            sections: {},
+            contextFiles: [],
+        };
+        await handlers.beforeAgentStart({
             type: "before_agent_start",
             messageType: "user",
             prompt: "hello",
-            systemPrompt,
-            systemPromptOptions: {
-                cwd: process.cwd(),
-                skills: [skill],
-                selectedTools: [],
-                hiddenTools: [],
-                toolSnippets: {},
-                toolGuidelines: {},
-                promptGuidelines: [],
-                appendSystemPrompt: "",
-                sections: {},
-                contextFiles: [],
-            },
+            systemPrompt: "Host-rendered prompt",
+            systemPromptOptions,
         });
-
-        expect(result?.systemPrompt).toBe("prefixsuffix");
+        expect(systemPromptOptions.skills).toHaveLength(0);
     });
 });
 
@@ -656,12 +929,15 @@ function createExtensionHarness(
     readonly execCalls: string[][];
     readonly handlers: {
         readonly agentStart: () => Promise<void>;
+        readonly sessionStart: () => Promise<void>;
+        readonly sessionShutdown: () => Promise<void>;
         readonly beforeProviderRequest: (
             event: BeforeProviderRequestEvent,
             ctx?: SkillExtensionContext,
         ) => Promise<unknown>;
         readonly beforeAgentStart: (
             event: BeforeAgentStartEvent,
+            ctx?: SkillExtensionContext,
         ) => Promise<{ readonly systemPrompt?: string } | void>;
         readonly context: (
             event: ContextEvent,
@@ -685,6 +961,7 @@ function createExtensionHarness(
     const execCalls: string[][] = [];
     const capturedHandlers: Partial<SkillExtensionEventHandlers> = {};
     const pi: SkillExtensionAPI = {
+        events: createEventBus(),
         on(eventName, handler) {
             events.push(eventName);
             capturedHandlers[eventName] = handler;
@@ -706,6 +983,18 @@ function createExtensionHarness(
         events,
         execCalls,
         handlers: {
+            sessionStart: async () => {
+                await requireHandler(capturedHandlers.session_start)(
+                    { type: "session_start", reason: "new" },
+                    defaultSkillExtensionContext,
+                );
+            },
+            sessionShutdown: async () => {
+                await requireHandler(capturedHandlers.session_shutdown)(
+                    { type: "session_shutdown", reason: "new" },
+                    defaultSkillExtensionContext,
+                );
+            },
             agentStart: async () => {
                 await requireHandler(capturedHandlers.agent_start)(
                     { type: "agent_start" },
@@ -715,11 +1004,8 @@ function createExtensionHarness(
             beforeProviderRequest: async (event, ctx = makeContext(vi.fn())) => {
                 return requireHandler(capturedHandlers.before_provider_request)(event, ctx);
             },
-            beforeAgentStart: async (event) => {
-                return requireHandler(capturedHandlers.before_agent_start)(
-                    event,
-                    defaultSkillExtensionContext,
-                );
+            beforeAgentStart: async (event, ctx = defaultSkillExtensionContext) => {
+                return requireHandler(capturedHandlers.before_agent_start)(event, ctx);
             },
             context: async (event, ctx = makeContext(vi.fn())) => {
                 return requireHandler(capturedHandlers.context)(event, ctx);
@@ -781,6 +1067,7 @@ function makeContext(
     const sessionId = options?.sessionId ?? "test-session";
     const sessionFile = options?.sessionFile ?? join(cwd, "test-session.jsonl");
     return {
+        abort: () => undefined,
         hasUI: true,
         ui: {
             addAutocompleteProvider: () => undefined,
