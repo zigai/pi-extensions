@@ -39,6 +39,9 @@ import {
 import { formatMutationStats } from "../tool-header.ts";
 import { collapseHome } from "../path.ts";
 
+// A mapped sparse input retains holes; consumers treat those like unparsed rows.
+type ParsedDiffLine = ReturnType<typeof parseDiffLine> | undefined;
+
 const ANSI_SEQUENCE_PREFIX = ansiStyles.modifier.reset.open.slice(0, 2);
 const ROW_BACKGROUND_SAFE_RESET = `${ansiStyles.modifier.bold.close}${ansiStyles.modifier.italic.close}${ansiStyles.modifier.underline.close}${ansiStyles.modifier.strikethrough.close}${ansiStyles.color.close}`;
 
@@ -52,13 +55,12 @@ function formatDiffLineNumber(lineNumber: string | number, width: number): strin
 }
 
 function diffLineNumberWidth(
-    lines: ReadonlyArray<string>,
+    lines: ReadonlyArray<ParsedDiffLine>,
     coordinates: ReadonlyArray<DiffLineCoordinates | undefined> | undefined,
 ): number {
     let width = 0;
-    for (const [index, line] of lines.entries()) {
-        const parsed = parseDiffLine(line);
-        if (parsed === null || parsed.kind === "ellipsis" || parsed.kind === "omission") {
+    for (const [index, parsed] of lines.entries()) {
+        if (!parsed || parsed.kind === "ellipsis" || parsed.kind === "omission") {
             continue;
         }
 
@@ -92,7 +94,7 @@ function diffLineNumberText(
 }
 
 function changedRangesForDiffLines(
-    lines: ReadonlyArray<string>,
+    lines: ReadonlyArray<ParsedDiffLine>,
 ): ReadonlyArray<readonly TextRange[] | undefined> {
     const ranges: Array<readonly TextRange[] | undefined> = Array.from(
         { length: lines.length },
@@ -117,9 +119,8 @@ function changedRangesForDiffLines(
         insertions = [];
     };
 
-    for (const [index, line] of lines.entries()) {
-        const parsed = parseDiffLine(line);
-        if (parsed === null || parsed.kind === "ellipsis" || parsed.kind === "omission") {
+    for (const [index, parsed] of lines.entries()) {
+        if (!parsed || parsed.kind === "ellipsis" || parsed.kind === "omission") {
             flush();
             continue;
         }
@@ -143,10 +144,9 @@ function changedRangesForDiffLines(
 }
 
 function isUnchangedReplacementSide(
-    line: string,
+    parsed: ParsedDiffLine,
     changedRanges: readonly TextRange[] | undefined,
 ): boolean {
-    const parsed = parseDiffLine(line);
     return (
         (parsed?.kind === "insert" || parsed?.kind === "delete") &&
         parsed.content.length > 0 &&
@@ -174,12 +174,12 @@ type DiffRowRenderOptions = {
 
 function renderDiffRow(
     line: string,
+    parsed: ParsedDiffLine,
     width: number,
     leftPrefix: string,
     theme: GlowupRenderTheme,
     options?: DiffRowRenderOptions,
 ): string[] {
-    const parsed = parseDiffLine(line);
     const rowWidth = Math.max(1, width);
     const prefixWidth = visibleWidth(leftPrefix);
     const contentWidth = Math.max(1, rowWidth - prefixWidth);
@@ -372,7 +372,7 @@ function styleDiffContent(
 }
 
 function highlightDiffContents(
-    lines: ReadonlyArray<string>,
+    lines: ReadonlyArray<ParsedDiffLine>,
     filePath: string | undefined,
     invalidate: () => void,
     isCurrent: () => boolean,
@@ -406,9 +406,8 @@ function highlightDiffContents(
         run = [];
     }
 
-    for (const [index, line] of lines.entries()) {
-        const parsed = parseDiffLine(line);
-        if (parsed === null) {
+    for (const [index, parsed] of lines.entries()) {
+        if (!parsed) {
             continue;
         }
 
@@ -460,14 +459,13 @@ function styleDiffGutter(
 }
 
 function collapsedDiffLineIndices(
-    sections: ReadonlyArray<DiffSection>,
+    sections: ReadonlyArray<ReadonlyArray<ParsedDiffLine>>,
     lineBudget: number,
 ): readonly number[] {
     return selectSemanticDiffIndices(
-        sections.flatMap((section) =>
-            section.lines.map((line): SemanticDiffRowKind => {
-                const parsed = parseDiffLine(line);
-                return parsed === null || parsed.kind === "ellipsis" || parsed.kind === "omission"
+        sections.flatMap((lines) =>
+            lines.map((parsed): SemanticDiffRowKind => {
+                return !parsed || parsed.kind === "ellipsis" || parsed.kind === "omission"
                     ? "meta"
                     : parsed.kind;
             }),
@@ -516,8 +514,11 @@ function createDiffComponent(
             Math.floor(options.collapsedLineBudget ?? MUTATION_DIFF_PREVIEW_ROWS),
         );
         const shouldCollapse = !expanded && allDiffLineCount > collapsedLineBudget;
+
+        // Share pure parse results between passes, without retaining them across renders.
+        const parsedSections = sections.map((section) => section.lines.map(parseDiffLine));
         const collapsedIndices = shouldCollapse
-            ? collapsedDiffLineIndices(sections, collapsedLineBudget)
+            ? collapsedDiffLineIndices(parsedSections, collapsedLineBudget)
             : [];
         const collapsedLineIndexSet = new Set(collapsedIndices);
         const rendered: string[] = [];
@@ -537,7 +538,8 @@ function createDiffComponent(
             );
         };
 
-        for (const section of sections) {
+        for (const [sectionIndex, section] of sections.entries()) {
+            const parsedLines = parsedSections[sectionIndex] ?? [];
             const visibleLines: Array<{ readonly line: string; readonly index: number }> = [];
             for (const [lineIndex, line] of section.lines.entries()) {
                 const globalLineIndex = sectionOffset + lineIndex;
@@ -574,22 +576,23 @@ function createDiffComponent(
             renderedSection = true;
 
             const sectionLineNumberWidth = diffLineNumberWidth(
-                section.lines,
+                parsedLines,
                 section.lineCoordinates,
             );
             const highlightedContents = highlightDiffContents(
-                section.lines,
+                parsedLines,
                 section.path,
                 invalidate,
                 isCurrent,
             );
-            const changedRanges = changedRangesForDiffLines(section.lines);
+            const changedRanges = changedRangesForDiffLines(parsedLines);
             const renderLines = (
                 lines: ReadonlyArray<{ readonly line: string; readonly index: number }>,
             ): void => {
                 const maxWrappedRows = options.maxWrappedRows ?? (expanded ? undefined : 4);
                 for (const { line, index } of lines) {
-                    if (isUnchangedReplacementSide(line, changedRanges[index])) {
+                    const parsed = parsedLines[index] ?? null;
+                    if (isUnchangedReplacementSide(parsed, changedRanges[index])) {
                         continue;
                     }
 
@@ -618,7 +621,7 @@ function createDiffComponent(
                         rowOptions = { ...rowOptions, maxWrappedRows };
                     }
 
-                    rendered.push(...renderDiffRow(line, width, "    ", theme, rowOptions));
+                    rendered.push(...renderDiffRow(line, parsed, width, "    ", theme, rowOptions));
                 }
             };
 

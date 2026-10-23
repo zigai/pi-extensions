@@ -1,0 +1,1 @@
+49b1ba87d8caf34788d9741a12edee3de3c24b567f90d906fc8788820299ad4d  test/rendering/diff/golden/text-diff.json
