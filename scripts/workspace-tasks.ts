@@ -13,6 +13,7 @@ export const isolatedDirectories = new Set([
     "extensions/pi-settings-ui",
     "extensions/pi-toggles",
     "extensions/pi-expanded-skills",
+    "extensions/pi-lazy-mcp",
     "packages/pi-extension-settings",
     "packages/pi-typed-args",
 ]);

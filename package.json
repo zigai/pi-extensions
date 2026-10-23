@@ -119,7 +119,9 @@
     ]
   },
   "piWorkspace": {
-    "optionalExtensions": [],
+    "optionalExtensions": [
+      "@zigai/pi-lazy-mcp"
+    ],
     "collections": [
       "@zigai/pi-tweaks"
     ]

@@ -29,6 +29,7 @@
     "extensions/pi-toggles/**",
     "extensions/pi-settings-ui/**",
     "extensions/pi-expanded-skills/**",
+    "extensions/pi-lazy-mcp/**",
     "**/dist/**",
     "**/node_modules/**"
   ]

@@ -1,0 +1,342 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/zigai/pi-tweaks/master/extensions/pi-lazy-mcp/config.schema.json",
+  "title": "Pi Lazy MCP settings",
+  "description": "Demand-owned MCP connections and dormant tool metadata.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "default": "./schemas/pi-lazy-mcp.schema.json",
+      "description": "JSON Schema used by editors for this settings file."
+    },
+    "servers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "description",
+          "transport",
+          "catalog",
+          "exposure"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_]+$",
+            "maxLength": 24
+          },
+          "description": {
+            "type": "string"
+          },
+          "transport": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": [
+                  "type",
+                  "command",
+                  "args",
+                  "cwd",
+                  "env"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "stdio"
+                  },
+                  "command": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "args": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "cwd": {
+                    "type": "string",
+                    "description": "Working directory, relative to the session root or absolute."
+                  },
+                  "env": {
+                    "type": "object",
+                    "patternProperties": {
+                      "^.*$": {
+                        "type": "string"
+                      }
+                    },
+                    "description": "Environment variable bindings: destination name to source variable name. Values are never persisted credentials."
+                  }
+                },
+                "title": "StdioServer",
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type",
+                  "url",
+                  "headers"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "http"
+                  },
+                  "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "Streamable HTTP endpoint without embedded credentials."
+                  },
+                  "headers": {
+                    "type": "object",
+                    "patternProperties": {
+                      "^.*$": {
+                        "type": "string"
+                      }
+                    },
+                    "description": "Environment variable bindings: destination name to source variable name. Values are never persisted credentials."
+                  }
+                },
+                "title": "HttpServer",
+                "additionalProperties": false
+              }
+            ]
+          },
+          "catalog": {
+            "type": "object",
+            "required": [
+              "tools"
+            ],
+            "properties": {
+              "instructions": {
+                "type": "string"
+              },
+              "tools": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "name",
+                    "inputSchema"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "inputSchema": {
+                      "type": "object",
+                      "patternProperties": {
+                        "^.*$": {
+                          "$defs": {
+                            "Json": {
+                              "anyOf": [
+                                {
+                                  "type": "null"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {
+                                    "$ref": "Json"
+                                  }
+                                },
+                                {
+                                  "type": "object",
+                                  "patternProperties": {
+                                    "^.*$": {
+                                      "$ref": "Json"
+                                    }
+                                  }
+                                }
+                              ],
+                              "$id": "Json"
+                            }
+                          },
+                          "$ref": "Json",
+                          "title": "JsonValue"
+                        }
+                      },
+                      "title": "JsonObject"
+                    },
+                    "outputSchema": {
+                      "type": "object",
+                      "patternProperties": {
+                        "^.*$": {
+                          "$defs": {
+                            "Json": {
+                              "anyOf": [
+                                {
+                                  "type": "null"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {
+                                    "$ref": "Json"
+                                  }
+                                },
+                                {
+                                  "type": "object",
+                                  "patternProperties": {
+                                    "^.*$": {
+                                      "$ref": "Json"
+                                    }
+                                  }
+                                }
+                              ],
+                              "$id": "Json"
+                            }
+                          },
+                          "$ref": "Json",
+                          "title": "JsonValue"
+                        }
+                      },
+                      "title": "JsonObject"
+                    },
+                    "annotations": {
+                      "type": "object",
+                      "properties": {
+                        "title": {
+                          "type": "string"
+                        },
+                        "readOnlyHint": {
+                          "type": "boolean"
+                        },
+                        "destructiveHint": {
+                          "type": "boolean"
+                        },
+                        "idempotentHint": {
+                          "type": "boolean"
+                        },
+                        "openWorldHint": {
+                          "type": "boolean"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "execution": {
+                      "type": "object",
+                      "properties": {
+                        "taskSupport": {
+                          "enum": [
+                            "forbidden",
+                            "optional",
+                            "required"
+                          ]
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "_meta": {
+                      "type": "object",
+                      "patternProperties": {
+                        "^.*$": {
+                          "$defs": {
+                            "Json": {
+                              "anyOf": [
+                                {
+                                  "type": "null"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {
+                                    "$ref": "Json"
+                                  }
+                                },
+                                {
+                                  "type": "object",
+                                  "patternProperties": {
+                                    "^.*$": {
+                                      "$ref": "Json"
+                                    }
+                                  }
+                                }
+                              ],
+                              "$id": "Json"
+                            }
+                          },
+                          "$ref": "Json",
+                          "title": "JsonValue"
+                        }
+                      },
+                      "title": "JsonObject"
+                    }
+                  },
+                  "title": "CatalogTool",
+                  "additionalProperties": false
+                }
+              }
+            },
+            "title": "ToolCatalog",
+            "additionalProperties": false
+          },
+          "exposure": {
+            "enum": [
+              "direct",
+              "codemode",
+              "deferred",
+              "hidden"
+            ],
+            "description": "Pi tool exposure; discovery uses supplied metadata without connecting."
+          },
+          "idle": {
+            "type": "object",
+            "required": [
+              "afterMs"
+            ],
+            "properties": {
+              "afterMs": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2147483647,
+                "description": "Disconnect after this idle duration. Set only for restart-safe servers; active calls and residency capabilities prevent eviction."
+              }
+            },
+            "title": "IdlePolicy",
+            "additionalProperties": false
+          }
+        },
+        "title": "LazyServer",
+        "additionalProperties": false
+      },
+      "default": [],
+      "description": "Owned servers and supplied catalogs. This extension replaces native session MCP; use /mcp discover NAME to explicitly refresh one catalog."
+    }
+  }
+}

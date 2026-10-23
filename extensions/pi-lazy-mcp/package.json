@@ -1,0 +1,48 @@
+{
+  "name": "@zigai/pi-lazy-mcp",
+  "version": "0.1.0",
+  "description": "Start MCP servers only when their tools are called.",
+  "license": "MIT",
+  "files": [
+    "src",
+    "config.schema.json",
+    "README.md"
+  ],
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "oxlint --type-aware --deny-warnings .",
+    "lint:fix": "oxlint --type-aware --fix .",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "config:generate": "pi-extension-settings generate",
+    "config:check": "pi-extension-settings check",
+    "check": "npm run config:check && npm run format:check && npm run lint && npm run check:code",
+    "check:code": "npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "@earendil-works/pi-mcp": "1.3.0",
+    "@zigai/pi-extension-internals": "0.2.0",
+    "@zigai/pi-extension-settings": "0.6.1"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-agent-core": "^1.3.0",
+    "@earendil-works/pi-coding-agent": "^1.3.0",
+    "typebox": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "piExtensionSettings": {
+    "definition": "./src/settings-input.ts",
+    "prevalidation": "./src/settings.prevalidated.ts",
+    "schema": "./config.schema.json",
+    "readme": "./README.md"
+  }
+}
