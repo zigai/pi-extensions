@@ -161,7 +161,7 @@ function renderScriptInvocation(
     pureScript: ScriptInvocation,
     options: BashCommandRenderOptions,
 ): Component {
-    if (pureScript.language === "bash" && options.profile !== undefined) {
+    if (pureScript.language === "bash") {
         return renderFullShellCommand(
             theme,
             pureScript.code,

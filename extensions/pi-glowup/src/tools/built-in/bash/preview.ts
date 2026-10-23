@@ -4,11 +4,7 @@ import { emptyComponent, makeComponent } from "../../../rendering/component.ts";
 import type { CodePreview } from "../../../rendering/streaming/presentation.ts";
 import { parseScriptInvocation, type ScriptInvocation } from "./invocation.ts";
 import { renderGlowupOutput, type GlowupOutputRenderOptions } from "../../../rendering/output.ts";
-import {
-    renderScriptCall,
-    type ScriptPreviewHeaderLayout,
-    type ScriptCallRenderOptions,
-} from "./script-renderer.ts";
+import { renderScriptCall, type ScriptPreviewHeaderLayout } from "./script-renderer.ts";
 import { shouldDeferSimpleToolCall } from "../../../rendering/status-labels.ts";
 import { detectStructuredOutputLanguage } from "../../../rendering/syntax/code-component.ts";
 import { commandField, textOutput } from "../arguments.ts";
@@ -59,9 +55,10 @@ function renderStreamingScriptCall(
     theme: BuiltInRenderTheme,
     context: BuiltInRenderContext,
     streamCode: CodePreview,
-    options: Omit<ScriptCallRenderOptions, "expanded">,
+    options: Omit<BashCommandRenderOptions, "expanded">,
 ) {
     const { toolCallId, argsComplete, isError } = context;
+    let previous: BashCommandRenderOptions["lastComponent"];
 
     return renderExpandableSection(context, "call", (expanded) =>
         makeComponent((width) => {
@@ -74,11 +71,16 @@ function renderStreamingScriptCall(
                 ...(options.invalidate !== undefined && { invalidate: options.invalidate }),
             });
 
-            return renderScriptCall(
-                theme,
-                { ...invocation, code },
-                { ...options, expanded },
-            ).render(width);
+            // Statement publication and shell layout are independent: lay out only
+            // the published snapshot, never expose the unfinished source tail.
+            const component = renderBashCommandCall(theme, code, {
+                ...options,
+                expanded,
+                pureScriptOverride: { ...invocation, code },
+                lastComponent: previous,
+            });
+            previous = component;
+            return component.render(width);
         }),
     );
 }
@@ -141,6 +143,8 @@ export function createNativeBashFeature() {
                 maxCodePreviewLines: maxCodePreviewLines(),
                 showPrologueOmission: showPrologueOmission(),
                 headerLayout: headerLayout(),
+                shellLayout: shellLayout(),
+                shellOperatorPosition: shellOperatorPosition(),
                 invalidate: context.invalidate,
             });
         }

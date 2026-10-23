@@ -378,101 +378,131 @@ describe("actual Pi CLI in a real PTY", () => {
         }
     }, 45_000);
 
-    it("reflows a completed Bash chain in the actual Pi process", async () => {
-        const fixture = createFixtureWorkspace();
-        fixtures.push(fixture);
-        const pi = new PiPtyProcess(
-            launchOptions(fixture, { initialPrompt: "run the deterministic bash chain" }),
-        );
-        try {
-            const wide = await pi.waitForText("STREAM_COMPLETE", PTY_TIMEOUT_MS);
-            const wideCallRows = wide.rows.filter(
-                (row) => row.text.includes("Bash") && row.text.includes("CHAIN_ALPHA"),
+    it.each(["token", "statement", "block"])(
+        "reflows a completed Bash chain in %s mode in the actual Pi process",
+        async (code) => {
+            const fixture = createFixtureWorkspace();
+            fixtures.push(fixture);
+            writeFileSync(
+                getGlowupGlobalConfigPath(fixture.agentDir),
+                JSON.stringify({ streaming: { code } }),
             );
-            expect(wideCallRows).toHaveLength(1);
-            expect(wideCallRows[0]?.text).toContain("&& printf");
-            expectTerminalInvariants(wide, [resolve("test/pty/fixtures/offline-provider.ts")]);
-
-            const narrowSequence = pi.frames().length;
-            pi.resize(44, 42);
-            const narrow = await pi.waitForFrame(
-                (frame) =>
-                    frame.columns === 44 &&
-                    frame.rows.some(
-                        (row) =>
-                            row.text.includes("CHAIN_ALPHA") && row.text.trimEnd().endsWith("&&"),
-                    ),
-                PTY_TIMEOUT_MS,
-                narrowSequence,
+            const pi = new PiPtyProcess(
+                launchOptions(fixture, { initialPrompt: "run the deterministic bash chain" }),
             );
-            expect(
-                narrow.rows
-                    .filter(
-                        (row) =>
-                            row.text.includes("CHAIN_ALPHA") || row.text.includes("CHAIN_BETA"),
-                    )
-                    .every((row) => !row.isWrapped),
-            ).toBe(true);
+            try {
+                const wide = await pi.waitForFrame(
+                    (frame) =>
+                        frame.text.includes("STREAM_COMPLETE") &&
+                        frame.rows.some(
+                            (row) => row.text.includes("Bash") && row.text.includes("CHAIN_ALPHA"),
+                        ),
+                    PTY_TIMEOUT_MS,
+                );
+                const wideCallRows = wide.rows.filter(
+                    (row) => row.text.includes("Bash") && row.text.includes("CHAIN_ALPHA"),
+                );
+                expect(wideCallRows).toHaveLength(1);
+                expect(wideCallRows[0]?.text).toContain("&& printf");
+                expectTerminalInvariants(wide, [resolve("test/pty/fixtures/offline-provider.ts")]);
 
-            expectTerminalInvariants(narrow, [resolve("test/pty/fixtures/offline-provider.ts")]);
+                const narrowSequence = pi.frames().length;
+                pi.resize(44, 42);
+                const narrow = await pi.waitForFrame(
+                    (frame) =>
+                        frame.columns === 44 &&
+                        frame.rows.some(
+                            (row) =>
+                                row.text.includes("CHAIN_ALPHA") &&
+                                row.text.trimEnd().endsWith("&&"),
+                        ),
+                    PTY_TIMEOUT_MS,
+                    narrowSequence,
+                );
+                expect(
+                    narrow.rows
+                        .filter(
+                            (row) =>
+                                row.text.includes("CHAIN_ALPHA") || row.text.includes("CHAIN_BETA"),
+                        )
+                        .every((row) => !row.isWrapped),
+                ).toBe(true);
 
-            const restoredSequence = pi.frames().length;
-            pi.resize(160, 42);
-            const restored = await pi.waitForFrame(
-                (frame) =>
-                    frame.columns === 160 &&
-                    frame.rows.some(
+                expectTerminalInvariants(narrow, [
+                    resolve("test/pty/fixtures/offline-provider.ts"),
+                ]);
+
+                const restoredSequence = pi.frames().length;
+                pi.resize(160, 42);
+                const restored = await pi.waitForFrame(
+                    (frame) =>
+                        frame.columns === 160 &&
+                        frame.rows.some(
+                            (row) => row.text.includes("Bash") && row.text.includes("CHAIN_ALPHA"),
+                        ),
+                    PTY_TIMEOUT_MS,
+                    restoredSequence,
+                );
+                expect(
+                    restored.rows.filter(
                         (row) => row.text.includes("Bash") && row.text.includes("CHAIN_ALPHA"),
                     ),
-                PTY_TIMEOUT_MS,
-                restoredSequence,
+                ).toHaveLength(1);
+
+                expectTerminalInvariants(restored, [
+                    resolve("test/pty/fixtures/offline-provider.ts"),
+                ]);
+            } catch (cause: unknown) {
+                await pi.writeFailureArtifacts("bash-chain-resize", cause);
+                throw cause;
+            } finally {
+                await pi.stop();
+            }
+        },
+        45_000,
+    );
+
+    it.each(["token", "statement", "block"])(
+        "separates and structures compound Bash in %s mode even when the command fits",
+        async (code) => {
+            const fixture = createFixtureWorkspace();
+            fixtures.push(fixture);
+            writeFileSync(
+                getGlowupGlobalConfigPath(fixture.agentDir),
+                JSON.stringify({ streaming: { code } }),
             );
-            expect(
-                restored.rows.filter(
-                    (row) => row.text.includes("Bash") && row.text.includes("CHAIN_ALPHA"),
-                ),
-            ).toHaveLength(1);
-
-            expectTerminalInvariants(restored, [resolve("test/pty/fixtures/offline-provider.ts")]);
-        } catch (cause: unknown) {
-            await pi.writeFailureArtifacts("bash-chain-resize", cause);
-            throw cause;
-        } finally {
-            await pi.stop();
-        }
-    }, 45_000);
-
-    it("separates and structures compound Bash even when the command fits", async () => {
-        const fixture = createFixtureWorkspace();
-        fixtures.push(fixture);
-        const pi = new PiPtyProcess(
-            launchOptions(fixture, {
-                columns: 312,
-                initialPrompt: "run the deterministic bash layout",
-            }),
-        );
-        try {
-            const completed = await pi.waitForFrame(
-                (frame) =>
-                    frame.text.includes("STREAM_COMPLETE") &&
-                    frame.rows.some((row) => row.text.trim() === "• Bash") &&
-                    frame.rows.some((row) =>
-                        row.text.includes("│ for item in alpha beta gamma delta; do"),
-                    ) &&
-                    frame.rows.some((row) => row.text.includes("│   if test")) &&
-                    frame.rows.some((row) => row.text.includes("│ done | sort")),
-                PTY_TIMEOUT_MS,
+            const pi = new PiPtyProcess(
+                launchOptions(fixture, {
+                    columns: 312,
+                    initialPrompt: "run the deterministic bash layout",
+                }),
             );
+            try {
+                const completed = await pi.waitForFrame(
+                    (frame) =>
+                        frame.text.includes("STREAM_COMPLETE") &&
+                        frame.rows.some((row) => row.text.trim() === "• Bash") &&
+                        frame.rows.some((row) =>
+                            row.text.includes("│ for item in alpha beta gamma delta; do"),
+                        ) &&
+                        frame.rows.some((row) => row.text.includes("│   if test")) &&
+                        frame.rows.some((row) => row.text.includes("│ done | sort")),
+                    PTY_TIMEOUT_MS,
+                );
 
-            expect(completed.text).not.toContain("• Bash for item");
-            expectTerminalInvariants(completed, [resolve("test/pty/fixtures/offline-provider.ts")]);
-        } catch (cause: unknown) {
-            await pi.writeFailureArtifacts("wide-compound-bash-layout", cause);
-            throw cause;
-        } finally {
-            await pi.stop();
-        }
-    }, 45_000);
+                expect(completed.text).not.toContain("• Bash for item");
+                expectTerminalInvariants(completed, [
+                    resolve("test/pty/fixtures/offline-provider.ts"),
+                ]);
+            } catch (cause: unknown) {
+                await pi.writeFailureArtifacts("wide-compound-bash-layout", cause);
+                throw cause;
+            } finally {
+                await pi.stop();
+            }
+        },
+        45_000,
+    );
 
     it("formats a restored Node call in the real transcript", async () => {
         const fixture = createFixtureWorkspace();
