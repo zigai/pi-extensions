@@ -1422,11 +1422,76 @@ describe("tool execution patches", () => {
 
         try {
             renderAbandonedRow();
+            expect(toolRendererPatchStats(prototype).completedLineCacheEntries).toBeGreaterThan(0);
 
             // The row invalidation WeakRef keeps a newly observed row alive until this job ends.
             await setImmediate();
-            expect(toolRendererPatchStats(prototype).completedLineCacheEntries).toBeGreaterThan(0);
             expect(queryObjects(RetainedPreview, { format: "count" })).toBe(0);
+        } finally {
+            configureBuiltInToolRendererPatch(false, undefined, prototype);
+        }
+    });
+
+    it("releases abandoned cached lines without evicting live completed components", async () => {
+        class CachedLines extends Array<string> {}
+
+        const prototype = createPrototype();
+        let lineRenders = 0;
+        installBuiltInToolRendererPatch(
+            {
+                renderCall: (_tool, _args, _theme, context) => ({
+                    render(width) {
+                        lineRenders += 1;
+                        const lines = new CachedLines();
+                        lines.push(`${context.toolCallId}:${width}`);
+
+                        return lines;
+                    },
+                    invalidate: noop,
+                }),
+                renderResult: () => undefined,
+            },
+            prototype,
+        );
+
+        function createRow(id: string): FakeComponent {
+            const component = prototype.getCallRenderer.call({ toolName: "read" })?.(
+                {},
+                plainTheme,
+                {
+                    ...renderContext,
+                    toolCallId: id,
+                    cwd: "/workspace",
+                    state: {},
+                    invalidate: noop,
+                },
+            );
+            if (component === undefined) throw new Error("Expected completed component");
+
+            component.render(80);
+
+            return component;
+        }
+
+        try {
+            const live = createRow("live");
+
+            for (let index = 0; index < 20; index++) createRow(`abandoned-${index}`);
+
+            // Cross the WeakRef job boundary, collect dead wrappers, run their cleanup,
+            // then collect the released arrays. This checks reachability, not heap/timing.
+            for (let attempt = 0; attempt < 10; attempt++) {
+                await setImmediate();
+
+                if (queryObjects(CachedLines, { format: "count" }) === 1) break;
+            }
+
+            expect(queryObjects(CachedLines, { format: "count" })).toBe(1);
+            expect(toolRendererPatchStats(prototype).completedLineCacheEntries).toBe(1);
+            expect(live.render(80)).toEqual(["live:80"]);
+            expect(lineRenders).toBe(21);
+            expect(live.render(40)).toEqual(["live:40"]);
+            expect(lineRenders).toBe(22);
         } finally {
             configureBuiltInToolRendererPatch(false, undefined, prototype);
         }

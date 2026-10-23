@@ -121,3 +121,5 @@ the stored baseline and `sha256sum -c` passes. Existing lint warnings are unchan
 Rollback: find the `perf(pi-glowup): precompile protocol snapshot validation` commit
 with `git log --oneline -- src/tools/protocol/decode.ts`, then `git revert <sha>`.
 Re-run the golden checks and renderer/PTY suites after rollback.
+
+Further profiling, retained-memory work, and rejected experiments: [round 2](performance-round2.md).

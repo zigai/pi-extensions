@@ -282,6 +282,12 @@ const completedComponentStates = new WeakMap<Component, CompletedComponentState>
 // Retain only bounded line state, never the wrapper/base renderer and its source graph.
 const completedLineCacheLru = new Map<CompletedComponentState, number>();
 
+// The held state never points back to its wrapper or source renderer. Bounds remain
+// authoritative; finalization only releases orphaned entries earlier than LRU eviction.
+const completedLineCacheFinalizer = new FinalizationRegistry<CompletedComponentState>(
+    releaseCompletedLineCache,
+);
+
 let completedLineCacheBytes = 0;
 let completedLineCacheLimitBytes = DEFAULT_COMPLETED_LINE_CACHE_BYTES;
 let completedLineCacheLimitEntries = DEFAULT_COMPLETED_LINE_CACHE_ENTRIES;
@@ -303,6 +309,7 @@ function releaseCompletedLineCache(state: CompletedComponentState): void {
     if (retainedBytes !== undefined) {
         completedLineCacheLru.delete(state);
         completedLineCacheBytes -= retainedBytes;
+        completedLineCacheFinalizer.unregister(state);
     }
 
     state.cachedWidth = undefined;
@@ -311,6 +318,7 @@ function releaseCompletedLineCache(state: CompletedComponentState): void {
 
 function clearCompletedLineCache(): void {
     for (const state of completedLineCacheLru.keys()) {
+        completedLineCacheFinalizer.unregister(state);
         state.cachedWidth = undefined;
         state.cachedLines = undefined;
     }
@@ -331,6 +339,7 @@ function retainCompletedLines(
     state: CompletedComponentState,
     width: number,
     lines: string[],
+    wrapper: Component,
 ): void {
     releaseCompletedLineCache(state);
 
@@ -352,6 +361,7 @@ function retainCompletedLines(
     state.cachedLines = lines;
     completedLineCacheLru.set(state, bytes);
     completedLineCacheBytes += bytes;
+    completedLineCacheFinalizer.register(wrapper, state, state);
 }
 
 function cacheCompletedComponent(component: Component): Component {
@@ -371,7 +381,7 @@ function cacheCompletedComponent(component: Component): Component {
             completedLineCacheMisses += 1;
 
             const lines = base.render(width);
-            retainCompletedLines(state, width, lines);
+            retainCompletedLines(state, width, lines, wrapper);
 
             return lines;
         },

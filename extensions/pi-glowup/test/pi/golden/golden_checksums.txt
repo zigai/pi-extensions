@@ -1,0 +1,1 @@
+378fc24abdaee97c6b62339d75d4d42c64c55a753beed2240a1c9bcb82630625  test/pi/golden/completed-cache.sha256
