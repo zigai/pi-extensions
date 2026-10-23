@@ -152,7 +152,7 @@ describe("assistant structured streaming", () => {
         expect(raw.content).toEqual([{ type: "text", text: "First\n\nTail" }]);
     });
 
-    it("isolates components and blocks and leaves thinking/user components untouched", async () => {
+    it("isolates components and blocks and leaves user components untouched", async () => {
         const userMethod: unknown = Object.getOwnPropertyDescriptor(
             UserMessageComponent.prototype,
             "render",
@@ -181,13 +181,158 @@ describe("assistant structured streaming", () => {
         expect(text(b)).not.toContain("hidden");
     });
 
+    it.each(["sentence", "paragraph"] as const)(
+        "buffers thinking using %s boundaries without mutating provider content",
+        async (prose) => {
+            await install(prose, "statement");
+            const component = new AssistantMessageComponent();
+            const thinking = "First thought. Still in this paragraph\n\nUnfinished tail";
+            const block = Object.freeze({
+                type: "thinking" as const,
+                thinking,
+                thinkingSignature: "signature",
+            });
+            const raw = message("");
+            raw.content = [block];
+            Object.freeze(raw.content);
+            Object.freeze(raw);
+
+            component.updateContent(raw, true);
+            expect(text(component)).toContain("First thought.");
+            expect(text(component)).toContain("Still in this paragraph");
+            expect(text(component)).not.toContain("Unfinished tail");
+            component.invalidate();
+            component.setOutputPad(2);
+            expect(text(component)).not.toContain("Unfinished tail");
+
+            component.updateContent({
+                ...raw,
+                content: [{ ...block, thinking: thinking + " continued" }],
+            });
+            expect(text(component)).not.toContain("continued");
+            component.updateContent(raw, false);
+            expect(text(component)).toContain("Unfinished tail");
+            expect(raw.content).toEqual([block]);
+            expect(block.thinkingSignature).toBe("signature");
+        },
+    );
+
+    it.each(["sentence", "paragraph"] as const)(
+        "holds partial thinking at every character boundary in %s mode",
+        async (prose) => {
+            await install(prose, "token");
+            const component = new AssistantMessageComponent();
+            const source = "First thought. Second thought.\n\nPending tail";
+            for (let end = 0; end <= source.length; end++) {
+                const raw = message("");
+                raw.content = [{ type: "thinking", thinking: source.slice(0, end) }];
+                component.updateContent(raw, true);
+                const rendered = text(component).trim();
+                let expected = "";
+                if (end >= source.indexOf("Pending")) expected = "First thought. Second thought.";
+                else if (prose === "sentence") {
+                    if (end >= source.indexOf("Second")) expected = "First thought.";
+                    if (end >= source.indexOf("\n") + 1)
+                        expected = "First thought. Second thought.";
+                }
+
+                expect(rendered, `prefix ${end}`).toBe(expected);
+            }
+        },
+    );
+
+    it.each(["thinking", "toolCall"] as const)(
+        "flushes response tails before a subsequent %s block",
+        async (kind) => {
+            await install("paragraph", "token");
+            const component = new AssistantMessageComponent();
+            const raw = message("Response without punctuation");
+            component.updateContent(raw, true);
+            expect(text(component)).not.toContain("Response without punctuation");
+            if (kind === "thinking")
+                raw.content.push({ type: "thinking", thinking: "Pending thought" });
+            else raw.content.push({ type: "toolCall", id: "call", name: "read", arguments: {} });
+            component.updateContent(raw);
+            expect(text(component)).toContain("Response without punctuation");
+            expect(text(component)).not.toContain("Pending thought");
+        },
+    );
+
+    it("releases thinking sentences before their paragraph ends and leaves code plain", async () => {
+        const { streams } = await install("sentence", "statement");
+        const component = new AssistantMessageComponent();
+        const raw = message("");
+        raw.content = [{ type: "thinking", thinking: "Ready. Next thought" }];
+        component.updateContent(raw, true);
+        expect(text(component)).toContain("Ready.");
+        expect(text(component)).not.toContain("Next thought");
+        raw.content = [{ type: "thinking", thinking: "Ready. Next thought. Pending" }];
+        component.updateContent(raw);
+        expect(text(component)).toContain("Next thought.");
+        expect(text(component)).not.toContain("Pending");
+        raw.content = [{ type: "thinking", thinking: "```js\nconst unfinished =" }];
+        component.updateContent(raw, false);
+        await streams.settled();
+        expect(text(component)).toContain("const unfinished =");
+    });
+
+    it.each(["text", "thinking", "toolCall"] as const)(
+        "flushes the preceding thinking tail when a %s block starts",
+        async (kind) => {
+            await install("paragraph", "token");
+            const component = new AssistantMessageComponent();
+            const raw = message("");
+            const thought = { type: "thinking" as const, thinking: "Thought without punctuation" };
+            raw.content = [thought];
+            component.updateContent(raw, true);
+            expect(text(component)).not.toContain(thought.thinking);
+            const next: AssistantMessage["content"][number] = {
+                type: "text",
+                text: "Response tail",
+            };
+            if (kind === "thinking")
+                raw.content = [thought, { type: "thinking", thinking: "Next thought" }];
+            else if (kind === "toolCall")
+                raw.content = [
+                    thought,
+                    { type: "toolCall", id: "call", name: "read", arguments: {} },
+                ];
+            else raw.content = [thought, next];
+            component.updateContent(raw);
+            expect(text(component)).toContain(thought.thinking);
+            expect(text(component)).not.toContain("Response tail");
+            expect(text(component)).not.toContain("Next thought");
+        },
+    );
+
+    it("preserves token thinking and restores buffered thinking on teardown", async () => {
+        const { handle } = await install("paragraph", "token");
+        const component = new AssistantMessageComponent();
+        const raw = message("");
+        raw.content = [{ type: "thinking", thinking: "Buffered thought" }];
+        component.updateContent(raw, true);
+        expect(text(component)).not.toContain("Buffered thought");
+        handle.dispose();
+        expect(text(component)).toContain("Buffered thought");
+        await install("token", "statement");
+        component.updateContent(raw, true);
+        expect(text(component)).toContain("Buffered thought");
+    });
+
     it.each(["aborted", "error", "length"] as const)(
         "flushes %s even if host streaming flag remains true",
         async (stopReason) => {
             await install("sentence", "token");
-            const component = new AssistantMessageComponent();
-            component.updateContent({ ...message("Unfinished tail"), stopReason }, true);
-            expect(text(component)).toContain("Unfinished tail");
+            for (const kind of ["text", "thinking"] as const) {
+                const component = new AssistantMessageComponent();
+                const raw = message("Unfinished tail");
+                if (kind === "thinking")
+                    raw.content = [{ type: "thinking", thinking: "Unfinished tail" }];
+                component.updateContent(raw, true);
+                expect(text(component)).not.toContain("Unfinished tail");
+                component.updateContent({ ...raw, stopReason }, true);
+                expect(text(component)).toContain("Unfinished tail");
+            }
         },
     );
 

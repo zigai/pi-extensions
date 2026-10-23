@@ -807,7 +807,7 @@
             }
           ],
           "default": "token",
-          "description": "Reveal assistant prose as tokens, completed sentences, or Markdown paragraphs and list items."
+          "description": "Reveal assistant response and thinking prose as tokens, completed sentences, or Markdown paragraphs and list items. Completed content blocks always reveal their remaining tail."
         },
         "code": {
           "anyOf": [

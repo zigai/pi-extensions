@@ -209,6 +209,16 @@ export async function installAssistantStreaming(
             };
 
             const content = raw.content.map((block, index) => {
+                // Providers append blocks in generation order. Once another block
+                // starts, this one's unpunctuated tail is no longer speculative.
+                const blockComplete = complete || index < raw.content.length - 1;
+                if (block.type === "thinking") {
+                    return {
+                        ...block,
+                        thinking: revealProse(block.thinking, options.prose, blockComplete),
+                    };
+                }
+
                 if (block.type !== "text") return block;
 
                 return {
@@ -216,7 +226,7 @@ export async function installAssistantStreaming(
                     text: renderText(
                         block.text,
                         `${remembered.key}:text:${index}`,
-                        complete,
+                        blockComplete,
                         options,
                         remembered.targetWidth,
                         invalidate,

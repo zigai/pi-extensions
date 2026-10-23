@@ -5,6 +5,16 @@ const ABBREVIATION =
 
 const sentenceSegments = new Intl.Segmenter(undefined, { granularity: "sentence" });
 
+function isAbbreviation(source: string, period: number): boolean {
+    // Scan only letters/periods with the abbreviation pattern's case-folding
+    // semantics. Testing every full prefix makes long reasoning traces quadratic.
+    let start = period;
+    while (start > 0 && /[A-Za-z.]/iu.test(source[start - 1] ?? "")) start--;
+
+    // Retain the preceding character so word boundaries still reject e.g. 2Dr.
+    return ABBREVIATION.test(source.slice(Math.max(0, start - 1), period + 1));
+}
+
 function sentenceEnd(source: string): number {
     const candidates = new Map<number, number>();
     for (const segment of sentenceSegments.segment(source)) {
@@ -54,7 +64,7 @@ function sentenceEnd(source: string): number {
 
         const end = candidates.get(index);
         if (end === undefined) continue;
-        if (character === "." && ABBREVIATION.test(source.slice(0, index + 1))) continue;
+        if (character === "." && isAbbreviation(source, index)) continue;
 
         boundary = end;
         index = end - 1;

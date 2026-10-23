@@ -23,6 +23,19 @@ describe("prose boundaries", () => {
         }
     });
 
+    it("checks abbreviation word boundaries and arbitrarily long dotted initials", () => {
+        for (const word of ["Dr.", "e.g.", "U.S.", "K.", "ſ.", "A.".repeat(100) + "Z."]) {
+            expect(revealProse(`Use ${word} Next`, "sentence", false)).toBe("");
+        }
+
+        for (const word of ["2Dr.", "_Dr.", "NotDr.", "10K.", "aſ."]) {
+            expect(revealProse(`Use ${word} Next`, "sentence", false)).toBe(`Use ${word} `);
+        }
+
+        const repeated = "A completed thought. Another thought with numbers 3.14.\n".repeat(2000);
+        expect(revealProse(repeated + "Unfinished", "sentence", false)).toBe(repeated);
+    });
+
     it("releases complete Markdown blocks without requiring terminal punctuation", () => {
         expect(revealProse("- First item\n- Second item", "sentence", false)).toBe(
             "- First item\n",

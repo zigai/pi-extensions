@@ -77,7 +77,7 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-glowup.json`.
 | `scriptPreview.shellLayout` | `preserve` \| `auto` \| `always` | `"auto"` | Choose when composed Bash commands are reflowed at safe syntax boundaries. |
 | `scriptPreview.shellOperatorPosition` | `trailing` \| `leading` | `"trailing"` | Place Bash chain operators before or after reflowed line breaks. |
 | `scriptPreview.formatters` | Record<string, [CommandFormatter](#settings-type-CommandFormatter) \| [PythonFormatter](#settings-type-PythonFormatter) \| [JavaScriptFormatter](#settings-type-JavaScriptFormatter) \| [TypeScriptFormatter](#settings-type-TypeScriptFormatter) \| [BashFormatter](#settings-type-BashFormatter)> | `{}` | Display-only profiles keyed by language id; statement mode formats each unit in both views, otherwise expansion shows original source. |
-| `streaming.prose` | `token` \| `sentence` \| `paragraph` | `"token"` | Reveal assistant prose as tokens, completed sentences, or Markdown paragraphs and list items. |
+| `streaming.prose` | `token` \| `sentence` \| `paragraph` | `"token"` | Reveal assistant response and thinking prose as tokens, completed sentences, or Markdown paragraphs and list items. Completed content blocks always reveal their remaining tail. |
 | `streaming.code` | `token` \| `statement` \| `block` | `"token"` | Reveal assistant code fences, writes, and script previews as tokens, completed statements, or whole blocks. Statement mode supports JavaScript, TypeScript, Python, and Bash; other languages wait for completion. Configured formatters format each statement separately in both views. Edits and patches are unchanged. |
 
 ### Defaults

@@ -72,7 +72,7 @@ const streamingSchema = Type.Object(
             {
                 default: "token",
                 description:
-                    "Reveal assistant prose as tokens, completed sentences, or Markdown paragraphs and list items.",
+                    "Reveal assistant response and thinking prose as tokens, completed sentences, or Markdown paragraphs and list items. Completed content blocks always reveal their remaining tail.",
             },
         ),
         code: Type.Union(
