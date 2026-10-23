@@ -178,6 +178,11 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
         if (ctx.hasUI) {
             ctx.ui.setEditorText(editorText);
 
+            if (selectedCommand.inlineHelp === "hidden") {
+                notifyIssues(ctx, issueMessages);
+                return undefined;
+            }
+
             const [
                 { helperInvocationForEditorText },
                 { setHelperWidget },

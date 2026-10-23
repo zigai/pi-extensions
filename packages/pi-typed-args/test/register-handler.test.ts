@@ -147,6 +147,43 @@ describe("registered typed command handler", () => {
         }
     });
 
+    it("reports rejected submissions when inline help is hidden and preserves the draft", async () => {
+        let handlerRuns = 0;
+        const editorUpdates: string[] = [];
+        const notifications: Array<{ message: string; level: string | undefined }> = [];
+        const registration = captureRegistration({
+            name: "hidden-helper-command",
+            description: "Hidden inline help",
+            inlineHelp: "hidden",
+            args: { value: { type: "string", position: 0, rest: true } },
+            run() {
+                handlerRuns += 1;
+            },
+        });
+        const ctx = createTestExtensionCommandContext({
+            mode: "tui",
+            ui: {
+                setEditorText(text) {
+                    editorUpdates.push(text);
+                },
+                notify(message, level) {
+                    notifications.push({ message, level });
+                },
+            },
+        });
+
+        try {
+            await registration.handler('"unfinished value', ctx);
+            assert.equal(handlerRuns, 0);
+            assert.deepEqual(editorUpdates, ['/hidden-helper-command "unfinished value']);
+            assert.deepEqual(notifications, [
+                { message: "Unterminated quote in arguments", level: "error" },
+            ]);
+        } finally {
+            registration.dispose();
+        }
+    });
+
     it("notifies directly when missing required values cannot open a form", async () => {
         const notifications: Array<{ message: string; level: string | undefined }> = [];
         const registration = captureRegistration({

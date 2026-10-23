@@ -162,7 +162,7 @@ workspace.serializeSubcommand({
 
 Set `formPolicy` on the root or an individual subcommand to `"manual"`, `"missing"`, `"invalid"`, or `"always"`. The default is `"missing"`.
 
-Set `inlineHelp: "hidden"` when a command should retain typed parsing, completion, and Tab-opened forms without rendering the compact live helper above or below the editor. The default is `"auto"`.
+Set `inlineHelp: "hidden"` to keep typed parsing, completion, and Tab-opened forms without the compact live helper. Rejected submissions still show error notifications. The default is `"auto"`.
 
 ## Inline ghost text
 
