@@ -7,6 +7,25 @@ import {
 } from "../../../../src/tools/built-in/bash/command.ts";
 
 describe("bash command analysis", () => {
+    it.each([
+        { source: "if false; then printf alpha; else # else\n printf beta; fi", expected: "beta" },
+        { source: 'if true; then printf "#"; else # else\n printf beta; fi', expected: "#" },
+    ])(
+        "preserves control-flow semantics when a comment repeats a keyword: $source",
+        ({ source, expected }) => {
+            const formatted = reflowBashCommand(source);
+            if (formatted === undefined) throw new Error("Expected a structured command preview");
+
+            const result = spawnSync("bash", ["--noprofile", "--norc", "-c", formatted], {
+                encoding: "utf8",
+                env: { PATH: process.env.PATH },
+            });
+
+            expect(result.status, result.stderr).toBe(0);
+            expect(result.stdout).toBe(expected);
+        },
+    );
+
     it("extracts only clean standalone language calls", () => {
         expect(analyzeBashCommand(`python -c "print('check')"`).pureScript).toEqual({
             label: "Python",
