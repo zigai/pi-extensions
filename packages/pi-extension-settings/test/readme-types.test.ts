@@ -299,9 +299,11 @@ describe("README schema rendering", () => {
         expect(text).toContain(
             "| `entries` | [Entry](#settings-type-Entry)[] | `[]` | Ordered entries. |",
         );
+
         expect(text).toContain(
             "| `selected` | [Entry](#settings-type-Entry) \\| null | `null` | Selected entry. |",
         );
+
         expect(text.match(/<a id="settings-type-Entry"><\/a>/g)).toHaveLength(1);
         expect(text.match(/^#### Entry$/gm)).toHaveLength(1);
         expect(text).toContain("| `label` | string | Yes | Display label. |");
