@@ -1,4 +1,7 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext, ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { registerExtensionDiagnostics } from "@zigai/pi-extension-internals";
+import { Type } from "typebox";
+import { Compile } from "typebox/compile";
 
 import { applyModeEditor } from "./editor.ts";
 import { ModeController } from "./mode-controller.ts";
@@ -15,6 +18,18 @@ import {
 } from "./settings.ts";
 import { isShortcutId } from "./shortcut-id.ts";
 import { ThinkingStatusPatchSession } from "./status-patch-session.ts";
+
+const modeSelectionQuery = Compile(
+    Type.Object(
+        {
+            version: Type.Literal(1),
+            sessionId: Type.String(),
+            mode: Type.String(),
+            accept: Type.Function([Type.Unknown()], Type.Void()),
+        },
+        { additionalProperties: false },
+    ),
+);
 
 export default function (pi: ExtensionAPI) {
     let sessionGeneration = 0;
@@ -33,7 +48,51 @@ export default function (pi: ExtensionAPI) {
         return sessionSettings;
     };
 
-    const controller = new ModeController(pi, new ModesStore(resolveSessionSettings));
+    let currentContext: ExtensionContext | undefined;
+    const publishMode = (mode: string): void => {
+        pi.events.emit("pi-toggles:register-context-key", {
+            owner: "pi-model-modes",
+            key: "mode.active",
+            type: "string",
+            description: "Authoritative selected model mode; custom after a manual model choice.",
+        });
+        pi.events.emit("pi-toggles:set-context", {
+            owner: "pi-model-modes",
+            key: "mode.active",
+            value: mode,
+        });
+    };
+
+    const controller = new ModeController(pi, new ModesStore(resolveSessionSettings), publishMode);
+    const unsubscribeContext = pi.events.on("pi-toggles:context-ready", () => {
+        if (currentContext !== undefined) publishMode(controller.currentMode);
+    });
+    const unsubscribeSelection = pi.events.on("pi-model-modes:select", (value) => {
+        if (currentContext === undefined || !modeSelectionQuery.Check(value)) return;
+
+        const request = modeSelectionQuery.Parse(value);
+        if (request.sessionId !== currentContext.sessionManager.getSessionId()) return;
+
+        const ctx = currentContext;
+        const generation = sessionGeneration;
+        const mode = request.mode;
+
+        request.accept(
+            (async () => {
+                await controller.ensure(ctx);
+
+                if (generation !== sessionGeneration) return;
+
+                if (!Object.hasOwn(controller.modes.modes, mode))
+                    throw new Error("Requested model mode is unavailable.");
+
+                await controller.applyMode(ctx, mode);
+
+                if (generation !== sessionGeneration || controller.currentMode !== mode)
+                    throw new Error("Requested model mode was not applied.");
+            })(),
+        );
+    });
     const picker = new ModePicker(controller);
     const statusPatchSession = new ThinkingStatusPatchSession();
     let editorHandle: { dispose(): void } | undefined;
@@ -57,6 +116,8 @@ export default function (pi: ExtensionAPI) {
 
     pi.on("session_start", async (event, ctx) => {
         sessionGeneration += 1;
+        controller.resetSession();
+        currentContext = ctx;
 
         const generation = sessionGeneration;
         statusPatchSession.reset();
@@ -91,8 +152,22 @@ export default function (pi: ExtensionAPI) {
 
         await controller.handleSessionActivated(ctx, event);
     });
-    pi.on("model_select", async (event, ctx) => controller.handleModelSelect(ctx, event));
-    pi.on("session_shutdown", () => {
+
+    pi.on("model_select", async (event, ctx) => {
+        currentContext = ctx;
+        await controller.handleModelSelect(ctx, event);
+    });
+
+    pi.on("session_shutdown", (event) => {
+        controller.resetSession();
+        currentContext = undefined;
+        pi.events.emit("pi-toggles:clear-context", { owner: "pi-model-modes" });
+
+        if (event.reason === "quit" || event.reason === "reload") {
+            unsubscribeContext();
+            unsubscribeSelection();
+        }
+
         sessionGeneration += 1;
         sessionSettings = undefined;
         sessionSettingsContext = undefined;
@@ -100,4 +175,5 @@ export default function (pi: ExtensionAPI) {
         editorHandle?.dispose();
         editorHandle = undefined;
     });
+    registerExtensionDiagnostics(pi);
 }
