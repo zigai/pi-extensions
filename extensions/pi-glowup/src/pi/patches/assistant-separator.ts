@@ -8,6 +8,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Container, Spacer, visibleWidth, type Component } from "@earendil-works/pi-tui";
 import ansiStyles from "ansi-styles";
+import { TRANSCRIPT_PRESENTATION } from "@zigai/pi-extension-internals";
 import { hasNonWhitespaceText } from "../../text-boundaries.ts";
 
 const ASSISTANT_SEPARATOR_PATCH_STATE_KEY = Symbol.for("zigai.pi-glowup.assistant-separator.state");
@@ -50,12 +51,15 @@ type ChatContainerInstance = Container;
 
 type ChatTransitionPatchState = {
     enabled: boolean;
-    readonly originalAddChild: ChatContainerPrototype["addChild"];
-    readonly wrapperAddChild?: NonNullable<ChatContainerPrototype["addChild"]>;
+    readonly originalRender: ChatContainerPrototype["render"];
+    readonly wrapperRender?: NonNullable<ChatContainerPrototype["render"]>;
+    readonly originalPrepare: ChatContainerPrototype[typeof TRANSCRIPT_PRESENTATION];
+    readonly wrapperPrepare: NonNullable<ChatContainerPrototype[typeof TRANSCRIPT_PRESENTATION]>;
 };
 
 type ChatContainerPrototype = {
-    addChild?: (this: ChatContainerInstance, component: Component) => void;
+    render?: (this: ChatContainerInstance, width: number) => string[];
+    [TRANSCRIPT_PRESENTATION]?: (this: ChatContainerInstance) => void;
     [CHAT_TRANSITION_PATCH_STATE_KEY]?: ChatTransitionPatchState;
 };
 
@@ -158,8 +162,6 @@ function assistantAddChildCalls(message: AssistantMessageLike): AssistantAddChil
     return calls;
 }
 
-const chatComponentKinds = new WeakMap<ChatContainerInstance, ChatComponentKind>();
-
 function shouldRenderAssistantSeparator(previousKind: ChatComponentKind | undefined): boolean {
     return previousKind === "tool";
 }
@@ -191,31 +193,15 @@ function markAssistantSeparator(component: Component, shouldRender: boolean): vo
 }
 
 function createChatTransitionSeparatorWrapper(
-    originalAddChild: (this: ChatContainerInstance, component: Component) => void,
-    isEnabled: () => boolean,
-): NonNullable<ChatContainerPrototype["addChild"]> {
-    return function addChildWithChatTransitionSeparator(
+    originalRender: NonNullable<ChatContainerPrototype["render"]>,
+    prepare: NonNullable<ChatContainerPrototype[typeof TRANSCRIPT_PRESENTATION]>,
+): NonNullable<ChatContainerPrototype["render"]> {
+    return function renderWithChatTransitionSeparator(
         this: ChatContainerInstance,
-        component: Component,
-    ): void {
-        if (!isEnabled()) {
-            originalAddChild.call(this, component);
-            return;
-        }
-
-        const kind = componentKind(component);
-        if (kind === "assistant") {
-            markAssistantSeparator(
-                component,
-                shouldRenderAssistantSeparator(chatComponentKinds.get(this)),
-            );
-        }
-
-        originalAddChild.call(this, component);
-
-        if (kind !== undefined) {
-            chatComponentKinds.set(this, kind);
-        }
+        width: number,
+    ): string[] {
+        prepare.call(this);
+        return originalRender.call(this, width);
     };
 }
 
@@ -358,22 +344,41 @@ function installChatPrototypePatch(container: ChatContainerPrototype): void {
         return;
     }
 
-    const originalAddChild = container.addChild;
+    const originalRender = container.render;
+    const originalPrepare = container[TRANSCRIPT_PRESENTATION];
     let nextState: ChatTransitionPatchState;
-    const wrapperAddChild =
-        originalAddChild !== undefined
-            ? createChatTransitionSeparatorWrapper(originalAddChild, () => nextState.enabled)
+    const wrapperPrepare = function (this: ChatContainerInstance): void {
+        originalPrepare?.call(this);
+
+        if (!nextState.enabled) return;
+
+        let previousKind: ChatComponentKind | undefined;
+        for (const component of this.children) {
+            const kind = componentKind(component);
+            if (kind === "assistant")
+                markAssistantSeparator(component, shouldRenderAssistantSeparator(previousKind));
+
+            if (kind !== undefined) previousKind = kind;
+        }
+    };
+    const wrapperRender =
+        originalRender !== undefined
+            ? createChatTransitionSeparatorWrapper(originalRender, wrapperPrepare)
             : undefined;
-    if (wrapperAddChild !== undefined) {
-        container.addChild = wrapperAddChild;
+
+    container[TRANSCRIPT_PRESENTATION] = wrapperPrepare;
+    if (wrapperRender !== undefined) {
+        container.render = wrapperRender;
     }
 
     nextState = {
         enabled: true,
-        originalAddChild,
+        originalRender,
+        originalPrepare,
+        wrapperPrepare,
     };
-    if (wrapperAddChild !== undefined) {
-        nextState = { ...nextState, wrapperAddChild };
+    if (wrapperRender !== undefined) {
+        nextState = { ...nextState, wrapperRender };
     }
 
     container[CHAT_TRANSITION_PATCH_STATE_KEY] = nextState;
@@ -411,15 +416,20 @@ function restoreChatTransitionPatch(container: ChatContainerPrototype): void {
     }
 
     state.enabled = false;
-    if (state.wrapperAddChild !== undefined) {
-        if (container.addChild !== state.wrapperAddChild) {
-            return;
-        }
+    if (
+        container[TRANSCRIPT_PRESENTATION] !== state.wrapperPrepare ||
+        (state.wrapperRender !== undefined && container.render !== state.wrapperRender)
+    )
+        return;
 
-        if (state.originalAddChild === undefined) {
-            delete container.addChild;
+    if (state.originalPrepare === undefined) delete container[TRANSCRIPT_PRESENTATION];
+    else container[TRANSCRIPT_PRESENTATION] = state.originalPrepare;
+
+    if (state.wrapperRender !== undefined) {
+        if (state.originalRender === undefined) {
+            delete container.render;
         } else {
-            container.addChild = state.originalAddChild;
+            container.render = state.originalRender;
         }
     }
 

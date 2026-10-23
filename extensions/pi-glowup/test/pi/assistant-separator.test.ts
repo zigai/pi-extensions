@@ -1,9 +1,25 @@
 import { stripVTControlCharacters } from "node:util";
-import { initTheme, AssistantMessageComponent } from "@earendil-works/pi-coding-agent";
-import { Container, type Component } from "@earendil-works/pi-tui";
+import {
+    initTheme,
+    AssistantMessageComponent,
+    ToolExecutionComponent,
+} from "@earendil-works/pi-coding-agent";
+import {
+    Container,
+    HStack,
+    Text,
+    TuiMainScreen,
+    VStack,
+    type Component,
+} from "@earendil-works/pi-tui";
+import {
+    TRANSCRIPT_PRESENTATION,
+    prepareTranscriptPresentation,
+} from "@zigai/pi-extension-internals";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 import { configureAssistantSeparatorPatch } from "../../src/pi/patches/assistant-separator.ts";
+import { VirtualTerminal } from "../support/virtual-terminal.ts";
 
 const ASSISTANT_SEPARATOR_RENDER_KEY = Symbol.for("zigai.pi-glowup.assistant-separator.render");
 
@@ -46,7 +62,8 @@ type FakeAssistantPrototype = {
 };
 
 type FakeContainerPrototype = {
-    addChild(component: Component): void;
+    readonly children: Component[];
+    render(width: number): string[];
 };
 
 function installAssistantSeparatorPatch(prototype: FakeAssistantPrototype): void {
@@ -117,6 +134,130 @@ function createPrototypeWithContentUpdates(): FakeAssistantPrototype {
 }
 
 describe("assistant separator patch", () => {
+    it("separates restored tool history constructed before activation", () => {
+        initTheme("dark");
+        configureAssistantSeparatorPatch(false);
+        const chat = new Container();
+        const terminal = new VirtualTerminal(20, 10);
+        const tool = new ToolExecutionComponent(
+            "sample",
+            "completed-sample",
+            {},
+            undefined,
+            { renderCall: () => new Text("completed tool", 0, 0) },
+            new TuiMainScreen(terminal),
+            "/generic",
+        );
+        const reply = new AssistantMessageComponent(
+            assistantMessage([{ type: "text", text: "next reply" }]),
+        );
+        chat.addChild(tool);
+        chat.addChild(reply);
+        try {
+            configureAssistantSeparatorPatch(true);
+            const lines = chat.render(20).map((line) => stripVTControlCharacters(line).trimEnd());
+            expect(lines.slice(lines.indexOf(" next reply") - 3)).toEqual([
+                "",
+                "────────────────────",
+                "",
+                " next reply",
+            ]);
+        } finally {
+            configureAssistantSeparatorPatch(false);
+        }
+    });
+
+    it.each([true, false])(
+        "prepares separate transcript cards without rendering hidden native history (restored: %s)",
+        (restored) => {
+            initTheme("dark");
+            configureAssistantSeparatorPatch(false);
+
+            if (!restored) configureAssistantSeparatorPatch(true);
+
+            const chat = new Container();
+            const terminal = new VirtualTerminal(40, 20);
+            const tool = new ToolExecutionComponent(
+                "sample",
+                "completed-sample",
+                {},
+                undefined,
+                { renderCall: () => new Text("completed tool", 0, 0) },
+                new TuiMainScreen(terminal),
+                "/generic",
+            );
+            tool.updateResult(
+                {
+                    content: [{ type: "text", text: "first result\nlast result" }],
+                    isError: false,
+                },
+                false,
+            );
+            tool.setExpanded(true);
+            const reply = new AssistantMessageComponent(
+                assistantMessage([{ type: "text", text: "next reply" }]),
+            );
+            chat.addChild(tool);
+            chat.addChild(reply);
+            const cards = new VStack(
+                chat.children.map((component) => new HStack([{ component, grow: 1 }])),
+            );
+            const toolLines = tool.render(40);
+            const renderNative = chat.render.bind(chat);
+            chat.render = () => {
+                throw new Error("Hidden native rendering is forbidden");
+            };
+            const renderCards = (): string[] => {
+                prepareTranscriptPresentation(chat);
+
+                return cards.render(40).map((line) => stripVTControlCharacters(line).trimEnd());
+            };
+            try {
+                configureAssistantSeparatorPatch(true);
+                const cold = renderCards();
+                expect(cold).toContain("────────────────────────────────────────");
+                expect(cold).toContain(" next reply");
+                expect(cold.some((line) => line.includes("last result"))).toBe(true);
+                renderNative(40);
+                expect(renderCards()).toEqual(cold);
+                expect(chat.children).toEqual([tool, reply]);
+                expect(tool.render(40)).toEqual(toolLines);
+
+                configureAssistantSeparatorPatch(false);
+                expect(renderCards()).not.toContain("────────────────────────────────────────");
+                configureAssistantSeparatorPatch(true);
+                expect(renderCards()).toEqual(cold);
+            } finally {
+                chat.render = renderNative;
+                configureAssistantSeparatorPatch(false);
+            }
+        },
+    );
+
+    it("preserves another source presentation provider when enabled and restored", () => {
+        let preparations = 0;
+        const container = {
+            children: [],
+            [TRANSCRIPT_PRESENTATION](): void {
+                preparations += 1;
+            },
+            render(): never {
+                throw new Error("Hidden native rendering is forbidden");
+            },
+        };
+        const assistant = createPrototype();
+        try {
+            configureAssistantSeparatorPatch(true, assistant, container);
+            prepareTranscriptPresentation(container);
+            expect(preparations).toBe(1);
+            configureAssistantSeparatorPatch(false, assistant, container);
+            prepareTranscriptPresentation(container);
+            expect(preparations).toBe(2);
+        } finally {
+            configureAssistantSeparatorPatch(false, assistant, container);
+        }
+    });
+
     it("does not add a separator before an ordinary assistant reply", () => {
         const prototype = createPrototype();
         installAssistantSeparatorPatch(prototype);
@@ -346,7 +487,10 @@ describe("assistant separator patch", () => {
     it("stops adding separators and thinking spacing when disabled", () => {
         const prototype = createPrototypeWithContentUpdates();
         const containerPrototype: FakeContainerPrototype = {
-            addChild(_component: Component): void {},
+            children: [],
+            render(_width: number): string[] {
+                return [];
+            },
         };
         const message = assistantMessage([
             { type: "text", text: "first" },
@@ -366,37 +510,37 @@ describe("assistant separator patch", () => {
 
     it("does not clobber assistant and chat wrappers installed later", () => {
         const prototype = createPrototypeWithContentUpdates();
-        const addedChildren: Component[] = [];
         const containerPrototype: FakeContainerPrototype = {
-            addChild(component: Component): void {
-                addedChildren.push(component);
+            children: [new LabelComponent("child")],
+            render(width: number): string[] {
+                return this.children.flatMap((child) => child.render(width));
             },
         };
         configureAssistantSeparatorPatch(true, prototype, containerPrototype);
         const patchedPrototype: FakeAssistantPrototype = { ...prototype };
         const patchedContainerPrototype: FakeContainerPrototype = { ...containerPrototype };
         const patchedRenderDescriptor = Object.getOwnPropertyDescriptor(prototype, "render");
-        const patchedAddChildDescriptor = Object.getOwnPropertyDescriptor(
+        const patchedChatRenderDescriptor = Object.getOwnPropertyDescriptor(
             containerPrototype,
-            "addChild",
+            "render",
         );
-        if (patchedRenderDescriptor === undefined || patchedAddChildDescriptor === undefined) {
+        if (patchedRenderDescriptor === undefined || patchedChatRenderDescriptor === undefined) {
             throw new Error("expected Glowup assistant wrappers");
         }
 
         Object.defineProperty(patchedPrototype, "render", patchedRenderDescriptor);
-        Object.defineProperty(patchedContainerPrototype, "addChild", patchedAddChildDescriptor);
+        Object.defineProperty(patchedContainerPrototype, "render", patchedChatRenderDescriptor);
         prototype.render = function renderWithLaterWrapper(
             this: FakeAssistantInstance,
             width: number,
         ): string[] {
             return ["foreign", ...patchedPrototype.render.call(this, width)];
         };
-        containerPrototype.addChild = function addChildWithLaterWrapper(
+        containerPrototype.render = function renderWithLaterChatWrapper(
             this: FakeContainerPrototype,
-            component: Component,
-        ): void {
-            patchedContainerPrototype.addChild.call(this, component);
+            width: number,
+        ): string[] {
+            return ["foreign-chat", ...patchedContainerPrototype.render.call(this, width)];
         };
         configureAssistantSeparatorPatch(false, prototype, containerPrototype);
 
@@ -404,8 +548,7 @@ describe("assistant separator patch", () => {
             "foreign",
         ]);
 
-        containerPrototype.addChild(new LabelComponent("child"));
-        expect(addedChildren.flatMap((child) => child.render(20))).toEqual(["child"]);
+        expect(containerPrototype.render(20)).toEqual(["foreign-chat", "child"]);
 
         configureAssistantSeparatorPatch(true, prototype, containerPrototype);
         const contentContainer = new Container();
