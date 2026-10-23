@@ -490,6 +490,40 @@ describe("parseTypedCommandArgs", () => {
         assert.equal(parsed.values.task, "Build --literal output");
     });
 
+    it.each([
+        "Don't remove the sample files",
+        "Don't change the workers' output",
+        "The workers' output stays intact",
+        "Keep l'utilisateur unchanged",
+    ])("preserves unquoted apostrophes in positional text: %s", (text) => {
+        const restCommand: RegisteredTypedCommand = {
+            ...command,
+            args: {
+                body: { type: "string", position: 0, rest: true },
+                raw: { type: "boolean", aliases: ["r"] },
+            },
+        };
+
+        const parsed = parseTypedCommandArgs(restCommand, `-r ${text}`);
+        assert.deepEqual(parsed.issues, []);
+        assert.deepEqual(parsed.values, { raw: true, body: text });
+    });
+
+    it.each([
+        ["--ref 'feature branch'", "feature branch"],
+        ["--ref='feature branch'", "feature branch"],
+        ["--ref=feature's-branch", "feature's-branch"],
+    ])("supports quoted flag values and literal apostrophes: %s", (input, expected) => {
+        const flagCommand: RegisteredTypedCommand = {
+            ...command,
+            args: { ref: { type: "string" } },
+        };
+
+        const parsed = parseTypedCommandArgs(flagCommand, input);
+        assert.deepEqual(parsed.issues, []);
+        assert.equal(parsed.values.ref, expected);
+    });
+
     it("serializes named flags before a rest positional for a parseable round trip", () => {
         const restCommand: RegisteredTypedCommand = {
             ...command,

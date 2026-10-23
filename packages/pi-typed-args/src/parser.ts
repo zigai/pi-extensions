@@ -212,8 +212,9 @@ export function lexTypedArgumentString(input: string): LexResult {
             continue;
         }
 
-        if (char === '"' || char === "'") {
-            beginToken(index);
+        beginToken(index);
+
+        if (char === '"' || (char === "'" && (index === tokenStart || input[index - 1] === "="))) {
             quote = char;
             tokenQuote ??= char;
             continue;
@@ -221,8 +222,6 @@ export function lexTypedArgumentString(input: string): LexResult {
 
         if (char === "\\") {
             const next = input[index + 1];
-            beginToken(index);
-
             if (next !== undefined && isOutsideEscapeTarget(next)) {
                 current += next;
                 index += 1;
@@ -234,7 +233,6 @@ export function lexTypedArgumentString(input: string): LexResult {
             continue;
         }
 
-        beginToken(index);
         current += char;
     }
 
