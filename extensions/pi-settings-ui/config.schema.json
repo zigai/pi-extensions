@@ -40,6 +40,18 @@
       },
       "additionalProperties": false
     },
+    "tabPickerShortcut": {
+      "type": "string",
+      "default": "ctrl+p",
+      "minLength": 1,
+      "pattern": "^\\s*(?!.*[cC][tT][rR][lL]\\+.*[cC][tT][rR][lL]\\+)(?!.*[sS][hH][iI][fF][tT]\\+.*[sS][hH][iI][fF][tT]\\+)(?!.*[aA][lL][tT]\\+.*[aA][lL][tT]\\+)(?!.*[sS][uU][pP][eE][rR]\\+.*[sS][uU][pP][eE][rR]\\+)(?:(?:[cC][tT][rR][lL]|[sS][hH][iI][fF][tT]|[aA][lL][tT]|[sS][uU][pP][eE][rR])\\+)*(?:[a-zA-Z0-9]|[eE][sS][cC][aA][pP][eE]|[eE][sS][cC]|[eE][nN][tT][eE][rR]|[rR][eE][tT][uU][rR][nN]|[tT][aA][bB]|[sS][pP][aA][cC][eE]|[bB][aA][cC][kK][sS][pP][aA][cC][eE]|[dD][eE][lL][eE][tT][eE]|[iI][nN][sS][eE][rR][tT]|[cC][lL][eE][aA][rR]|[hH][oO][mM][eE]|[eE][nN][dD]|[pP][aA][gG][eE][uU][pP]|[pP][aA][gG][eE][dD][oO][wW][nN]|[uU][pP]|[dD][oO][wW][nN]|[lL][eE][fF][tT]|[rR][iI][gG][hH][tT]|[fF]1|[fF]2|[fF]3|[fF]4|[fF]5|[fF]6|[fF]7|[fF]8|[fF]9|[fF]10|[fF]11|[fF]12|`|-|=|\\[|\\]|\\\\|;|'|,|\\.|/|!|@|#|\\$|%|\\^|&|\\*|\\(|\\)|_|\\+|\\||~|\\{|\\}|:|<|>|\\?)\\s*$",
+      "x-control": "combobox",
+      "examples": [
+        "ctrl+p",
+        "ctrl+shift+p"
+      ],
+      "description": "Key for the settings-tab picker, using Pi key names such as ctrl+shift+p."
+    },
     "projectOverrides": {
       "type": "boolean",
       "default": true,

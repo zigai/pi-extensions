@@ -4,9 +4,9 @@ Edit extension-owned Pi settings through a schema-driven terminal interface. The
 the generated schemas installed by [`@zigai/pi-extension-settings`](https://github.com/zigai/pi-tweaks/tree/master/packages/pi-extension-settings) and turns them into validated,
 reusable controls.
 
-- Pi's regular settings selector as the first tab, followed by one tab per extension.
-- A compact active-tab header and searchable Ctrl+P switcher that scale to large extension sets.
-- Global and trusted-project scopes for extension-owned settings.
+- Visible tabs with Pi pinned first, overflow arrows, and a More picker (Ctrl+P by default).
+- Ctrl+F searches settings across Pi and extensions; Ctrl+S chooses a searchable scope.
+- Global and trusted-project save scopes, separate from the search scope.
 - Native toggles, searchable choices, sliders, path completion, color previews, text, and number
   controls plus nested editors for lists, records, maps, and unions.
 - Humanized, grouped labels with aligned values, descriptions, constraints, and override state.
@@ -57,6 +57,7 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-settings-ui.jso
 | `header.layout` | `stacked` \| `compact` | `"stacked"` | Separate navigation and scope, or combine them when space allows. |
 | `header.showHints` | boolean | `true` | Show the tab-picker shortcut in the settings header. |
 | `header.showFieldCounter` | boolean | `true` | Show the current field position in the settings header. |
+| `tabPickerShortcut` | string | `"ctrl+p"` | Key for the settings-tab picker, using Pi key names such as ctrl+shift+p. |
 | `projectOverrides` | boolean | `true` | Let trusted projects have their own extension settings. |
 
 ```json
@@ -67,6 +68,7 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-settings-ui.jso
     "showHints": true,
     "showFieldCounter": true
   },
+  "tabPickerShortcut": "ctrl+p",
   "projectOverrides": true
 }
 ```

@@ -73,6 +73,7 @@ async function openSettingsEditor(pi: ExtensionAPI, ctx: ExtensionContext): Prom
             theme,
             keybindings,
             header: ownSettings.settings.header,
+            tabPickerShortcut: ownSettings.settings.tabPickerShortcut,
             save: store.saveSettingsLayers,
             close: () => done(undefined),
         });

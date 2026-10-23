@@ -8,10 +8,13 @@ import {
     Input,
     Key,
     matchesKey,
+    type KeyId,
     truncateToWidth,
     type Component,
     type Focusable,
     type TUI,
+    type TuiMouseEvent,
+    type TuiMouseEventResult,
     visibleWidth,
     wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
@@ -39,7 +42,14 @@ import {
 } from "./settings-schema.ts";
 import { type EditorFieldView, SettingsEditorModel } from "./settings-editor.ts";
 import type { PiSettingsPane } from "./pi-settings-tab.ts";
-import { defaultHeaderSettings, type SettingsHeaderSettings } from "./settings-input.ts";
+import { SettingsSearch, type SettingsSearchEntry } from "./settings-search.ts";
+import {
+    defaultHeaderSettings,
+    defaultTabPickerShortcut,
+    isPickerShortcut,
+    normalizePickerShortcut,
+    type SettingsHeaderSettings,
+} from "./settings-input.ts";
 import { type SaveSettingsLayerOutcome, type SaveSettingsLayerRequest } from "./settings-store.ts";
 import {
     addStructuredEntry,
@@ -67,6 +77,7 @@ export type SettingsEditorComponentOptions = {
     readonly theme: SettingsUiTheme;
     readonly keybindings: Pick<KeybindingsManager, "matches">;
     readonly header?: SettingsHeaderSettings;
+    readonly tabPickerShortcut?: string;
 
     readonly save: (
         requests: readonly SaveSettingsLayerRequest[],
@@ -114,6 +125,11 @@ type TabPicker = {
     query: string;
     selectedIndex: number;
     scrollOffset: number;
+};
+
+type NavigationPart = {
+    readonly text: string;
+    readonly activate: () => void;
 };
 
 type TabChoice = {
@@ -502,7 +518,7 @@ function primitiveChoiceLabel(value: JsonPrimitive): string {
     return String(value);
 }
 
-function fieldGroup(field: EditorFieldView, extensionTitle: string): string {
+function fieldGroup(field: Pick<EditorFieldView, "path">, extensionTitle: string): string {
     const path = field.path.slice(0, -1).map(formatSettingLabel);
     const extensionName = compactExtensionTitle(extensionTitle).toLocaleLowerCase();
     if (path[0]?.toLocaleLowerCase() === extensionName) path.shift();
@@ -637,12 +653,29 @@ export class SettingsEditorComponent implements Component, Focusable {
     private structuredEditing: StructuredEditing | undefined;
     private tabPicker: TabPicker | undefined;
     private valuePicker: ValuePicker | undefined;
+    private search: SettingsSearch | undefined;
+    private searchScope: number | undefined;
+    private navigationTargets: { start: number; end: number; activate: () => void }[] = [];
+    private navigationRow = 0;
+    private navigationColumn = 0;
     private statusMessage: string | undefined;
     private saving = false;
     private discardArmed = false;
     private _focused = false;
+    private readonly tabPickerKey: KeyId;
+    private readonly tabPickerHint: string;
 
-    constructor(private readonly options: SettingsEditorComponentOptions) {}
+    constructor(private readonly options: SettingsEditorComponentOptions) {
+        const key = normalizePickerShortcut(options.tabPickerShortcut ?? defaultTabPickerShortcut);
+        if (!isPickerShortcut(key)) throw new Error("Invalid settings-tab picker shortcut.");
+
+        this.tabPickerKey = key;
+        this.tabPickerHint = `${key
+            .toLowerCase()
+            .split("+")
+            .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+            .join("+")} choose`;
+    }
 
     get focused(): boolean {
         return this._focused;
@@ -650,6 +683,7 @@ export class SettingsEditorComponent implements Component, Focusable {
 
     set focused(value: boolean) {
         this._focused = value;
+        if (this.search !== undefined) this.search.focused = value;
         if (this.editing !== undefined) this.editing.editor.focused = value;
         if (this.inlineEditing !== undefined) this.inlineEditing.input.focused = value;
 
@@ -693,13 +727,23 @@ export class SettingsEditorComponent implements Component, Focusable {
             return;
         }
 
+        if (this.search !== undefined) {
+            this.search.handleInput(data);
+            return;
+        }
+
         if (this.tabPicker !== undefined) {
             this.handleTabPickerInput(data);
             return;
         }
 
-        if (matchesKey(data, Key.ctrl("p"))) {
+        if (matchesKey(data, this.tabPickerKey)) {
             this.openTabPicker();
+            return;
+        }
+
+        if (matchesKey(data, Key.ctrl("f")) || matchesKey(data, Key.ctrl("s"))) {
+            this.openSearch(matchesKey(data, Key.ctrl("s")));
             return;
         }
 
@@ -842,8 +886,36 @@ export class SettingsEditorComponent implements Component, Focusable {
         }
     }
 
+    handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+        if (
+            event.type !== "click" ||
+            event.button !== "left" ||
+            this.saving ||
+            this.search !== undefined ||
+            this.tabPicker !== undefined ||
+            this.valuePicker !== undefined ||
+            this.editing !== undefined ||
+            this.inlineEditing !== undefined ||
+            this.structuredEditing !== undefined
+        )
+            return undefined;
+
+        if (event.y !== this.navigationRow) return undefined;
+
+        const column = event.x - this.navigationColumn;
+        const target = this.navigationTargets.find(
+            (candidate) => column >= candidate.start && column < candidate.end,
+        );
+        if (target === undefined) return undefined;
+
+        target.activate();
+
+        return { handled: true, focus: true };
+    }
+
     invalidate(): void {
         this.options.piSettings.invalidate();
+        this.search?.invalidate();
         this.editing?.editor.invalidate();
         this.inlineEditing?.input.invalidate();
 
@@ -858,6 +930,12 @@ export class SettingsEditorComponent implements Component, Focusable {
     render(width: number): string[] {
         const safeWidth = Math.max(1, width);
         const lines = [...this.renderHeader(safeWidth)];
+
+        if (this.search !== undefined) {
+            lines.push(border(this.options.theme, safeWidth), ...this.search.render(safeWidth));
+
+            return lines.map((line) => truncateToWidth(line, safeWidth, ""));
+        }
 
         if (this.tabPicker !== undefined) {
             lines.push(...this.renderTabPicker(safeWidth));
@@ -885,26 +963,11 @@ export class SettingsEditorComponent implements Component, Focusable {
 
         lines.push(border(this.options.theme, safeWidth));
 
-        if (this.options.model.extensionCount === 0) {
-            lines.push(
-                ...wrapInset(
-                    this.options.theme.fg(
-                        "warning",
-                        "No generated extension settings schemas were found.",
-                    ),
-                    safeWidth,
-                ),
-            );
-        } else if (this.editing !== undefined) {
-            lines.push(...this.renderEditing(safeWidth));
-        } else if (this.structuredEditing !== undefined) {
-            lines.push(...this.renderStructuredEditing(safeWidth));
-        } else {
-            lines.push(...this.renderFields(safeWidth));
-        }
-
+        const footer: string[] = [];
         if (this.statusMessage !== undefined) {
-            lines.push(...wrapInset(this.options.theme.fg("muted", this.statusMessage), safeWidth));
+            footer.push(
+                ...wrapInset(this.options.theme.fg("muted", this.statusMessage), safeWidth),
+            );
         }
 
         const canChange =
@@ -925,11 +988,36 @@ export class SettingsEditorComponent implements Component, Focusable {
                 : this.structuredEditing !== undefined
                   ? "Enter change • Del remove • Esc back"
                   : canChange
-                    ? "Tab switch • Ctrl+P choose • Ctrl+G scope • Enter change • Esc close"
-                    : "Tab switch • Ctrl+P choose • Ctrl+G scope • Esc close";
+                    ? `Tab switch • ${this.tabPickerHint} • Ctrl+G scope • Enter change • Esc close`
+                    : `Tab switch • ${this.tabPickerHint} • Ctrl+G scope • Esc close`;
 
-        lines.push(...wrapInset(this.options.theme.fg("dim", help), safeWidth));
-        lines.push(border(this.options.theme, safeWidth));
+        footer.push(...wrapInset(this.options.theme.fg("dim", help), safeWidth));
+        footer.push(border(this.options.theme, safeWidth));
+
+        if (this.options.model.extensionCount === 0) {
+            lines.push(
+                ...wrapInset(
+                    this.options.theme.fg(
+                        "warning",
+                        "No generated extension settings schemas were found.",
+                    ),
+                    safeWidth,
+                ),
+            );
+        } else if (this.editing !== undefined) {
+            lines.push(...this.renderEditing(safeWidth));
+        } else if (this.structuredEditing !== undefined) {
+            lines.push(...this.renderStructuredEditing(safeWidth));
+        } else {
+            lines.push(
+                ...this.renderFields(
+                    safeWidth,
+                    Math.max(1, this.options.tui.terminal.rows - lines.length - footer.length - 4),
+                ),
+            );
+        }
+
+        lines.push(...footer);
 
         return lines.map((line) => truncateToWidth(line, safeWidth, ""));
     }
@@ -937,13 +1025,27 @@ export class SettingsEditorComponent implements Component, Focusable {
     private renderHeader(width: number): string[] {
         const header = this.options.header ?? defaultHeaderSettings;
         const title = this.options.theme.fg("accent", this.options.theme.bold("Settings"));
-        const navigation = this.renderNavigation();
+        const counter = this.activeFieldCounter();
+        let counterWidth = 0;
+        if (header.showFieldCounter && counter !== undefined)
+            counterWidth = visibleWidth(counter) + 1;
+
+        const navigationWidth = width - visibleWidth(title) - 2 - counterWidth;
+        const separateNavigation = navigationWidth < 32;
+        let navigation = this.renderNavigation(navigationWidth);
+        if (separateNavigation) navigation = this.renderNavigation(width - counterWidth);
+        this.navigationRow = 0;
+        this.navigationColumn = visibleWidth(title) + 2;
+        if (separateNavigation) {
+            this.navigationRow = 1;
+            this.navigationColumn = 0;
+        }
+
         const primary = `${title}  ${navigation}`;
         const scope = this.renderScope(width);
-        const counter = this.activeFieldCounter();
-        const hint = this.options.theme.fg("dim", "Ctrl+P choose");
+        const hint = this.options.theme.fg("dim", this.tabPickerHint);
         const lines = [primary];
-        if (visibleWidth(primary) > width) lines.splice(0, 1, title, navigation);
+        if (separateNavigation) lines.splice(0, 1, title, navigation);
 
         if (
             header.layout === "compact" &&
@@ -951,11 +1053,6 @@ export class SettingsEditorComponent implements Component, Focusable {
             visibleWidth(`${primary}  ${scope}`) <= width
         ) {
             let compact = `${primary}  ${scope}`;
-            let counterWidth = 0;
-            if (header.showFieldCounter && counter !== undefined) {
-                counterWidth = visibleWidth(counter) + 1;
-            }
-
             if (
                 header.showHints &&
                 visibleWidth(compact) + visibleWidth(hint) + 2 + counterWidth <= width
@@ -975,7 +1072,7 @@ export class SettingsEditorComponent implements Component, Focusable {
 
         const locationIndex = Math.min(1, lines.length - 1);
         let counterIndex = 0;
-        if (visibleWidth(primary) > width) counterIndex = locationIndex;
+        if (separateNavigation) counterIndex = locationIndex;
 
         const location = lines[counterIndex];
         if (header.showFieldCounter && counter !== undefined && location !== undefined) {
@@ -986,12 +1083,35 @@ export class SettingsEditorComponent implements Component, Focusable {
             );
         }
 
+        if (this.search === undefined) {
+            const searchScope =
+                this.tabChoices().find((choice) => choice.tabIndex === this.searchScope)?.title ??
+                "Everything";
+
+            let searchHint = " Ctrl+F";
+            let scopeHint = " Ctrl+S";
+
+            if (this.tabPickerKey === Key.ctrl("f")) searchHint = "";
+            if (this.tabPickerKey === Key.ctrl("s")) scopeHint = "";
+
+            lines.push(
+                ...wrapTextWithAnsi(
+                    this.options.theme.fg(
+                        "dim",
+                        `Search settings…${searchHint} · Search scope: ${searchScope}${scopeHint}`,
+                    ),
+                    width,
+                ),
+            );
+        }
+
         return lines.map((line) => truncateToWidth(line, width, ""));
     }
 
     private activeFieldCounter(): string | undefined {
         if (
             this.activeTabIndex === 0 ||
+            this.search !== undefined ||
             this.tabPicker !== undefined ||
             this.valuePicker !== undefined
         )
@@ -1008,24 +1128,159 @@ export class SettingsEditorComponent implements Component, Focusable {
         return `(${Math.min(this.selectedField + 1, count)}/${count})`;
     }
 
-    private renderNavigation(): string {
-        const tabs = this.options.model.tabs();
-        const selected = (text: string): string =>
-            this.options.theme.bg(
-                "selectedBg",
-                this.options.theme.fg("accent", this.options.theme.bold(` ${text} `)),
-            );
+    private renderNavigation(width: number): string {
+        const choices = this.tabChoices();
+        const renderTab = (choice: TabChoice, limit = width): string => {
+            let title = choice.title;
+            if (choice.dirty) title += "*";
+            if (choice.blocked) title += "!";
 
-        let activeTitle = "Pi";
-        if (this.activeTabIndex > 0) {
-            const tab = tabs[this.activeTabIndex - 1];
-            const marker =
-                tab === undefined ? "" : `${tab.dirty ? "*" : ""}${tab.blocked ? "!" : ""}`;
-            const title = tab === undefined ? "Extension" : compactExtensionTitle(tab.title);
-            activeTitle = `${title}${marker}`;
+            const text = ` ${truncateWithEllipsis(title, Math.max(1, limit - 2))} `;
+            if (choice.tabIndex !== this.activeTabIndex)
+                return this.options.theme.fg("muted", text);
+
+            return this.options.theme.bg(
+                "selectedBg",
+                this.options.theme.fg("accent", this.options.theme.bold(text)),
+            );
+        };
+
+        const renderParts = (parts: readonly NavigationPart[]): string => {
+            let column = 0;
+
+            this.navigationTargets = parts.map((part) => {
+                const start = column;
+                column += visibleWidth(part.text) + 1;
+                return { start, end: column - 1, activate: part.activate };
+            });
+
+            return parts.map((part) => part.text).join(" ");
+        };
+        const all = renderParts(
+            choices.map((choice) => ({
+                text: renderTab(choice),
+                activate: () => this.selectTab(choice.tabIndex),
+            })),
+        );
+        if (visibleWidth(all) <= width) return all;
+
+        const pi = choices[0];
+        if (pi === undefined) return "";
+
+        let start = Math.max(1, this.activeTabIndex);
+        let end = Math.min(choices.length, start + 1);
+        const renderWindow = (from: number, to: number, activeLimit = width): string => {
+            const parts: NavigationPart[] = [
+                { text: renderTab(pi), activate: () => this.selectTab(0) },
+            ];
+            if (from > 1)
+                parts.push({
+                    text: this.options.theme.fg("dim", "‹"),
+                    activate: () => this.changeTab(-1),
+                });
+
+            for (const choice of choices.slice(from, to)) {
+                parts.push({
+                    text: renderTab(choice, activeLimit),
+                    activate: () => this.selectTab(choice.tabIndex),
+                });
+            }
+
+            if (to < choices.length)
+                parts.push({
+                    text: this.options.theme.fg("dim", "›"),
+                    activate: () => this.changeTab(1),
+                });
+
+            const hidden = choices.length - 1 - (to - from);
+            if (hidden > 0)
+                parts.push({
+                    text: this.options.theme.fg("dim", `More (${hidden})`),
+                    activate: () => this.openTabPicker(),
+                });
+
+            return renderParts(parts);
+        };
+
+        while (start > 1 && visibleWidth(renderWindow(start - 1, end)) <= width) start -= 1;
+
+        while (end < choices.length && visibleWidth(renderWindow(start, end + 1)) <= width)
+            end += 1;
+
+        let navigation = renderWindow(start, end);
+        if (visibleWidth(navigation) > width) {
+            const active = choices[start];
+            if (active !== undefined) {
+                const activeWidth = visibleWidth(renderTab(active));
+                navigation = renderWindow(
+                    start,
+                    end,
+                    activeWidth - (visibleWidth(navigation) - width),
+                );
+            }
         }
 
-        return selected(activeTitle);
+        return truncateToWidth(navigation, Math.max(1, width), "");
+    }
+
+    private openSearch(chooseScope = false): void {
+        const tabs = this.tabChoices();
+        const entries: SettingsSearchEntry[] = this.options.piSettings
+            .settingsEntries()
+            .map((entry) => ({
+                tabIndex: 0,
+                breadcrumb: `Pi › ${entry.label}`,
+                description: entry.description,
+                keywords: entry.id,
+                target: { kind: "pi", id: entry.id },
+            }));
+        for (const { extensionIndex, fieldIndex, field } of this.options.model.searchFields()) {
+            const tabIndex = extensionIndex + 1;
+            const title = tabs[tabIndex]?.title ?? "Extension";
+            const group = fieldGroup(field, title);
+            const breadcrumb = [title];
+            if (group !== "") breadcrumb.push(group);
+            breadcrumb.push(field.label);
+            entries.push({
+                tabIndex,
+                breadcrumb: breadcrumb.join(" › "),
+                description: field.description,
+                keywords: field.path.join("."),
+                target: { kind: "extension", fieldIndex },
+            });
+        }
+
+        this.search = new SettingsSearch({
+            entries,
+            scopes: [{ tabIndex: undefined, title: "Everything" }, ...tabs],
+            initialScope: this.searchScope,
+            theme: this.options.theme,
+            keybindings: this.options.keybindings,
+            rows: () => this.options.tui.terminal.rows,
+            requestRender: () => this.options.tui.requestRender(),
+            scopeChanged: (scope) => {
+                this.searchScope = scope;
+            },
+            close: () => {
+                this.search = undefined;
+                this.options.tui.requestRender();
+            },
+            select: (entry) => {
+                this.search = undefined;
+                this.selectTab(entry.tabIndex);
+
+                if (entry.target.kind === "pi") {
+                    this.options.piSettings.focusSetting(entry.target.id);
+                } else {
+                    this.selectedField = entry.target.fieldIndex;
+                }
+
+                this.options.tui.requestRender();
+            },
+        });
+        this.search.focused = this.focused;
+        if (chooseScope) this.search.openScopePicker();
+        this.options.tui.requestRender();
     }
 
     private renderTabPicker(width: number): string[] {
@@ -1146,7 +1401,7 @@ export class SettingsEditorComponent implements Component, Focusable {
 
     private renderScope(width: number): string {
         const active = this.activeScopeValue;
-        const scopeTitle = this.options.theme.fg("dim", "Scope:");
+        const scopeTitle = this.options.theme.fg("dim", "Save to:");
         const globalAvailable =
             this.activeTabIndex === 0
                 ? this.options.piSettings.scopeAvailable("global")
@@ -1174,7 +1429,7 @@ export class SettingsEditorComponent implements Component, Focusable {
         return `${scopeTitle} ${scopeLabel("Global", true, globalAvailable)}`;
     }
 
-    private renderFields(width: number): string[] {
+    private renderFields(width: number, budget: number): string[] {
         const scope = this.options.model.scopeView(this.options.model.activeScope);
         if (!scope.editable) {
             return wrapInset(this.options.theme.fg("warning", scope.message), width);
@@ -1216,6 +1471,7 @@ export class SettingsEditorComponent implements Component, Focusable {
             Math.max(minLabelWidth, ...visible.map((field) => visibleWidth(field.label))),
         );
         let previousGroup: string | undefined;
+        let selectedLine = 0;
         for (const [offset, field] of visible.entries()) {
             const index = this.scrollOffset + offset;
             const group = fieldGroup(field, extensionTitle);
@@ -1246,6 +1502,8 @@ export class SettingsEditorComponent implements Component, Focusable {
                 inlineValue ??
                 this.options.theme.fg(color, truncateWithEllipsis(displayValue(field), valueWidth));
             const row = `${prefix} ${this.options.theme.fg(color, label)}  ${value}`;
+
+            if (selected) selectedLine = lines.length;
             lines.push(truncateToWidth(row, width, ""));
 
             if (selected && inlineValue === undefined) {
@@ -1255,6 +1513,8 @@ export class SettingsEditorComponent implements Component, Focusable {
             }
         }
 
+        const detailsLines: string[] = [];
+        const errorLines: string[] = [];
         const selected = fields[this.selectedField];
         if (selected !== undefined) {
             const origin = selected.overridden
@@ -1267,8 +1527,8 @@ export class SettingsEditorComponent implements Component, Focusable {
                     : `${selected.description} ${origin}${requirement} (${selected.constraints})`;
             const guidance = controlGuidance(selected.control);
 
-            lines.push("");
-            lines.push(
+            detailsLines.push("");
+            detailsLines.push(
                 ...wrapInset(
                     this.options.theme.fg(
                         "dim",
@@ -1279,13 +1539,23 @@ export class SettingsEditorComponent implements Component, Focusable {
             );
 
             if (this.inlineEditing?.error !== undefined) {
-                lines.push(
+                errorLines.push(
                     ...wrapInset(this.options.theme.fg("error", this.inlineEditing.error), width),
                 );
             }
         }
 
-        return lines;
+        const visibleErrors = errorLines.slice(0, Math.max(0, budget - 1));
+
+        const visibleDetails = [
+            ...detailsLines.slice(0, Math.max(0, budget - 3 - visibleErrors.length)),
+            ...visibleErrors,
+        ];
+
+        const listBudget = Math.max(1, budget - visibleDetails.length);
+        const contextRows = Math.min(2, listBudget - 1);
+        const offset = Math.max(0, Math.min(selectedLine - contextRows, lines.length - listBudget));
+        return [...lines.slice(offset, offset + listBudget), ...visibleDetails];
     }
 
     private currentStructuredRows(): readonly StructuredEditorRow[] {
@@ -1910,7 +2180,7 @@ export class SettingsEditorComponent implements Component, Focusable {
             selected?.control._tag === "ListControl" ||
             isJsonArray(selected?.value) ||
             isJsonObject(selected?.value);
-        return Math.max(3, this.options.tui.terminal.rows - (reservesPreview ? 19 : 15));
+        return Math.max(1, this.options.tui.terminal.rows - (reservesPreview ? 21 : 17));
     }
 
     private moveSelection(offset: number): void {

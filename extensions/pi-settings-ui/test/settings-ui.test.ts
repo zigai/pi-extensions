@@ -4,16 +4,20 @@ import {
     TuiAltScreen,
     TuiMainScreen as TUI,
     visibleWidth,
+    type Component,
     type Terminal,
+    type TuiMouseEvent,
 } from "@earendil-works/pi-tui";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { Value } from "typebox/value";
 
 import { SettingsEditorModel } from "../src/settings-editor.ts";
 import type { PiSettingsPane } from "../src/pi-settings-tab.ts";
-import { parseExtensionSettingsSchema } from "../src/settings-schema.ts";
+import { parseExtensionSettingsSchema, parseSettingsDocument } from "../src/settings-schema.ts";
+import { settingsSchema } from "../src/settings-input.ts";
 import type { CatalogExtensionSettings } from "../src/settings-store.ts";
 import { SettingsEditorComponent, type SettingsUiTheme } from "../src/settings-ui.ts";
 import { editableCatalog, generatedSchemaText, parseFixtureSchema } from "./fixture.ts";
@@ -398,6 +402,14 @@ function fakePiSettingsPane(): PiSettingsPane {
             return activeScope;
         },
         handleInput() {},
+        settingsEntries: () => [
+            {
+                id: "autoCompact",
+                label: "Auto-compact",
+                description: "Automatically enable compaction.",
+            },
+        ],
+        focusSetting: (id) => id === "autoCompact",
         render: () => [
             "Auto-compact  true",
             "Steering mode  one-at-a-time",
@@ -417,6 +429,258 @@ function fakePiSettingsPane(): PiSettingsPane {
 }
 
 describe("settings TUI", () => {
+    it("keeps Pi and the active extension visible when tabs overflow and resize", () => {
+        const model = new SettingsEditorModel(
+            editableCatalog([
+                fixtureExtension("pi-first", "First"),
+                fixtureExtension("pi-second", "Second"),
+                fixtureExtension("pi-third", "Third"),
+                fixtureExtension("pi-fourth", "Fourth"),
+                fixtureExtension("pi-last", "Last Extension"),
+            ]),
+            false,
+        );
+        const component = new SettingsEditorComponent({
+            cwd: "/project",
+            model,
+            piSettings: fakePiSettingsPane(),
+            tui: new TUI(fakeTerminal()),
+            theme: plainTheme,
+            keybindings: defaultKeys,
+            save: async () => [],
+            close() {},
+        });
+        component.handleInput("\u0010");
+        component.handleInput("last");
+        component.handleInput("\r");
+        const narrow = component.render(48);
+        expect(narrow.join("\n")).toContain(" Pi ");
+        expect(narrow.join("\n")).toContain("Last Extension");
+        expect(narrow.join("\n")).toContain("More (");
+        expect(narrow.join("\n")).toContain("‹");
+        expect(narrow.every((line) => visibleWidth(line) <= 48)).toBe(true);
+        const wide = component.render(180).join("\n");
+        expect(wide).toContain("First");
+        expect(wide).toContain("Last Extension");
+        expect(wide).not.toContain("More (");
+    });
+
+    it("opens visible tabs and the overflow picker by clicking their labels", () => {
+        const model = new SettingsEditorModel(
+            editableCatalog([
+                fixtureExtension("pi-first", "First"),
+                fixtureExtension("pi-second", "Second"),
+                fixtureExtension("pi-third", "Third"),
+                fixtureExtension("pi-last", "Last Extension"),
+            ]),
+            false,
+        );
+        const component: Component = new SettingsEditorComponent({
+            cwd: "/project",
+            model,
+            piSettings: fakePiSettingsPane(),
+            tui: new TUI(fakeTerminal()),
+            theme: plainTheme,
+            keybindings: defaultKeys,
+            save: async () => [],
+            close() {},
+        });
+        const wide = component.render(120);
+        const tabRow = wide.findIndex((line) => line.includes("Second"));
+        const click: TuiMouseEvent = {
+            type: "click",
+            button: "left",
+            x: wide[tabRow]?.indexOf("Second") ?? -1,
+            y: tabRow,
+            screenX: 0,
+            screenY: 0,
+            width: 120,
+            height: 30,
+            shift: false,
+            alt: false,
+            ctrl: false,
+        };
+        component.handleMouse?.(click);
+        expect(model.activeExtensionId).toBe("pi-second");
+        const narrow = component.render(48);
+        const moreRow = narrow.findIndex((line) => line.includes("More ("));
+        component.handleMouse?.({
+            ...click,
+            x: narrow[moreRow]?.indexOf("More (") ?? -1,
+            y: moreRow,
+            width: 48,
+        });
+
+        expect(component.render(48).join("\n")).toContain("Choose settings tab");
+    });
+
+    it("searches descriptions across tabs and opens the matching grouped setting", () => {
+        const model = new SettingsEditorModel(
+            editableCatalog([fixtureExtension("pi-first", "First"), contextualCategoryExtension()]),
+            false,
+        );
+        const component = new SettingsEditorComponent({
+            cwd: "/project",
+            model,
+            piSettings: fakePiSettingsPane(),
+            tui: new TUI(fakeTerminal()),
+            theme: plainTheme,
+            keybindings: defaultKeys,
+            save: async () => [],
+            close() {},
+        });
+        component.handleInput("\u0006");
+        component.handleInput("active status text");
+        const results = component.render(100).join("\n");
+        expect(results).toContain("Search scope: Everything");
+        expect(results).toContain("Status Bar › Active › Text");
+        expect(results).not.toContain("Working");
+        component.handleInput("\r");
+        expect(model.activeExtensionId).toBe("pi-status-bar");
+        expect(component.render(100).join("\n")).toMatch(/▎ Text\s+Working/u);
+    });
+
+    it("scopes searches to Pi or an extension without changing the save scope", () => {
+        const model = new SettingsEditorModel(
+            editableCatalog([
+                fixtureExtension("pi-first", "First"),
+                fixtureExtension("pi-second", "Second"),
+            ]),
+            false,
+        );
+        const component = new SettingsEditorComponent({
+            cwd: "/project",
+            model,
+            piSettings: fakePiSettingsPane(),
+            tui: new TUI(fakeTerminal()),
+            theme: plainTheme,
+            keybindings: defaultKeys,
+            save: async () => [],
+            close() {},
+        });
+        component.handleInput("\u0006");
+        component.handleInput("\u0013");
+        component.handleInput("second");
+        component.handleInput("\r");
+        component.handleInput("operating mode");
+        const scoped = component.render(100).join("\n");
+        expect(scoped).toContain("Search scope: Second");
+        expect(scoped).toContain("Second › Mode");
+        expect(scoped).not.toContain("First › Mode");
+        expect(model.activeScope).toBe("global");
+        component.handleInput("\u0013");
+        component.handleInput("Pi");
+        component.handleInput("\r");
+        component.handleInput("\u0015");
+        component.handleInput("\u0006");
+        component.handleInput("compaction");
+        expect(component.render(100).join("\n")).toContain("Pi › Auto-compact");
+        expect(component.render(100).join("\n")).not.toContain("Second ›");
+    });
+
+    it("returns to the previous field when search is cancelled or cleared", () => {
+        const model = new SettingsEditorModel(
+            editableCatalog([fixtureExtension("pi-first", "First")]),
+            false,
+        );
+        const component = new SettingsEditorComponent({
+            cwd: "/project",
+            model,
+            piSettings: fakePiSettingsPane(),
+            tui: new TUI(fakeTerminal()),
+            theme: plainTheme,
+            keybindings: defaultKeys,
+            save: async () => [],
+            close() {},
+        });
+        component.handleInput("\t");
+        component.handleInput("\u001b[B");
+        const before = component.render(100).join("\n");
+        component.handleInput("\u0006");
+        component.handleInput("no matching setting");
+        expect(component.render(100).join("\n")).toContain("No matching settings");
+        component.handleInput("\u001b");
+        expect(component.render(100).join("\n")).toBe(before);
+        component.handleInput("\u0006");
+        component.handleInput("threshold");
+        component.handleInput("\u0015");
+        expect(component.render(100).join("\n")).toBe(before);
+    });
+
+    it("keeps a search result visible near the end of a heavily grouped tab", () => {
+        const extension = fixtureExtension("pi-grouped", "Grouped");
+        const parsed = parseExtensionSettingsSchema(
+            "pi-grouped",
+            extension.schema.schemaPath,
+            generatedSchemaText(
+                "pi-grouped",
+                Object.fromEntries(
+                    Array.from({ length: 12 }, (_value, index) => [
+                        `group${index}`,
+                        {
+                            type: "object",
+                            additionalProperties: false,
+                            default: {},
+                            properties: {
+                                setting: {
+                                    type: "boolean",
+                                    default: false,
+                                    description: "A grouped switch.",
+                                },
+                            },
+                        },
+                    ]),
+                ),
+            ),
+        );
+        if (parsed._tag === "InvalidSchema") throw new Error(parsed.message);
+
+        const model = new SettingsEditorModel(
+            editableCatalog([{ ...extension, schema: parsed.schema }]),
+            false,
+        );
+        const component = new SettingsEditorComponent({
+            cwd: "/project",
+            model,
+            piSettings: fakePiSettingsPane(),
+            tui: new TUI(fakeTerminal(100, 30)),
+            theme: plainTheme,
+            keybindings: defaultKeys,
+            save: async () => [],
+            close() {},
+        });
+        component.handleInput("\u0006");
+        component.handleInput("group11.setting");
+        component.handleInput("\r");
+        const lines = component.render(100);
+        expect(lines.length).toBeLessThanOrEqual(30);
+        expect(lines.slice(0, 27).join("\n")).toMatch(/▎ Setting\s+false/u);
+        expect(lines.join("\n")).toContain("Group11");
+    });
+
+    it("does not search stored values or alter drafts while searching", () => {
+        const model = new SettingsEditorModel(
+            editableCatalog([fixtureExtension("pi-first", "First")]),
+            false,
+        );
+        model.setFieldValue(3, "invented-private-value");
+        const component = new SettingsEditorComponent({
+            cwd: "/project",
+            model,
+            piSettings: fakePiSettingsPane(),
+            tui: new TUI(fakeTerminal()),
+            theme: plainTheme,
+            keybindings: defaultKeys,
+            save: async () => [],
+            close() {},
+        });
+        component.handleInput("\u0006");
+        component.handleInput("invented-private-value");
+        expect(component.render(100).join("\n")).toContain("No matching settings");
+        expect(model.hasDirtySettings()).toBe(true);
+        expect(model.fields()[3]?.value).toBe("invented-private-value");
+    });
+
     it("opens on Pi settings, then switches through extension tabs and autosaves controls", async () => {
         const model = new SettingsEditorModel(
             editableCatalog([
@@ -451,20 +715,21 @@ describe("settings TUI", () => {
         const initial = component.render(100).join("\n");
         expect(initial).toContain("Settings");
         expect(initial).toContain(" Pi ");
-        expect(initial).toContain("Scope:");
+        expect(initial).toContain("Save to:");
         expect(initial).toContain("Auto-compact");
         expect(initial).toContain("Steering mode");
         expect(initial).not.toContain(" Extensions ");
         expect(initial).toContain("Type to search");
         expect(initial).not.toContain("Tab switch • Ctrl+P choose");
-        expect(initial).not.toContain("First Extension  Second Extension");
+        expect(initial).toContain("First Extension");
+        expect(initial).toContain("Second Extension");
         expect(model.activeExtensionId).toBe("pi-first");
 
         component.handleInput("\t");
         expect(model.activeExtensionId).toBe("pi-first");
         const firstExtension = component.render(100).join("\n");
         expect(firstExtension.split("\n")[0]).toMatch(/\(1\/10\)$/);
-        expect(firstExtension.split("\n")[0]).not.toContain(" Pi ");
+        expect(firstExtension.split("\n")[0]).toContain(" Pi ");
         expect(firstExtension.split("\n").filter((line) => line.trim() === "(1/10)")).toEqual([]);
         expect(firstExtension).toContain("Global");
         expect(firstExtension).toContain("First Extension");
@@ -515,7 +780,7 @@ describe("settings TUI", () => {
         const lines = component.render(width);
         expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
         const location = lines.find((line) => line.includes("Sample"));
-        const scope = lines.find((line) => line.includes("Scope:"));
+        const scope = lines.find((line) => line.includes("Save to:"));
         expect(location).toBeDefined();
         expect(scope).toBeDefined();
         expect(location).not.toBe(scope);
@@ -542,7 +807,7 @@ describe("settings TUI", () => {
         component.handleInput("\t");
         const first = component.render(120)[0];
         expect(first).toContain("Sample");
-        expect(first).toContain("Scope:");
+        expect(first).toContain("Save to:");
         expect(first).not.toContain("Ctrl+P");
         expect(first).not.toContain("(1/10)");
     });
@@ -568,9 +833,271 @@ describe("settings TUI", () => {
         const first = component.render(160)[0];
 
         expect(first).toContain("Sample");
-        expect(first).toContain("Scope:");
+        expect(first).toContain("Save to:");
         expect(first).toContain("Ctrl+P choose");
         expect(first).not.toContain("(1/10)");
+    });
+
+    it.each([
+        { shortcut: "ctrl+shift+k", input: "\u001b[107;6u", hint: "Ctrl+Shift+K choose" },
+        { shortcut: "shift+ctrl+k", input: "\u001b[107;6u", hint: "Shift+Ctrl+K choose" },
+        { shortcut: "alt+k", input: "\u001bk", hint: "Alt+K choose" },
+        { shortcut: "shift+k", input: "K", hint: "Shift+K choose" },
+        { shortcut: "return", input: "\r", hint: "Return choose" },
+        { shortcut: "esc", input: "\u001b", hint: "Esc choose" },
+        { shortcut: "ctrl+f", input: "\u0006", hint: "Ctrl+F choose" },
+        { shortcut: "ctrl+s", input: "\u0013", hint: "Ctrl+S choose" },
+        { shortcut: "ctrl++", input: "\u001b[43;5u", hint: "Ctrl++ choose" },
+        { shortcut: "alt+?", input: "\u001b?", hint: "Alt+? choose" },
+        { shortcut: "ctrl+\\", input: "\u001c", hint: "Ctrl+\\ choose" },
+        { shortcut: "pageUp", input: "\u001b[5~", hint: "Pageup choose" },
+        { shortcut: " CTRL+PAGEDOWN ", input: "\u001b[6;5~", hint: "Ctrl+Pagedown choose" },
+    ])("uses the configured picker shortcut and hint ($shortcut)", ({ shortcut, input, hint }) => {
+        expect(Value.Check(settingsSchema.properties.tabPickerShortcut, shortcut)).toBe(true);
+        const model = new SettingsEditorModel(
+            editableCatalog([
+                fixtureExtension("pi-first", "First Extension"),
+                fixtureExtension("pi-second", "Second Extension"),
+            ]),
+            false,
+        );
+        const component = new SettingsEditorComponent({
+            cwd: "/project",
+            model,
+            piSettings: fakePiSettingsPane(),
+            tui: new TUI(fakeTerminal()),
+            theme: plainTheme,
+            keybindings: defaultKeys,
+            tabPickerShortcut: shortcut,
+            save: async () => [],
+            close() {},
+        });
+
+        component.handleInput("\t");
+        expect(component.render(100).join("\n")).toContain(hint);
+        component.handleInput("\u0010");
+        expect(component.render(100).join("\n")).not.toContain("Choose settings tab");
+        component.handleInput(input);
+        expect(component.render(100).join("\n")).toContain("Choose settings tab");
+        component.handleInput("second");
+        component.handleInput("\r");
+        expect(model.activeExtensionId).toBe("pi-second");
+    });
+
+    it.each([
+        {
+            shortcut: "ctrl+f",
+            searchInput: "\u0013",
+            searchHint: "Search settings… · Search scope: Everything Ctrl+S",
+        },
+        {
+            shortcut: "ctrl+s",
+            searchInput: "\u0006",
+            searchHint: "Search settings… Ctrl+F · Search scope: Everything",
+        },
+    ])(
+        "keeps search accessible with picker shortcut $shortcut",
+        ({ shortcut, searchInput, searchHint }) => {
+            const component = new SettingsEditorComponent({
+                cwd: "/project",
+                model: new SettingsEditorModel(
+                    editableCatalog([fixtureExtension("pi-sample")]),
+                    false,
+                ),
+                piSettings: fakePiSettingsPane(),
+                tui: new TUI(fakeTerminal()),
+                theme: plainTheme,
+                keybindings: defaultKeys,
+                tabPickerShortcut: shortcut,
+                save: async () => [],
+                close() {},
+            });
+            component.handleInput("\t");
+            expect(
+                component
+                    .render(100)
+                    .find((line) => line.startsWith("Search settings"))
+                    ?.trimEnd(),
+            ).toBe(searchHint);
+
+            component.handleInput(searchInput);
+            expect(component.render(100).join("\n")).toContain("Type to search");
+            expect(component.render(100).join("\n")).not.toContain("Choose settings tab");
+        },
+    );
+
+    it("rejects malformed picker shortcuts at settings load and before creating save requests", () => {
+        const id = "pi-settings-ui";
+        const parsed = parseExtensionSettingsSchema(
+            id,
+            `/agent/${id}.schema.json`,
+            JSON.stringify({
+                ...settingsSchema,
+                $schema: "https://json-schema.org/draft/2020-12/schema",
+                $id: `urn:fixture:${id}`,
+                title: "Pi Settings UI settings",
+                description: "Settings for Pi Settings UI.",
+                required: [],
+                properties: {
+                    ...settingsSchema.properties,
+                    $schema: {
+                        type: "string",
+                        default: `./schemas/${id}.schema.json`,
+                        description: "JSON Schema used by editors for this settings file.",
+                    },
+                },
+            }),
+        );
+        if (parsed._tag === "InvalidSchema") throw new Error(parsed.message);
+
+        const model = new SettingsEditorModel(
+            editableCatalog([{ ...fixtureExtension(id), schema: parsed.schema }]),
+            false,
+        );
+        const fieldIndex = model
+            .fields()
+            .findIndex((field) => field.path.join(".") === "tabPickerShortcut");
+        expect(fieldIndex).toBeGreaterThanOrEqual(0);
+
+        for (const shortcut of [
+            "ctrl+banana",
+            "ctrl+ctrl+p",
+            "ctrl+shift+ctrl+p",
+            "CTRL+ctrl+p",
+            "ctrl+",
+            "ctrl+++",
+            "meta+p",
+            "p extra",
+            "",
+            "   ",
+        ]) {
+            expect
+                .soft(Value.Check(settingsSchema.properties.tabPickerShortcut, shortcut), shortcut)
+                .toBe(false);
+
+            expect
+                .soft(
+                    parseSettingsDocument(
+                        parsed.schema,
+                        JSON.stringify({ tabPickerShortcut: shortcut }),
+                    )._tag,
+                    shortcut,
+                )
+                .toBe("InvalidDocument");
+
+            expect
+                .soft(model.setFieldValue(fieldIndex, shortcut)._tag, shortcut)
+                .toBe("EditRejected");
+        }
+
+        expect(model.saveRequests()).toEqual([]);
+        expect(model.hasDirtySettings()).toBe(false);
+
+        expect(
+            parseSettingsDocument(
+                parsed.schema,
+                JSON.stringify({ tabPickerShortcut: "alt+pageUp" }),
+            )._tag,
+        ).toBe("ParsedDocument");
+
+        expect(model.setFieldValue(fieldIndex, "alt+pageUp")._tag).toBe("EditApplied");
+        expect(model.saveRequests()).toHaveLength(1);
+        expect(model.saveRequests()[0]?.content).toContain('"tabPickerShortcut": "alt+pageUp"');
+    });
+
+    it.each([11, 12])("keeps a selected grouped field visible at %s terminal rows", (rows) => {
+        const id = "pi-grouped-amount";
+        const parsed = parseExtensionSettingsSchema(
+            id,
+            `/agent/${id}.schema.json`,
+            generatedSchemaText(id, {
+                group: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                        amount: { type: "number", default: 5, description: "Amount to use." },
+                    },
+                },
+            }),
+        );
+        if (parsed._tag === "InvalidSchema") throw new Error(parsed.message);
+
+        const component = new SettingsEditorComponent({
+            cwd: "/project",
+            model: new SettingsEditorModel(
+                editableCatalog([{ ...fixtureExtension(id), schema: parsed.schema }]),
+                false,
+            ),
+            piSettings: fakePiSettingsPane(),
+            tui: new TUI(fakeTerminal(100, rows)),
+            theme: plainTheme,
+            keybindings: defaultKeys,
+            save: async () => [],
+            close() {},
+        });
+        component.handleInput("\t");
+        const lines = component.render(100);
+        expect(lines.join("\n")).toMatch(/^▎ Amount\b/mu);
+        expect(lines.length).toBeLessThanOrEqual(rows);
+    });
+
+    it("does not treat legacy Shift+letter input as an unmodified picker shortcut", () => {
+        const component = new SettingsEditorComponent({
+            cwd: "/project",
+            model: new SettingsEditorModel(editableCatalog([fixtureExtension("pi-sample")]), false),
+            piSettings: fakePiSettingsPane(),
+            tui: new TUI(fakeTerminal()),
+            theme: plainTheme,
+            keybindings: defaultKeys,
+            tabPickerShortcut: "k",
+            save: async () => [],
+            close() {},
+        });
+        component.handleInput("\t");
+        component.handleInput("K");
+        expect(component.render(100).join("\n")).not.toContain("Choose settings tab");
+        component.handleInput("k");
+        expect(component.render(100).join("\n")).toContain("Choose settings tab");
+    });
+
+    it("keeps inline validation visible when the description fills a short viewport", () => {
+        const id = "pi-number-input";
+        const parsed = parseExtensionSettingsSchema(
+            id,
+            `/agent/${id}.schema.json`,
+            generatedSchemaText(id, {
+                count: {
+                    type: "integer",
+                    default: 5,
+                    description: "A detailed explanation of this value. ".repeat(40),
+                },
+            }),
+        );
+        if (parsed._tag === "InvalidSchema") throw new Error(parsed.message);
+
+        const model = new SettingsEditorModel(
+            editableCatalog([{ ...fixtureExtension(id), schema: parsed.schema }]),
+            false,
+        );
+        const component = new SettingsEditorComponent({
+            cwd: "/project",
+            model,
+            piSettings: fakePiSettingsPane(),
+            tui: new TUI(fakeTerminal(40, 18)),
+            theme: plainTheme,
+            keybindings: defaultKeys,
+            save: async () => [],
+            close() {},
+        });
+        component.handleInput("\t");
+        component.handleInput("\r");
+        component.handleInput("\u0015");
+        component.handleInput("not-number");
+        component.handleInput("\r");
+        const lines = component.render(40);
+        expect(lines.join("\n")).toContain("Enter a finite number.");
+        expect(lines.length).toBeLessThanOrEqual(18);
+        expect(model.fields()[0]?.value).toBe(5);
     });
 
     it("offers every settings tab through a searchable compact picker", () => {
@@ -602,7 +1129,7 @@ describe("settings TUI", () => {
         expect(picker).toContain("First Extension");
         expect(picker).not.toContain("Pi First Extension");
         component.handleInput("third");
-        const filtered = component.render(100).join("\n");
+        const filtered = component.render(100).join("\n").split("Choose settings tab")[1] ?? "";
         expect(filtered).toContain("Third Extension");
         expect(filtered).not.toContain("First Extension");
         component.handleInput("\r");

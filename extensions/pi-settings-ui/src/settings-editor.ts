@@ -305,6 +305,20 @@ export class SettingsEditorModel {
         }));
     }
 
+    searchFields(): readonly {
+        readonly extensionIndex: number;
+        readonly fieldIndex: number;
+        readonly field: SettingsField;
+    }[] {
+        return this.extensions.flatMap((extension, extensionIndex) =>
+            extension.schema.fields.map((field, fieldIndex) => ({
+                extensionIndex,
+                fieldIndex,
+                field,
+            })),
+        );
+    }
+
     selectExtension(index: number): void {
         if (index < 0 || index >= this.extensions.length) return;
 
