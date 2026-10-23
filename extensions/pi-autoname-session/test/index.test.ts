@@ -594,6 +594,25 @@ describe("extension orchestration", () => {
         }
     });
 
+    it("does not invent a prompt naming checkpoint for a custom-message start", async () => {
+        const harness = Harness.create();
+        try {
+            writeSettings(harness, createSettings());
+            harness.faux.setResponses([fauxAssistantMessage("Background session name")]);
+            await harness.startSession();
+            await harness.beforeCustomAgentStart("Sample task");
+            await harness.settled();
+            await harness.shutdown();
+            expect(harness.registry.authCalls).toBe(0);
+            expect(harness.faux.state.callCount).toBe(0);
+            expect(harness.pi.sessionNameCalls).toEqual([]);
+            expect(stateEntries(harness)).toEqual([]);
+        } finally {
+            await harness.shutdown();
+            harness.dispose();
+        }
+    });
+
     it("names an unnamed session without blocking prompt submission", async () => {
         const harness = Harness.create();
         try {
@@ -1372,6 +1391,29 @@ describe("extension orchestration", () => {
             await harness.settled();
             expect(harness.faux.state.callCount).toBe(2);
             expect(harness.pi.sessionName).toBe("Fix parser tests");
+        } finally {
+            harness.dispose();
+        }
+    });
+
+    it("reports a thrown picker failure once through its safe owned outcome", async () => {
+        const harness = Harness.create();
+        try {
+            writeSettings(harness, createSettings());
+            await harness.startSession();
+            appendUserMessage(harness.session, "Fix the parser", 1);
+            harness.faux.setResponses([
+                async () => {
+                    throw new Error("SECRET-REQUEST-FAILURE");
+                },
+            ]);
+            await harness.settled();
+            expect(harness.pi.notified.map((notice) => notice.severity)).toEqual(["warning"]);
+            expect(harness.pi.notified.at(0)?.message).toContain("Session naming failed");
+
+            expect(allDiagnostics(harness)).not.toContain("SECRET-REQUEST-FAILURE");
+
+            expect(harness.pi.sessionName).toBeUndefined();
         } finally {
             harness.dispose();
         }
