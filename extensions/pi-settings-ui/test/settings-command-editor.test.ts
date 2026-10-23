@@ -1,8 +1,10 @@
 import type { KeybindingsManager } from "@earendil-works/pi-coding-agent";
 import type { EditorComponent, Focusable } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
+import { Type } from "typebox";
+import { Value } from "typebox/value";
 
-import { SettingsCommandEditor } from "../src/settings-command-editor.ts";
+import { createSettingsCommandEditor } from "../src/settings-command-editor.ts";
 
 class RecordingEditor implements EditorComponent, Focusable {
     private text = "";
@@ -41,7 +43,7 @@ describe("reserved settings command editor", () => {
     it("opens extension settings before Pi handles its built-in /settings command", async () => {
         const base = new RecordingEditor();
         let opened = 0;
-        const editor = new SettingsCommandEditor(
+        const editor = createSettingsCommandEditor(
             base,
             submitKeys,
             async () => {
@@ -58,9 +60,30 @@ describe("reserved settings command editor", () => {
         expect(base.inputs).toEqual([]);
     });
 
+    it("preserves an independently registered editor capability", () => {
+        const base = new RecordingEditor();
+        const capability = Symbol.for("test.editor.document");
+        let captured = "";
+        Object.defineProperty(base, capability, {
+            value: () => {
+                captured = base.getText();
+            },
+        });
+        const editor = createSettingsCommandEditor(
+            base,
+            submitKeys,
+            async () => {},
+            () => {},
+        );
+        editor.setText("sample draft");
+        const external: unknown = Object.getOwnPropertyDescriptor(editor, capability)?.value;
+        Value.Parse(Type.Function([], Type.Void()), external)();
+        expect(captured).toBe("sample draft");
+    });
+
     it("delegates ordinary editor input unchanged", () => {
         const base = new RecordingEditor();
-        const editor = new SettingsCommandEditor(
+        const editor = createSettingsCommandEditor(
             base,
             submitKeys,
             async () => {},

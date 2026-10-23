@@ -6,8 +6,9 @@ import {
     type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 
+import { registerEditorEnhancer } from "@zigai/pi-extension-internals";
 import type { PiSettingsTab } from "./pi-settings-tab.ts";
-import { SettingsCommandEditor } from "./settings-command-editor.ts";
+import { createSettingsCommandEditor } from "./settings-command-editor.ts";
 import type { SettingsEditorComponent } from "./settings-ui.ts";
 
 async function openSettingsEditor(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
@@ -86,32 +87,25 @@ export default function extension(pi: ExtensionAPI): void {
     let restoreEditor: (() => void) | undefined;
 
     pi.on("session_start", (_event, ctx) => {
+        restoreEditor?.();
+        restoreEditor = undefined;
+
         if (ctx.mode !== "tui") return;
 
-        const previousFactory = ctx.ui.getEditorComponent();
-        const settingsFactory: NonNullable<Parameters<typeof ctx.ui.setEditorComponent>[0]> = (
-            tui,
-            theme,
-            keybindings,
-        ) => {
-            const base =
-                previousFactory?.(tui, theme, keybindings) ??
-                new CustomEditor(tui, theme, keybindings);
+        const handle = registerEditorEnhancer(
+            ctx,
+            Symbol.for("pi-settings-ui.editor"),
+            (tui, theme, keybindings) => new CustomEditor(tui, theme, keybindings),
+            (base, _tui, _theme, keybindings) =>
+                createSettingsCommandEditor(
+                    base,
+                    keybindings,
+                    async () => openSettingsEditor(pi, ctx),
+                    () => ctx.ui.notify("Settings could not be opened", "error"),
+                ),
+        );
 
-            return new SettingsCommandEditor(
-                base,
-                keybindings,
-                async () => openSettingsEditor(pi, ctx),
-                () => ctx.ui.notify("Settings could not be opened", "error"),
-            );
-        };
-
-        ctx.ui.setEditorComponent(settingsFactory);
-        restoreEditor = () => {
-            if (ctx.ui.getEditorComponent() === settingsFactory) {
-                ctx.ui.setEditorComponent(previousFactory);
-            }
-        };
+        restoreEditor = () => handle.dispose();
     });
 
     pi.on("session_shutdown", () => {
