@@ -3,6 +3,7 @@ import { vi } from "vitest";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 
+import { createEventBus } from "@earendil-works/pi-coding-agent";
 import type {
   BeforeAgentStartEvent,
   BeforeAgentStartUserEvent,
@@ -225,6 +226,16 @@ export function createRuntimeHarness(
     const currentHandlers = handlers.get(event) ?? [];
     currentHandlers.push(handler);
     handlers.set(event, currentHandlers);
+
+    let subscribed = true;
+    return () => {
+      if (!subscribed) return;
+
+      subscribed = false;
+
+      const index = currentHandlers.indexOf(handler);
+      if (index !== -1) currentHandlers.splice(index, 1);
+    };
   }) as ExtensionAPI["on"];
 
   const registerCommand: ExtensionAPI["registerCommand"] = (name, options) => {
@@ -244,14 +255,7 @@ export function createRuntimeHarness(
         data,
       });
     },
-    events: {
-      emit() {
-        unsupportedHarnessMethod("pi.events.emit");
-      },
-      on() {
-        unsupportedHarnessMethod("pi.events.on");
-      },
-    },
+    events: createEventBus(),
     exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
     getActiveTools: () => [...activeToolNames],
     getAllTools: () => {
@@ -497,7 +501,8 @@ export function createRuntimeHarness(
     }
 
     const results: HarnessEventResult[] = [];
-    for (const handler of handlers.get(event) ?? []) {
+    const eventHandlers = handlers.get(event)?.slice() ?? [];
+    for (const handler of eventHandlers) {
       results.push(await handler(payload, ctx));
     }
 

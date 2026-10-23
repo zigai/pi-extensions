@@ -12,7 +12,7 @@ On first session start, `@zigai/pi-goal` creates the global settings file and it
 | Option                         | Type           | Default | Description                                                                                      |
 | ------------------------------ | -------------- | ------- | ------------------------------------------------------------------------------------------------ |
 | `creationPromptPath`           | string or null | `null`  | Absolute template path, or a path relative to the config file. `null` uses the bundled template. |
-| `disabledToolsWhileGoalActive` | string[]       | `[]`    | Registered tool names to disable only while a goal is active.                                    |
+| `disabledToolsWhileGoalActive` | string[]       | `[]`    | Additional tool names to disable while a goal is active.                                         |
 
 The complete default configuration is:
 
@@ -28,20 +28,20 @@ Unknown options and invalid values are rejected rather than silently ignored.
 
 ## Active-goal tool restrictions
 
-Set `disabledToolsWhileGoalActive` to the registered names of tools that should be unavailable
-during autonomous goal work. For example:
+`ask_user_question` is always blocked during active goal work, including supported nested calls.
+Set `disabledToolsWhileGoalActive` for additional restrictions. For example:
 
 ```json
 {
   "$schema": "./config.schema.json",
   "creationPromptPath": null,
-  "disabledToolsWhileGoalActive": ["ask_user_question"]
+  "disabledToolsWhileGoalActive": ["browser"]
 }
 ```
 
 The policy applies only while a goal is `active`. When it pauses, blocks, completes, or reaches its
-maximum time, the extension restores each affected tool to its previous state. Tools registered
-after session start are also covered before goal work begins.
+maximum time, remaining Toggles policy resumes, or standalone prior states are restored. Tools
+registered later are also restricted before agent work and when invoked.
 
 `get_goal` and `update_goal` cannot be disabled because the active lifecycle depends on them. A
 disabled-tool list may contain at most 128 non-empty names. Reload Pi after changing this option.

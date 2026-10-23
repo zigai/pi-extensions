@@ -38,7 +38,7 @@ const CONFIG_SCHEMA = {
     },
     disabledToolsWhileGoalActive: {
       description:
-        "Registered tool names to disable while a goal is active. Previous tool states are restored when the goal stops.",
+        "Additional tool names to disable while a goal is active. ask_user_question is always disabled; remaining policy resumes when the goal stops.",
       type: "array",
       maxItems: 128,
       items: { type: "string", minLength: 1 },

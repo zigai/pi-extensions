@@ -38,6 +38,9 @@ export interface GoalRuntimeController extends GoalRuntimeEventHandlers {
   configureGoalToolPolicy(policy: ActiveGoalToolPolicy): void;
   releaseGoalToolPolicy(): void;
   syncGoalToolPolicy(): void;
+  startToolPolicySession(sessionId: string): void;
+  canInvokeTool(name: string): boolean;
+  disposeToolPolicy(): void;
 
   resumeGoalWithContinuation(
     goalId: string,
@@ -49,7 +52,7 @@ export interface GoalRuntimeController extends GoalRuntimeEventHandlers {
 export function createGoalRuntimeController(pi: ExtensionAPI): GoalRuntimeController {
   const runtimeState = createGoalRuntimeState();
   const persistence = createGoalPersistence({ pi });
-  const goalToolPolicy = createGoalToolPolicyController(pi);
+  const goalToolPolicy = createGoalToolPolicyController(pi, pi.events);
 
   const clearActiveAccounting = (): void => {
     runtimeState.accounting.activeGoalId = null;
@@ -213,6 +216,9 @@ export function createGoalRuntimeController(pi: ExtensionAPI): GoalRuntimeContro
       goalToolPolicy.sync(stateController.getGoal());
     },
     releaseGoalToolPolicy: () => goalToolPolicy.release(),
+    startToolPolicySession: (sessionId) => goalToolPolicy.startSession(sessionId),
+    canInvokeTool: (name) => goalToolPolicy.canInvoke(name),
+    disposeToolPolicy: () => goalToolPolicy.dispose(),
     resumeGoalWithContinuation,
     syncGoalToolPolicy() {
       goalToolPolicy.sync(stateController.getGoal());
@@ -240,6 +246,8 @@ export function registerGoalRuntimeController(pi: ExtensionAPI): void {
   });
 
   pi.on("session_start", (_event, ctx) => {
+    controller.startToolPolicySession(ctx.sessionManager.getSessionId());
+
     try {
       ensureGoalConfigFiles();
     } catch {
@@ -260,11 +268,23 @@ export function registerGoalRuntimeController(pi: ExtensionAPI): void {
     controller.syncGoalToolPolicy();
   });
 
+  pi.on("tool_call", (event) => {
+    controller.syncGoalToolPolicy();
+
+    if (!controller.canInvokeTool(event.toolName)) {
+      return { block: true, reason: `Goal blocked ${event.toolName} while a goal is active.` };
+    }
+
+    return undefined;
+  });
+
   pi.on("tool_execution_end", () => {
     controller.syncGoalToolPolicy();
   });
 
-  pi.on("session_shutdown", () => {
+  pi.on("session_shutdown", (event) => {
     controller.releaseGoalToolPolicy();
+
+    if (event.reason === "quit" || event.reason === "reload") controller.disposeToolPolicy();
   });
 }

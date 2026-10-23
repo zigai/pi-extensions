@@ -11,7 +11,7 @@ active goal continues until it is completed, paused, blocked, or stopped by an o
 
 ## Install
 
-The package requires Node.js 24 or newer. Install the current npm release with Pi:
+Requires Node.js 24 or newer and Pi 1.3 or newer. Install the current npm release with Pi:
 
 ```sh
 pi install npm:@zigai/pi-goal
@@ -72,7 +72,7 @@ On first session start, the extension creates its global configuration at
 | Option                         | Type           | Default | Description                                                            |
 | ------------------------------ | -------------- | ------- | ---------------------------------------------------------------------- |
 | `creationPromptPath`           | string or null | `null`  | Use a custom goal-creation template. `null` uses the bundled template. |
-| `disabledToolsWhileGoalActive` | string[]       | `[]`    | Disable the named registered tools only while a goal is active.        |
+| `disabledToolsWhileGoalActive` | string[]       | `[]`    | Disable additional registered tools while a goal is active.            |
 
 The complete default configuration is:
 
@@ -84,8 +84,8 @@ The complete default configuration is:
 }
 ```
 
-Reload Pi after changing the disabled-tool list. The extension restores each affected tool to its
-previous state when the goal stops being active. `get_goal` and `update_goal` must remain available.
+`ask_user_question` is blocked while a goal is active. Reload Pi after changing additional restrictions.
+When the goal stops, remaining Toggles policy or standalone prior states resume. `get_goal` and `update_goal` remain available.
 
 See [Configuration](docs/configuration.md) for custom templates and trusted-project overrides.
 

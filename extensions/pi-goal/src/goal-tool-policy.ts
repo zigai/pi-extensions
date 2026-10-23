@@ -1,4 +1,6 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { EventBus, ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Compile } from "typebox/compile";
+import { Type } from "typebox";
 
 import type { ThreadGoal } from "./types.ts";
 
@@ -18,6 +20,9 @@ interface AppliedToolPolicy {
 }
 
 export interface GoalToolPolicyController {
+  startSession(sessionId: string): void;
+  canInvoke(name: string): boolean;
+  dispose(): void;
   configure(policy: ActiveGoalToolPolicy): void;
   release(): void;
   sync(goal: ThreadGoal | null): void;
@@ -71,9 +76,45 @@ function setsEqual(left: ReadonlySet<string>, right: ReadonlySet<string>): boole
   return left.size === right.size && [...left].every((name) => right.has(name));
 }
 
-export function createGoalToolPolicyController(host: ToolPolicyHost): GoalToolPolicyController {
-  let configured = normalizeActiveGoalToolPolicy([]);
+export function createGoalToolPolicyController(
+  host: ToolPolicyHost,
+  events?: EventBus,
+): GoalToolPolicyController {
+  let configured = normalizeActiveGoalToolPolicy(["ask_user_question"]);
   let applied: AppliedToolPolicy | null = null;
+  let sessionId: string | undefined;
+  let currentGoal: ThreadGoal | null = null;
+  let delegated = false;
+
+  const envelope = Compile(
+    Type.Object(
+      { version: Type.Literal(1), sessionId: Type.String() },
+      { additionalProperties: false },
+    ),
+  );
+  const publish = (): void => {
+    if (sessionId === undefined) return;
+
+    events?.emit("pi-toggles:register-context-key", {
+      owner: "pi-goal",
+      key: "goal.status",
+      type: "string",
+      description: "Authoritative Goal lifecycle status; absent when no goal exists.",
+    });
+
+    events?.emit("pi-toggles:set-context", {
+      owner: "pi-goal",
+      key: "goal.status",
+      value: currentGoal?.status ?? "absent",
+    });
+
+    events?.emit("pi-goal:tool-policy", {
+      version: 1,
+      sessionId,
+      status: currentGoal?.status ?? "absent",
+      disabledTools: configured.disabledTools,
+    });
+  };
 
   const setActiveToolsIfChanged = (
     currentNames: readonly string[],
@@ -93,7 +134,7 @@ export function createGoalToolPolicyController(host: ToolPolicyHost): GoalToolPo
     host.setActiveTools(ordered);
   };
 
-  const release = (): void => {
+  const restoreLocal = (): void => {
     if (applied === null) {
       return;
     }
@@ -137,14 +178,17 @@ export function createGoalToolPolicyController(host: ToolPolicyHost): GoalToolPo
   };
 
   const sync = (goal: ThreadGoal | null): void => {
-    if (goal?.status !== "active" || configured.disabledTools.length === 0) {
-      release();
+    currentGoal = goal;
+    publish();
+
+    if (delegated || goal?.status !== "active" || configured.disabledTools.length === 0) {
+      restoreLocal();
       return;
     }
 
     const key = policyKey(goal, configured);
     if (applied?.key !== key) {
-      release();
+      restoreLocal();
 
       const current = new Set(host.getActiveTools());
       const available = new Set(host.getAllTools().map((tool) => tool.name));
@@ -164,7 +208,7 @@ export function createGoalToolPolicyController(host: ToolPolicyHost): GoalToolPo
   };
 
   const configure = (policy: ActiveGoalToolPolicy): void => {
-    const next = normalizeActiveGoalToolPolicy(policy.disabledTools);
+    const next = normalizeActiveGoalToolPolicy(["ask_user_question", ...policy.disabledTools]);
     if (
       configured.disabledTools.length === next.disabledTools.length &&
       configured.disabledTools.every((name, index) => name === next.disabledTools[index])
@@ -172,9 +216,61 @@ export function createGoalToolPolicyController(host: ToolPolicyHost): GoalToolPo
       return;
     }
 
-    release();
+    restoreLocal();
     configured = next;
   };
 
-  return { configure, release, sync };
+  const unsubscribers = [
+    events?.on("pi-toggles:context-ready", (value) => {
+      if (!envelope.Check(value)) return;
+
+      const ready = envelope.Parse(value);
+      if (ready.sessionId === sessionId) publish();
+    }),
+    events?.on("pi-goal:tool-policy-accepted", (value) => {
+      if (!envelope.Check(value)) return;
+
+      const accepted = envelope.Parse(value);
+      if (accepted.sessionId !== sessionId) return;
+
+      restoreLocal();
+      delegated = true;
+    }),
+    events?.on("pi-goal:tool-policy-released", (value) => {
+      if (!envelope.Check(value)) return;
+
+      const released = envelope.Parse(value);
+      if (released.sessionId !== sessionId) return;
+
+      delegated = false;
+      sync(currentGoal);
+    }),
+  ];
+
+  const release = (): void => {
+    currentGoal = null;
+    publish();
+    restoreLocal();
+  };
+
+  return {
+    configure,
+    release,
+    sync,
+    startSession(nextSessionId) {
+      restoreLocal();
+      sessionId = nextSessionId;
+      delegated = false;
+      currentGoal = null;
+      publish();
+    },
+    canInvoke: (name) =>
+      currentGoal?.status !== "active" || !configured.disabledTools.includes(name),
+    dispose() {
+      release();
+      events?.emit("pi-toggles:clear-context", { owner: "pi-goal" });
+
+      for (const unsubscribe of unsubscribers) unsubscribe?.();
+    },
+  };
 }

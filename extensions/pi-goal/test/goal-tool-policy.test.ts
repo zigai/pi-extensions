@@ -82,18 +82,19 @@ test("tool policy preserves unrelated changes and handles tools registered later
   assert.equal(harness.active.includes("new_unrelated_tool"), true);
 });
 
-test("changing configured disabled tools restores the old policy first", () => {
+test("changing additional disabled tools preserves the question restriction", () => {
   const harness = createHarness(
-    ["read", "ask_user_question", "get_goal", "update_goal"],
-    ["read", "ask_user_question"],
+    ["read", "ask_user_question", "browser", "get_goal", "update_goal"],
+    ["read", "ask_user_question", "browser"],
   );
   const goal = createThreadGoal("ship", undefined, 0);
-  harness.controller.configure({ disabledTools: ["ask_user_question"] });
+  harness.controller.configure({ disabledTools: ["browser"] });
   harness.controller.sync(goal);
-  assert.equal(harness.active.includes("ask_user_question"), false);
+  assert.equal(harness.active.includes("browser"), false);
   harness.controller.configure({ disabledTools: ["read"] });
   harness.controller.sync(goal);
-  assert.equal(harness.active.includes("ask_user_question"), true);
+  assert.equal(harness.active.includes("browser"), true);
+  assert.equal(harness.active.includes("ask_user_question"), false);
   assert.equal(harness.active.includes("read"), false);
 });
 
