@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -84,6 +85,113 @@ function createSessionHarness(
 }
 
 describe("typed command UX session", () => {
+    it.each(["Error", "non-Error"])(
+        "queues both safe detached-failure records when notify throws (%s), without terminal output",
+        (kind) => {
+            const directory = mkdtempSync(join(tmpdir(), "typed-command-diagnostics-"));
+            try {
+                const result = spawnSync(
+                    process.execPath,
+                    [
+                        "--import",
+                        import.meta.resolve("tsx"),
+                        "--input-type=module",
+                        "-e",
+                        `
+                        import assert from "node:assert/strict";
+                        import { bindExtensionDiagnostics, reportExtensionDiagnostic } from "@zigai/pi-extension-internals";
+                        import { normalizeRegisteredCommand } from ${JSON.stringify(new URL("../src/command/registered-command.ts", import.meta.url).href)};
+                        import { createTypedCommandRegistry } from ${JSON.stringify(new URL("../src/registry.ts", import.meta.url).href)};
+                        import { TypedCommandUxSession } from ${JSON.stringify(new URL("../src/pi/ux-session.ts", import.meta.url).href)};
+                        import { createTestExtensionApi, createTestExtensionContext, createTestSignal } from ${JSON.stringify(new URL("./pi-test-adapter.ts", import.meta.url).href)};
+
+                        const registry = createTypedCommandRegistry();
+                        registry.register(normalizeRegisteredCommand({
+                            name: "diagnostic-form", description: "Failure demo",
+                            args: { token: { type: "string", required: true, sensitive: true } },
+                            run() {},
+                        }));
+                        const failure = () => {
+                            if (${JSON.stringify(kind)} === "Error") return new Error("SECRET error cause");
+                            return { secret: "SECRET arbitrary cause" };
+                        };
+                        let terminalInput;
+                        const attempts = [];
+                        const broken = createTestExtensionContext({
+                            ui: {
+                                getEditorText: () => "/diagnostic-form",
+                                onTerminalInput(handler) { terminalInput = handler; return () => {}; },
+                                async custom() { throw failure(); },
+                                notify(message) { attempts.push(message); throw failure(); },
+                            },
+                        });
+                        const session = new TypedCommandUxSession(createTestExtensionApi(), {}, registry);
+                        await session.start(broken);
+                        assert.deepEqual(terminalInput("\\t"), { consume: true });
+                        await session.waitForFormCompletion();
+                        assert.equal(attempts[0], "Typed command form failed.");
+                        await session.stop();
+
+                        const notices = [];
+                        const healthy = createTestExtensionContext({
+                            ui: { notify(message, level) { notices.push({ message, level }); } },
+                        });
+                        await session.start(healthy);
+                        reportExtensionDiagnostic("Standalone transport active", "info");
+                        assert.deepEqual(notices, [
+                            { message: "pi-typed-args detached form task failed (${kind})", level: "error" },
+                            { message: "pi-typed-args failed to report detached form task error (${kind})", level: "error" },
+                            { message: "Standalone transport active", level: "info" },
+                        ]);
+                        await session.stop();
+
+                        const opened = createTestSignal();
+                        const release = createTestSignal();
+                        const closing = createTestExtensionContext({
+                            ui: {
+                                getEditorText: () => "/diagnostic-form",
+                                onTerminalInput(handler) { terminalInput = handler; return () => {}; },
+                                notify: healthy.ui.notify,
+                                async custom() {
+                                    opened.resolve();
+                                    await release.promise;
+                                    reportExtensionDiagnostic("Owned form cleanup", "info");
+                                    throw failure();
+                                },
+                            },
+                        });
+                        await session.start(closing);
+                        terminalInput("\\t");
+                        await opened.promise;
+                        const stopped = session.stop();
+                        release.resolve();
+                        await stopped;
+                        // Cleanup retains its transport, but the stale form rejection is silent.
+                        assert.deepEqual(notices.slice(3), [{ message: "Owned form cleanup", level: "info" }]);
+                        await session.stop();
+                        reportExtensionDiagnostic("After shutdown", "warning");
+                        assert.equal(notices.length, 4);
+                        const rebound = bindExtensionDiagnostics(healthy);
+                        assert.deepEqual(notices.at(-1), { message: "After shutdown", level: "warning" });
+                        rebound.dispose();
+                        `,
+                    ],
+                    {
+                        cwd: import.meta.dirname,
+                        encoding: "utf8",
+                        env: { ...process.env, PI_CODING_AGENT_DIR: directory },
+                        timeout: 15_000,
+                    },
+                );
+                assert.equal(result.status, 0, result.stderr);
+                assert.equal(result.stderr, "");
+                assert.equal(result.stdout, "");
+            } finally {
+                rmSync(directory, { recursive: true, force: true });
+            }
+        },
+    );
+
     it("shows description-only command coverage without inventing forms or retaining stale helpers", async () => {
         const directory = mkdtempSync(join(tmpdir(), "command-description-"));
         const previous = process.env.PI_CODING_AGENT_DIR;

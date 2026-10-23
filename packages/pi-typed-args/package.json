@@ -60,6 +60,7 @@
     "release:dry-run": "release --dry --root ../.."
   },
   "dependencies": {
+    "@zigai/pi-extension-internals": "0.2.0",
     "typebox": "^1.3.8",
     "yaml": "^2.9.0"
   },
@@ -74,7 +75,7 @@
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-tui": "*"
+    "@earendil-works/pi-tui": "^1.3.0"
   },
   "engines": {
     "node": ">=22.19.0 <27"

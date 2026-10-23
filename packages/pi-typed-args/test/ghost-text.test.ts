@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 import { CustomEditor, type ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import { registerEditorEnhancer } from "@zigai/pi-extension-internals";
+import { Type } from "typebox";
+import { Value } from "typebox/value";
 import {
     CURSOR_MARKER,
     renderFakeCursor,
@@ -301,6 +304,13 @@ describe("inline ghost text editor", () => {
                 records.push(`max:${maxVisible}`);
             },
         };
+        const capability = Symbol.for("test.editor.document");
+        let captured = "";
+        Object.defineProperty(base, capability, {
+            value: () => {
+                captured = base.getText();
+            },
+        });
         const wrapped = withGhostText(base, () => "ghost", identity);
 
         wrapped.addToHistory?.("/old");
@@ -312,6 +322,9 @@ describe("inline ghost text editor", () => {
         wrapped.invalidate();
         assert.equal(wrapped.getText(), "/deploy service");
         assert.equal(wrapped.getExpandedText?.(), "expanded:/deploy service");
+        const external: unknown = Object.getOwnPropertyDescriptor(wrapped, capability)?.value;
+        Value.Parse(Type.Function([], Type.Void()), external)();
+        assert.equal(captured, "/deploy service");
         assert.deepEqual(records, [
             "history:/old",
             "autocomplete",
@@ -374,6 +387,67 @@ describe("inline ghost text editor", () => {
         assert.doesNotMatch(component.render(50).join("\n"), /deploy:root:\/workspace/);
         assert.equal(widgetContent.length, 1);
         await session.stop();
+        assert.equal(current, previous);
+    });
+
+    it("retains ghost text and a later shared editor capability without recursive factories", async () => {
+        type EditorFactory = NonNullable<ReturnType<ExtensionUIContext["getEditorComponent"]>>;
+
+        const registry = createTypedCommandRegistry();
+        registry.register(ghostCommand());
+        const previous: EditorFactory = (tui, theme, keybindings) =>
+            new CustomEditor(tui, theme, keybindings);
+
+        let current: EditorFactory | undefined = previous;
+        let active: EditorComponent | undefined;
+        const ctx = createTestExtensionContext({
+            cwd: "/workspace",
+            ui: {
+                getEditorComponent: () => current,
+                getEditorText: () => "/deploy",
+                setEditorComponent: (factory) => {
+                    current = factory;
+                    active = factory?.(createTestTui(), editorTheme, createTestKeybindings());
+                },
+            },
+        });
+        const first = registerEditorEnhancer(
+            ctx,
+            Symbol.for("test.editor.first"),
+            previous,
+            (editor) => editor,
+        );
+        const session = new TypedCommandUxSession(createTestExtensionApi(), {}, registry);
+        try {
+            await session.start(ctx);
+            const later = registerEditorEnhancer(
+                ctx,
+                Symbol.for("test.editor.later"),
+                previous,
+                (editor) => {
+                    const render = editor.render.bind(editor);
+                    editor.render = (width) => ["External capability", ...render(width)];
+                    return editor;
+                },
+            );
+            assert.ok(active);
+            requireFocusableComponent(active).focused = true;
+            active.setText("/deploy");
+            const lines = active.render(80).join("\n");
+            assert.match(lines, /deploy:root:\/workspace/);
+            assert.match(lines, /External capability/);
+            await session.stop();
+            assert.notEqual(active, undefined);
+            active.setText("/deploy");
+            const stopped = active.render(80).join("\n");
+            assert.doesNotMatch(stopped, /deploy:root:\/workspace/);
+            assert.match(stopped, /External capability/);
+            later.dispose();
+        } finally {
+            await session.stop();
+            first.dispose();
+        }
+
         assert.equal(current, previous);
     });
 

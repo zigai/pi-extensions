@@ -4,6 +4,11 @@ import {
     type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { getKeybindings, type AutocompleteProvider } from "@earendil-works/pi-tui";
+import {
+    bindExtensionDiagnostics,
+    registerEditorEnhancer,
+    reportExtensionDiagnostic,
+} from "@zigai/pi-extension-internals";
 import { openArgumentForm } from "../form/open.ts";
 import {
     parseTypedCommandArgs,
@@ -48,8 +53,8 @@ type PiEditorFactory = NonNullable<ReturnType<ExtensionContext["ui"]["getEditorC
 
 type EditorUxInstallation = {
     readonly ctx: ExtensionContext;
-    readonly previous: PiEditorFactory | undefined;
-    readonly installed: PiEditorFactory;
+    readonly installed: PiEditorFactory | undefined;
+    readonly dispose: () => void;
     readonly getActiveEditor: () => ReturnType<PiEditorFactory> | undefined;
 };
 
@@ -300,11 +305,16 @@ function reportDetachedError(ctx: ExtensionContext, error: unknown): void {
     try {
         notifyDetachedError(ctx);
     } catch (notifyError) {
-        console.error(`pi-typed-args detached form task failed (${thrownValueKind(error)})`);
-        console.error(
+        reportExtensionDiagnostic(
+            `pi-typed-args detached form task failed (${thrownValueKind(error)})`,
+            "error",
+        );
+
+        reportExtensionDiagnostic(
             `pi-typed-args failed to report detached form task error (${thrownValueKind(
                 notifyError,
             )})`,
+            "error",
         );
     }
 }
@@ -312,6 +322,7 @@ function reportDetachedError(ctx: ExtensionContext, error: unknown): void {
 /** Session-scoped Pi UX bridge for helper widgets, autocomplete, and Tab-to-form behavior. */
 export class TypedCommandUxSession {
     private cleanup: Array<() => void> = [];
+    private diagnosticsBinding: ReturnType<typeof bindExtensionDiagnostics> | undefined;
     private refreshTimer: NodeJS.Timeout | undefined;
     private openingForm = false;
     private active = false;
@@ -359,6 +370,8 @@ export class TypedCommandUxSession {
             return;
         }
 
+        this.diagnosticsBinding = bindExtensionDiagnostics(ctx);
+
         for (const diagnostic of this.options.diagnostics) {
             ctx.ui.notify(diagnostic.message, "warning");
         }
@@ -404,9 +417,16 @@ export class TypedCommandUxSession {
         const task = this.formTask;
         this.formTask = undefined;
 
-        if (task !== undefined) {
-            task.controller.abort();
-            await task.completion;
+        const diagnosticsBinding = this.diagnosticsBinding;
+        this.diagnosticsBinding = undefined;
+
+        try {
+            if (task !== undefined) {
+                task.controller.abort();
+                await task.completion;
+            }
+        } finally {
+            diagnosticsBinding?.dispose();
         }
     }
 
@@ -475,28 +495,29 @@ export class TypedCommandUxSession {
             return;
         }
 
-        const previous = ctx.ui.getEditorComponent();
         let activeEditor: ReturnType<PiEditorFactory> | undefined;
-        const installed: PiEditorFactory = (tui, theme, keybindings) => {
-            const base =
-                previous?.(tui, theme, keybindings) ?? new CustomEditor(tui, theme, keybindings);
-            const decorated = withGhostText(
-                base,
-                () => resolveGhostText(base.getText(), this.registry, ctx)?.text,
-                (text) => ctx.ui.theme.fg("dim", text),
-            );
+        const handle = registerEditorEnhancer(
+            ctx,
+            Symbol.for("pi-typed-args.editor-ux"),
+            (tui, theme, keybindings) => new CustomEditor(tui, theme, keybindings),
+            (base) => {
+                const decorated = withGhostText(
+                    base,
+                    () => resolveGhostText(base.getText(), this.registry, ctx)?.text,
+                    (text) => ctx.ui.theme.fg("dim", text),
+                );
 
-            activeEditor = decorated;
-            return decorated;
-        };
+                activeEditor = decorated;
+                return decorated;
+            },
+        );
 
         this.editorUxInstallation = {
             ctx,
-            previous,
-            installed,
+            installed: ctx.ui.getEditorComponent(),
+            dispose: () => handle.dispose(),
             getActiveEditor: () => activeEditor,
         };
-        ctx.ui.setEditorComponent(installed);
     }
 
     private uninstallEditorUx(): void {
@@ -507,9 +528,7 @@ export class TypedCommandUxSession {
 
         this.editorUxInstallation = undefined;
 
-        if (installation.ctx.ui.getEditorComponent() === installation.installed) {
-            installation.ctx.ui.setEditorComponent(installation.previous);
-        }
+        installation.dispose();
     }
 
     private submitEditorInput(ctx: ExtensionContext, data: string): boolean {
