@@ -25,6 +25,7 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-status-bar.json
 | --- | --- | --- | --- |
 | `statusBar.active.text` | string | — | Custom active status text. |
 | `statusBar.active.spinner.frames` | string[] | — | Spinner frames displayed while Pi is active. |
+| `statusBar.active.spinner.intervalMs` | integer | `160` | Delay between working spinner frames in milliseconds. |
 | `statusBar.active.timer.visible` | boolean | `true` | Show the active-run timer. |
 | `statusBar.active.timer.paused` | boolean | `false` | Display the active-run timer as paused. |
 | `statusBar.idle.text` | string | — | Custom idle status text. |
@@ -46,6 +47,9 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-status-bar.json
   "$schema": "./schemas/pi-status-bar.schema.json",
   "statusBar": {
     "active": {
+      "spinner": {
+        "intervalMs": 160
+      },
       "timer": {
         "visible": true,
         "paused": false

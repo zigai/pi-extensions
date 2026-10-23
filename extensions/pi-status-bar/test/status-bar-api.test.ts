@@ -37,6 +37,7 @@ test("configureStatusBar controls active and idle status bar state", () => {
     assert.deepEqual(getStatusBarSnapshot().active, {
         text: "Working now",
         spinnerFrames: ["◐", "◓"],
+        spinnerIntervalMs: undefined,
         timerVisible: true,
         timerPaused: false,
         timerResetVersion: 0,

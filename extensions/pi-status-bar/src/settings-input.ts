@@ -1,5 +1,6 @@
 import { Type } from "typebox";
 
+export const DEFAULT_SPINNER_INTERVAL_MS = 160;
 export const RIGHT_MESSAGES_SETTINGS_KEY = "rightMessages";
 export const DEFAULT_RIGHT_MESSAGE_INTERVAL_MS = 10_000;
 export const DEFAULT_RIGHT_MESSAGE_MIN_GAP = 4;
@@ -13,8 +14,13 @@ export const spinnerSettingsSchema = Type.Object(
                 description: "Spinner frames displayed while Pi is active.",
             }),
         ),
+        intervalMs: Type.Integer({
+            minimum: 1,
+            default: DEFAULT_SPINNER_INTERVAL_MS,
+            description: "Delay between working spinner frames in milliseconds.",
+        }),
     },
-    { additionalProperties: false },
+    { default: {}, additionalProperties: false },
 );
 
 export const timerSettingsSchema = Type.Object(
@@ -34,7 +40,7 @@ export const timerSettingsSchema = Type.Object(
 export const activeSettingsSchema = Type.Object(
     {
         text: Type.Optional(Type.String({ description: "Custom active status text." })),
-        spinner: Type.Optional(spinnerSettingsSchema),
+        spinner: spinnerSettingsSchema,
         timer: timerSettingsSchema,
     },
     { default: {}, additionalProperties: false },

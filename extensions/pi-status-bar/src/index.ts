@@ -11,10 +11,15 @@ import { installLoaderPatch, setStatusBarRunTimer } from "./loader-patch.ts";
 import { setRightMessagesConfig } from "./right-message.ts";
 import {
     DEFAULT_RIGHT_MESSAGES_CONFIG,
+    DEFAULT_SPINNER_INTERVAL_MS,
     loadStatusBarSettings,
     type LoadedStatusBarConfig,
 } from "./settings.ts";
-import { setStatusBarBaseConfig, subscribeStatusBarUpdates } from "./status-bar-api.ts";
+import {
+    getStatusBarSnapshot,
+    setStatusBarBaseConfig,
+    subscribeStatusBarUpdates,
+} from "./status-bar-api.ts";
 import { isProviderOutputEvent, TurnTokenThroughputTracker } from "./token-throughput.ts";
 import {
     clearWorkedForWidget,
@@ -33,7 +38,8 @@ type StatusBarContext = Pick<ExtensionContext, "cwd" | "isProjectTrusted" | "isI
             typeof getWorkedForStateFromBranch
         >[0]["sessionManager"];
 
-        readonly ui: WorkedForWidgetContext["ui"] & Pick<ExtensionContext["ui"], "notify">;
+        readonly ui: WorkedForWidgetContext["ui"] &
+            Pick<ExtensionContext["ui"], "notify" | "setWorkingIndicator">;
     };
 
 type StatusBarMessage = Pick<MessageStartEvent["message"], "role">;
@@ -74,6 +80,18 @@ export function createStatusBarLifecycle(appendState: (state: WorkedForState) =>
     let idleWorkedForText: string | undefined;
     let idleTokensPerSecond: number | undefined;
     let agentRunning = false;
+    let spinnerIntervalMs: number | undefined;
+
+    function applyWorkingIndicator(ctx: StatusBarContext): void {
+        if (!ctx.hasUI) return;
+
+        const intervalMs =
+            getStatusBarSnapshot().active.spinnerIntervalMs ?? DEFAULT_SPINNER_INTERVAL_MS;
+        if (spinnerIntervalMs === intervalMs) return;
+
+        ctx.ui.setWorkingIndicator({ intervalMs });
+        spinnerIntervalMs = intervalMs;
+    }
 
     function restoreWorkedForState(ctx: StatusBarContext): void {
         const state = getWorkedForStateFromBranch(ctx);
@@ -88,13 +106,20 @@ export function createStatusBarLifecycle(appendState: (state: WorkedForState) =>
     }
 
     const unsubscribeStatusBarUpdates = subscribeStatusBarUpdates(() => {
-        if (agentRunning || idleWidgetContext === undefined) return;
+        if (idleWidgetContext === undefined) return;
+
+        applyWorkingIndicator(idleWidgetContext);
+
+        if (agentRunning) return;
 
         setWorkedForWidget(idleWidgetContext, idleWorkedForText, idleTokensPerSecond);
     });
 
     async function session_start(_event: Pick<ExtensionEvent, "type">, ctx: StatusBarContext) {
+        idleWidgetContext = undefined;
+        spinnerIntervalMs = undefined;
         applyStatusBarResolvedConfig(ctx);
+        applyWorkingIndicator(ctx);
         runStartedAt = undefined;
         setStatusBarRunTimer(undefined);
         throughput.reset();
@@ -177,11 +202,13 @@ export function createStatusBarLifecycle(appendState: (state: WorkedForState) =>
     }
 
     async function session_shutdown(_event: Pick<ExtensionEvent, "type">, ctx: StatusBarContext) {
+        if (spinnerIntervalMs !== undefined) ctx.ui.setWorkingIndicator();
+        spinnerIntervalMs = undefined;
+        idleWidgetContext = undefined;
         runStartedAt = undefined;
         setStatusBarRunTimer(undefined);
         throughput.reset();
         agentRunning = false;
-        idleWidgetContext = undefined;
         idleWorkedForText = undefined;
         idleTokensPerSecond = undefined;
         setRightMessagesConfig(DEFAULT_RIGHT_MESSAGES_CONFIG);

@@ -30,8 +30,15 @@
                     "type": "string"
                   },
                   "description": "Spinner frames displayed while Pi is active."
+                },
+                "intervalMs": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "default": 160,
+                  "description": "Delay between working spinner frames in milliseconds."
                 }
               },
+              "default": {},
               "additionalProperties": false
             },
             "timer": {

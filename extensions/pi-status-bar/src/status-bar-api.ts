@@ -10,6 +10,7 @@ export type StatusBarSide = "right";
 export type StatusBarSpinnerConfig = {
     /** Frames used instead of Pi's current loader frames while active. */
     readonly frames?: readonly string[];
+    readonly intervalMs?: number;
 };
 
 export type StatusBarTimerConfig = {
@@ -57,7 +58,7 @@ export type StatusBarHandle = {
     /** Replace the idle status text. Empty text clears the override. */
     setIdleText(text: string): void;
 
-    /** Replace active spinner frames. Empty frames clear the override. */
+    /** Replace active spinner frames and speed. Empty frames clear the frame override. */
     setSpinner(spinner: StatusBarSpinnerConfig): void;
 
     /** Pause the active elapsed timer. */
@@ -130,6 +131,7 @@ export type StatusBarSnapshot = {
     readonly active: {
         readonly text?: string;
         readonly spinnerFrames?: readonly string[];
+        readonly spinnerIntervalMs?: number;
         readonly timerVisible: boolean;
         readonly timerPaused: boolean;
         readonly timerResetVersion: number;
@@ -149,6 +151,7 @@ type MutableStatusBarOverride = {
     readonly owner: symbol;
     activeText?: string;
     spinnerFrames?: readonly string[];
+    spinnerIntervalMs?: number;
     timerVisible?: boolean;
     timerPaused?: boolean;
     idleText?: string;
@@ -282,6 +285,33 @@ function emitStatusBarUpdates(state: StatusBarState): void {
     }
 }
 
+function applySpinnerConfig(
+    target: MutableStatusBarOverride,
+    spinner: StatusBarSpinnerConfig | undefined,
+): boolean {
+    const frames = sanitizeFrames(spinner?.frames);
+    let intervalMs = spinner?.intervalMs;
+    if (intervalMs !== undefined && (!Number.isInteger(intervalMs) || intervalMs <= 0)) {
+        intervalMs = undefined;
+    }
+
+    const changed = target.spinnerFrames !== frames || target.spinnerIntervalMs !== intervalMs;
+
+    if (frames === undefined) {
+        delete target.spinnerFrames;
+    } else {
+        target.spinnerFrames = frames;
+    }
+
+    if (intervalMs === undefined) {
+        delete target.spinnerIntervalMs;
+    } else {
+        target.spinnerIntervalMs = intervalMs;
+    }
+
+    return changed;
+}
+
 function applyStatusBarConfig(target: MutableStatusBarOverride, config: StatusBarConfig): boolean {
     let changed = false;
     let activeText: string | undefined;
@@ -299,16 +329,7 @@ function applyStatusBarConfig(target: MutableStatusBarOverride, config: StatusBa
         }
     }
 
-    const spinnerFrames = sanitizeFrames(config.active?.spinner?.frames);
-    if (target.spinnerFrames !== spinnerFrames) {
-        changed = true;
-
-        if (spinnerFrames === undefined) {
-            delete target.spinnerFrames;
-        } else {
-            target.spinnerFrames = spinnerFrames;
-        }
-    }
+    if (applySpinnerConfig(target, config.active?.spinner)) changed = true;
 
     const timerVisible = config.active?.timer?.visible;
     if (target.timerVisible !== timerVisible) {
@@ -447,18 +468,7 @@ export function configureStatusBar(config: StatusBarConfig): StatusBarHandle {
             });
         },
         setSpinner(spinner: StatusBarSpinnerConfig): void {
-            updateOwned((current) => {
-                const frames = sanitizeFrames(spinner.frames);
-                if (current.spinnerFrames === frames) return false;
-
-                if (frames === undefined) {
-                    delete current.spinnerFrames;
-                } else {
-                    current.spinnerFrames = frames;
-                }
-
-                return true;
-            });
+            updateOwned((current) => applySpinnerConfig(current, spinner));
         },
         pauseTimer(): void {
             updateOwned((current) => {
@@ -644,6 +654,7 @@ export function getStatusBarSnapshot(): StatusBarSnapshot {
         active: {
             text: override?.activeText ?? base.activeText,
             spinnerFrames: override?.spinnerFrames ?? base.spinnerFrames,
+            spinnerIntervalMs: override?.spinnerIntervalMs ?? base.spinnerIntervalMs,
             timerVisible: override?.timerVisible ?? base.timerVisible ?? true,
             timerPaused: override?.timerPaused ?? base.timerPaused ?? false,
             timerResetVersion: state.timerResetVersion,

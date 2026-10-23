@@ -26,6 +26,7 @@ test("loadStatusBarSettings scaffolds missing global config and schema", async (
         assert.equal(loaded.config.rightMessages.enabled, false);
         assert.deepEqual(loaded.config.statusBar, {
             active: {
+                spinner: { intervalMs: 160 },
                 timer: {
                     visible: true,
                     paused: false,
@@ -41,6 +42,7 @@ test("loadStatusBarSettings scaffolds missing global config and schema", async (
             $schema: "./schemas/pi-status-bar.schema.json",
             statusBar: {
                 active: {
+                    spinner: { intervalMs: 160 },
                     timer: {
                         visible: true,
                         paused: false,
@@ -106,6 +108,7 @@ test("status bar status bar parses active and idle config", () => {
                         text: " Working\nnow ",
                         spinner: {
                             frames: [" ◐ ", "", "◓"],
+                            intervalMs: 240,
                         },
                         timer: {
                             visible: false,
@@ -129,6 +132,7 @@ test("status bar status bar parses active and idle config", () => {
             text: "Working now",
             spinner: {
                 frames: ["◐", "◓"],
+                intervalMs: 240,
             },
             timer: {
                 visible: false,

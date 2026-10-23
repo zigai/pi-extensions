@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
-import { test, vi } from "vitest";
+import { afterEach, beforeEach, test, vi } from "vitest";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
-import { Loader, type TUI } from "@earendil-works/pi-tui";
+import { Loader, type LoaderIndicatorOptions, type TUI } from "@earendil-works/pi-tui";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { resolve } from "node:path";
 
 import { RenderCountingTui } from "./tui-fixture.ts";
 
@@ -13,6 +15,22 @@ import {
     WORKED_FOR_STATE_ENTRY,
     type WorkedForState,
 } from "../src/worked-for-widget.ts";
+
+let agentDir: string | undefined;
+
+beforeEach(() => {
+    mkdirSync(".cache", { recursive: true });
+    agentDir = mkdtempSync(resolve(".cache/status-bar-agent-"));
+    vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
+});
+
+afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
+
+    if (agentDir !== undefined) rmSync(agentDir, { recursive: true, force: true });
+    agentDir = undefined;
+});
 
 type LifecycleEvent = {
     readonly message?: {
@@ -77,7 +95,9 @@ function parseLoaderPrototypeOwner(
     return value;
 }
 
-function createHarness(): LifecycleHarness {
+function createHarness(
+    setWorkingIndicator: (options?: LoaderIndicatorOptions) => void = () => {},
+): LifecycleHarness {
     const appendEntries: WorkedForState[] = [];
     let widget: WidgetFactory | undefined;
     let branch: SessionEntry[] = [];
@@ -107,6 +127,7 @@ function createHarness(): LifecycleHarness {
             getBranch: () => branch,
         },
         ui: {
+            setWorkingIndicator,
             notify() {},
             setWidget(key: string, nextWidget: WidgetFactory | undefined): void {
                 assert.equal(key, WIDGET_KEY);
@@ -177,6 +198,43 @@ function renderedWidgetText(widget: WidgetFactory | undefined): string {
     const component = widget(new RenderCountingTui(), { fg: (_role, text) => text });
     return component.render(80)[0] ?? "";
 }
+
+test("working spinner uses a slower default and applies live speed changes without restarting on text updates", async () => {
+    vi.useFakeTimers();
+    resetStatusBarStateForTests();
+    const loader = new WorkingLoader(
+        new RenderCountingTui(),
+        (text) => text,
+        (text) => text,
+        "Working",
+    );
+    const harness = createHarness((options) => loader.setIndicator(options));
+
+    try {
+        await harness.invoke("session_start");
+        vi.advanceTimersByTime(159);
+        assert.match(renderedLoaderText(loader), /^⠋ /);
+        vi.advanceTimersByTime(1);
+        assert.match(renderedLoaderText(loader), /^⠙ /);
+        const handle = configureStatusBar({ active: { spinner: { intervalMs: 240 } } });
+        vi.advanceTimersByTime(120);
+        handle.setActiveText("Still working");
+        vi.advanceTimersByTime(119);
+        assert.match(renderedLoaderText(loader), /^⠋ /);
+        vi.advanceTimersByTime(1);
+        assert.match(renderedLoaderText(loader), /^⠙ /);
+        handle.dispose();
+        vi.advanceTimersByTime(160);
+        assert.match(renderedLoaderText(loader), /^⠙ /);
+        await harness.invoke("session_shutdown");
+        vi.advanceTimersByTime(80);
+        assert.match(renderedLoaderText(loader), /^⠙ /);
+    } finally {
+        await harness.invoke("session_shutdown");
+        loader.stop();
+        vi.useRealTimers();
+    }
+});
 
 test("working time survives indicator replacements and restarts for a new run", async () => {
     vi.useFakeTimers();

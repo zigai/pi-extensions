@@ -12,6 +12,7 @@ import { Value } from "typebox/value";
 
 import { definePrevalidatedExtensionSettings } from "@zigai/pi-extension-settings/runtime";
 import {
+    DEFAULT_SPINNER_INTERVAL_MS,
     DEFAULT_RIGHT_MESSAGE_INTERVAL_MS,
     DEFAULT_RIGHT_MESSAGE_MIN_GAP,
     DEFAULT_RIGHT_MESSAGE_MIN_SCROLL_CYCLES,
@@ -97,6 +98,7 @@ type MutableStatusBarConfig = {
 
         spinner?: {
             frames?: readonly string[];
+            intervalMs?: number;
         };
 
         timer?: {
@@ -116,6 +118,7 @@ type MutableStatusBarConfig = {
 const StatusBarSpinnerConfigSchema = Type.Object(
     {
         frames: Type.Optional(Type.Array(Type.String())),
+        intervalMs: Type.Optional(Type.Integer({ minimum: 1 })),
     },
     { additionalProperties: false },
 );
@@ -194,6 +197,7 @@ export const DEFAULT_RIGHT_MESSAGES_CONFIG: RightMessagesConfig = {
 
 export const DEFAULT_STATUS_BAR_CONFIG: StatusBarConfig = {
     active: {
+        spinner: { intervalMs: DEFAULT_SPINNER_INTERVAL_MS },
         timer: {
             visible: true,
             paused: false,
@@ -251,8 +255,9 @@ function parseStatusBarConfigSettings(
         }
 
         const frames = sanitizeOptionalFrames(parsed.active.spinner?.frames);
-        if (frames !== undefined) {
-            active.spinner = { frames };
+        if (parsed.active.spinner !== undefined) {
+            active.spinner = { intervalMs: parsed.active.spinner.intervalMs };
+            if (frames !== undefined) active.spinner.frames = frames;
         }
 
         if (parsed.active.timer !== undefined) {
