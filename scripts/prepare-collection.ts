@@ -4,14 +4,18 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadWorkspacePackages } from "./workspace-packages.ts";
+import { loadReleasePackages, planWorkspacePublish } from "./publish-workspace.ts";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const inventory = loadWorkspacePackages(root);
-const collection = inventory.packages.find(
-    (workspace) => workspace.manifest.piCollection !== undefined,
-);
-if (collection === undefined) throw new Error("Collection workspace is missing");
+if (inventory.collections.length === 0) throw new Error("Collection workspace is missing");
 
+const releases = loadReleasePackages(root);
+const selected = new Set(
+    inventory.defaultExtensions
+        .flatMap(({ workspace }) => planWorkspacePublish(releases, workspace.manifest.name))
+        .map(({ name }) => name),
+);
 const cacheRoot = path.join(homedir(), ".cache", "pi-tweaks", "collection");
 mkdirSync(cacheRoot, { recursive: true });
 
@@ -22,7 +26,7 @@ if (process.platform === "win32") npm += ".cmd";
 try {
     const tarballs: string[] = [];
     for (const workspace of inventory.packages) {
-        if (workspace === collection) continue;
+        if (!selected.has(workspace.manifest.name)) continue;
 
         const output = execFileSync(
             npm,
@@ -40,28 +44,30 @@ try {
         tarballs.push(path.join(temporary, filename));
     }
 
-    rmSync(path.join(collection.directory, "node_modules"), { recursive: true, force: true });
-    execFileSync(
-        npm,
-        [
-            "install",
-            ...tarballs,
-            "--prefix",
-            collection.directory,
-            "--no-save",
-            "--workspaces=false",
-            "--ignore-scripts",
-            "--legacy-peer-deps",
-            "--omit=dev",
-            "--package-lock=false",
-            "--prefer-offline",
-        ],
-        {
-            cwd: root,
-            stdio: "inherit",
-            shell: process.platform === "win32",
-        },
-    );
+    for (const collection of inventory.collections) {
+        rmSync(path.join(collection.directory, "node_modules"), { recursive: true, force: true });
+        execFileSync(
+            npm,
+            [
+                "install",
+                ...tarballs,
+                "--prefix",
+                collection.directory,
+                "--no-save",
+                "--workspaces=false",
+                "--ignore-scripts",
+                "--legacy-peer-deps",
+                "--omit=dev",
+                "--package-lock=false",
+                "--prefer-offline",
+            ],
+            {
+                cwd: root,
+                stdio: "inherit",
+                shell: process.platform === "win32",
+            },
+        );
+    }
 } finally {
     rmSync(temporary, { recursive: true, force: true });
 }

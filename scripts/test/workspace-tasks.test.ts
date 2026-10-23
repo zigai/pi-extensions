@@ -21,7 +21,11 @@ function checkWorkspace(exitCode: number) {
     mkdirSync(directory, { recursive: true });
     writeFileSync(
         path.join(root, "package.json"),
-        JSON.stringify({ workspaces: ["extensions/*"], pi: { extensions: [] } }),
+        JSON.stringify({
+            workspaces: ["extensions/*"],
+            piWorkspace: { optionalExtensions: [], collections: [] },
+            pi: { extensions: [] },
+        }),
     );
 
     writeFileSync(
@@ -66,6 +70,7 @@ test("makes built workspace executables available after a clean install", () => 
         JSON.stringify({
             private: true,
             workspaces: ["extensions/*", "packages/*"],
+            piWorkspace: { optionalExtensions: [], collections: [] },
             pi: { extensions: [] },
         }),
     );

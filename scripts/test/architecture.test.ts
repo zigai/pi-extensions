@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, expect, test } from "vitest";
@@ -31,6 +31,7 @@ function fixture(): string {
         "package.json",
         JSON.stringify({
             workspaces: ["packages/*"],
+            piWorkspace: { optionalExtensions: [], collections: [] },
             pi: { extensions: ["./packages/b/src/index.ts", "./packages/a/src/index.ts"] },
         }),
     );
@@ -112,7 +113,16 @@ test.each([
     [["./packages/ghost/src/index.ts"], "undeclared or duplicated"],
 ])("rejects inconsistent root extension inventory %j", (extensions, message) => {
     const root = fixture();
-    write(root, "package.json", JSON.stringify({ workspaces: ["packages/*"], pi: { extensions } }));
+    write(
+        root,
+        "package.json",
+        JSON.stringify({
+            workspaces: ["packages/*"],
+            piWorkspace: { optionalExtensions: [], collections: [] },
+            pi: { extensions },
+        }),
+    );
+
     expect(() => loadWorkspacePackages(root)).toThrow(message);
 });
 
@@ -230,6 +240,7 @@ test("discovers mixed workspace roots and conditional exports without flattening
         "package.json",
         JSON.stringify({
             workspaces: ["extensions/*", "packages/*"],
+            piWorkspace: { optionalExtensions: [], collections: [] },
             pi: { extensions: ["./packages/b/src/index.ts", "./packages/a/src/index.ts"] },
         }),
     );
@@ -258,6 +269,16 @@ test("discovers mixed workspace roots and conditional exports without flattening
 
 test("collection is an alternative resource inventory, not another root activation", () => {
     const root = fixture();
+    write(
+        root,
+        "package.json",
+        JSON.stringify({
+            workspaces: ["packages/*"],
+            piWorkspace: { optionalExtensions: [], collections: ["@test/collection"] },
+            pi: { extensions: ["./packages/b/src/index.ts", "./packages/a/src/index.ts"] },
+        }),
+    );
+
     for (const name of ["a", "b"]) {
         write(
             root,
@@ -279,7 +300,6 @@ test("collection is an alternative resource inventory, not another root activati
             exports: { ".": "./package.json" },
             dependencies: { "@test/b": "1.0.0", "@test/a": "1.0.0" },
             bundleDependencies: ["@test/b", "@test/a"],
-            piCollection: ["@test/b", "@test/a"],
             pi: {
                 extensions: [
                     "./node_modules/@test/b/src/index.ts",
@@ -300,9 +320,144 @@ test("collection is an alternative resource inventory, not another root activati
         JSON.stringify({
             name: "@test/collection",
             exports: { ".": "./package.json" },
-            piCollection: ["@test/a", "@test/b"],
+            pi: {
+                extensions: [
+                    "./node_modules/@test/a/src/index.ts",
+                    "./node_modules/@test/b/src/index.ts",
+                ],
+            },
         }),
     );
 
-    expect(() => loadWorkspacePackages(root)).toThrow("ordered root extension inventory");
+    expect(() => loadWorkspacePackages(root)).toThrow("ordered default extension inventory");
+});
+
+test("optional extensions stay independently discoverable without entering default loadouts", () => {
+    const root = fixture();
+    write(
+        root,
+        "packages/optional/package.json",
+        JSON.stringify({
+            name: "@test/optional",
+            version: "1.0.0",
+            exports: { ".": "./index.ts" },
+            pi: { extensions: ["./index.ts"] },
+        }),
+    );
+
+    write(root, "packages/optional/index.ts", "export default function extension() {}\n");
+    write(
+        root,
+        "package.json",
+        JSON.stringify({
+            workspaces: ["packages/*"],
+            piWorkspace: { optionalExtensions: ["@test/optional"], collections: [] },
+            pi: { extensions: ["./packages/b/src/index.ts", "./packages/a/src/index.ts"] },
+        }),
+    );
+    const inventory = loadWorkspacePackages(root);
+    expect(inventory.extensions.map(({ workspace }) => workspace.manifest.name)).toEqual([
+        "@test/b",
+        "@test/a",
+        "@test/optional",
+    ]);
+
+    expect(inventory.defaultExtensions.map(({ workspace }) => workspace.manifest.name)).toEqual([
+        "@test/b",
+        "@test/a",
+    ]);
+
+    expect(inventory.optionalExtensions.map(({ workspace }) => workspace.manifest.name)).toEqual([
+        "@test/optional",
+    ]);
+});
+
+test.each([
+    [["@test/ghost"], [], "Unknown optional extension"],
+    [["@test/a"], [], "Optional extension is present in the root loadout"],
+    [["@test/a", "@test/a"], [], "Invalid root workspace manifest"],
+    [[], ["@test/ghost"], "Unknown collection workspace"],
+    [["@test/a"], ["@test/a"], "also be optional"],
+])("rejects invalid repo-only grouping %j / %j", (optionalExtensions, collections, message) => {
+    const root = fixture();
+    write(
+        root,
+        "package.json",
+        JSON.stringify({
+            workspaces: ["packages/*"],
+            piWorkspace: { optionalExtensions, collections },
+            pi: { extensions: ["./packages/b/src/index.ts", "./packages/a/src/index.ts"] },
+        }),
+    );
+
+    expect(() => loadWorkspacePackages(root)).toThrow(message);
+});
+
+test("collection generation repairs resources and pins without losing unrelated metadata", async () => {
+    const root = fixture();
+    for (const name of ["a", "b", "optional"]) {
+        write(
+            root,
+            `packages/${name}/package.json`,
+            JSON.stringify({
+                name: `@test/${name}`,
+                version: "1.0.0",
+                exports: { ".": "./index.ts" },
+                pi: { extensions: ["./index.ts"] },
+            }),
+        );
+
+        write(root, `packages/${name}/index.ts`, "export default function extension() {}\n");
+    }
+
+    write(
+        root,
+        "package.json",
+        JSON.stringify({
+            workspaces: ["packages/*"],
+            piWorkspace: {
+                optionalExtensions: ["@test/optional"],
+                collections: ["@test/collection"],
+            },
+            pi: { extensions: ["./packages/b/index.ts", "./packages/a/index.ts"] },
+        }),
+    );
+
+    write(
+        root,
+        "packages/collection/package.json",
+        JSON.stringify({
+            name: "@test/collection",
+            version: "1.0.0",
+            description: "Fixture collection",
+            license: "MIT",
+            exports: { ".": "./package.json" },
+            pi: {
+                extensions: ["./node_modules/@test/optional/index.ts"],
+                image: "https://example.test/preview.png",
+            },
+            dependencies: { "@test/optional": "1.0.0" },
+            bundleDependencies: ["@test/optional"],
+        }),
+    );
+    const { generateCollectionManifests } = await import("../generate-collection.ts");
+    expect(() => generateCollectionManifests(root, "check")).toThrow("stale");
+    generateCollectionManifests(root, "generate");
+    generateCollectionManifests(root, "check");
+    const inventory = loadWorkspacePackages(root);
+    const collection = inventory.collections.at(0);
+    expect(collection?.manifest.dependencies).toEqual({ "@test/a": "1.0.0", "@test/b": "1.0.0" });
+    expect(collection?.manifest.pi?.extensions).toEqual([
+        "./node_modules/@test/b/index.ts",
+        "./node_modules/@test/a/index.ts",
+    ]);
+    const manifest: unknown = JSON.parse(
+        readFileSync(path.join(root, "packages/collection/package.json"), "utf8"),
+    );
+    expect(manifest).toMatchObject({
+        version: "1.0.0",
+        description: "Fixture collection",
+        license: "MIT",
+        pi: { image: "https://example.test/preview.png" },
+    });
 });

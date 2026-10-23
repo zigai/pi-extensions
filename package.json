@@ -33,6 +33,8 @@
     "check": "npm run build && npm run check:root && npm run check:code:workspaces",
     "build:internals": "npm run build -w @zigai/pi-extension-internals",
     "architecture:check": "node scripts/architecture-check.ts",
+    "collection:generate": "node scripts/generate-collection.ts generate",
+    "collection:check": "node scripts/generate-collection.ts check",
     "test": "npm run build && node scripts/workspace-tasks.ts test",
     "coverage": "npm run build && node scripts/workspace-tasks.ts coverage",
     "test:package": "npm run build && npm run test:package:built",
@@ -43,7 +45,7 @@
     "config:check": "npm run build -w @zigai/pi-extension-settings && node packages/pi-extension-settings/dist/cli-entry.js check",
     "build": "node scripts/workspace-tasks.ts build",
     "check:code:workspaces": "node scripts/workspace-tasks.ts check:code:workspaces",
-    "check:root": "npm run architecture:check && npm run config:check && npm run format:check:root && npm run lint:root && npm run typecheck:root && npm run test:root && npm run test:package:built",
+    "check:root": "npm run architecture:check && npm run collection:check && npm run config:check && npm run format:check:root && npm run lint:root && npm run typecheck:root && npm run test:root && npm run test:package:built",
     "format:check:root": "node scripts/workspace-tasks.ts format:check:root",
     "lint:root": "node scripts/workspace-tasks.ts lint:root",
     "typecheck:root": "node scripts/workspace-tasks.ts typecheck:root",
@@ -114,6 +116,12 @@
       "./extensions/pi-toggles/src/index.ts",
       "./extensions/pi-settings-ui/src/index.ts",
       "./extensions/pi-expanded-skills/src/index.ts"
+    ]
+  },
+  "piWorkspace": {
+    "optionalExtensions": [],
+    "collections": [
+      "@zigai/pi-tweaks"
     ]
   }
 }

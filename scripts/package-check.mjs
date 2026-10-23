@@ -50,14 +50,11 @@ try {
         ]),
     );
     const releases = loadReleasePackages(packageRoot);
-    const collection = workspaces.packages.find(
-        (workspace) => workspace.manifest.piCollection !== undefined,
-    );
-    assert.ok(collection, "collection workspace must exist");
+    assert.ok(workspaces.collections.length > 0, "collection workspace must exist");
 
     const consumers = [
-        ...workspaces.packages.filter((workspace) => workspace !== collection),
-        collection,
+        ...workspaces.packages.filter((workspace) => !workspaces.collections.includes(workspace)),
+        ...workspaces.collections,
     ];
 
     for (const [index, consumer] of consumers.entries()) {
@@ -73,7 +70,7 @@ try {
 
         let closure;
         let consumerTarballs;
-        if (consumer === collection) {
+        if (workspaces.collections.includes(consumer)) {
             const collectionRelease = releases.find(
                 (workspace) => workspace.name === consumer.manifest.name,
             );
@@ -105,11 +102,13 @@ try {
         );
 
         const installedModules = path.join(installRoot, "node_modules");
-        assert.equal(
-            existsSync(path.join(installedModules, "@earendil-works")),
-            false,
-            "managed-install check must not install Pi host peers",
-        );
+        for (const host of ["pi-coding-agent", "pi-agent-core", "pi-ai", "pi-tui"]) {
+            assert.equal(
+                existsSync(path.join(installedModules, "@earendil-works", host)),
+                false,
+                "managed-install check must not install Pi host peers",
+            );
+        }
 
         const piPackageDirectory = path.join(
             packageRoot,
@@ -181,9 +180,9 @@ if (await loadPiInternalModule("modes/interactive/theme/theme.js", options) !== 
         const installedPackages = closure.map((workspace) =>
             path.join(installedModules, workspace.name),
         );
-        if (consumer === collection) {
+        if (workspaces.collections.includes(consumer)) {
             installedPackages.push(
-                ...workspaces.extensions.map(({ workspace }) =>
+                ...workspaces.defaultExtensions.map(({ workspace }) =>
                     path.join(installedConsumer, "node_modules", workspace.manifest.name),
                 ),
             );

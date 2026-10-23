@@ -52,6 +52,9 @@
     "@zigai/pi-trust-all-folders": "0.3.0",
     "@zigai/pi-ui-tweaks": "0.8.1"
   },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "^1.3.0"
+  },
   "bundleDependencies": [
     "@zigai/pi-autoname-session",
     "@zigai/pi-branch",
@@ -105,31 +108,5 @@
       "./node_modules/@zigai/pi-settings-ui/src/index.ts",
       "./node_modules/@zigai/pi-enhanced-skills/src/index.ts"
     ]
-  },
-  "piCollection": [
-    "@zigai/pi-model-filter",
-    "@zigai/pi-ui-tweaks",
-    "@zigai/pi-model-alias",
-    "@zigai/pi-tree",
-    "@zigai/pi-footer",
-    "@zigai/pi-response-renderer",
-    "@zigai/pi-plain-user-messages",
-    "@zigai/pi-message-highlights",
-    "@zigai/pi-status-bar",
-    "@zigai/pi-keymap-tweaks",
-    "@zigai/pi-model-modes",
-    "@zigai/pi-prompt-history",
-    "@zigai/pi-mention-anything",
-    "@zigai/pi-mention-skill",
-    "@zigai/pi-mention-project",
-    "@zigai/pi-trust-all-folders",
-    "@zigai/pi-branch",
-    "@zigai/pi-codex-core",
-    "@zigai/pi-glowup",
-    "@zigai/pi-goal",
-    "@zigai/pi-autoname-session",
-    "@zigai/pi-toggles",
-    "@zigai/pi-settings-ui",
-    "@zigai/pi-enhanced-skills"
-  ]
+  }
 }
