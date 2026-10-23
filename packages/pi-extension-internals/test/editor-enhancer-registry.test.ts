@@ -1,6 +1,11 @@
 import { describe, expect, test } from "vitest";
 
-import { registerEditorEnhancer, type EditorFactory } from "@zigai/pi-extension-internals";
+import {
+    registerEditorBackend,
+    registerEditorEnhancer,
+    type EditorEnhancerHandle,
+    type EditorFactory,
+} from "@zigai/pi-extension-internals";
 
 type FactoryArgs = [label: string, count: number];
 type Editor = string[];
@@ -77,6 +82,176 @@ function renderEditor(ui: EditorUi): Editor {
 
     return factory("prompt", 3);
 }
+
+describe("registerEditorBackend", () => {
+    test("restores the original after retiring a deep predecessor chain in reverse order", () => {
+        const original: EditorFactory<FactoryArgs, Editor> = () => ["original"];
+        const ui = new EditorUi(original);
+        const ctx = { hasUI: true, ui };
+        const predecessors = Array.from({ length: 20_000 }, (_, index) =>
+            registerEditorBackend(ctx, () => [`backend-${index}`]),
+        );
+        const top = registerEditorBackend(ctx, () => ["top"]);
+
+        for (const predecessor of predecessors.reverse()) predecessor.dispose();
+        expect(renderEditor(ui)).toEqual(["top"]);
+
+        expect(() => top.dispose()).not.toThrow();
+        expect(ui.getEditorComponent()).toBe(original);
+        expect(renderEditor(ui)).toEqual(["original"]);
+    });
+
+    test("prunes a retired predecessor from every externally restored successor branch", () => {
+        const original: EditorFactory<FactoryArgs, Editor> = () => ["original"];
+        const ui = new EditorUi(original);
+        const ctx = { hasUI: true, ui };
+        const first = registerEditorBackend(ctx, () => ["backend-a"]);
+        const firstFactory = ui.getEditorComponent();
+        const second = registerEditorBackend(ctx, () => ["backend-b"]);
+        const secondFactory = ui.getEditorComponent();
+        ui.setEditorComponent(firstFactory);
+        const third = registerEditorBackend(ctx, () => ["backend-c"]);
+
+        first.dispose();
+        expect(renderEditor(ui)).toEqual(["backend-c"]);
+        third.dispose();
+        expect(ui.getEditorComponent()).toBe(original);
+
+        ui.setEditorComponent(secondFactory);
+        second.dispose();
+        expect(ui.getEditorComponent()).toBe(original);
+    });
+
+    test("keeps distinct ownership when two registrations use the same factory", () => {
+        const original: EditorFactory<FactoryArgs, Editor> = () => ["original"];
+        const shared: EditorFactory<FactoryArgs, Editor> = () => ["shared"];
+        const ui = new EditorUi(original);
+        const ctx = { hasUI: true, ui };
+        const first = registerEditorBackend(ctx, shared);
+        const second = registerEditorBackend(ctx, shared);
+
+        first.dispose();
+        first.dispose();
+        first.update(() => ["disposed"]);
+        expect(renderEditor(ui)).toEqual(["shared"]);
+
+        second.update((label, count) => [`updated:${label}:${count}`]);
+        expect(renderEditor(ui)).toEqual(["updated:prompt:3"]);
+        second.dispose();
+        second.dispose();
+        expect(ui.getEditorComponent()).toBe(original);
+    });
+
+    test("does not reclaim an external editor on backend update or disposal", () => {
+        const original: EditorFactory<FactoryArgs, Editor> = () => ["original"];
+        const external: EditorFactory<FactoryArgs, Editor> = () => ["external"];
+        const ui = new EditorUi(original);
+        const ctx = { hasUI: true, ui };
+        const first = registerEditorBackend(ctx, () => ["backend-a"]);
+        const second = registerEditorBackend(ctx, () => ["backend-b"]);
+        ui.setEditorComponent(external);
+
+        first.update(() => ["updated-a"]);
+        second.update(() => ["updated-b"]);
+        first.dispose();
+        second.dispose();
+
+        expect(ui.getEditorComponent()).toBe(external);
+    });
+
+    test("rolls back failed backend setters under an enhancer and allows retry", () => {
+        class SynchronousFailingUi extends FailingEditorUi {
+            active: Editor = [];
+
+            override setEditorComponent(
+                factory: EditorFactory<FactoryArgs, Editor> | undefined,
+            ): void {
+                super.setEditorComponent(factory);
+                this.active = factory?.("prompt", 3) ?? [];
+            }
+        }
+
+        const original: EditorFactory<FactoryArgs, Editor> = () => ["original"];
+        const ui = new SynchronousFailingUi(original);
+        const ctx = { hasUI: true, ui };
+        const enhancer = registerEditorEnhancer(
+            ctx,
+            enhancerKey("backend-failed-setters"),
+            () => ["fallback"],
+            (editor) => [...editor, "enhanced"],
+        );
+        const backend = registerEditorBackend(ctx, () => ["backend-a"]);
+        try {
+            ui.failNextSet();
+            expect(() => registerEditorBackend(ctx, () => ["failed-registration"])).toThrow(
+                "set editor failed",
+            );
+
+            expect(renderEditor(ui)).toEqual(["backend-a", "enhanced"]);
+
+            ui.failNextSet();
+            expect(() => backend.update(() => ["backend-b"])).toThrow("set editor failed");
+            expect(renderEditor(ui)).toEqual(["backend-a", "enhanced"]);
+
+            backend.update(() => ["backend-b"]);
+            expect(ui.active).toEqual(["backend-b", "enhanced"]);
+            expect(renderEditor(ui)).toEqual(["backend-b", "enhanced"]);
+            ui.failNextSet();
+            expect(() => backend.dispose()).toThrow("set editor failed");
+            expect(renderEditor(ui)).toEqual(["backend-b", "enhanced"]);
+
+            backend.dispose();
+            expect(renderEditor(ui)).toEqual(["original", "enhanced"]);
+            enhancer.dispose();
+            expect(ui.getEditorComponent()).toBe(original);
+        } finally {
+            backend.dispose();
+            enhancer.dispose();
+        }
+    });
+
+    test.each([
+        { scenario: "without an editor enhancer", enhanced: false, suffix: [] },
+        { scenario: "with an editor enhancer", enhanced: true, suffix: ["enhanced"] },
+    ])(
+        "restores the original after disposing a superseded backend before its successor $scenario",
+        ({ enhanced, suffix }) => {
+            const original: EditorFactory<FactoryArgs, Editor> = () => ["original"];
+            const backendA: EditorFactory<FactoryArgs, Editor> = () => ["backend-a"];
+            const backendB: EditorFactory<FactoryArgs, Editor> = () => ["backend-b"];
+            const ui = new EditorUi(original);
+            const ctx = { hasUI: true, ui };
+            let enhancer: EditorEnhancerHandle<FactoryArgs, Editor> | undefined;
+            if (enhanced) {
+                enhancer = registerEditorEnhancer(
+                    ctx,
+                    enhancerKey("backend-out-of-order-disposal"),
+                    () => ["fallback"],
+                    (editor) => [...editor, "enhanced"],
+                );
+            }
+
+            const first = registerEditorBackend(ctx, backendA);
+            const second = registerEditorBackend(ctx, backendB);
+            try {
+                expect(renderEditor(ui)).toEqual(["backend-b", ...suffix]);
+
+                first.dispose();
+                expect(renderEditor(ui)).toEqual(["backend-b", ...suffix]);
+
+                second.dispose();
+                expect(renderEditor(ui)).toEqual(["original", ...suffix]);
+
+                enhancer?.dispose();
+                expect(ui.getEditorComponent()).toBe(original);
+            } finally {
+                first.dispose();
+                second.dispose();
+                enhancer?.dispose();
+            }
+        },
+    );
+});
 
 describe("registerEditorEnhancer", () => {
     test("updates the live editor when Pi constructs factories synchronously", () => {

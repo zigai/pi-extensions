@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { expect, test } from "vitest";
 
 import {
+    bindExtensionDiagnostics,
     loadPiInternalModule,
     warnPiInternalPatchUnavailable,
 } from "@zigai/pi-extension-internals";
@@ -33,15 +34,19 @@ function hasInstallation(value: unknown): value is InstallationModuleView {
 }
 
 async function captureWarnings(run: () => Promise<void> | void): Promise<string[]> {
-    const originalWarn = console.warn;
     const warnings: string[] = [];
-    console.warn = (...values: unknown[]): void => {
-        warnings.push(values.map((value) => String(value)).join(" "));
-    };
+    const binding = bindExtensionDiagnostics({
+        hasUI: true,
+        ui: {
+            notify(message) {
+                warnings.push(message);
+            },
+        },
+    });
     try {
         await run();
     } finally {
-        console.warn = originalWarn;
+        binding.dispose();
     }
 
     return warnings;

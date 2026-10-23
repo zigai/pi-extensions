@@ -19,10 +19,30 @@ export type EditorEnhancerHandle<Args extends readonly unknown[], Editor> = {
     dispose(): void;
 };
 
+export type EditorBackendHandle<Args extends readonly unknown[], Editor> = {
+    update(factory: EditorFactory<Args, Editor>): void;
+    dispose(): void;
+};
+
+type RegistryRelease = () => void;
+
+type BackendState<Args extends readonly unknown[], Editor> = {
+    readonly factory: EditorFactory<Args, Editor>;
+    previous: EditorFactory<Args, Editor> | undefined;
+    readonly successors: Set<EditorFactory<Args, Editor>>;
+    disposed: boolean;
+};
+
+function isRegistryRelease(value: unknown): value is RegistryRelease {
+    return typeof value === "function";
+}
+
 const EDITOR_ENHANCER_PROTOCOL_VERSION = 1;
 const EDITOR_ENHANCER_PROTOCOL = Symbol.for("zigai.pi-tweaks.editor-enhancer-protocol-version");
 const EDITOR_ENHANCER_REGISTRY = Symbol.for("zigai.pi-tweaks.editor-enhancer-registry");
 const EDITOR_ENHANCER_FACTORY = Symbol.for("zigai.pi-tweaks.editor-enhancer-factory");
+const EDITOR_ENHANCER_RELEASE = Symbol.for("zigai.pi-tweaks.editor-enhancer-release");
+const EDITOR_BACKEND_STATE = Symbol.for("zigai.pi-tweaks.editor-backend-state");
 
 type EnhancerEntry<Args extends readonly unknown[], Editor> = {
     enhancer: EditorEnhancer<Args, Editor>;
@@ -95,7 +115,14 @@ function hasValidEnhancerEntries(entries: ReadonlyMap<unknown, unknown>, legacy:
 function readRegistry<Args extends readonly unknown[], Editor>(
     ui: EditorEnhancerContext<Args, Editor>["ui"],
 ): EditorEnhancerRegistry<Args, Editor> | undefined {
-    const recordValue = getOwnDataDescriptor(ui, EDITOR_ENHANCER_REGISTRY)?.value;
+    const current = ui.getEditorComponent();
+    let recordValue = getOwnDataDescriptor(ui, EDITOR_ENHANCER_REGISTRY)?.value;
+    let factoryRecordValue: unknown;
+    if (current !== undefined) {
+        factoryRecordValue = getOwnDataDescriptor(current, EDITOR_ENHANCER_REGISTRY)?.value;
+        if (factoryRecordValue !== undefined) recordValue = factoryRecordValue;
+    }
+
     if (recordValue === undefined) return undefined;
 
     if (!isNonNullObject(recordValue)) {
@@ -127,6 +154,13 @@ function readRegistry<Args extends readonly unknown[], Editor>(
     }
 
     if (
+        factoryRecordValue !== undefined &&
+        (factory !== current || !hasOwnFunctionProperty(factory, EDITOR_ENHANCER_RELEASE))
+    ) {
+        throw new TypeError("Incompatible editor enhancer factory registry");
+    }
+
+    if (
         version === undefined &&
         !Reflect.defineProperty(record, EDITOR_ENHANCER_PROTOCOL, {
             configurable: true,
@@ -142,16 +176,46 @@ function readRegistry<Args extends readonly unknown[], Editor>(
     return record as EditorEnhancerRegistry<Args, Editor>;
 }
 
-function markSharedFactory<Args extends readonly unknown[], Editor>(
-    factory: EditorFactory<Args, Editor>,
+function removeStoredRegistry<Args extends readonly unknown[], Editor>(
+    ui: EditorEnhancerContext<Args, Editor>["ui"],
+    registry: EditorEnhancerRegistry<Args, Editor>,
 ): void {
     if (
-        !Reflect.defineProperty(factory, EDITOR_ENHANCER_FACTORY, {
-            value: true,
-        })
-    ) {
-        throw new TypeError("Unable to mark the shared editor enhancer factory");
+        getOwnDataDescriptor(ui, EDITOR_ENHANCER_REGISTRY)?.value === registry &&
+        !Reflect.deleteProperty(ui, EDITOR_ENHANCER_REGISTRY)
+    )
+        throw new TypeError("Unable to remove the editor enhancer registry");
+}
+
+function removeRegistry<Args extends readonly unknown[], Editor>(
+    ui: EditorEnhancerContext<Args, Editor>["ui"],
+    registry: EditorEnhancerRegistry<Args, Editor>,
+): void {
+    const release = getOwnDataDescriptor(registry.factory, EDITOR_ENHANCER_RELEASE)?.value;
+    if (release !== undefined) {
+        if (!isRegistryRelease(release))
+            throw new TypeError("Incompatible editor enhancer registry release");
+
+        release();
     }
+
+    removeStoredRegistry(ui, registry);
+}
+
+function markSharedFactory<Args extends readonly unknown[], Editor>(
+    registry: EditorEnhancerRegistry<Args, Editor>,
+    ui: EditorEnhancerContext<Args, Editor>["ui"],
+): void {
+    if (
+        !Reflect.defineProperty(registry.factory, EDITOR_ENHANCER_REGISTRY, { value: registry }) ||
+        !Reflect.defineProperty(registry.factory, EDITOR_ENHANCER_RELEASE, {
+            value: () => {
+                removeStoredRegistry(ui, registry);
+            },
+        }) ||
+        !Reflect.defineProperty(registry.factory, EDITOR_ENHANCER_FACTORY, { value: true })
+    )
+        throw new TypeError("Unable to mark the shared editor enhancer factory");
 }
 
 function isCurrentSharedFactory<Args extends readonly unknown[], Editor>(
@@ -175,6 +239,163 @@ function activateRegistry<Args extends readonly unknown[], Editor>(
     }
 
     ui.setEditorComponent(registry.factory);
+}
+
+function isBackendState<Args extends readonly unknown[], Editor>(
+    value: unknown,
+): value is BackendState<Args, Editor> {
+    if (!isNonNullObject(value)) return false;
+
+    const factory = getOwnDataDescriptor(value, "factory")?.value;
+    const previous = getOwnDataDescriptor(value, "previous");
+    const successors = getOwnDataDescriptor(value, "successors")?.value;
+    const disposed = getOwnDataDescriptor(value, "disposed");
+
+    if (
+        typeof factory !== "function" ||
+        previous?.writable !== true ||
+        (previous.value !== undefined && typeof previous.value !== "function") ||
+        !(successors instanceof Set) ||
+        disposed?.writable !== true ||
+        typeof disposed.value !== "boolean"
+    )
+        return false;
+
+    for (const successor of successors) {
+        if (typeof successor !== "function") return false;
+    }
+
+    return true;
+}
+
+function readBackendState<Args extends readonly unknown[], Editor>(
+    factory: EditorFactory<Args, Editor> | undefined,
+): BackendState<Args, Editor> | undefined {
+    if (factory === undefined) return undefined;
+
+    const state = getOwnDataDescriptor(factory, EDITOR_BACKEND_STATE)?.value;
+    if (state === undefined) return undefined;
+    if (!isBackendState<Args, Editor>(state) || state.factory !== factory)
+        throw new TypeError("Incompatible editor backend state");
+
+    return state;
+}
+
+function resolveEditorBackend<Args extends readonly unknown[], Editor>(
+    factory: EditorFactory<Args, Editor> | undefined,
+): EditorFactory<Args, Editor> | undefined {
+    let current = factory;
+    const visited = new Set<EditorFactory<Args, Editor>>();
+    while (current !== undefined) {
+        if (visited.has(current)) throw new TypeError("Cyclic editor backend chain");
+
+        visited.add(current);
+
+        const state = readBackendState(current);
+        if (state === undefined || !state.disposed) return current;
+
+        current = state.previous;
+    }
+
+    return undefined;
+}
+
+export function registerEditorBackend<Args extends readonly unknown[], Editor>(
+    ctx: EditorEnhancerContext<Args, Editor>,
+    factory: EditorFactory<Args, Editor>,
+): EditorBackendHandle<Args, Editor> {
+    const registry = readRegistry(ctx.ui);
+    let previous = ctx.ui.getEditorComponent();
+    if (registry !== undefined && isCurrentSharedFactory(previous, registry))
+        previous = registry.baseFactory;
+
+    let current = factory;
+    const backend: EditorFactory<Args, Editor> = (...args) => current(...args);
+    const state: BackendState<Args, Editor> = {
+        factory: backend,
+        previous: resolveEditorBackend(previous),
+        successors: new Set(),
+        disposed: false,
+    };
+    Object.defineProperty(backend, EDITOR_BACKEND_STATE, { value: state });
+
+    const install = (next: EditorFactory<Args, Editor> | undefined): void => {
+        const shared = readRegistry(ctx.ui);
+        if (shared === undefined || !isCurrentSharedFactory(ctx.ui.getEditorComponent(), shared)) {
+            ctx.ui.setEditorComponent(next);
+            return;
+        }
+
+        const before = shared.baseFactory;
+        shared.baseFactory = next;
+
+        try {
+            activateRegistry(ctx.ui, shared);
+        } catch (cause) {
+            shared.baseFactory = before;
+            throw cause;
+        }
+    };
+
+    const ownsBase = (): boolean => {
+        const shared = readRegistry(ctx.ui);
+        if (shared !== undefined && isCurrentSharedFactory(ctx.ui.getEditorComponent(), shared)) {
+            return shared.baseFactory === backend;
+        }
+
+        return ctx.ui.getEditorComponent() === backend;
+    };
+
+    if (ctx.hasUI) {
+        install(backend);
+        readBackendState(state.previous)?.successors.add(backend);
+    }
+
+    return {
+        update(next): void {
+            if (state.disposed || !ctx.hasUI || !ownsBase()) return;
+
+            const before = current;
+            current = next;
+
+            try {
+                install(backend);
+            } catch (cause) {
+                current = before;
+                throw cause;
+            }
+        },
+        dispose(): void {
+            if (state.disposed) return;
+
+            const predecessor = resolveEditorBackend(state.previous);
+            const predecessorState = readBackendState(predecessor);
+            const successors: BackendState<Args, Editor>[] = [];
+            for (const successor of state.successors) {
+                const successorState = readBackendState(successor);
+                if (
+                    successorState === undefined ||
+                    successorState.previous !== backend ||
+                    successorState.disposed
+                )
+                    throw new TypeError("Incompatible editor backend successor");
+
+                successors.push(successorState);
+            }
+
+            if (ctx.hasUI && ownsBase()) install(predecessor);
+            predecessorState?.successors.delete(backend);
+
+            for (const successor of successors) {
+                successor.previous = predecessor;
+                predecessorState?.successors.add(successor.factory);
+            }
+
+            state.successors.clear();
+            state.previous = undefined;
+            state.disposed = true;
+        },
+    };
 }
 
 /**
@@ -222,7 +443,7 @@ export function registerEditorEnhancer<Args extends readonly unknown[], Editor>(
             },
         };
 
-        markSharedFactory(createdRegistry.factory);
+        markSharedFactory(createdRegistry, ctx.ui);
 
         if (
             !Reflect.defineProperty(ctx.ui, EDITOR_ENHANCER_REGISTRY, {
@@ -322,12 +543,7 @@ export function registerEditorEnhancer<Args extends readonly unknown[], Editor>(
                 ctx.ui.setEditorComponent(registry.baseFactory);
             }
 
-            if (
-                getOwnDataDescriptor(ctx.ui, EDITOR_ENHANCER_REGISTRY)?.value === registry &&
-                !Reflect.deleteProperty(ctx.ui, EDITOR_ENHANCER_REGISTRY)
-            ) {
-                throw new TypeError("Unable to remove the editor enhancer registry");
-            }
+            removeRegistry(ctx.ui, registry);
 
             registry.enhancers.delete(key);
             disposed = true;

@@ -1,5 +1,6 @@
 import type * as EditorProtocolModule from "../src/editor-enhancer-registry.ts";
 import type * as PatchProtocolModule from "../src/linked-method-patch.ts";
+import type * as TranscriptProtocolModule from "../src/transcript-presentation.ts";
 
 import { expect, test } from "vitest";
 
@@ -45,6 +46,49 @@ async function loadPatchProtocolCopy(copy: string): Promise<PatchProtocol> {
     if (!isPatchProtocol(imported)) throw new Error("Invalid linked-patch protocol module");
     return imported;
 }
+
+type TranscriptProtocol = typeof TranscriptProtocolModule;
+
+function isTranscriptProtocol(value: unknown): value is TranscriptProtocol {
+    return (
+        typeof value === "object" &&
+        value !== null &&
+        "TRANSCRIPT_PRESENTATION" in value &&
+        typeof value.TRANSCRIPT_PRESENTATION === "symbol" &&
+        "prepareTranscriptPresentation" in value &&
+        typeof value.prepareTranscriptPresentation === "function"
+    );
+}
+
+async function loadTranscriptProtocolCopy(copy: string): Promise<TranscriptProtocol> {
+    const url = new URL(`../src/transcript-presentation.ts?copy=${copy}`, import.meta.url).href;
+    const imported: unknown = await import(url);
+    if (!isTranscriptProtocol(imported)) throw new Error("Invalid transcript protocol module");
+    return imported;
+}
+
+test("separate transcript consumers prepare original rows without rendering the source", async () => {
+    const provider = await loadTranscriptProtocolCopy("provider");
+    const consumer = await loadTranscriptProtocolCopy("consumer");
+    const source = {
+        children: [{ text: "original content" }],
+        render(): never {
+            throw new Error("Hidden source rendering is forbidden");
+        },
+    };
+    consumer.prepareTranscriptPresentation(source);
+    expect(source.children).toEqual([{ text: "original content" }]);
+    const originalRows = source.children;
+    Reflect.set(source, provider.TRANSCRIPT_PRESENTATION, function (this: typeof source): void {
+        for (const row of this.children) row.text = `presented ${row.text}`;
+    });
+
+    consumer.prepareTranscriptPresentation(source);
+    expect(source.children).toBe(originalRows);
+    expect(source.children).toEqual([{ text: "presented original content" }]);
+    Reflect.set(source, provider.TRANSCRIPT_PRESENTATION, "invalid");
+    expect(() => consumer.prepareTranscriptPresentation(source)).toThrow(TypeError);
+});
 
 class EditorUi {
     private factory: ((label: string) => string[]) | undefined = () => ["base"];

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
+import { reportExtensionDiagnostic } from "./diagnostics.ts";
 
 export type PiInternalModuleLoadOptions<T> = {
     readonly scope: string;
@@ -126,7 +127,9 @@ export function warnPiInternalPatchUnavailable(
         suffix = `: ${cause.message}`;
     }
 
-    console.warn(`[${scope}] ${feature} unavailable; Pi internals may have changed${suffix}`);
+    reportExtensionDiagnostic(
+        `[${scope}] ${feature} unavailable; Pi internals may have changed${suffix}`,
+    );
 }
 
 async function parseImportedModule<T>(
