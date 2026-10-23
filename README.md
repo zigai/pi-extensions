@@ -31,6 +31,7 @@ A collection of small Pi extensions for improving interaction, display, and mode
 | [@zigai/pi-settings-ui](extensions/pi-settings-ui)                 | Schema-driven TUI editor for Pi extension settings.                               | `pi install npm:@zigai/pi-settings-ui`         |
 | [@zigai/pi-enhanced-skills](extensions/pi-expanded-skills)         | Enhanced Pi skills                                                                | `pi install npm:@zigai/pi-enhanced-skills`     |
 | [@zigai/pi-lazy-mcp](extensions/pi-lazy-mcp)                       | Start MCP servers only when their tools are called.                               | `pi install npm:@zigai/pi-lazy-mcp`            |
+| [@zigai/pi-workspace](extensions/pi-workspace)                     | Customize Pi's chat and sidebar; search saved history.                            | `pi install npm:@zigai/pi-workspace`           |
 
 ## Libraries
 

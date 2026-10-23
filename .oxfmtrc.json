@@ -31,6 +31,7 @@
     "extensions/pi-toggles/config.schema.json",
     "extensions/pi-toggles/README.md",
     "extensions/pi-lazy-mcp/README.md",
+    "extensions/pi-workspace/README.md",
     "extensions/pi-response-renderer/README.md"
   ],
   "overrides": [

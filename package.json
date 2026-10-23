@@ -120,7 +120,8 @@
   },
   "piWorkspace": {
     "optionalExtensions": [
-      "@zigai/pi-lazy-mcp"
+      "@zigai/pi-lazy-mcp",
+      "@zigai/pi-workspace"
     ],
     "collections": [
       "@zigai/pi-tweaks"

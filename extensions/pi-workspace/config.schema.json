@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/zigai/pi-tweaks/master/extensions/pi-workspace/config.schema.json",
+  "title": "Pi Workspace settings",
+  "description": "Replaceable transcript, editor and workspace layout.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "default": "./schemas/pi-workspace.schema.json",
+      "description": "JSON Schema used by editors for this settings file."
+    },
+    "enabled": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable the replaceable workspace surface."
+    },
+    "transcript": {
+      "type": "string",
+      "default": "native",
+      "minLength": 1,
+      "description": "Transcript backend: native, ledger, or a registered name."
+    },
+    "editor": {
+      "type": "string",
+      "default": "native",
+      "minLength": 1,
+      "description": "Editor backend: native or a registered name."
+    },
+    "layout": {
+      "type": "string",
+      "default": "native",
+      "minLength": 1,
+      "description": "Layout backend: native, sidebar, or a registered name."
+    },
+    "sidebarSide": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "off"
+        },
+        {
+          "type": "string",
+          "const": "left"
+        },
+        {
+          "type": "string",
+          "const": "right"
+        }
+      ],
+      "default": "off",
+      "description": "Optional persistent sidebar position."
+    },
+    "sidebarWidth": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 24,
+      "description": "Sidebar width in terminal columns."
+    },
+    "minimumMainWidth": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 48,
+      "description": "Main-area width below which the sidebar is hidden."
+    },
+    "timestamps": {
+      "type": "boolean",
+      "default": false,
+      "description": "Show available message and tool timestamps in ledger metadata."
+    },
+    "durations": {
+      "type": "boolean",
+      "default": false,
+      "description": "Show observed tool duration when both execution boundaries were available."
+    },
+    "timeouts": {
+      "type": "boolean",
+      "default": false,
+      "description": "Show available tool timeout arguments in ledger metadata."
+    }
+  }
+}

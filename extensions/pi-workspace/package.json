@@ -1,0 +1,45 @@
+{
+  "name": "@zigai/pi-workspace",
+  "version": "0.1.0",
+  "description": "Customize Pi's chat view and session sidebar; search saved conversation history.",
+  "license": "MIT",
+  "files": [
+    "src",
+    "README.md",
+    "*.json"
+  ],
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./editor": "./src/editor.ts",
+    "./transcript": "./src/transcript.ts",
+    "./layout": "./src/layout.ts"
+  },
+  "scripts": {
+    "config:generate": "pi-extension-settings generate",
+    "config:check": "pi-extension-settings check",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check:code": "npm run config:check && npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "@zigai/pi-extension-internals": "0.2.0",
+    "@zigai/pi-extension-settings": "0.6.1"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "^1.3.0",
+    "@earendil-works/pi-tui": "^1.3.0",
+    "typebox": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "piExtensionSettings": {
+    "definition": "./src/settings-input.ts",
+    "prevalidation": "./src/settings.prevalidated.ts",
+    "schema": "./config.schema.json",
+    "readme": "./README.md"
+  }
+}
