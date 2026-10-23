@@ -10,6 +10,8 @@ The extension can name a session after a configurable activity threshold and opt
 pi install npm:@zigai/pi-autoname-session
 ```
 
+Requires Pi 1.3 or newer.
+
 <!-- pi-extension-settings:start -->
 ## Configuration
 
