@@ -1,6 +1,98 @@
-import type { EventBus } from "@earendil-works/pi-coding-agent";
+import type { BuildSystemPromptOptions, EventBus } from "@earendil-works/pi-coding-agent";
 import { Compile } from "typebox/compile";
 import { Type, type Static } from "typebox";
+
+const roleResultValidator = Compile(
+    Type.Union([
+        Type.Object(
+            {
+                status: Type.Literal("resolved"),
+                model: Type.Object(
+                    {
+                        provider: Type.String(),
+                        modelId: Type.String(),
+                        thinkingLevel: Type.Optional(Type.String()),
+                    },
+                    { additionalProperties: false },
+                ),
+            },
+            { additionalProperties: false },
+        ),
+        Type.Object(
+            { status: Type.Enum(["missing", "invalid"] as const), reason: Type.String() },
+            { additionalProperties: false },
+        ),
+    ]),
+);
+
+export function resolveTogglesModelRole(
+    events: EventBus,
+    role: string,
+): ReturnType<typeof roleResultValidator.Parse> | undefined {
+    let result: ReturnType<typeof roleResultValidator.Parse> | undefined;
+
+    events.emit("pi-toggles:model-role", {
+        version: 1,
+        role,
+        accept: (value: unknown): void => {
+            const roleResult = roleResultValidator.Parse(value);
+            result = roleResult;
+        },
+    });
+
+    return result;
+}
+
+const promptPreparationValidator = Compile(
+    Type.Object(
+        {
+            prepare: Type.Function([], Type.Unknown()),
+        },
+        { additionalProperties: false },
+    ),
+);
+
+const promptCompositionValidator = Compile(
+    Type.Object(
+        {
+            basePrompt: Type.String(),
+            compose: Type.Function([Type.String()], Type.Unknown()),
+        },
+        { additionalProperties: false },
+    ),
+);
+const promptOutputValidator = Compile(Type.String());
+
+type PromptComposition = { basePrompt: string; compose(prompt: string): Promise<string> };
+
+export async function prepareTogglesPrompt(
+    events: EventBus,
+    request: {
+        getPrompt(): string;
+        prompt: string | undefined;
+        options: BuildSystemPromptOptions;
+    },
+): Promise<PromptComposition | undefined> {
+    let preparation: ReturnType<typeof promptPreparationValidator.Parse> | undefined;
+
+    events.emit("pi-toggles:prompt-composer", {
+        version: 1,
+        ...request,
+        accept: (value: unknown): void => {
+            const candidate = promptPreparationValidator.Parse(value);
+            preparation = candidate;
+        },
+    });
+
+    if (preparation === undefined) return undefined;
+
+    const composition = promptCompositionValidator.Parse(await preparation.prepare());
+
+    return {
+        basePrompt: composition.basePrompt,
+        compose: async (prompt) => promptOutputValidator.Parse(await composition.compose(prompt)),
+    };
+}
 
 const ACTIVATION_READY_EVENT = "pi-toggles:activation-ready";
 const SET_ACTIVATION_PROPOSAL_EVENT = "pi-toggles:set-activation-proposal";
@@ -105,12 +197,16 @@ export class OptionalTogglesActivation {
         return this.#delegatedSessionId === sessionId ? "delegated" : "standalone";
     }
 
-    dispose(): void {
-        for (const unsubscribe of this.#unsubscribers) unsubscribe();
+    resetSession(): void {
         this.#sessionId = undefined;
         this.#readySessionId = undefined;
         this.#delegatedSessionId = undefined;
         this.#decisions = [];
+    }
+
+    dispose(): void {
+        for (const unsubscribe of this.#unsubscribers) unsubscribe();
+        this.resetSession();
     }
 
     private publishIfReady(): void {

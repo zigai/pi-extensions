@@ -71,6 +71,18 @@ export function rewriteCodexResponsesPayload(
     return result;
 }
 
+export function applyFastMode(
+    payload: unknown,
+    expectedModelId: string | undefined,
+): JsonObject | undefined {
+    const request = JsonObjectDecoder.decode(payload);
+    if (!request || request.model !== expectedModelId) return undefined;
+    if (!codexModelRequestProfile(expectedModelId)?.supportsPriorityServiceTier) return undefined;
+    if (request.service_tier === "priority") return undefined;
+
+    return { ...request, service_tier: "priority" };
+}
+
 /** Removes the visible reasoning summary request while preserving hidden reasoning controls. */
 export function omitReasoningSummary(
     payload: unknown,

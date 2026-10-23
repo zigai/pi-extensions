@@ -54,6 +54,7 @@
     "release:dry-run": "release --dry --root ../.."
   },
   "dependencies": {
+    "@zigai/pi-extension-internals": "0.2.0",
     "@zigai/pi-extension-settings": "0.6.1",
     "@zigai/pi-glowup": "2.0.0",
     "better-result": "^2.9.2",

@@ -185,7 +185,8 @@ export const openaiSchema = Type.Object(
         }),
         compactionModel: Type.String({
             default: "current",
-            description: "Model for compaction; `current` uses the active model.",
+            description:
+                "Model for compaction; `current` uses the active model. A preset compaction role takes precedence.",
         }),
         compactionReasoning: CodexCompactionReasoningSchema,
         verbosity: CodexVerbositySchema,

@@ -10,6 +10,7 @@ import {
     type ExtensionAPI,
     type ExtensionContext,
     type ExtensionToolContext,
+    type SessionCompactFailedEvent,
     type Theme,
 } from "@earendil-works/pi-coding-agent";
 import { normalizeBuildSystemPromptOptions } from "./pi-system-prompt.ts";
@@ -61,6 +62,7 @@ type ExtensionHarnessEvent =
     | HarnessMessageEndEvent
     | HarnessModelSelectEvent
     | HarnessBeforeCompactEvent
+    | SessionCompactFailedEvent
     | HarnessShutdownEvent;
 
 type ExtensionHarnessResult = BeforeAgentStartEventResult | JsonValue | void;
@@ -133,6 +135,7 @@ type ExtensionHarness = {
     ) => Promise<Readonly<Record<string, JsonValue | undefined>> | undefined>;
 
     readonly finishCompaction: (ctx: ExtensionContext) => Promise<void>;
+    readonly failCompaction: (ctx: ExtensionContext) => Promise<void>;
 
     readonly prepareSystemPrompt: (
         systemPrompt: string,
@@ -162,14 +165,26 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
             messageRenderers.set(type, renderer);
         },
         on(eventName: string, handler: ExtensionEventHandler) {
-            handlers.set(eventName, handler);
+            const previous = handlers.get(eventName);
+            const combined: ExtensionEventHandler = async (event, ctx) => {
+                const earlier = await previous?.(event, ctx);
+                return (await handler(event, ctx)) ?? earlier;
+            };
 
-            if (eventName === "session_start") sessionStart = handler;
-            if (eventName === "before_provider_headers") beforeProviderHeaders = handler;
-            if (eventName === "before_provider_request") beforeProviderRequest = handler;
-            if (eventName === "before_agent_start") beforeAgentStart = handler;
-            if (eventName === "session_before_compact") sessionBeforeCompact = handler;
-            if (eventName === "session_compact") sessionCompact = handler;
+            handlers.set(eventName, combined);
+
+            if (eventName === "session_start") sessionStart = combined;
+            if (eventName === "before_provider_headers") beforeProviderHeaders = combined;
+            if (eventName === "before_provider_request") beforeProviderRequest = combined;
+            if (eventName === "before_agent_start") beforeAgentStart = combined;
+            if (eventName === "session_before_compact") sessionBeforeCompact = combined;
+            if (eventName === "session_compact") sessionCompact = combined;
+            return () => {
+                if (handlers.get(eventName) !== combined) return;
+
+                if (previous === undefined) handlers.delete(eventName);
+                else handlers.set(eventName, previous);
+            };
         },
         appendEntry(customType: string, data: JsonValue) {
             appendedEntries.push({ customType, data });
@@ -214,6 +229,18 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
         },
         async settleAgent(ctx: ExtensionContext): Promise<void> {
             await dispatch("agent_settled", { type: "agent_settled" }, ctx);
+        },
+        async failCompaction(ctx: ExtensionContext): Promise<void> {
+            await handlers.get("session_compact_failed")?.(
+                {
+                    type: "session_compact_failed",
+                    reason: "manual",
+                    aborted: true,
+                    willRetry: false,
+                    fromExtension: false,
+                },
+                ctx,
+            );
         },
         async shutdownSession(reason: string, ctx: ExtensionContext): Promise<void> {
             await dispatch("session_shutdown", { type: "session_shutdown", reason }, ctx);
@@ -310,6 +337,8 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
                 },
                 ctx,
             );
+            if (result === undefined) return systemPrompt;
+
             const resultObject = JsonObjectDecoder.decode(result);
             const preparedPrompt = JsonStringDecoder.decode(resultObject?.systemPrompt);
             if (preparedPrompt === undefined) {
@@ -373,6 +402,7 @@ export function makeExtensionContext(
 
     return testDouble<ExtensionToolContext>({
         ...ctx,
+        modelRegistry: { getProvider: () => undefined },
         tools: [],
         async executeTool() {
             throw new Error("Unexpected nested tool call.");
@@ -482,7 +512,7 @@ function makeTestTheme(): Theme {
 
 // oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- SAFETY: testDouble is a type-assertion double builder for partial host fixtures.
 export function testDouble<TTarget>(
-    // oxlint-disable-next-line antislop/no-unknown-parameters, typescript/no-unsafe-type-assertion -- SAFETY: testDouble receives partial host objects at test construction sites.
+    // oxlint-disable-next-line antislop/no-unknown-parameters -- SAFETY: testDouble receives partial host objects at test construction sites.
     value: unknown = {},
 ): TTarget {
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: The explicit fixture builders keep every implemented host member reviewable at the construction site.

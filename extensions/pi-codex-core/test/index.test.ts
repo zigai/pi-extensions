@@ -1,14 +1,23 @@
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { createServer } from "node:http";
+import { zstdDecompressSync } from "node:zlib";
+import { once } from "node:events";
+import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
+import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
+import type { SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { dirname, join } from "node:path";
 import assert from "node:assert/strict";
 import { test } from "vitest";
+import { Type } from "typebox";
+import { Compile } from "typebox/compile";
 import {
     createEventBus,
     type BuildSystemPromptOptions,
     type ExtensionAPI,
     type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { registerSystemPromptPreparation } from "@zigai/pi-extension-internals/prompt-preparation";
 import { buildSystemPrompt } from "./pi-system-prompt.ts";
 import extension, { packageName, extensionName } from "../src/index.ts";
 import { DEFAULT_CODEX_CORE_CONFIG_JSON, getCodexCoreConfigPath } from "../src/config/config.ts";
@@ -175,6 +184,64 @@ test("input lifecycle holds follow-ups and merges them into the next manual mess
         await rm(root, { recursive: true, force: true });
     }
 });
+
+test.each(["new", "resume", "fork"] as const)(
+    "delegates tool policy after a non-final %s session shutdown and start",
+    async (reason) => {
+        const root = await mkdtemp(join(tmpdir(), "pi-codex-core-coordination-lifecycle-"));
+        const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+        const ctx = makeExtensionContext(join(root, "project"), false);
+        const harness = makeExtensionHarness(["read", "edit"]);
+        try {
+            const agentDir = join(root, "agent");
+            process.env.PI_CODING_AGENT_DIR = agentDir;
+            const configPath = getCodexCoreConfigPath(agentDir);
+            await mkdir(dirname(configPath), { recursive: true });
+            await writeFile(
+                configPath,
+                JSON.stringify({
+                    tools: { applyPatch: "openai" },
+                    compaction: { enabled: false },
+                }),
+            );
+            const proposals: unknown[] = [];
+            harness.events.on("pi-toggles:set-activation-proposal", (value) => {
+                proposals.push(value);
+                harness.events.emit("pi-toggles:activation-proposal-accepted", {
+                    version: 1,
+                    sessionId: ctx.sessionManager.getSessionId(),
+                    owner: packageName,
+                });
+            });
+
+            extension(harness.api);
+            harness.events.emit("pi-toggles:activation-ready", {
+                version: 1,
+                sessionId: ctx.sessionManager.getSessionId(),
+            });
+            await harness.startSession(ctx);
+            assert.deepEqual(harness.activeTools, ["read", "edit"]);
+            assert.equal(proposals.length, 1);
+            await harness.shutdownSession(reason, ctx);
+            harness.events.emit("pi-toggles:activation-ready", {
+                version: 1,
+                sessionId: ctx.sessionManager.getSessionId(),
+            });
+
+            assert.equal(proposals.length, 1, "shutdown clears the prior session proposal");
+            await harness.startSession(ctx);
+            assert.deepEqual(harness.activeTools, ["read", "edit"]);
+            assert.equal(proposals.length, 2);
+        } finally {
+            await harness.shutdownSession("quit", ctx);
+
+            if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+            else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+
+            await rm(root, { recursive: true, force: true });
+        }
+    },
+);
 
 test("session shutdown releases Pi Toggles lifecycle subscriptions", async () => {
     const root = await mkdtemp(join(tmpdir(), "pi-codex-core-shutdown-"));
@@ -488,6 +555,34 @@ test("does not opt Pi internal summarization into Responses Lite", async () => {
     }
 });
 
+test("clears Pi fallback request policy after a cancelled compaction", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-compaction-cancel-"));
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    try {
+        process.env.PI_CODING_AGENT_DIR = join(root, "agent");
+        const configPath = getCodexCoreConfigPath();
+        await mkdir(dirname(configPath), { recursive: true });
+        await writeFile(configPath, JSON.stringify({ compaction: { enabled: false } }));
+        const harness = makeExtensionHarness();
+        extension(harness.api);
+        const ctx = makeExtensionContext(root, false, {
+            ...DEFAULT_TEST_EXTENSION_MODEL,
+            id: "gpt-5.6-sol",
+        });
+        await harness.startSession(ctx);
+        await harness.beginCompaction(ctx);
+        await harness.failCompaction(ctx);
+        const headers: Record<string, string | null> = {};
+        await harness.prepareProviderHeaders(headers, ctx);
+        assert.equal(headers[CODEX_RESPONSES_LITE_HEADER], "true");
+    } finally {
+        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
 test("routes unexpected native compaction failures through Pi fallback", async () => {
     const root = await mkdtemp(join(tmpdir(), "pi-codex-core-compaction-error-"));
     const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
@@ -515,6 +610,312 @@ test("routes unexpected native compaction failures through Pi fallback", async (
         await rm(root, { recursive: true, force: true });
     }
 });
+
+test.each([
+    {
+        modelId: "gpt-6.1-sol",
+        provider: "openai-codex",
+        api: "openai-codex-responses",
+        fast: true,
+        expectedTier: "priority",
+    },
+    {
+        modelId: "gpt-5.5",
+        provider: "openai-codex",
+        api: "openai-codex-responses",
+        fast: true,
+        expectedTier: "priority",
+    },
+    {
+        modelId: "gpt-5.4-mini",
+        provider: "openai-codex",
+        api: "openai-codex-responses",
+        fast: true,
+        expectedTier: undefined,
+    },
+    {
+        modelId: "gpt-5.5",
+        provider: "openai-codex",
+        api: "openai-codex-responses",
+        fast: false,
+        expectedTier: undefined,
+    },
+    {
+        modelId: "gpt-6.1-sol",
+        provider: "openai",
+        api: "openai-responses",
+        fast: true,
+        expectedTier: "priority",
+    },
+    {
+        modelId: "other-model",
+        provider: "other",
+        api: "openai-responses",
+        fast: true,
+        expectedTier: undefined,
+    },
+])(
+    "applies Fast mode to supported ordinary $provider/$modelId requests when enabled=$fast",
+    async ({ modelId, provider, api, fast, expectedTier }) => {
+        const root = await mkdtemp(join(tmpdir(), "pi-codex-core-fast-"));
+        const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+        try {
+            const agentDir = join(root, "agent");
+            process.env.PI_CODING_AGENT_DIR = agentDir;
+            const configPath = getCodexCoreConfigPath(agentDir);
+            await mkdir(dirname(configPath), { recursive: true });
+            await writeFile(configPath, JSON.stringify({ openai: { fast } }));
+            const harness = makeExtensionHarness();
+            extension(harness.api);
+            const ctx = testDouble<ExtensionContext>({
+                ...makeExtensionContext("/workspace", true, {
+                    ...DEFAULT_TEST_EXTENSION_MODEL,
+                    id: modelId,
+                    provider,
+                    api,
+                }),
+                ui: { notify() {} },
+            });
+            await harness.startSession(ctx);
+            const payload = {
+                model: modelId,
+                instructions: "system instructions",
+                input: [{ role: "user", content: "hello" }],
+                reasoning: { effort: "high" },
+            };
+            const rewritten = await harness.rewriteProviderRequest(payload, ctx);
+            assert.equal(rewritten?.service_tier, expectedTier);
+            const effective = rewritten ?? payload;
+            assert.equal(JsonObjectDecoder.decode(effective.reasoning)?.effort, "high");
+        } finally {
+            if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+            else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+
+            await rm(root, { recursive: true, force: true });
+        }
+    },
+);
+
+test.each(["default", undefined, "flex"])(
+    "Fast mode prices ordinary Codex requests using the requested tier when response tier is %s",
+    async (responseTier) => {
+        const root = await mkdtemp(join(tmpdir(), "pi-codex-core-fast-pricing-"));
+        const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+        const harness = makeExtensionHarness();
+        const provider = openaiCodexProvider();
+        const originalStream = Object.getOwnPropertyDescriptor(provider, "stream");
+        const originalSimple = Object.getOwnPropertyDescriptor(provider, "streamSimple");
+        const catalogModel = provider.getModels().find((model) => model.id === "gpt-5.5");
+        assert.ok(catalogModel);
+        const model = {
+            ...catalogModel,
+            cost: { input: 1, output: 4, cacheRead: 0.1, cacheWrite: 2 },
+        };
+        const ctx = testDouble<ExtensionContext>({
+            ...makeExtensionContext(root, false, model),
+            modelRegistry: { getProvider: () => provider },
+        });
+        try {
+            process.env.PI_CODING_AGENT_DIR = join(root, "agent");
+            const configPath = getCodexCoreConfigPath();
+            await mkdir(dirname(configPath), { recursive: true });
+            await writeFile(
+                configPath,
+                JSON.stringify({
+                    compaction: { enabled: false },
+                    openai: { fast: true },
+                }),
+            );
+            extension(harness.api);
+            await harness.startSession(ctx);
+            await harness.selectModel(ctx);
+            const options = {
+                apiKey: `header.${Buffer.from(
+                    JSON.stringify({
+                        "https://api.openai.com/auth": { chatgpt_account_id: "test-account" },
+                    }),
+                ).toString("base64url")}.signature`,
+                transport: "sse" as const,
+                onPayload: async (payload) =>
+                    harness.rewriteProviderRequest(JsonObjectDecoder.Parse(payload), ctx),
+                fetch: async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+                    const bytes = Buffer.from(testDouble<Uint8Array>(init?.body));
+                    const payload = JsonObjectDecoder.Parse(
+                        JSON.parse(zstdDecompressSync(bytes).toString()),
+                    );
+                    assert.equal(payload.service_tier, "priority");
+                    return new Response(
+                        `data: ${JSON.stringify({
+                            type: "response.completed",
+                            response: {
+                                status: "completed",
+                                output: [],
+                                service_tier: responseTier,
+                                usage: {
+                                    input_tokens: 1000,
+                                    output_tokens: 100,
+                                    input_tokens_details: { cached_tokens: 200 },
+                                },
+                            },
+                        })}\n\n`,
+                        { headers: { "content-type": "text/event-stream" } },
+                    );
+                },
+            } satisfies SimpleStreamOptions;
+            const result = await provider
+                .streamSimple(
+                    model,
+                    normalizeContext({
+                        messages: [{ role: "user", content: "hello", timestamp: 0 }],
+                    }),
+                    options,
+                )
+                .result();
+            assert.equal(result.stopReason, "stop", result.errorMessage);
+            let expected = { input: 0.002, output: 0.001, cacheRead: 0.00005, cacheWrite: 0 };
+            if (responseTier === "flex")
+                expected = { input: 0.0004, output: 0.0002, cacheRead: 0.00001, cacheWrite: 0 };
+
+            for (const field of ["input", "output", "cacheRead", "cacheWrite"] as const)
+                assert.ok(
+                    Math.abs(result.usage.cost[field] - expected[field]) < 1e-12,
+                    `${field}: ${result.usage.cost[field]} instead of ${expected[field]}`,
+                );
+
+            assert.ok(
+                Math.abs(
+                    result.usage.cost.total -
+                        (expected.input + expected.output + expected.cacheRead),
+                ) < 1e-12,
+            );
+            assert.equal(Object.hasOwn(options, "serviceTier"), false);
+        } finally {
+            await harness.shutdownSession("quit", ctx);
+
+            if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+            else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+
+            await rm(root, { recursive: true, force: true });
+            assert.deepEqual(Object.getOwnPropertyDescriptor(provider, "stream"), originalStream);
+            assert.deepEqual(
+                Object.getOwnPropertyDescriptor(provider, "streamSimple"),
+                originalSimple,
+            );
+        }
+    },
+);
+
+test.each([
+    { level: "minimal", mapped: "low", active: false },
+    { level: "minimal", mapped: "high", active: false },
+    { level: "off", mapped: "low", active: true },
+    { level: undefined, mapped: "medium", active: false },
+])(
+    "compaction role maps $level through the selected model to $mapped (active=$active)",
+    async ({ level, mapped, active }) => {
+        const root = await mkdtemp(join(tmpdir(), "pi-codex-core-role-reasoning-"));
+        const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+        let request: JsonObject | undefined;
+        const notices: string[] = [];
+        const server = createServer((incoming, response) => {
+            const chunks: Buffer[] = [];
+            incoming.on("data", (chunk: Buffer) => {
+                chunks.push(chunk);
+            });
+
+            incoming.on("end", () => {
+                const bytes = Buffer.concat(chunks);
+                let text = bytes.toString();
+                if (incoming.headers["content-encoding"] === "zstd")
+                    text = zstdDecompressSync(bytes).toString();
+
+                request = JsonObjectDecoder.Parse(JSON.parse(text));
+                response.end(
+                    'event: response.output_item.done\ndata: {"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"sealed"}}\n\nevent: response.completed\ndata: {"type":"response.completed","response":{"id":"compacted"}}\n\n',
+                );
+            });
+        });
+        server.listen(0, "127.0.0.1");
+        await once(server, "listening");
+        const address = Compile(
+            Type.Object({ port: Type.Number() }, { additionalProperties: true }),
+        ).Parse(server.address());
+        const harness = makeExtensionHarness();
+        const targetModel = {
+            ...DEFAULT_TEST_EXTENSION_MODEL,
+            id: "gpt-5.4",
+            baseUrl: `http://127.0.0.1:${address.port}`,
+            reasoning: true,
+            thinkingLevelMap: { minimal: mapped, off: "low" },
+        };
+        let model = { ...targetModel, id: "gpt-5.5" };
+        if (active) model = targetModel;
+
+        const ctx = testDouble<ExtensionContext>({
+            ...makeExtensionContext(root, false, model),
+            getSystemPrompt: () => "System instructions",
+            hasUI: true,
+            ui: {
+                notify: (message: string) => {
+                    notices.push(message);
+                },
+            },
+            modelRegistry: {
+                getProvider: () => undefined,
+                find: (_provider: string, id: string) => {
+                    if (id === targetModel.id) return targetModel;
+                    return undefined;
+                },
+                getApiKeyAndHeaders: async () => ({
+                    ok: true,
+                    apiKey: "test-key",
+                    headers: { "chatgpt-account-id": "test-account" },
+                }),
+            },
+        });
+        try {
+            process.env.PI_CODING_AGENT_DIR = join(root, "agent");
+            harness.events.on("pi-toggles:model-role", (value) => {
+                const request = Compile(
+                    Type.Object(
+                        { accept: Type.Function([Type.Unknown()], Type.Void()) },
+                        { additionalProperties: true },
+                    ),
+                ).Parse(value);
+                request.accept({
+                    status: "resolved",
+                    model: {
+                        provider: "openai-codex",
+                        modelId: targetModel.id,
+                        thinkingLevel: level,
+                    },
+                });
+            });
+
+            extension(harness.api);
+            await harness.startSession(ctx);
+            const result = await harness.beginCompaction(ctx);
+            assert.ok(result?.compaction, JSON.stringify({ result, notices, request }));
+            assert.ok(request);
+            assert.equal(request.model, targetModel.id);
+            assert.equal(JsonObjectDecoder.Parse(request.reasoning).effort, mapped);
+        } finally {
+            await harness.shutdownSession("quit", ctx);
+            server.closeAllConnections();
+            await new Promise<void>((resolve, reject) => {
+                server.close((cause) => {
+                    if (cause) reject(cause);
+                    else resolve();
+                });
+            });
+
+            if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+            else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+
+            await rm(root, { recursive: true, force: true });
+        }
+    },
+);
 
 test("suppresses reasoning traces only for GPT Responses models", async () => {
     const root = await mkdtemp(join(tmpdir(), "pi-codex-core-reasoning-traces-"));
@@ -575,6 +976,100 @@ test("suppresses reasoning traces only for GPT Responses models", async () => {
             undefined,
         );
     } finally {
+        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test.each(["active", "replaced", "shutdown"] as const)(
+    "prompt preparation rejection cancels only its %s session owner",
+    async (owner) => {
+        const root = await mkdtemp(join(tmpdir(), "pi-codex-core-preparation-"));
+        const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+        const harness = makeExtensionHarness();
+        const ctx = makeExtensionContext("/workspace", false);
+        let cancellations = 0;
+        Object.defineProperty(ctx, "abort", {
+            value: () => {
+                cancellations += 1;
+            },
+        });
+        let enter!: () => void;
+        let rejectPreparation!: (cause: Error) => void;
+        const entered = new Promise<void>((resolve) => {
+            enter = resolve;
+        });
+        const preparation = new Promise<void>((_resolve, reject) => {
+            rejectPreparation = reject;
+        });
+        const cause = new Error("Preparation rejected");
+        const unregister = registerSystemPromptPreparation(harness.events, async () => {
+            enter();
+            return preparation;
+        });
+        try {
+            process.env.PI_CODING_AGENT_DIR = join(root, "agent");
+            const configPath = getCodexCoreConfigPath();
+            await mkdir(dirname(configPath), { recursive: true });
+            await writeFile(configPath, JSON.stringify({ compaction: { enabled: false } }));
+            extension(harness.api);
+            await harness.startSession(ctx);
+            const operation = harness.prepareSystemPrompt("Initial prompt", { cwd: ctx.cwd }, ctx);
+            const rejected = assert.rejects(operation, (error) => error === cause);
+            await entered;
+
+            if (owner === "replaced") await harness.startSession(ctx);
+            if (owner === "shutdown") await harness.shutdownSession("quit", ctx);
+            rejectPreparation(cause);
+            await rejected;
+            assert.equal(cancellations, owner === "active" ? 1 : 0);
+        } finally {
+            unregister();
+            await harness.shutdownSession("quit", ctx);
+
+            if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+            else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+
+            await rm(root, { recursive: true, force: true });
+        }
+    },
+);
+
+test("does not publish a prompt from preparation completed after session replacement", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-preparation-"));
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    const harness = makeExtensionHarness();
+    const ctx = makeExtensionContext("/workspace", false);
+    let enter!: () => void;
+    let finishPreparation!: () => void;
+    const entered = new Promise<void>((resolve) => {
+        enter = resolve;
+    });
+    const preparation = new Promise<void>((resolve) => {
+        finishPreparation = resolve;
+    });
+    const unregister = registerSystemPromptPreparation(harness.events, async () => {
+        enter();
+        return preparation;
+    });
+    try {
+        process.env.PI_CODING_AGENT_DIR = join(root, "agent");
+        const configPath = getCodexCoreConfigPath();
+        await mkdir(dirname(configPath), { recursive: true });
+        await writeFile(configPath, JSON.stringify({ compaction: { enabled: false } }));
+        extension(harness.api);
+        await harness.startSession(ctx);
+        const operation = harness.prepareSystemPrompt("Initial prompt", { cwd: ctx.cwd }, ctx);
+        await entered;
+        await harness.startSession(ctx);
+        finishPreparation();
+        assert.equal(await operation, "Initial prompt");
+    } finally {
+        unregister();
+        await harness.shutdownSession("quit", ctx);
+
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
 

@@ -32,11 +32,11 @@ Tool activation follows model and scope settings; authentication is checked when
 
 ### System prompt
 
-Model-aware Codex prompt mode uses matching bundled GPT-6 Astra/Sol/Luna, GPT-5.6 Sol/Terra/Luna, or GPT-5.5 system prompts adapted to Pi's active tools and runtime context.
+Model-aware Codex prompt mode adapts bundled GPT prompts to Pi's active tools and context. Toggles full replacements take precedence; owned additions compose in either load order.
 
 ### Compaction
 
-Optional Codex remote compaction v2 replay supports OpenAI Codex response models, with chaining, metadata, fallbacks, world-state injection, auto-compaction, and token-aware context shrinking.
+The selectable `codex-native` handler preserves remote compaction v2 checkpoints, replay, chaining, fallbacks, and token-aware shrinking. Toggles can select it per model or preset; a preset's compaction role supplies its model and optional reasoning.
 
 ### Turn recovery
 
@@ -83,7 +83,7 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-codex-core.json
 | `openai.webSearchModel` | string | `"current"` | Model for `web_run`; `current` uses the active model. |
 | `openai.imageModel` | string | `"gpt-image-2"` | Model for `imagegen`. |
 | `openai.imageDescriptionModel` | string | `"current"` | Model for image descriptions; `current` uses the active model. |
-| `openai.compactionModel` | string | `"current"` | Model for compaction; `current` uses the active model. |
+| `openai.compactionModel` | string | `"current"` | Model for compaction; `current` uses the active model. A preset compaction role takes precedence. |
 | `openai.compactionReasoning` | string | `"medium"` | Reasoning effort for compaction requests: `medium`, `current`, `max`, or `ultra`. |
 | `openai.verbosity` | `low` \| `medium` \| `high` | `"low"` | Verbosity level for Codex API requests: `low`, `medium`, or `high`. |
 | `openai.fast` | boolean | `false` | Prioritize speed for supported OpenAI models. |
