@@ -1,4 +1,5 @@
 import { waitWithScheduler, type CodexRuntime } from "../runtime.ts";
+import { parseRetryAfterMs } from "./retry-after.ts";
 
 export type FetchedTextResponse = {
     readonly response: Response;
@@ -27,13 +28,21 @@ export async function fetchTextWithRetries(
             if (signal !== undefined) requestInit.signal = signal;
 
             const response = await runtime.fetch(input, requestInit);
+            const receivedAt = runtime.clock.nowMs();
+            const retryAfterMs = parseRetryAfterMs(response.headers.get("Retry-After"), receivedAt);
             const text = await response.text();
 
             if ((response.status === 429 || response.status >= 500) && attempt + 1 < attempts) {
-                await waitWithScheduler(runtime.scheduler, initialDelayMs * 2 ** attempt, {
+                let delayMs = initialDelayMs * 2 ** attempt;
+                if (retryAfterMs !== undefined) {
+                    delayMs = Math.max(0, receivedAt + retryAfterMs - runtime.clock.nowMs());
+                }
+
+                await waitWithScheduler(runtime.scheduler, delayMs, {
                     signal,
                     preservePreAbortReason: true,
                 });
+
                 continue;
             }
 

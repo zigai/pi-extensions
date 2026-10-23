@@ -667,12 +667,25 @@ async function estimateResponsesInputItemTokens(
     options: TokenWorkOptions,
 ): Promise<number> {
     return cachedObjectTokenCount(item, cache, async () => {
+        let framing = item;
+        let encryptedTokens = 0;
+        const encryptedContent = JsonStringDecoder.decode(item.encrypted_content);
+        if (
+            encryptedContent !== undefined &&
+            (item.type === "compaction" ||
+                item.type === "compaction_summary" ||
+                item.type === "context_compaction")
+        ) {
+            framing = { ...item, encrypted_content: "" };
+            encryptedTokens = Math.ceil(Buffer.byteLength(encryptedContent, "utf8") / 12);
+        }
+
         const serializedTokens = await estimateTokenParts(
-            responsesInputItemTokenParts(item),
+            responsesInputItemTokenParts(framing),
             cache,
             options,
         );
-        return serializedTokens + nestedInputImageTokenCount(item);
+        return serializedTokens + encryptedTokens + nestedInputImageTokenCount(item);
     });
 }
 

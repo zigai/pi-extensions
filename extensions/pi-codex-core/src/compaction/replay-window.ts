@@ -236,6 +236,7 @@ export function rewriteResponsesPayloadWithNativeReplay(input: {
     const preCompactionKeptInput = serializeEntriesToResponsesInput(
         input.model,
         input.branchEntries.slice(firstKeptEntryIndex, boundaryIndex),
+        input.branchEntries,
     );
     const afterShimIndex = shimIndex + 1;
     let keptReplayIndex = afterShimIndex;

@@ -1,17 +1,26 @@
-import type {
-    ExtensionContext,
-    SessionBeforeCompactEvent,
-    SessionEntry,
+import { readFileSync } from "node:fs";
+import { createRequire, findPackageJSON } from "node:module";
+import { join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import type { Message, Tool } from "@earendil-works/pi-ai";
+import type { createGrammarToolInputProperties } from "@earendil-works/pi-ai/api/constrained-sampling";
+import type { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
+import type { getDeclaredTools, normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
+import {
+    buildSessionProjection,
+    convertToLlm,
+    getPackageDir,
+    type ExtensionContext,
+    type SessionBeforeCompactEvent,
+    type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
+import { isModelWithStringApi } from "../codex/auth.ts";
 import { compileSchema } from "../schema-parsing.ts";
 import { NATIVE_COMPACTION_SHIM_SUMMARY } from "./messages.ts";
 import type {
     BuildPromptInputResult,
-    CompactionContentBlock,
-    CompactionMessage,
-    CompactionMessageContent,
     FoundNativeCompactionEntry,
     JsonObject,
     JsonValue,
@@ -19,12 +28,80 @@ import type {
     ResponsesPayload,
 } from "./types.ts";
 
-const COMPACTION_SUMMARY_PREFIX =
-    "The conversation history before this point was compacted into the following summary:\n\n<summary>\n";
-const COMPACTION_SUMMARY_SUFFIX = "\n</summary>";
-const BRANCH_SUMMARY_PREFIX =
-    "The following is a summary of a branch that this conversation came back from:\n\n<summary>\n";
-const BRANCH_SUMMARY_SUFFIX = "</summary>";
+const CODEX_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode"]);
+const HostProviderModulesDecoder = compileSchema(
+    Type.Tuple([
+        Type.Object({
+            convertResponsesMessages: Type.Unsafe<typeof convertResponsesMessages>(
+                Type.Function([], Type.Unknown()),
+            ),
+        }),
+        Type.Object({
+            createGrammarToolInputProperties: Type.Unsafe<typeof createGrammarToolInputProperties>(
+                Type.Function([], Type.Unknown()),
+            ),
+        }),
+        Type.Object({
+            getDeclaredTools: Type.Unsafe<typeof getDeclaredTools>(
+                Type.Function([], Type.Unknown()),
+            ),
+            normalizeContext: Type.Unsafe<typeof normalizeContext>(
+                Type.Function([], Type.Unknown()),
+            ),
+        }),
+    ]),
+);
+
+const HostProviderManifestDecoder = compileSchema(
+    Type.Object({
+        exports: Type.Object({
+            "./api/*": Type.Object({ import: Type.String() }),
+            "./utils/*": Type.Object({ import: Type.String() }),
+        }),
+    }),
+);
+const hostPackageUrl = pathToFileURL(join(getPackageDir(), "package.json"));
+const providerManifestPath = findPackageJSON("@earendil-works/pi-ai", hostPackageUrl);
+if (providerManifestPath === undefined)
+    throw new Error("The running Pi does not provide its AI package.");
+
+const rawProviderManifest: unknown = JSON.parse(readFileSync(providerManifestPath, "utf8"));
+const providerManifest = HostProviderManifestDecoder.decode(rawProviderManifest);
+if (providerManifest === undefined)
+    throw new Error("The running Pi does not export the required Responses transcript APIs.");
+
+const providerPackageUrl = pathToFileURL(providerManifestPath);
+const requireHost = createRequire(hostPackageUrl);
+const hostModules = HostProviderModulesDecoder.decode([
+    requireHost(
+        fileURLToPath(
+            new URL(
+                providerManifest.exports["./api/*"].import.replace("*", "openai-responses-shared"),
+                providerPackageUrl,
+            ),
+        ),
+    ),
+    requireHost(
+        fileURLToPath(
+            new URL(
+                providerManifest.exports["./api/*"].import.replace("*", "constrained-sampling"),
+                providerPackageUrl,
+            ),
+        ),
+    ),
+    requireHost(
+        fileURLToPath(
+            new URL(
+                providerManifest.exports["./utils/*"].import.replace("*", "transcript"),
+                providerPackageUrl,
+            ),
+        ),
+    ),
+]);
+if (hostModules === undefined)
+    throw new Error("The running Pi does not provide the required Responses transcript APIs.");
+
+const [responsesApi, grammarApi, transcriptApi] = hostModules;
 
 const JsonValueSchema = Type.Cyclic(
     {
@@ -55,13 +132,15 @@ export const ResponsesPayloadDecoder = compileSchema(
 const StringValidator = compileSchema(Type.String());
 export const JsonStringDecoder = StringValidator;
 export const JsonNumberDecoder = compileSchema(Type.Number());
-const ImageDetailValidator = compileSchema(
-    Type.Union([Type.Literal("high"), Type.Literal("original")]),
+const DetailedImageDecoder = compileSchema(
+    Type.Object({
+        type: Type.Literal("image"),
+        data: Type.String(),
+        mimeType: Type.String(),
+        detail: Type.Union([Type.Literal("high"), Type.Literal("original")]),
+    }),
 );
 const UnknownArrayValidator = compileSchema(Type.Array(Type.Unknown()));
-const CompactionMessageContentValidator = compileSchema(
-    Type.Union([Type.String(), Type.Array(Type.Unknown())]),
-);
 
 export function buildRemoteCompactionPromptInput(
     event: SessionBeforeCompactEvent,
@@ -75,418 +154,123 @@ export function buildRemoteCompactionPromptInput(
                 ...serializeEntriesToResponsesInput(
                     model,
                     event.branchEntries.slice(latestNativeCompaction.index + 1),
+                    event.branchEntries,
                 ),
             ],
             previousCompactionEntryId: latestNativeCompaction.entry.id,
         };
     }
 
-    const messages: CompactionMessage[] = [];
-    if (event.preparation.previousSummary) {
-        messages.push(compactionSummaryMessage(event.preparation.previousSummary));
-    }
-
-    for (const rawMessage of [
-        ...event.preparation.messagesToSummarize,
-        ...event.preparation.turnPrefixMessages,
-    ]) {
-        const message = parseCompactionMessage(rawMessage);
-        if (message) messages.push(message);
-    }
-
-    const firstKeptEntryIndex = event.branchEntries.findIndex(
-        (entry) => entry.id === event.preparation.firstKeptEntryId,
-    );
-    if (firstKeptEntryIndex >= 0) {
-        for (const message of compactionMessagesFromSessionEntries(
-            event.branchEntries
-                .slice(firstKeptEntryIndex)
-                .filter((entry) => entry.type !== "compaction"),
-        )) {
-            messages.push(message);
-        }
-    }
-
-    return { input: serializeMessagesToResponsesInput(model, messages) };
+    return {
+        input: serializeEntriesToResponsesInput(model, event.branchEntries, event.branchEntries),
+    };
 }
 
 export function serializeEntriesToResponsesInput(
     model: ExtensionContext["model"] | undefined,
     entries: readonly SessionEntry[],
+    contextEntries: readonly SessionEntry[],
 ): ResponsesInputItem[] {
-    return serializeMessagesToResponsesInput(model, compactionMessagesFromSessionEntries(entries));
-}
-
-function* compactionMessagesFromSessionEntries(
-    entries: readonly SessionEntry[],
-): Generator<CompactionMessage> {
-    for (const entry of entries) {
-        const message = compactionMessageFromSessionEntry(entry);
-        if (message) yield message;
-    }
+    const selectedIds = new Set(entries.map((entry) => entry.id));
+    const projection = buildSessionProjection([...contextEntries]);
+    const messages = convertToLlm(
+        projection.entries
+            .filter((entry) => selectedIds.has(entry.sourceEntry.id))
+            .flatMap((entry) => entry.messages),
+    );
+    const declaredTools = transcriptApi.getDeclaredTools(convertToLlm(projection.messages));
+    return serializeMessagesToResponsesInput(
+        model,
+        messages,
+        entries[0]?.parentId === null,
+        declaredTools,
+    );
 }
 
 function serializeMessagesToResponsesInput(
     model: ExtensionContext["model"] | undefined,
-    messages: Iterable<CompactionMessage>,
+    messages: Message[],
+    initialTranscript: boolean,
+    declaredTools: Tool[],
 ): ResponsesInputItem[] {
-    const input: ResponsesInputItem[] = [];
-    const toolCallIdMap = new Map<string, string>();
-    let pendingToolCalls: ResponsesInputItem[] = [];
-    let existingToolResultIds = new Set<string>();
-    let messageIndex = 0;
+    if (!isModelWithStringApi(model)) {
+        throw new Error("Codex compaction requires a registered Responses model.");
+    }
 
-    const serializeNormalizedMessage = (message: CompactionMessage) => {
-        input.push(...serializeMessage(message, messageIndex, model));
-        messageIndex += 1;
-    };
+    let transcriptMessages = messages;
+    if (!initialTranscript) {
+        transcriptMessages = [{ role: "system", content: "", timestamp: 0 }, ...messages];
+    }
 
-    const insertSyntheticToolResults = () => {
-        if (pendingToolCalls.length === 0) return;
+    const context = transcriptApi.normalizeContext({ messages: transcriptMessages });
+    const compat = JsonObjectDecoder.decode(model.compat);
+    const supportsOpenAIGrammarTools = compat?.supportsOpenAIGrammarTools === true;
+    const converted = responsesApi.convertResponsesMessages(
+        model,
+        context,
+        CODEX_TOOL_CALL_PROVIDERS,
+        {
+            includeSystemPrompt: false,
+            grammarToolInputProperties: grammarApi.createGrammarToolInputProperties(
+                declaredTools,
+                supportsOpenAIGrammarTools,
+            ),
+            supportsMidConvoSystemMessages: compat?.supportsMidConvoSystemMessages === true,
+            supportsAdditionalTools: compat?.supportsAdditionalTools === true,
+            supportsToolSearch: compat?.supportsToolSearch === true,
+            toolOptions: {
+                strict: null,
+                supportsStrictMode: compat?.supportsStrictMode !== false,
+                supportsOpenAIGrammarTools,
+            },
+        },
+    );
+    const input = parseResponsesInputItems(converted);
+    if (!input) throw new Error("Pi produced an invalid Responses transcript.");
 
-        for (const toolCall of pendingToolCalls) {
-            const id = StringValidator.decode(toolCall.call_id);
-            if (id && !existingToolResultIds.has(id)) {
-                serializeNormalizedMessage({
-                    role: "toolResult",
-                    toolCallId: id,
-                    content: [{ type: "text", text: "No result provided" }],
-                });
+    const imageDetails = new Map<string, "high" | "original">();
+    for (const message of messages) {
+        const content = JsonArrayDecoder.decode(message.content);
+        if (content === undefined) continue;
+
+        for (const block of content) {
+            const image = DetailedImageDecoder.decode(block);
+            if (image !== undefined) {
+                imageDetails.set(`data:${image.mimeType};base64,${image.data}`, image.detail);
             }
         }
-
-        pendingToolCalls = [];
-        existingToolResultIds = new Set();
-    };
-
-    for (const rawMessage of messages) {
-        const message = transformMessageForResponses(model, rawMessage, toolCallIdMap);
-        if (message.role === "assistant") {
-            insertSyntheticToolResults();
-
-            if (message.stopReason === "error" || message.stopReason === "aborted") continue;
-            pendingToolCalls = toolCallsFromContent(message.content);
-            serializeNormalizedMessage(message);
-            continue;
-        }
-
-        if (message.role === "toolResult") {
-            const callId = responseCallIdFromToolCallId(message.toolCallId);
-            if (callId) existingToolResultIds.add(callId);
-            serializeNormalizedMessage(message);
-            continue;
-        }
-
-        insertSyntheticToolResults();
-        serializeNormalizedMessage(message);
-        continue;
     }
 
-    insertSyntheticToolResults();
-
-    return input;
+    if (imageDetails.size === 0) return input;
+    return input.map((item) => restoreImageDetails(item, imageDetails));
 }
 
-function transformMessageForResponses(
-    model: ExtensionContext["model"] | undefined,
-    message: CompactionMessage,
-    toolCallIdMap: Map<string, string>,
-): CompactionMessage {
-    if (message.role === "toolResult") {
-        const mapped =
-            message.toolCallId === undefined ? undefined : toolCallIdMap.get(message.toolCallId);
-        return mapped ? { ...message, toolCallId: mapped } : message;
-    }
-
-    if (message.role !== "assistant") return message;
-
-    const isSameModel =
-        model &&
-        message.provider === model.provider &&
-        message.api === model.api &&
-        message.model === model.id;
-    const content = message.content.flatMap((block): CompactionContentBlock[] => {
-        if (block.type === "thinking") {
-            if (block.redacted) return isSameModel ? [block] : [];
-            if (isSameModel && block.thinkingSignature) return [block];
-            return block.thinking && block.thinking.trim().length > 0
-                ? [{ type: "text", text: block.thinking }]
-                : [];
-        }
-
-        if (block.type === "toolCall") {
-            const normalizedId = normalizeResponsesToolCallId(block.id, Boolean(isSameModel));
-            if (normalizedId !== block.id) toolCallIdMap.set(block.id, normalizedId);
-            return [{ ...block, id: normalizedId }];
-        }
-
-        return [block];
-    });
-
-    return { ...message, content };
-}
-
-function compactionMessageFromSessionEntry(entry: SessionEntry): CompactionMessage | undefined {
-    if (entry.type === "message") return parseCompactionMessage(entry.message);
-
-    if (entry.type === "custom_message") {
-        return parseCompactionMessage({ role: "user", content: entry.content });
-    }
-
-    if (entry.type === "branch_summary") {
-        return {
-            role: "user",
-            content: [
-                {
-                    type: "text",
-                    text: `${BRANCH_SUMMARY_PREFIX}${entry.summary}${BRANCH_SUMMARY_SUFFIX}`,
-                },
-            ],
-        };
-    }
-
-    if (entry.type === "compaction") {
-        return compactionSummaryMessage(entry.summary);
-    }
-
-    return undefined;
-}
-
-function compactionSummaryMessage(summary: string): CompactionMessage {
-    return {
-        role: "user",
-        content: [
-            {
-                type: "text",
-                text: `${COMPACTION_SUMMARY_PREFIX}${summary}${COMPACTION_SUMMARY_SUFFIX}`,
-            },
-        ],
-    };
-}
-
-function parseCompactionMessage(value: unknown): CompactionMessage | undefined {
-    const message = parseJsonObject(value);
-    if (message === undefined) return undefined;
-
-    if (message.role === "user") {
-        const content = parseCompactionMessageContent(message.content);
-        return content === undefined ? undefined : { role: "user", content };
-    }
-
-    if (message.role === "assistant") {
-        const content = parseCompactionContentBlocks(message.content);
-        if (!content) return undefined;
-
-        return {
-            role: "assistant",
-            content,
-            provider: parseOptionalString(message.provider),
-            api: parseOptionalString(message.api),
-            model: parseOptionalString(message.model),
-            stopReason: parseOptionalString(message.stopReason),
-        };
-    }
-
-    if (message.role === "toolResult") {
-        const content = parseCompactionContentBlocks(message.content);
-        if (!content) return undefined;
-
-        return {
-            role: "toolResult",
-            toolCallId: parseOptionalString(message.toolCallId),
-            content,
-        };
-    }
-
-    return undefined;
-}
-
-function parseCompactionMessageContent(value: unknown): CompactionMessageContent | undefined {
-    const content = CompactionMessageContentValidator.decode(value);
-    if (content === undefined) return undefined;
-    return Array.isArray(content)
-        ? parseCompactionContentBlocks(content)
-        : [{ type: "text", text: content }];
-}
-
-function parseCompactionContentBlocks(
-    value: unknown,
-): readonly CompactionContentBlock[] | undefined {
-    const values = UnknownArrayValidator.decode(value);
-    if (values === undefined) return undefined;
-
-    const content: CompactionContentBlock[] = [];
-    for (const item of values) {
-        const block = parseCompactionContentBlock(item);
-        if (block) content.push(block);
-    }
-
-    return content;
-}
-
-function parseCompactionContentBlock(value: unknown): CompactionContentBlock | undefined {
-    const block = parseJsonObject(value);
-    if (block === undefined) return undefined;
-
-    const text = StringValidator.decode(block.text);
-    if (block.type === "text" && text !== undefined) return { type: "text", text };
-
-    const data = StringValidator.decode(block.data);
-    const mimeType = StringValidator.decode(block.mimeType);
-    if (block.type === "image" && data !== undefined && mimeType !== undefined) {
-        return { type: "image", data, mimeType, detail: imageDetailForResponses(block.detail) };
-    }
-
-    if (block.type === "thinking") {
-        return {
-            type: "thinking",
-            thinking: parseOptionalString(block.thinking),
-            thinkingSignature: parseOptionalString(block.thinkingSignature),
-            redacted: block.redacted === true ? true : undefined,
-        };
-    }
-
-    const id = StringValidator.decode(block.id);
-    const name = StringValidator.decode(block.name);
-    if (block.type === "toolCall" && id !== undefined && name !== undefined) {
-        return { type: "toolCall", id, name, arguments: parseJsonObject(block.arguments) };
-    }
-
-    return undefined;
-}
-
-function serializeMessage(
-    message: CompactionMessage,
-    messageIndex: number,
-    model: ExtensionContext["model"] | undefined,
-): ResponsesInputItem[] {
-    if (message.role === "user") {
-        const content = inputContentFromContent(message.content, model);
-        return content.length > 0 ? [{ role: "user", content }] : [];
-    }
-
-    if (message.role === "assistant") {
-        const items: ResponsesInputItem[] = [];
-        const text = textFromContent(message.content);
-        if (text) {
-            items.push({
-                type: "message",
-                role: "assistant",
-                content: [{ type: "output_text", text: sanitizeSurrogates(text), annotations: [] }],
-                status: "completed",
-                id: `msg_pi_compact_${messageIndex}`,
+function restoreImageDetails(
+    item: ResponsesInputItem,
+    imageDetails: ReadonlyMap<string, "high" | "original">,
+): ResponsesInputItem {
+    const result: Record<string, JsonValue | undefined> = {};
+    for (const [key, value] of Object.entries(item)) {
+        if (isJsonArray(value)) {
+            result[key] = value.map((part) => {
+                const object = JsonObjectDecoder.decode(part);
+                if (object) return restoreImageDetails(object, imageDetails);
+                return part;
             });
+        } else {
+            const object = JsonObjectDecoder.decode(value);
+            if (object) result[key] = restoreImageDetails(object, imageDetails);
+            else result[key] = value;
         }
-
-        for (const toolCall of toolCallsFromContent(message.content)) items.push(toolCall);
-        return items;
     }
 
-    const callId = responseCallIdFromToolCallId(message.toolCallId);
-    if (!callId) return [];
-
-    return [
-        {
-            type: "function_call_output",
-            call_id: callId,
-            output: toolResultOutputFromContent(message.content, model),
-        },
-    ];
-}
-
-function inputContentFromContent(
-    content: CompactionMessageContent,
-    model: ExtensionContext["model"] | undefined,
-): ResponsesInputItem[] {
-    return content.flatMap((item): ResponsesInputItem[] => {
-        if (item.type === "text") {
-            return [{ type: "input_text", text: sanitizeSurrogates(item.text) }];
-        }
-
-        if (item.type === "image" && modelSupportsImages(model)) {
-            return [
-                {
-                    type: "input_image",
-                    image_url: `data:${item.mimeType};base64,${item.data}`,
-                    detail: imageDetailForResponses(item.detail),
-                },
-            ];
-        }
-
-        if (item.type === "image") {
-            return [{ type: "input_text", text: "(image omitted: model does not support images)" }];
-        }
-
-        return [];
-    });
-}
-
-function toolResultOutputFromContent(
-    content: readonly CompactionContentBlock[],
-    model: ExtensionContext["model"] | undefined,
-): string | ResponsesInputItem[] {
-    const text = content.flatMap((item) => (item.type === "text" ? [item.text] : [])).join("\n");
-    const images = content.flatMap((item): ResponsesInputItem[] => {
-        if (item.type !== "image") return [];
-
-        return [
-            {
-                type: "input_image",
-                image_url: `data:${item.mimeType};base64,${item.data}`,
-                detail: imageDetailForResponses(item.detail),
-            },
-        ];
-    });
-    if (images.length > 0 && modelSupportsImages(model)) {
-        return [
-            ...(text.trim().length > 0
-                ? [{ type: "input_text", text: sanitizeSurrogates(text) }]
-                : []),
-            ...images,
-        ];
+    const imageUrl = JsonStringDecoder.decode(item.image_url);
+    if (item.type === "input_image" && imageUrl !== undefined) {
+        const detail = imageDetails.get(imageUrl);
+        if (detail !== undefined) result.detail = detail;
     }
 
-    if (text.trim().length > 0) return sanitizeSurrogates(text);
-    return images.length > 0 ? "(see attached image)" : "(no output)";
-}
-
-function textFromContent(content: CompactionMessageContent): string | undefined {
-    const parts = content.flatMap((item) =>
-        item.type === "text" ? [sanitizeSurrogates(item.text)] : [],
-    );
-    const text = parts.join("\n").trim();
-    return text.length > 0 ? text : undefined;
-}
-
-function toolCallsFromContent(content: readonly CompactionContentBlock[]): ResponsesInputItem[] {
-    return content.flatMap((item) => {
-        if (item.type !== "toolCall") return [];
-
-        const [callId, itemId] = splitResponseToolCallId(item.id);
-
-        if (!callId) return [];
-
-        const argumentsText = JSON.stringify(item.arguments ?? {});
-
-        return itemId
-            ? [
-                  {
-                      type: "function_call",
-                      id: itemId,
-                      call_id: callId,
-                      name: item.name,
-                      arguments: argumentsText,
-                  },
-              ]
-            : [
-                  {
-                      type: "function_call",
-                      call_id: callId,
-                      name: item.name,
-                      arguments: argumentsText,
-                  },
-              ];
-    });
+    return result;
 }
 
 export function parseResponsesPayload(value: unknown): ResponsesPayload | undefined {
@@ -552,56 +336,4 @@ export function sanitizeSurrogates(text: string): string {
 
 function parseJsonObject(value: unknown): JsonObject | undefined {
     return JsonObjectDecoder.decode(value);
-}
-
-function modelSupportsImages(model: ExtensionContext["model"] | undefined): boolean {
-    return Array.isArray(model?.input) && model.input.includes("image");
-}
-
-function imageDetailForResponses(value: unknown): "auto" | "high" | "original" {
-    return ImageDetailValidator.decode(value) ?? "auto";
-}
-
-function normalizeResponsesToolCallId(id: string, isSameModel: boolean): string {
-    const [callId, itemId] = splitResponseToolCallId(id);
-    const normalizedCallId = normalizeResponseIdPart(callId ?? id);
-    if (!itemId) return normalizedCallId;
-
-    const normalizedItemId = normalizeResponseIdPart(
-        isSameModel ? itemId : `fc_${shortHash(itemId)}`,
-    );
-    return `${normalizedCallId}|${normalizedItemId.startsWith("fc_") ? normalizedItemId : `fc_${normalizedItemId}`}`;
-}
-
-function responseCallIdFromToolCallId(value: string | undefined): string | undefined {
-    if (value === undefined) return undefined;
-    return splitResponseToolCallId(value)[0];
-}
-
-function splitResponseToolCallId(id: string): readonly [string | undefined, string | undefined] {
-    const [callId, itemId] = id.split("|");
-    return [callId && callId.length > 0 ? normalizeResponseIdPart(callId) : undefined, itemId];
-}
-
-function normalizeResponseIdPart(value: string): string {
-    const sanitized = value
-        .replace(/[^a-zA-Z0-9_-]/g, "_")
-        .slice(0, 64)
-        .replace(/_+$/, "");
-    return sanitized.length > 0 ? sanitized : "id";
-}
-
-function shortHash(value: string): string {
-    let hash = 2_166_136_261;
-    for (const char of value) {
-        hash ^= char.charCodeAt(0);
-        hash = Math.imul(hash, 16_777_619);
-    }
-
-    const unsignedHash = hash < 0 ? hash + 4_294_967_296 : hash;
-    return Math.trunc(unsignedHash).toString(16);
-}
-
-function parseOptionalString(value: unknown): string | undefined {
-    return StringValidator.decode(value);
 }

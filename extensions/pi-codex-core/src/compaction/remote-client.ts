@@ -13,6 +13,7 @@ import {
     type CodexFailure,
     type CodexResult,
 } from "../codex/failures.ts";
+import { parseRetryAfterHeaders, parseRetryAfterMs } from "../codex/retry-after.ts";
 import { waitWithScheduler, type CodexRuntime, type ScheduledTask } from "../runtime.ts";
 import { compileSchema } from "../schema-parsing.ts";
 import {
@@ -46,6 +47,10 @@ type LinkedAttemptController = {
     readonly dispose: () => void;
 };
 
+type RemoteCompactionRetryAdvice = {
+    deadlineMs?: number;
+};
+
 type RemoteCompactionV2Collector = {
     readonly consume: (event: ServerSentEvent) => CodexResult<void>;
     readonly isComplete: () => boolean;
@@ -71,6 +76,8 @@ export async function executeRemoteCompactionV2(
         if (signal.aborted) return cancelledRemoteCompaction(signal.reason);
 
         const linkedAttempt = createLinkedAttemptController(signal);
+
+        const retryAdvice: RemoteCompactionRetryAdvice = {};
         let result: CodexResult<RemoteCompactionV2Response>;
         try {
             result = await executeRemoteCompactionV2Attempt(
@@ -79,6 +86,7 @@ export async function executeRemoteCompactionV2(
                 linkedAttempt.controller,
                 signal,
                 services,
+                retryAdvice,
             );
             if (result.isErr() && !linkedAttempt.controller.signal.aborted) {
                 linkedAttempt.controller.abort(result.error);
@@ -98,14 +106,20 @@ export async function executeRemoteCompactionV2(
             return result;
         }
 
+        let delayMs = REMOTE_COMPACTION_RETRY_INITIAL_DELAY_MS * 2 ** attempt;
+        if (
+            result.error._tag === "CodexStreamRetryable" &&
+            result.error.retryAfterMs !== undefined
+        ) {
+            delayMs = result.error.retryAfterMs;
+        }
+
+        if (retryAdvice.deadlineMs !== undefined) {
+            delayMs = Math.max(0, retryAdvice.deadlineMs - services.clock.nowMs());
+        }
+
         try {
-            await waitWithScheduler(
-                services.scheduler,
-                (result.error._tag === "CodexStreamRetryable"
-                    ? result.error.retryAfterMs
-                    : undefined) ?? REMOTE_COMPACTION_RETRY_INITIAL_DELAY_MS * 2 ** attempt,
-                { signal },
-            );
+            await waitWithScheduler(services.scheduler, delayMs, { signal });
         } catch (cause: unknown) {
             return cancelledRemoteCompaction(cause);
         }
@@ -146,6 +160,7 @@ async function executeRemoteCompactionV2Attempt(
     attemptController: AbortController,
     parentSignal: AbortSignal,
     services: CodexRuntime,
+    retryAdvice: RemoteCompactionRetryAdvice,
 ): Promise<CodexResult<RemoteCompactionV2Response>> {
     const signal = attemptController.signal;
     let response: Response;
@@ -178,6 +193,10 @@ async function executeRemoteCompactionV2Attempt(
     }
 
     if (!response.ok) {
+        const receivedAt = services.clock.nowMs();
+        const retryAfterMs = parseRetryAfterMs(response.headers.get("Retry-After"), receivedAt);
+        if (retryAfterMs !== undefined) retryAdvice.deadlineMs = receivedAt + retryAfterMs;
+
         let detail: string | undefined;
         try {
             detail = await readSafeHttpErrorDetail(
@@ -209,7 +228,7 @@ async function executeRemoteCompactionV2Attempt(
                 services,
                 attemptController,
             );
-            return collectRemoteCompactionV2Output(text);
+            return collectRemoteCompactionV2Output(text, services.clock.nowMs, retryAdvice);
         }
 
         return await collectRemoteCompactionV2OutputFromStream(
@@ -217,6 +236,7 @@ async function executeRemoteCompactionV2Attempt(
             signal,
             services,
             attemptController,
+            retryAdvice,
         );
     } catch (cause: unknown) {
         if (cause instanceof RemoteCompactionIdleTimeout) {
@@ -501,10 +521,11 @@ async function collectRemoteCompactionV2OutputFromStream(
     signal: AbortSignal,
     services: CodexRuntime,
     attemptController: AbortController,
+    retryAdvice: RemoteCompactionRetryAdvice,
 ): Promise<CodexResult<RemoteCompactionV2Response>> {
     const reader = body.getReader();
     const decoder = new TextDecoder();
-    const collector = createRemoteCompactionV2Collector();
+    const collector = createRemoteCompactionV2Collector(services.clock.nowMs, retryAdvice);
     let buffer = "";
 
     try {
@@ -579,8 +600,12 @@ async function cancelStreamReader(reader: ReadableStreamDefaultReader<Uint8Array
     }
 }
 
-function collectRemoteCompactionV2Output(sseText: string): CodexResult<RemoteCompactionV2Response> {
-    const collector = createRemoteCompactionV2Collector();
+function collectRemoteCompactionV2Output(
+    sseText: string,
+    nowMs: () => number,
+    retryAdvice: RemoteCompactionRetryAdvice,
+): CodexResult<RemoteCompactionV2Response> {
+    const collector = createRemoteCompactionV2Collector(nowMs, retryAdvice);
     for (const event of parseServerSentEvents(sseText)) {
         const consumed = collector.consume(event);
         if (consumed.isErr()) return fail(consumed.error);
@@ -589,12 +614,16 @@ function collectRemoteCompactionV2Output(sseText: string): CodexResult<RemoteCom
     return collector.finish();
 }
 
-function createRemoteCompactionV2Collector(): RemoteCompactionV2Collector {
+function createRemoteCompactionV2Collector(
+    nowMs: () => number,
+    retryAdvice: RemoteCompactionRetryAdvice,
+): RemoteCompactionV2Collector {
     let outputItemCount = 0;
     const compactionItems: ResponsesInputItem[] = [];
     let completed = false;
     let responseId: string | undefined;
     let createdAt: number | string | undefined;
+    let serviceTier: string | undefined;
     let usage: RemoteCompactionV2Response["usage"];
 
     return {
@@ -620,12 +649,19 @@ function createRemoteCompactionV2Collector(): RemoteCompactionV2Collector {
                 completed = true;
                 responseId = JsonStringDecoder.decode(response.value?.id);
                 createdAt = parseCreatedAt(response.value);
+                serviceTier = JsonStringDecoder.decode(response.value?.service_tier);
                 usage = parseCompactionUsage(response.value);
                 return ok(undefined);
             }
 
             if (event.event === "response.failed" || event.event === "response.incomplete") {
-                return fail(parseResponsesStreamFailure(event.data, event.event));
+                const receivedAt = nowMs();
+                const error = parseResponsesStreamFailure(event.data, event.event, receivedAt);
+                if (error._tag === "CodexStreamRetryable" && error.retryAfterMs !== undefined) {
+                    retryAdvice.deadlineMs = receivedAt + error.retryAfterMs;
+                }
+
+                return fail(error);
             }
 
             return ok(undefined);
@@ -666,7 +702,7 @@ function createRemoteCompactionV2Collector(): RemoteCompactionV2Collector {
                 );
             }
 
-            return ok({ compactionOutput, id: responseId, createdAt, usage });
+            return ok({ compactionOutput, id: responseId, createdAt, serviceTier, usage });
         },
     };
 }
@@ -755,11 +791,35 @@ function parseCompactionUsage(
     if (!usage) return undefined;
 
     const inputTokens = nonNegativeTokenCount(usage.input_tokens);
+    const outputTokens = nonNegativeTokenCount(usage.output_tokens);
     const inputTokenDetails = JsonObjectDecoder.decode(usage.input_tokens_details);
-    const cachedInputTokens = nonNegativeTokenCount(inputTokenDetails?.cached_tokens);
-    return inputTokens !== undefined || cachedInputTokens !== undefined
-        ? { inputTokens, cachedInputTokens }
-        : undefined;
+    const outputTokenDetails = JsonObjectDecoder.decode(usage.output_tokens_details);
+    const cacheRead = nonNegativeTokenCount(inputTokenDetails?.cached_tokens) ?? 0;
+    const cacheWrite = nonNegativeTokenCount(inputTokenDetails?.cache_write_tokens) ?? 0;
+    const reasoning = nonNegativeTokenCount(outputTokenDetails?.reasoning_tokens);
+    const totalTokens = nonNegativeTokenCount(usage.total_tokens);
+    if (
+        inputTokens === undefined &&
+        outputTokens === undefined &&
+        totalTokens === undefined &&
+        cacheRead === 0 &&
+        cacheWrite === 0
+    )
+        return undefined;
+
+    const input = Math.max(0, (inputTokens ?? 0) - cacheRead - cacheWrite);
+    const output = outputTokens ?? 0;
+    const parsed: NonNullable<RemoteCompactionV2Response["usage"]> = {
+        input,
+        output,
+        cacheRead,
+        cacheWrite,
+        totalTokens: totalTokens ?? input + output + cacheRead + cacheWrite,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    };
+    if (reasoning !== undefined) parsed.reasoning = reasoning;
+
+    return parsed;
 }
 
 function nonNegativeTokenCount(value: JsonObject[string]): number | undefined {
@@ -781,7 +841,11 @@ const FATAL_RESPONSES_ERROR_CODES = new Set([
     "content_policy_violation",
 ]);
 
-function parseResponsesStreamFailure(data: readonly string[], event: string): CodexFailure {
+function parseResponsesStreamFailure(
+    data: readonly string[],
+    event: string,
+    nowMs: number,
+): CodexFailure {
     const response = parseEventResponse(data);
     if (response.isErr()) return response.error;
 
@@ -804,7 +868,7 @@ function parseResponsesStreamFailure(data: readonly string[], event: string): Co
             provider: "openai-codex",
             message,
             code,
-            retryAfterMs: code === "rate_limit_exceeded" ? parseRateLimitDelay(detail) : undefined,
+            retryAfterMs: parseStreamRetryDelay(error, code, detail, nowMs),
         });
     }
 
@@ -813,6 +877,18 @@ function parseResponsesStreamFailure(data: readonly string[], event: string): Co
         provider: "openai-codex",
         message,
     });
+}
+
+function parseStreamRetryDelay(
+    error: JsonObject,
+    code: string | undefined,
+    detail: string | undefined,
+    nowMs: number,
+): number | undefined {
+    const headerDelayMs = parseRetryAfterHeaders(error.headers, nowMs);
+    if (headerDelayMs !== undefined) return headerDelayMs;
+    if (code === "rate_limit_exceeded" || code === "slow_down") return parseRateLimitDelay(detail);
+    return undefined;
 }
 
 function parseRateLimitDelay(message: string | undefined): number | undefined {

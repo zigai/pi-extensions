@@ -3,10 +3,12 @@ import type {
     ExtensionContext,
     SessionBeforeCompactEvent,
 } from "@earendil-works/pi-coding-agent";
+import { calculateCost, type Api, type Model, type Usage } from "@earendil-works/pi-ai";
 
 import {
     resolveActiveCodexResponsesProvider,
     resolveCodexApiProviderBaseUrl,
+    isModelWithStringApi,
 } from "../codex/auth.ts";
 import {
     CodexNativeCompactionIncompatible,
@@ -59,6 +61,7 @@ import type {
     FoundNativeCompactionEntry,
     NativeCompactionDetails,
     NativeCompactionMatch,
+    NativeCompactionResult,
     NativeCompactionWorldState,
     ResponsesInputItem,
     ResponsesPayload,
@@ -86,13 +89,7 @@ export async function handleCodexNativeCompaction(
 ): Promise<
     | {
           readonly cancel?: true;
-
-          readonly compaction?: {
-              readonly summary: string;
-              readonly firstKeptEntryId: string;
-              readonly tokensBefore: number;
-              readonly details: NativeCompactionDetails;
-          };
+          readonly compaction?: NativeCompactionResult;
       }
     | undefined
 > {
@@ -125,8 +122,13 @@ export async function handleCodexNativeCompaction(
         runtime.value.model,
     );
     const targetModel = resolveCompactionTargetModel(ctx, compactionModel);
+    if (!isModelWithStringApi(targetModel)) {
+        notifyCompactionFallback(ctx, "Codex compaction model is not registered in Pi.");
+        return undefined;
+    }
+
     const requestProfile = codexModelRequestProfile(compactionModel);
-    const contextWindow = targetModel?.contextWindow;
+    const contextWindow = targetModel.contextWindow;
     const latestNativeCompaction = findLatestActiveNativeCompactionEntry(
         event.branchEntries,
         match,
@@ -252,6 +254,15 @@ export async function handleCodexNativeCompaction(
         }
 
         const response = responseResult.value;
+        if (response.usage) {
+            priceCompactionUsage(
+                response.usage,
+                targetModel,
+                shrink.request.service_tier,
+                response.serviceTier,
+            );
+        }
+
         const compactedWindow = await buildRemoteCompactionV2Window(
             shrink.promptInput,
             response.compactionOutput,
@@ -265,41 +276,44 @@ export async function handleCodexNativeCompaction(
         const worldState = captureNativeCompactionWorldState(ctx, pi, runtimeServices, event);
         const lifecycle = buildWindowLifecycle(latestNativeCompaction, runtimeServices);
 
-        return {
-            compaction: {
-                summary: NATIVE_COMPACTION_SHIM_SUMMARY,
-                firstKeptEntryId: event.preparation.firstKeptEntryId,
-                tokensBefore: event.preparation.tokensBefore,
-                details: {
-                    strategy: NATIVE_COMPACTION_STRATEGY,
-                    provider: runtime.value.provider,
-                    api: runtime.value.api,
-                    model: compactionModel,
-                    compHash: requestProfile?.compHash,
-                    baseUrl: runtime.value.baseUrl,
-                    compactedWindow,
-                    windowNumber: lifecycle.windowNumber,
-                    windowId: lifecycle.windowId,
-                    firstWindowId: lifecycle.firstWindowId,
-                    previousWindowId: lifecycle.previousWindowId,
-                    sourceCompactionEntryId: lifecycle.sourceCompactionEntryId,
-                    worldState,
-                    compactResponseId: response.id,
-                    createdAt: normalizeCreatedAt(response.createdAt, runtimeServices),
-                    requestMeta: {
-                        previousCompactionEntryId: promptInput.previousCompactionEntryId,
-                        retainedInputItems: compactedWindow.length,
-                        rewrittenToolOutputs: shrink.rewrittenToolOutputs,
-                        estimatedTokensBefore: shrink.estimatedTokensBefore,
-                        estimatedTokensAfter: shrink.estimatedTokensAfter,
-                        budgetTokens: shrink.budgetTokens,
-                        providerTemplateUsed: requestTemplate !== undefined,
-                        inputTokens: response.usage?.inputTokens,
-                        cachedInputTokens: response.usage?.cachedInputTokens,
-                    },
+        const compaction: NativeCompactionResult = {
+            summary: NATIVE_COMPACTION_SHIM_SUMMARY,
+            firstKeptEntryId: event.preparation.firstKeptEntryId,
+            tokensBefore: event.preparation.tokensBefore,
+            details: {
+                strategy: NATIVE_COMPACTION_STRATEGY,
+                provider: runtime.value.provider,
+                api: runtime.value.api,
+                model: compactionModel,
+                compHash: requestProfile?.compHash,
+                baseUrl: runtime.value.baseUrl,
+                compactedWindow,
+                windowNumber: lifecycle.windowNumber,
+                windowId: lifecycle.windowId,
+                firstWindowId: lifecycle.firstWindowId,
+                previousWindowId: lifecycle.previousWindowId,
+                sourceCompactionEntryId: lifecycle.sourceCompactionEntryId,
+                worldState,
+                compactResponseId: response.id,
+                createdAt: normalizeCreatedAt(response.createdAt, runtimeServices),
+                requestMeta: {
+                    previousCompactionEntryId: promptInput.previousCompactionEntryId,
+                    retainedInputItems: compactedWindow.length,
+                    rewrittenToolOutputs: shrink.rewrittenToolOutputs,
+                    estimatedTokensBefore: shrink.estimatedTokensBefore,
+                    estimatedTokensAfter: shrink.estimatedTokensAfter,
+                    budgetTokens: shrink.budgetTokens,
+                    providerTemplateUsed: requestTemplate !== undefined,
+                    inputTokens:
+                        response.usage &&
+                        response.usage.input + response.usage.cacheRead + response.usage.cacheWrite,
+                    cachedInputTokens: response.usage?.cacheRead,
                 },
             },
         };
+        if (response.usage) compaction.usage = response.usage;
+
+        return { compaction };
     } catch (cause: unknown) {
         // oxlint-disable-next-line typescript/no-unnecessary-condition -- SAFETY: event.signal.aborted can become true during the preceding async operation.
         if (isCodexAbortCause(cause) || event.signal.aborted) {
@@ -396,6 +410,34 @@ const NativeReplayRequestDecoder = {
 
 function resolvedNativeCompactionHash(details: NativeCompactionDetails): string | undefined {
     return details.compHash ?? codexModelRequestProfile(details.model)?.compHash;
+}
+
+function priceCompactionUsage(
+    usage: Usage,
+    model: Model<Api>,
+    requestTier: string | undefined,
+    responseTier: string | undefined,
+): void {
+    calculateCost(model, usage);
+
+    let tier = responseTier ?? requestTier;
+    if (responseTier === "default" && (requestTier === "priority" || requestTier === "flex"))
+        tier = requestTier;
+
+    let multiplier = 1;
+    if (tier === "flex") multiplier = 0.5;
+
+    if (tier === "priority") {
+        multiplier = 2;
+        if (model.id === "gpt-5.5") multiplier = 2.5;
+    }
+
+    usage.cost.input *= multiplier;
+    usage.cost.output *= multiplier;
+    usage.cost.cacheRead *= multiplier;
+    usage.cost.cacheWrite *= multiplier;
+    usage.cost.total =
+        usage.cost.input + usage.cost.output + usage.cost.cacheRead + usage.cost.cacheWrite;
 }
 
 function nativeCompactionCompatibilityFailure(

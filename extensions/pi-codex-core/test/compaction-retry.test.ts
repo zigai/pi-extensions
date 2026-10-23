@@ -97,7 +97,7 @@ for (const [message, expectedDelay] of [
     });
 }
 
-for (const code of ["server_is_overloaded", "slow_down", "server_error", "unknown_error"]) {
+for (const code of ["server_is_overloaded", "server_error", "unknown_error"]) {
     test(`stream retry classification uses code rather than rate-limit wording: ${code}`, async () => {
         const scenario = runScenario([
             failure({ code, message: "Rate limit reached. Please try again in 11s." }),
@@ -107,6 +107,150 @@ for (const code of ["server_is_overloaded", "slow_down", "server_error", "unknow
         assert.deepEqual(scenario.delays, [200]);
     });
 }
+
+test.each([
+    { headers: { "Retry-After": "2" }, expectedDelay: 2000 },
+    { headers: { "retry-after": "0" }, expectedDelay: 0 },
+    { headers: { "retry-after": "Tue, 14 Nov 2023 22:13:25 GMT" }, expectedDelay: 5000 },
+    { headers: { "retry-after": "Wed, 21 Oct 2015 07:28:00 GMT" }, expectedDelay: 0 },
+    { headers: { "retry-after": "\t5\t" }, expectedDelay: 5000 },
+    { headers: { "Retry-After": "5", "retry-after": "30" }, expectedDelay: 30000 },
+    { headers: { "retry-after": 3 }, expectedDelay: 3000 },
+    { headers: { "retry-after": "\n5\n" }, expectedDelay: 35000 },
+    { headers: { "retry-after": "\u007f5" }, expectedDelay: 35000 },
+    { headers: { "retry-after": "bad" }, expectedDelay: 35000 },
+    { headers: { "retry-after": ["5"] }, expectedDelay: 35000 },
+    { headers: { "retry-after": "99999999999999999999999" }, expectedDelay: 35000 },
+])("stream Retry-After validation and precedence: $headers", async ({ headers, expectedDelay }) => {
+    const scenario = runScenario([
+        failure({ code: "rate_limit_exceeded", message: "Try again in 35 seconds.", headers }),
+        success,
+    ]);
+
+    assert.ok((await scenario.result).isOk());
+    assert.deepEqual(scenario.delays, [expectedDelay]);
+    assert.equal(scenario.calls(), 2);
+});
+
+test.each([undefined, "bad"])(
+    "stream Retry-After falls back to slow_down message advice when header is %j",
+    async (header) => {
+        let error: JsonObject = { code: "slow_down", message: "Try again in 35 seconds." };
+        if (header !== undefined) error = { ...error, headers: { "retry-after": header } };
+
+        const scenario = runScenario([failure(error), success]);
+        assert.ok((await scenario.result).isOk());
+        assert.deepEqual(scenario.delays, [35000]);
+    },
+);
+
+test.each(["server_is_overloaded", "slow_down", "unknown_failure"])(
+    "stream Retry-After survives retryable %s failures",
+    async (code) => {
+        const scenario = runScenario([failure({ code, headers: { "retry-after": "7" } }), success]);
+        assert.ok((await scenario.result).isOk());
+        assert.deepEqual(scenario.delays, [7000]);
+    },
+);
+
+test.each(["insufficient_quota", "cyber_policy", "invalid_request"])(
+    "stream Retry-After never overrides fatal %s failures",
+    async (code) => {
+        const scenario = runScenario([failure({ code, headers: { "retry-after": "7" } }), success]);
+
+        const result = await scenario.result;
+        assert.ok(result.isErr());
+        assert.equal(result.error._tag, "CodexUnexpectedResponse");
+        assert.equal(scenario.calls(), 1);
+        assert.deepEqual(scenario.delays, []);
+    },
+);
+
+test("remote HTTP Retry-After controls retryable compaction failure delays", async () => {
+    const delays: number[] = [];
+    let calls = 0;
+    const services = makeTestRuntime(async () => {
+        calls += 1;
+        if (calls === 2) return new Response(success);
+        return new Response("busy", { status: 503, headers: { "Retry-After": "6" } });
+    });
+    const result = await executeRemoteCompactionV2(
+        { responsesUrl: "https://example.test/responses", headers: new Headers() },
+        request,
+        {
+            signal: new AbortController().signal,
+            services: {
+                ...services,
+                scheduler: {
+                    set(delayMs, task) {
+                        if (delayMs === 300_000) return { cancel() {} };
+
+                        delays.push(delayMs);
+                        task();
+
+                        return { cancel() {} };
+                    },
+                },
+            },
+        },
+    );
+
+    assert.ok(result.isOk());
+    assert.equal(calls, 2);
+    assert.deepEqual(delays, [6000]);
+});
+
+test("stream Retry-After deadline is not restarted after response cleanup", async () => {
+    const delays: number[] = [];
+    let calls = 0;
+    let now = 1_700_000_000_000;
+    const services = makeTestRuntime(async () => {
+        calls += 1;
+        if (calls === 2) return new Response(success);
+        return new Response(
+            new ReadableStream({
+                start(controller) {
+                    controller.enqueue(
+                        new TextEncoder().encode(
+                            failure({
+                                code: "server_is_overloaded",
+                                headers: { "retry-after": "5" },
+                            }),
+                        ),
+                    );
+                },
+                cancel() {
+                    now += 2000;
+                },
+            }),
+        );
+    });
+    const result = await executeRemoteCompactionV2(
+        { responsesUrl: "https://example.test/responses", headers: new Headers() },
+        request,
+        {
+            signal: new AbortController().signal,
+            services: {
+                ...services,
+                clock: { ...services.clock, nowMs: () => now },
+                scheduler: {
+                    set(delayMs, task) {
+                        if (delayMs === 300_000) return { cancel() {} };
+
+                        delays.push(delayMs);
+                        task();
+
+                        return { cancel() {} };
+                    },
+                },
+            },
+        },
+    );
+
+    assert.ok(result.isOk());
+    assert.deepEqual(delays, [3000]);
+    assert.equal(calls, 2);
+});
 
 test("synchronous retry scheduling disposes tasks and preserves compaction attempts", async () => {
     let cancellations = 0;
@@ -142,7 +286,7 @@ test("stream retries exhaust after two retries and preserve the last failure", a
     assert.deepEqual(scenario.delays, [200, 400]);
 });
 
-test("aborting a server-directed retry delay cancels the task and prevents another request", async () => {
+test("aborting a Retry-After delay cancels the task and prevents another request", async () => {
     let scheduled!: () => void;
     let cancelled = false;
     let notifyScheduled!: () => void;
@@ -150,7 +294,7 @@ test("aborting a server-directed retry delay cancels the task and prevents anoth
         notifyScheduled = resolve;
     });
     const scenario = runScenario(
-        [failure({ code: "rate_limit_exceeded", message: "Try again in 30s." }), success],
+        [failure({ code: "rate_limit_exceeded", headers: { "retry-after": "30" } }), success],
         (_delayMs, task) => {
             scheduled = task;
             notifyScheduled();

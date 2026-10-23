@@ -3,10 +3,15 @@ import { deflateSync, zstdDecompressSync } from "node:zlib";
 import { Worker } from "node:worker_threads";
 import { getEncoding } from "js-tiktoken";
 import { afterAll, test } from "vitest";
+import { Type, type Message, type Model } from "@earendil-works/pi-ai";
+import { createGrammarToolInputProperties } from "@earendil-works/pi-ai/api/constrained-sampling";
+import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
+import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import {
     type ExtensionAPI,
     type ExtensionContext,
     type SessionBeforeCompactEvent,
+    type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_CODEX_CORE_CONFIG } from "../src/config/config.ts";
 import {
@@ -33,6 +38,8 @@ import {
     JsonNumberDecoder,
     JsonStringDecoder,
     JsonValueDecoder,
+    serializeEntriesToResponsesInput,
+    buildRemoteCompactionPromptInput,
 } from "../src/compaction/responses-input.ts";
 import {
     captureProviderRequestTemplate,
@@ -228,6 +235,185 @@ test("shutting down one Codex tokenizer does not affect another owner", async ()
     }
 });
 
+test.each([false, true])(
+    "native compaction matches Pi transcript conversion after a checkpoint=%s",
+    (afterCheckpoint) => {
+        const grammarTool = {
+            name: "patch_file",
+            description: "Apply a change.",
+            parameters: Type.Object({ patch: Type.String() }),
+            constrainedSampling: {
+                type: "grammar",
+                variants: { openai_lark: 'start: "change"' },
+            },
+        } as const;
+        const model: Model<"openai-codex-responses"> = {
+            id: "gpt-6.1-sol",
+            name: "Reasoning model",
+            provider: "openai-codex",
+            api: "openai-codex-responses",
+            baseUrl: "https://example.com/responses",
+            reasoning: true,
+            input: ["text", "image"],
+            cost: { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
+            contextWindow: 200_000,
+            maxTokens: 8192,
+            compat: {
+                supportsMidConvoSystemMessages: true,
+                supportsAdditionalTools: true,
+                supportsOpenAIGrammarTools: true,
+            },
+        };
+        const reasoningItem = {
+            type: "reasoning",
+            id: "rs_context",
+            encrypted_content: "sealed-reasoning",
+            summary: [],
+        };
+
+        const messages: Message[] = [
+            { role: "system", content: "base instructions", timestamp: 0 },
+            { role: "user", content: "start", timestamp: 1 },
+            {
+                role: "system",
+                content: "new instructions",
+                sections: { project: "updated project rules" },
+                toolsAdded: [grammarTool],
+                timestamp: 2,
+            },
+            {
+                role: "assistant",
+                provider: model.provider,
+                api: model.api,
+                model: model.id,
+                content: [
+                    {
+                        type: "thinking",
+                        thinking: "",
+                        thinkingSignature: JSON.stringify(reasoningItem),
+                    },
+                    {
+                        type: "text",
+                        text: "Working",
+                        textSignature: '{"v":1,"id":"msg_answer","phase":"commentary"}',
+                    },
+                    {
+                        type: "toolCall",
+                        id: "call_read|fc_read",
+                        name: "read",
+                        namespace: "files",
+                        arguments: { path: "sample.txt" },
+                    },
+                    {
+                        type: "toolCall",
+                        id: "call_patch|ctc_patch",
+                        name: "patch_file",
+                        namespace: "files",
+                        arguments: { patch: "change" },
+                    },
+                ],
+                usage: {
+                    input: 0,
+                    output: 0,
+                    cacheRead: 0,
+                    cacheWrite: 0,
+                    totalTokens: 0,
+                    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+                },
+                stopReason: "toolUse",
+                timestamp: 3,
+            },
+            {
+                role: "toolResult",
+                toolCallId: "call_read|fc_read",
+                toolName: "read",
+                content: [{ type: "text", text: "contents" }],
+                isError: false,
+                timestamp: 4,
+            },
+            {
+                role: "toolResult",
+                toolCallId: "call_patch|ctc_patch",
+                toolName: "patch_file",
+                content: [{ type: "text", text: "changed" }],
+                isError: false,
+                timestamp: 5,
+            },
+            { role: "user", content: "continue", timestamp: 6 },
+        ];
+
+        const entries: SessionEntry[] = messages.map((message, index) => {
+            let parentId: string | null = `entry-${index - 1}`;
+            if (index === 0) parentId = null;
+
+            return {
+                type: "message",
+                id: `entry-${index}`,
+                parentId,
+                timestamp: "2026-01-01T00:00:00.000Z",
+                message,
+            };
+        });
+        let selectedEntries = entries;
+        let referenceMessages: Message[] = messages;
+
+        if (afterCheckpoint) {
+            selectedEntries = entries.slice(3);
+            referenceMessages = [
+                { role: "system", content: "", toolsAdded: [grammarTool], timestamp: 0 },
+                ...messages.slice(3),
+            ];
+        }
+
+        const expected = convertResponsesMessages(
+            model,
+            normalizeContext({ messages: referenceMessages }),
+            new Set(["openai", "openai-codex", "opencode"]),
+            {
+                includeSystemPrompt: false,
+                grammarToolInputProperties: createGrammarToolInputProperties([grammarTool], true),
+                supportsMidConvoSystemMessages: true,
+                supportsAdditionalTools: true,
+                toolOptions: {
+                    strict: null,
+                    supportsStrictMode: true,
+                    supportsOpenAIGrammarTools: true,
+                },
+            },
+        );
+
+        let input: readonly ResponsesInputItem[];
+        if (afterCheckpoint) {
+            input = serializeEntriesToResponsesInput(model, selectedEntries, entries);
+        } else {
+            const baseEvent = makeBeforeCompactEvent();
+            const event: SessionBeforeCompactEvent = {
+                ...baseEvent,
+                branchEntries: entries,
+                preparation: {
+                    ...baseEvent.preparation,
+                    firstKeptEntryId: "entry-6",
+                    messagesToSummarize: messages
+                        .slice(0, 6)
+                        .filter((message) => message.role !== "system"),
+                },
+            };
+            input = buildRemoteCompactionPromptInput(event, model, undefined).input;
+        }
+
+        assert.deepEqual(input, expected);
+        assert.deepEqual(
+            input.find((item) => item.type === "reasoning"),
+            reasoningItem,
+        );
+        assert.equal(input.find((item) => item.type === "message")?.phase, "commentary");
+        assert.equal(input.find((item) => item.type === "function_call")?.namespace, "files");
+        assert.equal(input.find((item) => item.type === "custom_tool_call")?.input, "change");
+        assert.equal(input.filter((item) => item.type === "custom_tool_call_output").length, 1);
+        if (!afterCheckpoint) assert.match(JSON.stringify(input), /updated project rules/);
+    },
+);
+
 test("remote compaction requests always preserve encrypted reasoning context", () => {
     const liteRequest = buildRemoteCompactionV2Request({
         sessionId: "session",
@@ -373,7 +559,7 @@ test("reuses captured provider fields and records compaction cache usage", async
                 'data: {"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"sealed-template"}}',
                 "",
                 "event: response.completed",
-                'data: {"type":"response.completed","response":{"id":"resp_template","usage":{"input_tokens":1200,"input_tokens_details":{"cached_tokens":900}}}}',
+                'data: {"type":"response.completed","response":{"id":"resp_template","usage":{"input_tokens":1200,"input_tokens_details":{"cached_tokens":900,"cache_write_tokens":100},"output_tokens":50,"output_tokens_details":{"reasoning_tokens":20},"total_tokens":1250}}}',
                 "",
             ].join("\n"),
             { status: 200 },
@@ -444,11 +630,72 @@ test("reuses captured provider fields and records compaction cache usage", async
         assert.equal(requestMeta.providerTemplateUsed, true);
         assert.equal(requestMeta.inputTokens, 1200);
         assert.equal(requestMeta.cachedInputTokens, 900);
+        assert.ok(compaction.usage);
+        assert.deepEqual(
+            { ...compaction.usage, cost: undefined },
+            {
+                input: 200,
+                output: 50,
+                cacheRead: 900,
+                cacheWrite: 100,
+                reasoning: 20,
+                totalTokens: 1250,
+                cost: undefined,
+            },
+        );
+        assert.ok(Math.abs(compaction.usage.cost.total - 0.00133) < 1e-12);
         assert.equal(isNativeCompactionDetails(compaction.details), true);
     } finally {
         clearProviderRequestTemplate(sessionId);
     }
 });
+
+test.each([
+    { modelId: "gpt-5.5", fast: true, responseTier: "default", expectedCost: 0.003325 },
+    { modelId: "gpt-6.1-sol", fast: true, responseTier: undefined, expectedCost: 0.00266 },
+    { modelId: "gpt-6.1-sol", fast: false, responseTier: "priority", expectedCost: 0.00266 },
+    { modelId: "gpt-6.1-sol", fast: true, responseTier: "flex", expectedCost: 0.000665 },
+])(
+    "prices $modelId compaction using the effective service tier ($responseTier)",
+    async ({ modelId, fast, responseTier, expectedCost }) => {
+        const response = {
+            id: "resp_pricing",
+            service_tier: responseTier,
+            usage: {
+                input_tokens: 1200,
+                input_tokens_details: { cached_tokens: 900, cache_write_tokens: 100 },
+                output_tokens: 50,
+                total_tokens: 1250,
+            },
+        };
+        const runtime = makeTestRuntime(
+            async () =>
+                new Response(
+                    [
+                        "event: response.output_item.done",
+                        'data: {"item":{"type":"compaction","encrypted_content":"sealed-pricing"}}',
+                        "",
+                        "event: response.completed",
+                        `data: ${JSON.stringify({ response })}`,
+                        "",
+                    ].join("\n"),
+                    { status: 200 },
+                ),
+        );
+        const result = await handleCodexNativeCompaction(
+            makeBeforeCompactEvent(),
+            makeNativeCompactionContext({ modelId }),
+            { ...DEFAULT_CODEX_CORE_CONFIG, openai: { ...DEFAULT_CODEX_CORE_CONFIG.openai, fast } },
+            makeCompactionApi(),
+            runtime,
+        );
+        const usage = result?.compaction?.usage;
+        assert.ok(usage);
+        assert.ok(Math.abs(usage.cost.total - expectedCost) < 1e-12);
+        assert.equal(usage.totalTokens, 1250);
+        assert.equal(usage.cacheRead, 900);
+    },
+);
 
 test("cancels an invalid retained-context boundary", async () => {
     let requested = false;
@@ -1292,10 +1539,50 @@ test("native compaction inserts synthetic output for missing tool results", asyn
     assert.ok(userIndex > syntheticOutputIndex);
     assert.deepEqual(requestInput[syntheticOutputIndex], {
         type: "function_call_output",
-        call_id: "call_missing",
+        call_id: "call/missing",
         output: "No result provided",
     });
 });
+
+test.each([
+    { type: "compaction", repeats: 1500, expected: "ok" },
+    { type: "compaction_summary", repeats: 1500, expected: "ok" },
+    { type: "context_compaction", repeats: 1500, expected: "ok" },
+    { type: "compaction", repeats: 6000, expected: "too_large" },
+])(
+    "budgets encrypted $type checkpoints without tokenizing ciphertext ($repeats)",
+    async ({ type, repeats, expected }) => {
+        const checkpoint = { type, encrypted_content: "q7X9".repeat(repeats) };
+        const request = buildRemoteCompactionV2Request({
+            model: "gpt-6-sol",
+            sessionId: "checkpoint-budget",
+            input: [checkpoint],
+            instructions: "system",
+            promptCacheKey: "checkpoint-budget",
+            verbosity: "low",
+            fast: false,
+            reasoning: { effort: "medium" },
+        });
+        const result = await shrinkRemoteCompactionRequestForContextWindow(
+            request,
+            2000,
+            createTokenEstimateCache(),
+            { tokenizer: compactionTokenizer },
+        );
+        assert.equal(result.kind, expected);
+        assert.equal(result.rewrittenToolOutputs, 0);
+        assert.equal(checkpoint.encrypted_content, "q7X9".repeat(repeats));
+
+        if (result.kind === "ok") {
+            assert.deepEqual(
+                result.promptInput.find((item) => item.type === type),
+                checkpoint,
+            );
+            assert.ok(result.estimatedTokensAfter >= 500);
+            assert.ok(result.estimatedTokensAfter < 1600);
+        }
+    },
+);
 
 test("falls back when a previous native anchor plus semantic input cannot fit", async () => {
     let requestBody: unknown;
@@ -1392,7 +1679,7 @@ test("shrinks oversized tool outputs before remote v2 compaction", async () => {
     );
     assert.deepEqual(callItem, {
         type: "function_call",
-        call_id: "call_1",
+        call_id: "call/1",
         name: "read",
         arguments: JSON.stringify({ path: "big.txt" }),
     });
@@ -2735,6 +3022,10 @@ function makeNativeCompactionContext(
             baseUrl: "https://chatgpt.com/backend-api",
             input: ["text", "image"],
             contextWindow: options.contextWindow ?? 200_000,
+            name: modelId,
+            reasoning: true,
+            maxTokens: 8192,
+            cost: { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
         },
         modelRegistry: {
             getApiKeyAndHeaders: async () => ({

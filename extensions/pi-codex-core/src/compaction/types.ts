@@ -1,4 +1,5 @@
-import type { CompactionEntry } from "@earendil-works/pi-coding-agent";
+import type { CompactionEntry, CompactionResult } from "@earendil-works/pi-coding-agent";
+import type { Usage } from "@earendil-works/pi-ai";
 
 import type { ScheduledTask } from "../runtime.ts";
 import { NATIVE_COMPACTION_STRATEGY } from "./messages.ts";
@@ -7,59 +8,6 @@ export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonObject | readonly JsonValue[];
 export type JsonObject = { readonly [key: string]: JsonValue | undefined };
 export type ResponsesInputItem = JsonObject;
-
-export type CompactionTextBlock = {
-    readonly type: "text";
-    readonly text: string;
-};
-
-export type CompactionImageBlock = {
-    readonly type: "image";
-    readonly data: string;
-    readonly mimeType: string;
-    readonly detail?: "auto" | "high" | "original" | undefined;
-};
-
-export type CompactionThinkingBlock = {
-    readonly type: "thinking";
-    readonly thinking?: string | undefined;
-    readonly thinkingSignature?: string | undefined;
-    readonly redacted?: boolean | undefined;
-};
-
-export type CompactionToolCallBlock = {
-    readonly type: "toolCall";
-    readonly id: string;
-    readonly name: string;
-    readonly arguments?: JsonObject | undefined;
-};
-
-export type CompactionContentBlock =
-    | CompactionTextBlock
-    | CompactionImageBlock
-    | CompactionThinkingBlock
-    | CompactionToolCallBlock;
-
-export type CompactionMessageContent = readonly CompactionContentBlock[];
-
-export type CompactionMessage =
-    | {
-          readonly role: "user";
-          readonly content: CompactionMessageContent;
-      }
-    | {
-          readonly role: "assistant";
-          readonly content: readonly CompactionContentBlock[];
-          readonly provider?: string | undefined;
-          readonly api?: string | undefined;
-          readonly model?: string | undefined;
-          readonly stopReason?: string | undefined;
-      }
-    | {
-          readonly role: "toolResult";
-          readonly toolCallId?: string | undefined;
-          readonly content: readonly CompactionContentBlock[];
-      };
 
 /** Provider-serialized Responses tool definition, retained without schema rewriting. */
 export type ResponsesTool = JsonObject;
@@ -119,6 +67,10 @@ export type NativeCompactionDetails = {
     readonly requestMeta?: NativeCompactionRequestMeta | undefined;
 };
 
+export type NativeCompactionResult = CompactionResult<NativeCompactionDetails> & {
+    readonly details: NativeCompactionDetails;
+};
+
 export type NativeCompactionEntry = CompactionEntry<NativeCompactionDetails> & {
     readonly details: NativeCompactionDetails;
 };
@@ -127,12 +79,8 @@ export type RemoteCompactionV2Response = {
     readonly compactionOutput: ResponsesInputItem;
     readonly id?: string | undefined;
     readonly createdAt?: number | string | undefined;
-    readonly usage?: RemoteCompactionUsage | undefined;
-};
-
-export type RemoteCompactionUsage = {
-    readonly inputTokens?: number | undefined;
-    readonly cachedInputTokens?: number | undefined;
+    readonly serviceTier?: string | undefined;
+    readonly usage?: Usage | undefined;
 };
 
 export type RemoteCompactionV2Request = {
