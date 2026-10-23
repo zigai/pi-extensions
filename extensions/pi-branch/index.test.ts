@@ -244,6 +244,43 @@ describe("branch worktrees", () => {
 });
 
 describe("branch configuration", () => {
+    it("routes schema refresh failures through the session UI", async () => {
+        const root = await mkdtemp(join(tmpdir(), "pi-branch-scaffold-"));
+        const notices: string[] = [];
+        let runner: ExtensionRunner | undefined;
+        try {
+            const agentDir = join(root, "agent");
+            await mkdir(agentDir);
+            await writeFile(join(agentDir, "pi-branch"), "keep");
+            vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
+            vi.stubEnv("TMUX", "isolated-launcher");
+            runner = await loadBranchRunner(root, agentDir);
+            runner.setUIContext(
+                {
+                    ...runner.getUIContext(),
+                    notify: (message) => {
+                        notices.push(message);
+                    },
+                },
+                "rpc",
+            );
+            await runner.emit({ type: "session_start", reason: "startup" });
+            const command = runner.getCommand("branch");
+            if (command === undefined) throw new Error("Missing /branch command");
+
+            await command.handler("--worktree", runner.createCommandContext());
+            expect(
+                notices.some((message) => message.startsWith("[pi-branch] Failed to refresh ")),
+            ).toBe(true);
+
+            expect(await readFile(join(agentDir, "pi-branch"), "utf8")).toBe("keep");
+        } finally {
+            await runner?.emit({ type: "session_shutdown", reason: "quit" });
+            vi.unstubAllEnvs();
+            await rm(root, { recursive: true, force: true });
+        }
+    });
+
     it("reports malformed config without quoting its contents", async () => {
         const root = await mkdtemp(join(tmpdir(), "pi-branch-config-"));
         try {

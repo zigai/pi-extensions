@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import type { MarkdownTheme } from "@earendil-works/pi-tui";
 
 import { test } from "vitest";
-import { initTheme } from "@earendil-works/pi-coding-agent";
+import {
+    initTheme,
+    type ExtensionContext,
+    type SessionStartEvent,
+} from "@earendil-works/pi-coding-agent";
 
 import plainUserMessagesExtension from "../src/index.ts";
 import { userMessageRuntime } from "../src/user-message-runtime.ts";
@@ -33,8 +37,12 @@ type LifecycleApi = {
 function createLifecycleApi(): LifecycleApi {
     const shutdownHandlers: Array<() => void> = [];
     const api = {
-        on(event: string, handler: () => void): void {
-            if (event === "session_shutdown") shutdownHandlers.push(handler);
+        on(
+            ...registration:
+                | ["session_start", (event: SessionStartEvent, context: ExtensionContext) => void]
+                | ["session_shutdown", () => void]
+        ): void {
+            if (registration[0] === "session_shutdown") shutdownHandlers.push(registration[1]);
         },
     };
 

@@ -1,7 +1,9 @@
 import {
     installLinkedRenderPatch,
+    registerExtensionDiagnostics,
     warnPiInternalPatchUnavailable,
     type LinkedMethodPatchHandle,
+    type ExtensionDiagnosticsApi,
 } from "@zigai/pi-extension-internals";
 
 import { ensurePlainTextUserMessage, type UserMessageComponentInstance } from "./plain-markdown.ts";
@@ -11,10 +13,6 @@ const USER_MESSAGE_PLAINTEXT_PATCH_KEY = Symbol.for(
     "zigai.pi-plain-user-messages.user-message-patched",
 );
 const SCOPE = "pi-plain-user-messages";
-
-type PlainUserMessagesApi = {
-    on(event: "session_shutdown", handler: () => void): void;
-};
 
 type UserMessagePatchHandle = LinkedMethodPatchHandle<
     UserMessageComponentInstance,
@@ -59,7 +57,11 @@ async function patchUserMessageRendering(): Promise<void> {
     );
 }
 
-export default async function plainUserMessagesExtension(pi?: PlainUserMessagesApi): Promise<void> {
+export default async function plainUserMessagesExtension(
+    pi?: ExtensionDiagnosticsApi,
+): Promise<void> {
     await patchUserMessageRendering();
     pi?.on("session_shutdown", restoreUserMessageRenderingPatch);
+
+    if (pi !== undefined) registerExtensionDiagnostics(pi);
 }

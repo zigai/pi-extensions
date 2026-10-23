@@ -5,6 +5,7 @@ import {
     type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 
+import { registerExtensionDiagnostics } from "@zigai/pi-extension-internals";
 import { installModelSelectorProviderPatch } from "./model-selector-patch.ts";
 import { installModelRuntimeAliasPatch } from "./model-runtime-patch.ts";
 import {
@@ -105,4 +106,5 @@ export default function modelAliasExtension(pi: ExtensionAPI): void {
         if (alias === undefined) return undefined;
         return rewritePayloadModel(event.payload, alias.model);
     });
+    registerExtensionDiagnostics(pi);
 }

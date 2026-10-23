@@ -50,6 +50,7 @@
     "verify": "npm run check"
   },
   "dependencies": {
+    "@zigai/pi-extension-internals": "0.2.0",
     "pi-typed-args": "0.2.1"
   },
   "devDependencies": {

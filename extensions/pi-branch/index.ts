@@ -12,6 +12,10 @@ import {
     type ExtensionAPI,
     type ExtensionCommandContext,
 } from "@earendil-works/pi-coding-agent";
+import {
+    registerExtensionDiagnostics,
+    reportExtensionDiagnostic,
+} from "@zigai/pi-extension-internals";
 import { defineTypedCommand, registerTypedCommand } from "pi-typed-args/command";
 import { installTypedCommandUx } from "pi-typed-args/pi";
 import { Type, type Static } from "typebox";
@@ -442,8 +446,9 @@ async function readInstalledBranchConfigSchemaText(): Promise<string | undefined
     try {
         return await fs.readFile(installedSchemaPath, "utf8");
     } catch (error: unknown) {
-        console.error(
+        reportExtensionDiagnostic(
             `[pi-branch] Failed to read installed schema ${installedSchemaPath}: ${formatUnknownError(error)}`,
+            "error",
         );
         return undefined;
     }
@@ -458,7 +463,10 @@ async function writeTextFileIfMissing(filePath: string, content: string): Promis
             return;
         }
 
-        console.error(`[pi-branch] Failed to scaffold ${filePath}: ${formatUnknownError(error)}`);
+        reportExtensionDiagnostic(
+            `[pi-branch] Failed to scaffold ${filePath}: ${formatUnknownError(error)}`,
+            "error",
+        );
     }
 }
 
@@ -472,15 +480,19 @@ async function refreshExtensionOwnedTextFile(filePath: string, content: string):
             }
         } catch (error: unknown) {
             if (!isFileMissingError(error)) {
-                console.error(
+                reportExtensionDiagnostic(
                     `[pi-branch] Failed to read ${filePath}: ${formatUnknownError(error)}`,
+                    "error",
                 );
             }
         }
 
         await fs.writeFile(filePath, content, "utf8");
     } catch (error: unknown) {
-        console.error(`[pi-branch] Failed to refresh ${filePath}: ${formatUnknownError(error)}`);
+        reportExtensionDiagnostic(
+            `[pi-branch] Failed to refresh ${filePath}: ${formatUnknownError(error)}`,
+            "error",
+        );
     }
 }
 
@@ -1743,4 +1755,5 @@ export default function (pi: ExtensionAPI): void {
             pi.sendUserMessage(prompt, { expandPromptTemplates: true });
         }
     });
+    registerExtensionDiagnostics(pi);
 }
