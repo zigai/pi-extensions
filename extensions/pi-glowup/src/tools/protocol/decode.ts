@@ -42,7 +42,7 @@ const toneSchema = Type.Union([
     Type.Literal("code"),
 ]);
 
-const inlineObjectSchema = Type.Object({
+export const inlineObjectSchema = Type.Object({
     kind: Type.Literal("text"),
     text: Type.String(),
     tone: Type.Optional(toneSchema),
@@ -153,12 +153,12 @@ function countText(state: DecodeState, value: string): void {
     if (state.textCharacters > state.limits.maxTextCharacters) reject();
 }
 
-// oxlint-disable-next-line antislop/no-unknown-parameters, antislop/no-unsafe-dictionary-type, antislop/no-runtime-typeof
+// oxlint-disable-next-line antislop/no-unknown-parameters, antislop/no-unsafe-dictionary-type
 function isObject(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null;
 }
 
-// oxlint-disable-next-line antislop/no-unknown-parameters, antislop/no-unsafe-dictionary-type, antislop/no-runtime-typeof
+// oxlint-disable-next-line antislop/no-unknown-parameters, antislop/no-unsafe-dictionary-type
 function isObjectNotArray(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }

@@ -3,6 +3,7 @@ import type { JsonValue } from "../json-value.ts";
 import type { GlowupRenderTheme } from "../rendering/theme.ts";
 import type { ToolLabelMode } from "../rendering/status-labels.ts";
 import type { MutationSettings } from "../rendering/preview-settings.ts";
+import type { CodePreview, CodeSource } from "../rendering/streaming/presentation.ts";
 import type {
     GlowupCallContext,
     GlowupExecutionPhase,
@@ -17,6 +18,8 @@ export type ToolNameMatcher =
 /** Internal context translated from Pi's ToolExecutionComponent. */
 export type ThirdPartyToolRenderContext = Omit<GlowupCallContext, "toolName" | "phase"> & {
     readonly toolName?: string;
+    readonly streamCode?: CodePreview;
+    readonly streamKey?: string;
     readonly phase?: GlowupExecutionPhase;
     readonly args: JsonValue | undefined;
     readonly executionStarted?: boolean;
@@ -32,6 +35,11 @@ export type ThirdPartyToolResult = GlowupToolResult;
 
 /** Pi-facing renderer produced by the private Glowup rendering engine. */
 export type ThirdPartyToolRenderer = {
+    readonly codeSource?: (
+        args: JsonValue | undefined,
+        context: ThirdPartyToolRenderContext,
+    ) => CodeSource | undefined;
+
     readonly renderCall: (
         args: JsonValue | undefined,
         theme: GlowupRenderTheme,
@@ -69,6 +77,7 @@ export type ThirdPartyToolRenderingOptions = {
     readonly renderers?: ReadonlyArray<ThirdPartyToolRendererPlugin>;
     readonly labelMode?: ToolLabelMode;
     readonly mutationSettings?: MutationSettings;
+    readonly streamCode?: CodePreview;
 
     readonly codemodePreview?: {
         get(

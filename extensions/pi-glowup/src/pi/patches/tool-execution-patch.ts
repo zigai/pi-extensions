@@ -8,7 +8,9 @@ import type { Component } from "@earendil-works/pi-tui";
 import Type from "typebox";
 import { Value } from "typebox/value";
 import { jsonValueParser } from "../../json-value.ts";
+import { outputSchemaParser } from "../../tools/schema-rendering.ts";
 import { emptyComponent } from "../../rendering/component.ts";
+import { inheritSyntaxComponent } from "../../rendering/syntax/component-owner.ts";
 import type {
     BuiltInToolRenderContext,
     BuiltInToolRendererOptions,
@@ -42,6 +44,7 @@ const THIRD_PARTY_RENDERER_PATCH_STATE_KEY = Symbol.for(
     "zigai.pi-glowup.third-party-renderer-state",
 );
 const MAX_THIRD_PARTY_RENDERERS = 100;
+const rowInvalidationSchema = Type.Object({ invalidate: Type.Function([], Type.Void()) });
 
 type RenderShellMode = NonNullable<PiRendererDefinition["renderShell"]>;
 type ThemeForeground = Parameters<Theme["fg"]>[0];
@@ -64,9 +67,16 @@ type CompletedRender = {
     readonly signature: readonly unknown[];
 };
 
+type RenderInvalidation = {
+    readonly invalidate: () => void;
+    refresh: () => void;
+    rendered: Component | undefined;
+};
+
 type CompletedRenderSlots = {
     call?: CompletedRender;
     result?: CompletedRender;
+    readonly invalidations: Partial<Record<RenderSlot, RenderInvalidation>>;
 };
 
 type CompletedRenderCache = WeakMap<ToolExecutionInstance, CompletedRenderSlots>;
@@ -268,7 +278,9 @@ type CompletedComponentState = {
 
 const completedComponentBases = new WeakMap<Component, Component>();
 const completedComponentStates = new WeakMap<Component, CompletedComponentState>();
-const completedLineCacheLru = new Map<Component, number>();
+
+// Retain only bounded line state, never the wrapper/base renderer and its source graph.
+const completedLineCacheLru = new Map<CompletedComponentState, number>();
 
 let completedLineCacheBytes = 0;
 let completedLineCacheLimitBytes = DEFAULT_COMPLETED_LINE_CACHE_BYTES;
@@ -286,48 +298,41 @@ function completedLinesSize(lines: readonly string[]): number {
     return bytes;
 }
 
-function releaseCompletedLineCache(component: Component): void {
-    const retainedBytes = completedLineCacheLru.get(component);
+function releaseCompletedLineCache(state: CompletedComponentState): void {
+    const retainedBytes = completedLineCacheLru.get(state);
     if (retainedBytes !== undefined) {
-        completedLineCacheLru.delete(component);
+        completedLineCacheLru.delete(state);
         completedLineCacheBytes -= retainedBytes;
     }
 
-    const state = completedComponentStates.get(component);
-    if (state !== undefined) {
-        state.cachedWidth = undefined;
-        state.cachedLines = undefined;
-    }
+    state.cachedWidth = undefined;
+    state.cachedLines = undefined;
 }
 
 function clearCompletedLineCache(): void {
-    for (const component of completedLineCacheLru.keys()) {
-        const state = completedComponentStates.get(component);
-        if (state !== undefined) {
-            state.cachedWidth = undefined;
-            state.cachedLines = undefined;
-        }
+    for (const state of completedLineCacheLru.keys()) {
+        state.cachedWidth = undefined;
+        state.cachedLines = undefined;
     }
 
     completedLineCacheLru.clear();
     completedLineCacheBytes = 0;
 }
 
-function touchCompletedLineCache(component: Component): void {
-    const bytes = completedLineCacheLru.get(component);
+function touchCompletedLineCache(state: CompletedComponentState): void {
+    const bytes = completedLineCacheLru.get(state);
     if (bytes === undefined) return;
 
-    completedLineCacheLru.delete(component);
-    completedLineCacheLru.set(component, bytes);
+    completedLineCacheLru.delete(state);
+    completedLineCacheLru.set(state, bytes);
 }
 
 function retainCompletedLines(
-    component: Component,
     state: CompletedComponentState,
     width: number,
     lines: string[],
 ): void {
-    releaseCompletedLineCache(component);
+    releaseCompletedLineCache(state);
 
     const bytes = completedLinesSize(lines);
     if (bytes > completedLineCacheLimitBytes) return;
@@ -345,7 +350,7 @@ function retainCompletedLines(
 
     state.cachedWidth = width;
     state.cachedLines = lines;
-    completedLineCacheLru.set(component, bytes);
+    completedLineCacheLru.set(state, bytes);
     completedLineCacheBytes += bytes;
 }
 
@@ -359,14 +364,14 @@ function cacheCompletedComponent(component: Component): Component {
         render(width) {
             if (state.cachedWidth === width && state.cachedLines !== undefined) {
                 completedLineCacheHits += 1;
-                touchCompletedLineCache(wrapper);
+                touchCompletedLineCache(state);
                 return state.cachedLines;
             }
 
             completedLineCacheMisses += 1;
 
             const lines = base.render(width);
-            retainCompletedLines(wrapper, state, width, lines);
+            retainCompletedLines(state, width, lines);
 
             return lines;
         },
@@ -381,14 +386,16 @@ function cacheCompletedComponent(component: Component): Component {
 
     completedComponentBases.set(wrapper, base);
     completedComponentStates.set(wrapper, state);
+    inheritSyntaxComponent(wrapper, base);
 
     return wrapper;
 }
 
 function releaseCompletedRender(render: CompletedRender | undefined): void {
-    if (render !== undefined) {
-        releaseCompletedLineCache(render.component);
-    }
+    if (render === undefined) return;
+
+    const state = completedComponentStates.get(render.component);
+    if (state !== undefined) releaseCompletedLineCache(state);
 }
 
 function clearCompletedRendersForInstance(
@@ -400,7 +407,8 @@ function clearCompletedRendersForInstance(
 
     releaseCompletedRender(slots.call);
     releaseCompletedRender(slots.result);
-    cache.delete(instance);
+    delete slots.call;
+    delete slots.result;
 }
 
 function clearCompletedRender(
@@ -413,10 +421,45 @@ function clearCompletedRender(
 
     releaseCompletedRender(slots[slot]);
     delete slots[slot];
+}
 
-    if (slots.call === undefined && slots.result === undefined) {
-        cache.delete(instance);
+function renderSlotInvalidation(
+    cache: CompletedRenderCache,
+    instance: ToolExecutionInstance,
+    slot: RenderSlot,
+    refresh: () => void,
+): RenderInvalidation {
+    let slots = cache.get(instance);
+    if (slots === undefined) {
+        slots = { invalidations: {} };
+        cache.set(instance, slots);
     }
+
+    const previous = slots.invalidations[slot];
+    if (previous !== undefined) {
+        previous.refresh = refresh;
+        return previous;
+    }
+
+    const row = new WeakRef(instance);
+    const invalidation: RenderInvalidation = {
+        rendered: undefined,
+        refresh,
+        invalidate() {
+            const current = row.deref();
+            if (current === undefined) return;
+
+            const owner = cache.get(current)?.invalidations[slot];
+            if (owner === undefined) return;
+
+            clearCompletedRendersForInstance(cache, current);
+            owner.rendered?.invalidate();
+            owner.refresh();
+        },
+    };
+
+    slots.invalidations[slot] = invalidation;
+    return invalidation;
 }
 
 function renderCompletedSlot(options: {
@@ -439,15 +482,15 @@ function renderCompletedSlot(options: {
 
     clearCompletedRender(options.cache, options.instance, options.slot);
 
-    const { cache, instance, invalidate: invalidateHost } = options;
-    let rendered: Component | undefined;
-    const invalidate = (): void => {
-        clearCompletedRendersForInstance(cache, instance);
-        rendered?.invalidate();
-        invalidateHost();
-    };
+    const invalidation = renderSlotInvalidation(
+        options.cache,
+        options.instance,
+        options.slot,
+        options.invalidate,
+    );
+    const rendered = options.render(invalidation.invalidate);
+    invalidation.rendered = rendered;
 
-    rendered = options.render(invalidate);
     if (options.signature === undefined) {
         return rendered;
     }
@@ -457,9 +500,10 @@ function renderCompletedSlot(options: {
         component = cacheCompletedComponent(rendered);
     }
 
-    const slots = options.cache.get(options.instance) ?? {};
-    slots[options.slot] = { component, signature: options.signature };
-    options.cache.set(options.instance, slots);
+    const slots = options.cache.get(options.instance);
+    if (slots !== undefined) {
+        slots[options.slot] = { component, signature: options.signature };
+    }
 
     return component;
 }
@@ -496,6 +540,7 @@ function completedResultSignature(
         context.args,
         result.content,
         result.details,
+        result.structuredContent,
         renderOptions.expanded,
         renderThemeFingerprint(theme),
         context.executionStarted,
@@ -516,6 +561,9 @@ function builtInToolName(instance: ToolExecutionInstance): BuiltInToolName | und
     if (toolName === undefined) {
         return undefined;
     }
+
+    if (shouldPreserveThirdPartyToolRenderer({ toolName, toolDefinition: instance.toolDefinition }))
+        return undefined;
 
     // Pi resolves built-in renderers into toolDefinition before constructing the row.
     return nativeBuiltInToolName(toolName) ?? compatBuiltInToolName(toolName);
@@ -546,7 +594,7 @@ function restoredCallRenderContext(
     return { ...context, argsComplete: true, result };
 }
 
-function thirdPartyRenderContext(
+export function thirdPartyRenderContext(
     toolName: string,
     context: PiToolRenderContext,
 ): ThirdPartyToolRenderContext {
@@ -608,7 +656,10 @@ function shouldUseThirdPartyRenderer(
         return false;
     }
 
-    if (hasGlowupRenderingAdapter(definition)) {
+    if (
+        hasGlowupRenderingAdapter(definition) ||
+        (outputSchemaParser.parse(definition) !== undefined && !hasExplicitToolRenderer(instance))
+    ) {
         return true;
     }
 
@@ -710,6 +761,7 @@ export function configureBuiltInToolRendererPatch(
     const originalGetResultRenderer = prototype.getResultRenderer;
     const originalGetRenderShell = prototype.getRenderShell;
     const originalHasRendererDefinition = prototype.hasRendererDefinition;
+    const initializedRows = new WeakSet<ToolExecutionInstance>();
     let state: BuiltInRendererPatchState;
     const observeRow = (row: ToolExecutionInstance): void => {
         // Constructors run ahead of argument completion. Observing boundaries there
@@ -725,6 +777,7 @@ export function configureBuiltInToolRendererPatch(
 
     const getCallRenderer: RendererPatchWrappers["getCallRenderer"] =
         function getGlowupBuiltInCallRenderer(this: ToolExecutionInstance) {
+            initializedRows.add(this);
             observeRow(this);
 
             const toolName = builtInToolName(this);
@@ -803,9 +856,16 @@ export function configureBuiltInToolRendererPatch(
 
     const getRenderShell: RendererPatchWrappers["getRenderShell"] =
         function getGlowupBuiltInRenderShell(this: ToolExecutionInstance) {
-            return state.enabled && builtInToolName(this) !== undefined
-                ? "self"
-                : (originalGetRenderShell?.call(this) ?? "default");
+            if (!state.enabled || builtInToolName(this) === undefined)
+                return originalGetRenderShell?.call(this) ?? "default";
+
+            if (!initializedRows.has(this)) {
+                initializedRows.add(this);
+
+                if (Value.Check(rowInvalidationSchema, this)) this.invalidate();
+            }
+
+            return "self";
         };
 
     const hasRendererDefinition: RendererPatchWrappers["hasRendererDefinition"] =
@@ -1052,23 +1112,40 @@ export function configureThirdPartyToolRendererPatch(
                     renderOptions: ToolRenderResultOptions,
                     theme: Theme,
                     context: BuiltInToolRenderContext,
-                ) =>
-                    renderCompletedSlot({
+                ) => {
+                    let completeResult = result;
+                    if (
+                        result.structuredContent === undefined &&
+                        this.result?.structuredContent !== undefined
+                    ) {
+                        completeResult = {
+                            ...result,
+                            structuredContent: this.result.structuredContent,
+                        };
+                    }
+
+                    return renderCompletedSlot({
                         cache: state.completedRenders,
                         instance: this,
                         slot: "result",
-                        signature: completedResultSignature(result, renderOptions, theme, context),
+                        signature: completedResultSignature(
+                            completeResult,
+                            renderOptions,
+                            theme,
+                            context,
+                        ),
                         invalidate: context.invalidate,
                         cacheLines: shouldCacheThirdPartyCompletedLines(toolName),
                         render(invalidate) {
                             return renderer.renderResult(
-                                result,
+                                completeResult,
                                 renderOptions,
                                 theme,
                                 thirdPartyRenderContext(toolName, { ...context, invalidate }),
                             );
                         },
                     });
+                };
             }
 
             return originalGetResultRenderer?.call(this);

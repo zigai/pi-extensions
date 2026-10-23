@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { createRequire } from "node:module";
 import type { ScriptFormatterProfile } from "../../../../src/settings-input.ts";
 import { describe, expect, it, vi } from "vitest";
+import { renderScriptCall } from "../../../../src/tools/built-in/bash/script-renderer.ts";
 import {
     createCommandScriptFormatter,
     formatScriptInvocation,
@@ -13,6 +14,78 @@ import {
 } from "../../../../src/tools/built-in/bash/formatter.ts";
 
 describe("script formatter settings", () => {
+    it("fits Python imports, class and function bodies after compacting structural gaps", async () => {
+        const code =
+            "import math\n\n\nclass Sample:\n    pass\n\n\ndef read():\n    return 1\n\n\nassert read() == 1";
+        const invocation = { label: "Python", language: "python", code };
+        const formatter = createCommandScriptFormatter(
+            parseScriptFormatterCommandsValue({
+                python: {
+                    kind: "command",
+                    command: [process.execPath, "-e", "process.stdin.pipe(process.stdout)"],
+                },
+            }),
+        );
+        const formatted = await formatScriptInvocation(invocation, formatter);
+        const component = renderScriptCall(
+            { fg: (_token, text) => text, bold: (text) => text },
+            formatted,
+            {
+                state: "success",
+                expanded: false,
+                maxCodePreviewLines: 8,
+            },
+        );
+
+        const expected = [
+            "• Python",
+            "  │ import math",
+            "  │ class Sample:",
+            "  │     pass",
+            "  │ def read():",
+            "  │     return 1",
+            "  │ assert read() == 1",
+        ];
+
+        expect(component.render(80)).toEqual(expected);
+        expect(component.render(24)).toEqual(expected);
+        expect(component.render(80)).toEqual(expected);
+        expect(invocation.code).toBe(code);
+    });
+
+    it.each([
+        ["triple double string", 'text = """first\n\nclass Literal:\n\nlast"""'],
+        ["raw triple single string", "text = r'''first\n\nlast'''"],
+        ["byte string", 'text = b"""first\n\nlast"""'],
+        ["formatted string", 'text = f"""first {1}\n\nlast"""'],
+        ["parenthesized content", "values = (\n    1,\n\n    2,\n)"],
+        ["list content", "values = [\n    1,\n\n    2,\n]"],
+        ["continued statement", "value = 1 + \\\n\n2"],
+        ["suite grouping", "def read():\n    first = 1\n\n    return first"],
+        ["comment grouping", "first = 1\n\n# group\n\nsecond = 2"],
+        ["inline comment grouping", "first = 1  # group\n\nsecond = 2"],
+        ["incomplete string", 'text = """first\n\nlast'],
+    ])("retains %s blank rows while compacting structural spacing", async (_name, content) => {
+        const prefix = "import math\n\nclass Sample:\n    pass\n\nassert True\n";
+
+        const formatter = createCommandScriptFormatter(
+            parseScriptFormatterCommandsValue({
+                python: {
+                    kind: "command",
+                    command: [process.execPath, "-e", "process.stdin.pipe(process.stdout)"],
+                },
+            }),
+        );
+        const formatted = await formatScriptInvocation(
+            { label: "Python", language: "python", code: prefix + content },
+            formatter,
+        );
+
+        expect(formatted.code).toBe(
+            "import math\nclass Sample:\n    pass\nassert True\n" + content,
+        );
+    });
+
     it("compacts JavaScript objects with Oxfmt at the requested display width", async () => {
         const executable = join(
             dirname(createRequire(import.meta.url).resolve("oxfmt/package.json")),
@@ -519,6 +592,33 @@ describe("script formatter settings", () => {
                 formatScriptInvocation({ label: "Python", language: "python", code }, formatter),
             ).resolves.toEqual({ label: "Python", language: "python", code: output });
         }
+    });
+
+    it("reuses a formatter result completed while an identical request was queued", async () => {
+        const formatter = createCommandScriptFormatter(
+            new Map<string, ScriptFormatterProfile>([
+                [
+                    "javascript",
+                    {
+                        kind: "command",
+                        command: [
+                            process.execPath,
+                            "-e",
+                            "process.stdin.resume();process.stdin.on('end',()=>process.stdout.write(String(process.pid)))",
+                        ],
+                    },
+                ],
+            ]),
+        );
+        const invocation = { label: "Node", language: "javascript", code: "console.log(1)" };
+        const [first, second, queued] = await Promise.all([
+            formatScriptInvocation(invocation, formatter),
+            formatScriptInvocation(invocation, formatter),
+            formatScriptInvocation(invocation, formatter),
+        ]);
+
+        expect(first.code).not.toBe(second.code);
+        expect([first.code, second.code]).toContain(queued.code);
     });
 
     it("falls back to the original script when a formatter throws", async () => {

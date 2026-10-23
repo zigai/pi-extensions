@@ -5,6 +5,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+const SYNCHRONIZED_OUTPUT_START = "\u001b[?2026h";
 const SYNCHRONIZED_OUTPUT_END = "\u001b[?2026l";
 const MAX_RAW_OUTPUT_BYTES = 4 * 1024 * 1024;
 
@@ -158,6 +159,17 @@ export class PiPtyProcess {
 
     frames(): readonly PtyScreenFrame[] {
         return [...this.capturedFrames];
+    }
+
+    unframedOutput(): string {
+        return this.rawOutput
+            .split(SYNCHRONIZED_OUTPUT_END)
+            .map((segment) => {
+                const start = segment.indexOf(SYNCHRONIZED_OUTPUT_START);
+                if (start < 0) return segment;
+                return segment.slice(0, start);
+            })
+            .join("");
     }
 
     async waitForText(text: string, timeoutMs = 10_000): Promise<PtyScreenFrame> {

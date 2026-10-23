@@ -105,6 +105,7 @@ type SyntaxState =
       };
 
 let syntaxState: SyntaxState | undefined;
+let pythonTokenizer: ReturnType<typeof createSyntaxTokenizer> | undefined;
 let initializationPromise: Promise<SyntaxState> | undefined;
 let syntaxGeneration = 0;
 let syntaxPreloadDiagnostics: SyntaxPreloadDiagnostics | undefined;
@@ -315,6 +316,7 @@ export function highlightSyntaxCode(
     const state = syntaxState;
     const normalizedLanguage = normalizeSyntaxLanguage(language);
     if (
+        code.length === 0 ||
         state?.status !== "ready" ||
         normalizedLanguage === undefined ||
         normalizedLanguage === "text" ||
@@ -396,6 +398,33 @@ export function observeSyntaxHighlightSource(
     return () => highlightOwners.get(invalidate) === owner;
 }
 
+export async function compactPythonStructuralBlankRows(
+    code: string,
+    options: {
+        readonly signal?: AbortSignal;
+        readonly reportWarning?: SyntaxWarningReporter;
+    } = {},
+): Promise<string | undefined> {
+    if (options.signal?.aborted === true) return undefined;
+    if (!/\n[\t ]*\n/u.test(code)) return code;
+
+    const generation = syntaxGeneration;
+
+    pythonTokenizer ??= createSyntaxTokenizer(undefined, {
+        maxJobs: CACHE_LIMIT,
+        maxBytes: MAX_CACHE_BYTES,
+        reportWarning: options.reportWarning,
+        async waitForDisposals() {
+            await Promise.all(tokenizerDisposals);
+        },
+    });
+
+    const lines = await pythonTokenizer.compactPython(code, options);
+    if (lines === undefined || generation !== syntaxGeneration) return undefined;
+
+    return lines.join("\n");
+}
+
 /** Computes complete code colors off the TUI thread, preserving grammar state across all lines. */
 export async function highlightSyntaxCodeAsync(
     code: string,
@@ -408,6 +437,7 @@ export async function highlightSyntaxCodeAsync(
     const size = Buffer.byteLength(code, "utf8");
 
     if (
+        code.length === 0 ||
         state?.status !== "ready" ||
         normalizedLanguage === undefined ||
         normalizedLanguage === "text" ||
@@ -706,6 +736,12 @@ export async function disposeSyntaxHighlighting(): Promise<void> {
     activeConfigurationKey = undefined;
 
     disposeReadySyntaxState(state);
+
+    if (pythonTokenizer !== undefined) {
+        disposeTokenizer(pythonTokenizer);
+        pythonTokenizer = undefined;
+    }
+
     await Promise.allSettled(tokenizerDisposals);
     syntaxRenderingVersion += 1;
     notifySyntaxStateListeners("uninitialized");
@@ -763,12 +799,16 @@ function disposeReadySyntaxState(state: SyntaxState | undefined): void {
     if (state?.status === "ready") {
         state.highlighter.dispose();
 
-        const disposal = state.tokenizer.dispose();
-        tokenizerDisposals.add(disposal);
-        void disposal.finally(() => {
-            tokenizerDisposals.delete(disposal);
-        });
+        disposeTokenizer(state.tokenizer);
     }
+}
+
+function disposeTokenizer(tokenizer: ReturnType<typeof createSyntaxTokenizer>): void {
+    const disposal = tokenizer.dispose();
+    tokenizerDisposals.add(disposal);
+    void disposal.finally(() => {
+        tokenizerDisposals.delete(disposal);
+    });
 }
 
 function disposedSyntaxState(config: SyntaxConfig): SyntaxState {

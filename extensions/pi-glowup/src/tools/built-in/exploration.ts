@@ -78,7 +78,10 @@ export function createExplorationFeature() {
         result: TextResult,
         expanded: boolean,
         theme: GlowupRenderTheme,
-        options?: { readonly syntaxPath: string | undefined },
+        options?: {
+            readonly syntaxPath: string | undefined;
+            readonly invalidate?: (() => void) | undefined;
+        },
     ) {
         const output = textOutput(result);
         if (output === undefined) {
@@ -91,6 +94,7 @@ export function createExplorationFeature() {
             prefixFirst: "",
             prefixRest: "",
             noOutputLabel: null,
+            invalidate: options?.invalidate,
         };
         if (options?.syntaxPath !== undefined) {
             renderOptions = { ...renderOptions, syntax: { path: options.syntaxPath } };

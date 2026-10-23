@@ -21,7 +21,7 @@ type Work = {
 };
 
 export function createSyntaxTokenizer(
-    theme: ThemeRegistration,
+    theme: ThemeRegistration | undefined,
     options: {
         readonly maxJobs: number;
         readonly maxBytes: number;
@@ -122,9 +122,12 @@ export function createSyntaxTokenizer(
                 }
             });
 
+            let language: BundledLanguage = "python";
+            if (initial.request.operation === "highlight") language = initial.request.language;
+
             const initialization: TokenizeInitialization = {
                 type: "initialize",
-                language: initial.request.language,
+                language,
                 theme,
             };
             current.postMessage(initialization);
@@ -183,13 +186,11 @@ export function createSyntaxTokenizer(
         }
     }
 
-    async function tokenize(
-        code: string,
-        language: BundledLanguage,
-        brackets: boolean,
-        cancellation: { readonly signal?: AbortSignal } = {},
+    async function enqueue(
+        request: TokenizeRequest,
+        cancellation: { readonly signal?: AbortSignal },
     ): Promise<string[] | undefined> {
-        const size = Buffer.byteLength(code, "utf8");
+        const size = Buffer.byteLength(request.code, "utf8");
         if (
             disposed ||
             failed ||
@@ -201,7 +202,7 @@ export function createSyntaxTokenizer(
 
         return new Promise((resolve) => {
             const work: Work = {
-                request: { id: nextId++, code, language, theme, brackets },
+                request,
                 bytes: size,
                 resolve,
                 signal: cancellation.signal,
@@ -229,6 +230,26 @@ export function createSyntaxTokenizer(
         });
     }
 
+    async function tokenize(
+        code: string,
+        language: BundledLanguage,
+        brackets: boolean,
+        cancellation: { readonly signal?: AbortSignal } = {},
+    ): Promise<string[] | undefined> {
+        if (theme === undefined) return undefined;
+        return enqueue(
+            { operation: "highlight", id: nextId++, code, language, theme, brackets },
+            cancellation,
+        );
+    }
+
+    async function compactPython(
+        code: string,
+        cancellation: { readonly signal?: AbortSignal } = {},
+    ): Promise<string[] | undefined> {
+        return enqueue({ operation: "compact-python", id: nextId++, code }, cancellation);
+    }
+
     async function dispose(): Promise<void> {
         disposed = true;
 
@@ -243,5 +264,5 @@ export function createSyntaxTokenizer(
         await Promise.allSettled(closing);
     }
 
-    return { tokenize, dispose };
+    return { tokenize, compactPython, dispose };
 }

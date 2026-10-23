@@ -18,7 +18,13 @@ import {
     pathText,
 } from "../theme.ts";
 import { type TextRange, changedTextRanges, applyBackgroundToTextRanges } from "./intraline.ts";
-import { wrapStyledText, makeComponent, toolExpandHint, wrapPrefixedLine } from "../component.ts";
+import {
+    wrapStyledText,
+    makeComponent,
+    toolExpandHint,
+    wrapPrefixedLine,
+    omittedLinesLabel,
+} from "../component.ts";
 import { truncateToWidth, visibleWidth, type Component } from "@earendil-works/pi-tui";
 import { expandTerminalTabs } from "../../text-boundaries.ts";
 import { strongerDiffBackgroundAnsi } from "./ansi-colors.ts";
@@ -524,7 +530,7 @@ function createDiffComponent(
 
             rendered.push(
                 truncateToWidth(
-                    `${dim(theme, "    ")} ${muted(theme, `… +${omitted} lines (`)}${hint}${muted(theme, ")")}`,
+                    `${dim(theme, "    ")} ${muted(theme, `${omittedLinesLabel(omitted)} (`)}${hint}${muted(theme, ")")}`,
                     width,
                     "…",
                 ),

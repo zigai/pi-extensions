@@ -1,4 +1,5 @@
 import { type JsonValue } from "../../json-value.ts";
+import type { CodePreview } from "../../rendering/streaming/presentation.ts";
 import { renderGlowupOutput } from "../../rendering/output.ts";
 import {
     getPierreDiffPayloadFromDetails,
@@ -30,6 +31,7 @@ export function renderWriteCall(
         readonly labelMode: ToolLabelMode;
         readonly movingViewport: boolean;
         readonly mutationSettings: MutationSettings;
+        readonly streamCode?: CodePreview;
     },
 ) {
     const labelColumnWidth = mutationLabelColumnWidth(context, options.labelMode);
@@ -50,7 +52,10 @@ export function renderWriteCall(
                   mutationLabelColumnWidth: labelColumnWidth,
               };
 
-    return renderWriteCallPreview(normalizedWriteArgs(args), theme, writeContext);
+    return renderWriteCallPreview(normalizedWriteArgs(args), theme, {
+        ...writeContext,
+        ...(options.streamCode !== undefined && { streamCode: options.streamCode }),
+    });
 }
 
 export function renderWriteResult(

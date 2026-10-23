@@ -67,6 +67,7 @@ export type GlowupResultContext<Args = unknown> = GlowupCallContext & {
 export type GlowupToolResult = {
     readonly content?: unknown;
     readonly details?: unknown;
+    readonly structuredContent?: unknown;
 };
 
 /** Parses a serialized runtime value into an adapter-owned value. */

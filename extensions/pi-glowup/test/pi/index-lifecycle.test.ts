@@ -5,8 +5,10 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import type { Worker } from "node:worker_threads";
 import {
     createEditTool,
+    createReadToolDefinition,
     initTheme,
     ToolExecutionComponent,
     SessionManager,
@@ -17,6 +19,8 @@ import { Value } from "typebox/value";
 import { TuiMainScreen } from "@earendil-works/pi-tui";
 import type { AssistantMessage, ToolCall } from "@earendil-works/pi-ai";
 import { VirtualTerminal } from "../support/virtual-terminal.ts";
+import { createPlainTheme } from "../support/plain-theme.ts";
+import { renderGlowupOutput } from "../../src/rendering/output.ts";
 import {
     createExtensionContext,
     ExtensionRegistrationFixture,
@@ -24,8 +28,11 @@ import {
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { getGlowupGlobalConfigPath } from "../../src/config/load.ts";
 import glowupExtension from "../../src/index.ts";
+import { registerGlowupToolRenderer } from "../../src/presentation.ts";
+import { output } from "../../src/tools/protocol/contract.ts";
 import {
     disposeSyntaxHighlighting,
+    highlightSyntaxCodeAsync,
     initializeSyntaxHighlighting,
     isSyntaxHighlightingReady,
 } from "../../src/rendering/syntax/highlighter.ts";
@@ -60,7 +67,6 @@ function assistantMessage(source: AssistantSourceMessage): AssistantMessage {
 
 class FakeExtensionApi extends ExtensionRegistrationFixture {
     branch: { type: "message"; message: AssistantSourceMessage }[] = [];
-    toolExpansionRefreshes = 0;
     private context = createExtensionContext(process.cwd());
 
     async startSession(
@@ -76,9 +82,6 @@ class FakeExtensionApi extends ExtensionRegistrationFixture {
             mode,
             trusted,
             sessionManager,
-            setToolsExpanded: () => {
-                this.toolExpansionRefreshes += 1;
-            },
         });
         for (const registration of this.registrations) {
             if (registration[0] === "session_start") {
@@ -347,6 +350,34 @@ describe("extension lifecycle", () => {
         await pi.shutdownSession();
     });
 
+    it("sends opt-in retained-output telemetry to the debug file instead of the terminal", async () => {
+        const root = await mkdtemp(join(tmpdir(), "pi-glowup-retained-diagnostics-"));
+        const agentDir = join(root, "agent");
+        const originalRetainedLog = process.env.PI_GLOWUP_RETAINED_OUTPUT_LOG;
+        process.env.PI_GLOWUP_RETAINED_OUTPUT_LOG = "1";
+        process.env[AGENT_DIR_ENV] = agentDir;
+        onTestFinished(async () => {
+            if (originalRetainedLog === undefined) delete process.env.PI_GLOWUP_RETAINED_OUTPUT_LOG;
+            else process.env.PI_GLOWUP_RETAINED_OUTPUT_LOG = originalRetainedLog;
+
+            await rm(root, { recursive: true, force: true });
+        });
+        const pi = new FakeExtensionApi();
+        installGlowup(pi);
+        try {
+            await pi.startSession(join(root, "project"), false, "tui");
+            renderGlowupOutput(createPlainTheme(), "SENSITIVE_OUTPUT", { expanded: false }).render(
+                40,
+            );
+            await Promise.resolve();
+            const log = join(agentDir, "pi-glowup", "debug.log");
+            expect(readLogEvents(log)).toContain("retained_output");
+            expect(readFileSync(log, "utf8")).not.toContain("SENSITIVE_OUTPUT");
+        } finally {
+            await pi.shutdownSession();
+        }
+    });
+
     it("records tool and turn diagnostics and disposes syntax on quit", async () => {
         const root = mkdtempSync(join(tmpdir(), "pi-glowup-lifecycle-"));
         const agentDir = join(root, "agent");
@@ -525,18 +556,53 @@ describe("extension lifecycle", () => {
         expect(readFileSync(join(project, "sample.txt"), "utf8")).toBe("item0=1\nitem1=1\n");
     });
 
-    it("keeps syntax ready across reload teardown", async () => {
-        const root = mkdtempSync(join(tmpdir(), "pi-glowup-lifecycle-"));
+    it("releases syntax workers on reload and highlights again in the next session", async () => {
+        const root = await mkdtemp(join(tmpdir(), "pi-glowup-lifecycle-"));
         process.env[AGENT_DIR_ENV] = join(root, "agent");
+        const workers: Worker[] = [];
+        const observeWorker = (worker: Worker): void => {
+            workers.push(worker);
+        };
+        process.on("worker", observeWorker);
+        onTestFinished(async () => {
+            process.off("worker", observeWorker);
+            await Promise.all(workers.map(async (worker) => worker.terminate()));
+            await rm(root, { recursive: true, force: true });
+        });
         const pi = new FakeExtensionApi();
-
         installGlowup(pi);
+        onTestFinished(async () => pi.shutdownSession());
+        const code = "const total = 3;";
+
         await pi.startSession(join(root, "project"), false);
         await Promise.all(pi.runBashToolCall("true"));
-        await initializeSyntaxHighlighting();
+        await vi.waitUntil(() => isSyntaxHighlightingReady());
+        const beforeReload = await highlightSyntaxCodeAsync(code, "typescript");
+        expect(beforeReload.map(stripAnsi)).toEqual([code]);
+        expect(beforeReload).not.toEqual([code]);
+        expect(workers).toHaveLength(1);
+        expect(workers[0]?.threadId).toBeGreaterThan(0);
+
         await pi.shutdownSession("reload");
 
-        expect(isSyntaxHighlightingReady()).toBe(true);
+        expect(workers[0]?.threadId).toBe(-1);
+        expect(isSyntaxHighlightingReady()).toBe(false);
+        expect(await highlightSyntaxCodeAsync(code, "typescript")).toEqual([code]);
+
+        const nextPi = new FakeExtensionApi();
+        installGlowup(nextPi);
+        onTestFinished(async () => nextPi.shutdownSession());
+        await nextPi.startSession(join(root, "project"), false);
+        await Promise.all(nextPi.runBashToolCall("true"));
+        await vi.waitUntil(() => isSyntaxHighlightingReady());
+
+        expect(await highlightSyntaxCodeAsync(code, "typescript")).toEqual(beforeReload);
+        expect(workers).toHaveLength(2);
+        expect(workers[0]?.threadId).toBe(-1);
+        expect(workers[1]?.threadId).toBeGreaterThan(0);
+
+        await nextPi.shutdownSession("reload");
+        expect(workers[1]?.threadId).toBe(-1);
     });
 
     it("refreshes retained tool components after TUI syntax startup", async () => {
@@ -547,13 +613,98 @@ describe("extension lifecycle", () => {
         installGlowup(pi);
         await pi.startSession(join(root, "project"), false, "tui");
 
-        const refreshesBeforeSyntax = pi.toolExpansionRefreshes;
-        await Promise.all(pi.runBashToolCall("true"));
-        await initializeSyntaxHighlighting();
-        await vi.waitFor(() =>
-            expect(pi.toolExpansionRefreshes).toBeGreaterThan(refreshesBeforeSyntax),
+        initTheme("dark");
+        const row = new ToolExecutionComponent(
+            "write",
+            "syntax",
+            { path: "sample.ts", content: "const total = 3;" },
+            undefined,
+            undefined,
+            createTui(),
+            root,
         );
+        row.setArgsComplete();
+        const before = row.render(80).join("\n");
+        expect(stripAnsi(before)).toContain("const total = 3;");
+        await initializeSyntaxHighlighting();
+        await vi.waitFor(() => expect(row.render(80).join("\n")).not.toBe(before));
+        expect(stripAnsi(row.render(80).join("\n"))).toContain("const total = 3;");
     });
+
+    it.each(["compact", "outline"])(
+        "applies configured statement formatting while write arguments are streaming in %s",
+        async (presentation) => {
+            const cache = join(import.meta.dirname, "../../.cache");
+            await mkdir(cache, { recursive: true });
+            const root = await mkdtemp(join(cache, "streaming-session-"));
+            const agentDir = join(root, "agent");
+            process.env[AGENT_DIR_ENV] = agentDir;
+            delete process.env[SCRIPT_FORMATTERS_ENV];
+            const settingsPath = getGlowupGlobalConfigPath(agentDir);
+            await mkdir(dirname(settingsPath), { recursive: true });
+            await writeFile(
+                settingsPath,
+                JSON.stringify({
+                    presentation,
+                    streaming: { prose: "sentence", code: "statement" },
+                    scriptPreview: {
+                        formatters: {
+                            javascript: {
+                                kind: "javascript",
+                                command: [
+                                    join(
+                                        dirname(
+                                            createRequire(import.meta.url).resolve(
+                                                "oxfmt/package.json",
+                                            ),
+                                        ),
+                                        "bin",
+                                        "oxfmt",
+                                    ),
+                                ],
+                            },
+                        },
+                    },
+                }),
+            );
+            const pi = new FakeExtensionApi();
+            installGlowup(pi);
+            initTheme("dark");
+            try {
+                await pi.startSession(root, false, "tui");
+                const row = new ToolExecutionComponent(
+                    "write",
+                    "streamed-write",
+                    {
+                        path: "example.js",
+                        content: "const first={value:1};\nconst second =",
+                    },
+                    undefined,
+                    undefined,
+                    createTui(),
+                    root,
+                );
+                const screen = () => stripAnsi(row.render(100).join("\n"));
+                expect(screen()).not.toContain("const second");
+                await vi.waitFor(() => expect(screen()).toContain("const first = { value: 1 };"));
+                expect(screen()).not.toContain("const second");
+                row.updateArgs({
+                    path: "example.js",
+                    content: "const first={value:1};\nconst second={value:2};",
+                });
+                row.setArgsComplete();
+                row.setExpanded(true);
+                await vi.waitFor(() => expect(screen()).toContain("const second = { value: 2 };"));
+                expect(screen()).toContain("const first = { value: 1 };");
+                row.updateResult({ content: [{ type: "text", text: "cancelled" }], isError: true });
+                expect(screen()).toContain("const first = { value: 1 };");
+                expect(screen()).toContain("const second = { value: 2 };");
+            } finally {
+                await pi.shutdownSession();
+                await rm(root, { recursive: true, force: true });
+            }
+        },
+    );
 
     it("does not block bash tool-call preflight on configured script formatters", async () => {
         const root = mkdtempSync(join(tmpdir(), "pi-glowup-lifecycle-"));
@@ -573,6 +724,68 @@ describe("extension lifecycle", () => {
         ).resolves.toEqual([undefined]);
 
         await pi.shutdownSession();
+    });
+
+    it("renders native history on the first frame after activation", async () => {
+        const root = await mkdtemp(join(tmpdir(), "pi-glowup-native-history-"));
+        process.env[AGENT_DIR_ENV] = join(root, "agent");
+        onTestFinished(async () => rm(root, { recursive: true, force: true }));
+        initTheme("dark");
+        const row = new ToolExecutionComponent(
+            "read",
+            "history-read",
+            { path: "sample.ts" },
+            undefined,
+            createReadToolDefinition(root),
+            createTui(),
+            root,
+        );
+        row.updateResult({
+            content: [{ type: "text", text: "const sample = 1;" }],
+            isError: false,
+        });
+        const pi = new FakeExtensionApi();
+        installGlowup(pi);
+        try {
+            await pi.startSession(root, false, "tui");
+
+            expect(stripAnsi(row.render(100).join("\n"))).toContain("sample.ts");
+        } finally {
+            await pi.shutdownSession();
+        }
+    });
+
+    it("preserves native image read output when images are hidden", async () => {
+        const root = await mkdtemp(join(tmpdir(), "pi-glowup-image-fallback-"));
+        process.env[AGENT_DIR_ENV] = join(root, "agent");
+        onTestFinished(async () => rm(root, { recursive: true, force: true }));
+        initTheme("dark");
+        const pi = new FakeExtensionApi();
+        installGlowup(pi);
+        try {
+            await pi.startSession(root, false, "tui");
+            const row = new ToolExecutionComponent(
+                "read",
+                "image-read",
+                { path: "sample.png" },
+                { showImages: false },
+                createReadToolDefinition(root),
+                createTui(),
+                root,
+            );
+            row.updateResult({
+                content: [
+                    { type: "text", text: "Read image file [image/png]" },
+                    { type: "image", mimeType: "image/png", data: "" },
+                ],
+                isError: false,
+            });
+            row.setExpanded(true);
+
+            expect(stripAnsi(row.render(100).join("\n"))).toContain("Read image file [image/png]");
+        } finally {
+            await pi.shutdownSession();
+        }
     });
 
     it("formats a restored Node call in the transcript", async () => {
@@ -621,6 +834,61 @@ describe("extension lifecycle", () => {
         await pi.shutdownSession();
     });
 
+    it("restores structured schema results through the actual host tool component", async () => {
+        const root = mkdtempSync(join(tmpdir(), "pi-glowup-schema-"));
+        process.env[AGENT_DIR_ENV] = join(root, "agent");
+        const pi = new FakeExtensionApi();
+        installGlowup(pi);
+        initTheme("dark");
+        await pi.startSession(root, false, "tui");
+        const definition = {
+            name: "inventory",
+            label: "Inventory",
+            description: "Inventory result",
+            parameters: Type.Object({ folder: Type.String() }),
+            outputSchema: Type.Object({ count: Type.Number({ title: "Count" }) }),
+            execute: async () => {
+                throw new Error("Restored results do not execute tools");
+            },
+        };
+        const row = new ToolExecutionComponent(
+            "inventory",
+            "schema",
+            { folder: "samples" },
+            undefined,
+            definition,
+            createTui(),
+            root,
+        );
+        const result = {
+            content: [{ type: "text" as const, text: "Text fallback" }],
+            structuredContent: { count: 2 },
+            isError: false,
+        };
+        row.updateResult(result);
+        const rendered = stripAnsi(row.render(80).join("\n"));
+        expect(rendered).toContain("Count → 2");
+        expect(rendered).not.toContain("Text fallback");
+        const registration = registerGlowupToolRenderer(
+            "inventory-view",
+            (name) => name === "inventory",
+            {
+                version: 3,
+                parseArgs: (value) => value,
+                parseResult: (value) => value,
+                renderResult: () => output("Contribution result"),
+            },
+        );
+        try {
+            expect(stripAnsi(row.render(80).join("\n"))).toContain("Contribution result");
+            registration.dispose();
+            expect(stripAnsi(row.render(80).join("\n"))).toContain("Count → 2");
+        } finally {
+            registration.dispose();
+            await pi.shutdownSession();
+        }
+    });
+
     it("renders generic Bash calls before a long-running command completes", async () => {
         const root = mkdtempSync(join(tmpdir(), "pi-glowup-lifecycle-"));
         process.env[AGENT_DIR_ENV] = join(root, "agent");
@@ -629,6 +897,7 @@ describe("extension lifecycle", () => {
         initTheme("dark");
 
         const tui = createTui();
+        await pi.startSession(root, false, "tui");
         const command = "cd /tmp && sleep 300";
         const completedArgs = new ToolExecutionComponent(
             "bash",

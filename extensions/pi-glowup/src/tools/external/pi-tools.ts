@@ -58,7 +58,7 @@ function createFinalizePlanRenderer(
         },
         renderResult(result, options, theme, context) {
             if (context.isError || options.isPartial) {
-                return renderSimpleResult(theme, result, options);
+                return renderSimpleResult(theme, result, options, context);
             }
 
             return emptyComponent();

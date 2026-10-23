@@ -8,11 +8,14 @@ import Type from "typebox";
 import { Value } from "typebox/value";
 import { afterEach, describe, expect, it } from "vitest";
 import { renderScriptCall } from "../../../src/tools/built-in/bash/script-renderer.ts";
+import { renderBashCommandCall } from "../../../src/tools/built-in/bash/renderer.ts";
+import { renderGlowupOutput } from "../../../src/rendering/output.ts";
 import { createPlainTheme } from "../../support/plain-theme.ts";
 import { renderWriteCallPreview } from "../../../src/tools/built-in/write-preview.ts";
 import { scheduleCodeOutputSyntaxLoad } from "../../../src/rendering/syntax/code-component.ts";
 import {
     createSyntaxHighlighter,
+    compactPythonStructuralBlankRows,
     disposeSyntaxHighlighting,
     clearSyntaxHighlightCache,
     getLoadedSyntaxHighlighterForLanguage,
@@ -89,6 +92,146 @@ async function waitForCondition(condition: () => boolean): Promise<void> {
 describe("syntax highlighter lifecycle", () => {
     afterEach(async () => {
         await disposeSyntaxHighlighting();
+    });
+
+    it.each(["preserve", "always"] as const)(
+        "keeps restored Bash syntax settled across shared-cache eviction in %s layout",
+        async (shellLayout) => {
+            await initializeSyntaxHighlighting({}, { preloadLanguages: ["bash", "javascript"] });
+            const commands = Array.from(
+                { length: 128 },
+                (_value, index) => `node -e 'console.log("item_${index}")' && printf complete`,
+            );
+            const components = new Map<string, Component>();
+            let invalidations = 0;
+            const invalidate = () => {
+                invalidations += 1;
+            };
+
+            const redraw = async () => {
+                for (const command of commands) {
+                    const component = renderBashCommandCall(plainTheme, command, {
+                        state: "success",
+                        expanded: false,
+                        maxCodePreviewLines: 8,
+                        showPrologueOmission: false,
+                        headerLayout: "auto",
+                        shellLayout,
+                        shellOperatorPosition: "trailing",
+                        invalidate,
+                        lastComponent: components.get(command),
+                    });
+                    components.set(command, component);
+                    component.render(120);
+                    await settleSyntaxHighlights();
+                }
+            };
+
+            await redraw();
+            const warmed = invalidations;
+            expect(warmed).toBeGreaterThan(0);
+            await redraw();
+            expect(invalidations).toBe(warmed);
+        },
+    );
+
+    it("releases old streamed output colors beyond the previous revision", async () => {
+        await initializeSyntaxHighlighting({}, { preloadLanguages: ["typescript"] });
+        const invalidate = () => {};
+        const render = (text: string) =>
+            renderGlowupOutput(plainTheme, text, {
+                expanded: true,
+                dimContent: false,
+                prefixFirst: "",
+                prefixRest: "",
+                syntax: { language: "typescript", cache: false },
+                invalidate,
+            });
+
+        const first = 'const first = "one";';
+        render(first).render(100);
+        await settleSyntaxHighlights();
+        render('const second = "two";').render(100);
+        await settleSyntaxHighlights();
+        render('const third = "three";').render(100);
+        await settleSyntaxHighlights();
+
+        expect(render(first).render(100)).toEqual([first]);
+        await settleSyntaxHighlights();
+    });
+
+    it("cancels superseded output syntax while keeping both head and tail runs", async () => {
+        await initializeSyntaxHighlighting({}, { preloadLanguages: ["typescript"] });
+        let invalidations = 0;
+        const invalidate = () => {
+            invalidations += 1;
+        };
+        const options = {
+            expanded: false,
+            maxPreviewLines: 2,
+            dimContent: false,
+            prefixFirst: "",
+            prefixRest: "",
+            syntax: { language: "typescript", cache: false },
+            invalidate,
+        };
+        renderGlowupOutput(plainTheme, 'const abandoned = "old";', options).render(100);
+        const current = renderGlowupOutput(
+            plainTheme,
+            ['const head = "new";', "// omitted one", "// omitted two", 'const tail = "new";'].join(
+                "\n",
+            ),
+            options,
+        );
+        current.render(100);
+        await settleSyntaxHighlights();
+
+        expect(invalidations).toBe(2);
+        current.invalidate();
+        const lines = current.render(100);
+        expect(lines[0]).not.toBe(stripVTControlCharacters(lines[0] ?? ""));
+        expect(lines[2]).not.toBe(stripVTControlCharacters(lines[2] ?? ""));
+        expect(lines.map(stripVTControlCharacters)).toEqual([
+            'const head = "new";',
+            expect.stringContaining("… +2 lines"),
+            'const tail = "new";',
+        ]);
+    });
+
+    it("compacts Python structural rows even when syntax colors are disabled", async () => {
+        await initializeSyntaxHighlighting({ PI_GLOWUP_SYNTAX: "off" });
+
+        await expect(
+            compactPythonStructuralBlankRows('text = """first\n\nlast"""\n\nassert text'),
+        ).resolves.toBe('text = """first\n\nlast"""\nassert text');
+        expect(isSyntaxHighlightingReady()).toBe(false);
+    });
+
+    it("cancels Python analysis without losing queued analysis", async () => {
+        const controller = new AbortController();
+        const cancelled = compactPythonStructuralBlankRows("first = 1\n\nsecond = 2", {
+            signal: controller.signal,
+        });
+        const queued = compactPythonStructuralBlankRows("third = 3\n\nfourth = 4");
+        await new Promise<void>((resolve) => {
+            setImmediate(resolve);
+        });
+
+        controller.abort();
+
+        await expect(cancelled).resolves.toBeUndefined();
+        await expect(queued).resolves.toBe("third = 3\nfourth = 4");
+    });
+
+    it("disposes pending Python analysis and permits fresh session analysis", async () => {
+        const pending = compactPythonStructuralBlankRows("first = 1\n\nsecond = 2");
+
+        await disposeSyntaxHighlighting();
+
+        await expect(pending).resolves.toBeUndefined();
+        await expect(compactPythonStructuralBlankRows("third = 3\n\nfourth = 4")).resolves.toBe(
+            "third = 3\nfourth = 4",
+        );
     });
 
     it("owns custom registered names and rejects unsupported names through Shiki", async () => {

@@ -1,6 +1,7 @@
 import { MouseRegion, type Component } from "@earendil-works/pi-tui";
 import Type, { type Static } from "typebox";
 import { Value } from "typebox/value";
+import { inheritSyntaxComponent } from "../rendering/syntax/component-owner.ts";
 
 const expansionSchema = Type.Object({
     global: Type.Boolean(),
@@ -44,7 +45,7 @@ export function renderExpandableSection(
     const invalidate = context.invalidate;
     if (expansion === undefined || invalidate === undefined) return component;
 
-    return new MouseRegion(component, (event) => {
+    const region = new MouseRegion(component, (event) => {
         if (event.type !== "click" || event.button !== "left") return undefined;
 
         const collapsedLines = render(false).render(event.width);
@@ -61,4 +62,8 @@ export function renderExpandableSection(
 
         return { handled: true };
     });
+
+    inheritSyntaxComponent(region, component);
+
+    return region;
 }

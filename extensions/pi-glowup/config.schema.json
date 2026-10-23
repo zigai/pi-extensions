@@ -11,6 +11,12 @@
       "default": "./schemas/pi-glowup.schema.json",
       "description": "JSON Schema used by editors for this settings file."
     },
+    "presentation": {
+      "type": "string",
+      "default": "compact",
+      "minLength": 1,
+      "description": "Whole tool presentation: compact, outline, or an extension-registered name."
+    },
     "preserveTools": {
       "type": "array",
       "items": {
@@ -567,7 +573,7 @@
                           "const": "omit"
                         }
                       ],
-                      "description": "Leading import/setup visibility in collapsed display; expansion shows original source.",
+                      "description": "Leading import/setup visibility in collapsed display; expansion retains all source.",
                       "default": "omit"
                     },
                     "indentWidth": {
@@ -632,7 +638,7 @@
                           "const": "omit"
                         }
                       ],
-                      "description": "Leading import/setup visibility in collapsed display; expansion shows original source.",
+                      "description": "Leading import/setup visibility in collapsed display; expansion retains all source.",
                       "default": "omit"
                     },
                     "tabWidth": {
@@ -692,7 +698,7 @@
                           "const": "omit"
                         }
                       ],
-                      "description": "Leading import/setup visibility in collapsed display; expansion shows original source.",
+                      "description": "Leading import/setup visibility in collapsed display; expansion retains all source.",
                       "default": "omit"
                     },
                     "tabWidth": {
@@ -769,7 +775,7 @@
               ]
             }
           },
-          "description": "Display-only profiles keyed by matching language id; expansion shows original source."
+          "description": "Display-only profiles keyed by language id; statement mode formats each unit in both views, otherwise expansion shows original source."
         }
       },
       "additionalProperties": false,
@@ -780,6 +786,52 @@
         "shellLayout": "auto",
         "shellOperatorPosition": "trailing",
         "formatters": {}
+      }
+    },
+    "streaming": {
+      "type": "object",
+      "properties": {
+        "prose": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "token"
+            },
+            {
+              "type": "string",
+              "const": "sentence"
+            },
+            {
+              "type": "string",
+              "const": "paragraph"
+            }
+          ],
+          "default": "token",
+          "description": "Reveal assistant prose as tokens, completed sentences, or Markdown paragraphs and list items."
+        },
+        "code": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "token"
+            },
+            {
+              "type": "string",
+              "const": "statement"
+            },
+            {
+              "type": "string",
+              "const": "block"
+            }
+          ],
+          "default": "token",
+          "description": "Reveal assistant code fences, writes, and script previews as tokens, completed statements, or whole blocks. Statement mode supports JavaScript, TypeScript, Python, and Bash; other languages wait for completion. Configured formatters format each statement separately in both views. Edits and patches are unchanged."
+        }
+      },
+      "additionalProperties": false,
+      "default": {
+        "prose": "token",
+        "code": "token"
       }
     }
   }

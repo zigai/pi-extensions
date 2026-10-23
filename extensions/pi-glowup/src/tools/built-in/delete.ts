@@ -20,6 +20,7 @@ import {
 } from "./context.ts";
 import { captureDeletedTextPreview, type DeletedTextPreview } from "./delete-preview.ts";
 import { type MutationSettings } from "../../rendering/preview-settings.ts";
+import { inheritSyntaxComponent } from "../../rendering/syntax/component-owner.ts";
 
 export function createNativeDeleteFeature() {
     let generation = 0;
@@ -104,6 +105,8 @@ export function createNativeDeleteFeature() {
         const showAllRows = context.expanded || mutationSettings.defaultView === "full";
         let diffOptions: GlowupDiffRenderOptions = {
             collapsedLineBudget: mutationSettings.previewLines,
+            lastComponent: context.lastComponent,
+            invalidate: context.invalidate,
         };
         if (!showAllRows) {
             diffOptions = { ...diffOptions, maxWrappedRows: 1 };
@@ -111,7 +114,13 @@ export function createNativeDeleteFeature() {
 
         const body = renderGlowupDiff(theme, [preview.section], showAllRows, diffOptions);
 
-        return makeComponent((width) => [...header.render(width), ...body.render(width)]);
+        const component = makeComponent((width) => [
+            ...header.render(width),
+            ...body.render(width),
+        ]);
+        inheritSyntaxComponent(component, body);
+
+        return component;
     }
 
     function clear(): void {

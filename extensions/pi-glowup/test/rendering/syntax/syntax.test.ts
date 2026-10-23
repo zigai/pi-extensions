@@ -16,6 +16,8 @@ import { createNativeBashFeature } from "../../../src/tools/built-in/bash/previe
 import { renderWriteCallPreview } from "../../../src/tools/built-in/write-preview.ts";
 import { TEST_THEME_BACKGROUND_COLORS, TEST_THEME_COLORS } from "../../support/theme-colors.ts";
 import { createThirdPartyToolRenderer } from "../../../src/tools/renderers.ts";
+import { compactPresentation, outlinePresentation } from "../../../src/presentation.ts";
+import { code, output } from "../../../src/tools/protocol/contract.ts";
 import {
     disposeSyntaxHighlighting,
     configureSyntaxBracketPairColoring,
@@ -270,6 +272,47 @@ describe("central syntax highlighting", () => {
         }
     });
 
+    it.each([
+        { kind: "code", makeNode: code },
+        { kind: "output", makeNode: output },
+    ])(
+        "preserves explicit $kind node syntax colors in the outline presentation",
+        async ({ makeNode }) => {
+            const text = 'const value = "ok";';
+            await highlightSyntaxCodeAsync(text, "typescript");
+            const node = makeNode(text, { syntax: { language: "typescript" } });
+            const compact = compactPresentation
+                .renderNode(node, plainTheme, renderContext, "static")
+                .render(80)
+                .join("\n");
+            const outline = outlinePresentation
+                .renderNode(node, plainTheme, renderContext, "static")
+                .render(80)
+                .join("\n");
+
+            expect(compact).toContain(`${TYPESCRIPT_KEYWORD_COLOR}const`);
+            expect(outline).toContain(`${TYPESCRIPT_KEYWORD_COLOR}const`);
+            expect(stripVTControlCharacters(outline).trim()).toBe(text);
+        },
+    );
+
+    it.each([
+        { kind: "code", makeNode: code },
+        { kind: "output", makeNode: output },
+    ])(
+        "keeps default and explicit plain $kind nodes uncolored in the outline presentation",
+        ({ makeNode }) => {
+            const text = 'const value = "ok";';
+            for (const node of [makeNode(text), makeNode(text, { syntax: { language: "text" } })]) {
+                const outline = outlinePresentation
+                    .renderNode(node, plainTheme, renderContext, "static")
+                    .render(80);
+
+                expect(outline).toEqual([`  ${text}`]);
+            }
+        },
+    );
+
     it("preserves grammar state through an oversized multiline comment", async () => {
         const code = `const before = "safe";\n/* ${"x".repeat(9_000)}\nconst inside = "not code";\n*/\nconst after = 1;`;
         const lines = await highlightSyntaxCodeAsync(code, "javascript", { cache: false });
@@ -278,6 +321,25 @@ describe("central syntax highlighting", () => {
         expect(lines[2]).not.toContain(TYPESCRIPT_KEYWORD_COLOR);
         expect(lines[4]).toContain(TYPESCRIPT_KEYWORD_COLOR);
         expect(stripVTControlCharacters(lines.join("\n"))).toBe(code);
+    });
+
+    it("colors code cut inside a string like the rest of that string", async () => {
+        const [cutLine] = await highlightSyntaxCodeAsync(
+            'const path = "/srv/app/cache/',
+            "javascript",
+            {
+                cache: false,
+            },
+        );
+        const cutLines = await highlightSyntaxCodeAsync(
+            'const first = 1;\nconst paths = ["/srv/app/cache/',
+            "typescript",
+            { cache: false },
+        );
+
+        expect(cutLine).toContain("cache/");
+        expect(cutLines[1]).toContain("cache/");
+        expect(cutLines[0]).toContain(TYPESCRIPT_KEYWORD_COLOR);
     });
 
     it("highlights accepted one-line scripts longer than 1000 characters", async () => {

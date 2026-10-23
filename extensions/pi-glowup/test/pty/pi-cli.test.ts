@@ -598,6 +598,62 @@ describe("actual Pi CLI in a real PTY", () => {
         }
     }, 45_000);
 
+    it("shows formatter failures as notifications without corrupting the input draft", async () => {
+        const fixture = createFixtureWorkspace();
+        fixtures.push(fixture);
+        writeFileSync(
+            getGlowupGlobalConfigPath(fixture.agentDir),
+            JSON.stringify({
+                scriptPreview: {
+                    formatters: {
+                        javascript: {
+                            kind: "javascript",
+                            command: [oxfmtExecutable],
+                        },
+                    },
+                },
+            }),
+        );
+        const pi = new PiPtyProcess(
+            launchOptions(fixture, { initialPrompt: "run the deterministic formatter failure" }),
+        );
+        try {
+            const warning = "[pi-glowup] javascript display formatter failed";
+            const frame = await pi.waitForFrame(
+                (candidate) =>
+                    candidate.text.includes("STREAM_COMPLETE") &&
+                    candidate.text.includes(warning) &&
+                    candidate.text.includes("DIAGNOSTIC_DRAFT"),
+                PTY_TIMEOUT_MS,
+            );
+            expect(pi.unframedOutput()).not.toContain(warning);
+            const drafts = frame.rows.filter((row) => row.text.includes("DIAGNOSTIC_DRAFT"));
+            expect(drafts.map((row) => row.text.trim())).toEqual(["DIAGNOSTIC_DRAFT"]);
+            expect(
+                frame.rows.some(
+                    (row) => row.text.includes(warning) && !row.text.includes("DIAGNOSTIC_DRAFT"),
+                ),
+            ).toBe(true);
+
+            expectTerminalInvariants(frame, [resolve("test/pty/fixtures/offline-provider.ts")]);
+            expect(
+                pi
+                    .frames()
+                    .some((candidate) =>
+                        candidate.rows.some(
+                            (row) =>
+                                row.text.includes(warning) && row.text.includes("DIAGNOSTIC_DRAFT"),
+                        ),
+                    ),
+            ).toBe(false);
+        } catch (cause: unknown) {
+            await pi.writeFailureArtifacts("formatter-diagnostic-input", cause);
+            throw cause;
+        } finally {
+            await pi.stop();
+        }
+    }, 45_000);
+
     it("keeps original Node source while running and decorates after completion", async () => {
         const fixture = createFixtureWorkspace();
         fixtures.push(fixture);

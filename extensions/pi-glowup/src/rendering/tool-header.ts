@@ -9,7 +9,7 @@ import {
     red,
     pathText,
 } from "./theme.ts";
-import { wrapPrefixedLine, makeComponent } from "./component.ts";
+import { wrapPrefixedLine, makeComponent, omittedLinesLabel } from "./component.ts";
 import { type Component } from "@earendil-works/pi-tui";
 import { formatPathTarget, collapseHome } from "./path.ts";
 
@@ -66,15 +66,21 @@ function wrapPreviewPhysicalLines(
 
     const visibleText = physicalLines.slice(0, lineBudget).join("\n");
     const omitted = physicalLines.length - lineBudget;
-    return [
-        ...wrapPrefixedLine(visibleText, width, firstPrefix, restPrefix),
-        ...wrapPrefixedLine(
-            muted(theme, `… +${omitted} lines (${omittedHint})`),
-            width,
-            restPrefix,
-            restPrefix,
-        ),
-    ];
+    const visibleRows = wrapPrefixedLine(visibleText, width, firstPrefix, restPrefix);
+    const markerRows = wrapPrefixedLine(
+        muted(theme, `${omittedLinesLabel(omitted)} (${omittedHint})`),
+        width,
+        restPrefix,
+        restPrefix,
+    );
+    if (omitted === 1) {
+        const allRows = wrapPrefixedLine(normalized, width, firstPrefix, restPrefix);
+        if (allRows.length <= visibleRows.length + markerRows.length) {
+            return allRows;
+        }
+    }
+
+    return [...visibleRows, ...markerRows];
 }
 
 export type GlowupCallRenderOptions = {
@@ -103,10 +109,6 @@ export function renderGlowupCall(
             theme,
         );
     });
-}
-
-export function renderGlowupBody(text: string | undefined): Component {
-    return makeComponent((width) => wrapPrefixedLine(text, width, "", ""));
 }
 
 export function renderGlowupExplore(

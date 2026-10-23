@@ -75,7 +75,8 @@ export function createDirectMcpRenderer(
                 : renderExpandableSection(
                       { ...context, expanded: options.expanded },
                       "result",
-                      (expanded) => renderSimpleResult(theme, result, { ...options, expanded }),
+                      (expanded) =>
+                          renderSimpleResult(theme, result, { ...options, expanded }, context),
                   );
         },
     };
@@ -369,8 +370,8 @@ export function createMcpGatewayRenderer(
                 expanded: context.expanded,
             });
         },
-        renderResult(result, options, theme) {
-            return renderSimpleResult(theme, result, options);
+        renderResult(result, options, theme, context) {
+            return renderSimpleResult(theme, result, options, context);
         },
     };
 }
@@ -398,8 +399,8 @@ export function createChromeDevtoolsMcpRenderer(
                 expanded: context.expanded,
             });
         },
-        renderResult(result, options, theme) {
-            return renderSimpleResult(theme, result, options);
+        renderResult(result, options, theme, context) {
+            return renderSimpleResult(theme, result, options, context);
         },
     };
 }

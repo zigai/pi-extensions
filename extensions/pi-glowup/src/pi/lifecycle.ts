@@ -1,3 +1,4 @@
+import { reportExtensionDiagnostic } from "@zigai/pi-extension-internals";
 import Type from "typebox";
 import { Value } from "typebox/value";
 import {
@@ -12,6 +13,10 @@ import {
     readGlowupConfig,
 } from "../config/load.ts";
 import { type GlowupConfig } from "../config/normalize.ts";
+import {
+    configureRetainedOutputDiagnostics,
+    isRetainedOutputLoggingEnabled,
+} from "../rendering/output.ts";
 import { DebugFileLogger } from "../diagnostics/logger.ts";
 import {
     configDiagnostics,
@@ -46,6 +51,14 @@ import { createExplorationFeature, isExplorationToolName } from "../tools/built-
 import { createNativeToolRenderers } from "../tools/built-in/renderers.ts";
 import { parsePreservedThirdPartyToolNames } from "../tools/renderers.ts";
 import { type ThirdPartyToolRenderingOptions } from "../tools/types.ts";
+import {
+    activateGlowupRendering,
+    observeGlowupRendering,
+    selectGlowupPresentation,
+    selectedGlowupPresentation,
+} from "../rendering/presentation-registry.ts";
+import { clearProtocolRenderingState } from "../tools/protocol/renderer.ts";
+import { emptyComponent } from "../rendering/component.ts";
 import { diffDetailsParser } from "../unknown-values.ts";
 import { configureAssistantSeparatorPatch } from "./patches/assistant-separator.ts";
 import { configureAutocompleteCleanupPatch } from "./patches/autocomplete-cleanup.ts";
@@ -55,14 +68,20 @@ import {
     configureBuiltInToolRendererPatch,
     configureCompletedLineCache,
     configureThirdPartyToolRendererPatch,
+    thirdPartyRenderContext,
 } from "./patches/tool-execution-patch.ts";
 import { configureWorkingWidgetSpacingPatch } from "./patches/working-widget-spacing.ts";
 import {
+    clearToolRows,
     installExplorationSession,
+    observeToolRow,
     refreshToolRows,
     restoreExplorationSession,
 } from "./session.ts";
 import { createSyntaxLifecycle } from "./syntax-lifecycle.ts";
+import { createCodeStreamStore } from "../rendering/streaming/code-stream.ts";
+import { installAssistantStreaming } from "../rendering/streaming/assistant-streaming.ts";
+import type { CodePreview } from "../rendering/streaming/presentation.ts";
 
 const opaqueObjectSchema = Type.Object({});
 const opaqueObjectParser = {
@@ -83,9 +102,10 @@ const SCRIPT_HEADER_LAYOUT_ENV = "PI_GLOWUP_SCRIPT_HEADER_LAYOUT";
 function thirdPartyToolRenderingOptions(
     config: GlowupConfig,
     codemodePreview: NonNullable<ThirdPartyToolRenderingOptions["codemodePreview"]>,
+    streamCode: CodePreview,
 ): ThirdPartyToolRenderingOptions {
     const preservedFromEnv = process.env[PRESERVE_TOOLS_ENV];
-    return {
+    const options: ThirdPartyToolRenderingOptions = {
         labelMode: config.toolLabels.mode,
         mutationSettings: config.mutations,
         codemodePreview,
@@ -94,6 +114,9 @@ function thirdPartyToolRenderingOptions(
                 ? config.preserveTools
                 : parsePreservedThirdPartyToolNames(preservedFromEnv),
     };
+    if (config.streaming.code === "token") return options;
+
+    return { ...options, streamCode };
 }
 
 function scriptFormatterCommands(
@@ -113,7 +136,10 @@ function scriptBlockFormatter(
     config: GlowupConfig,
     reportWarning: (message: string) => void,
 ): ScriptBlockFormatter | undefined {
-    return createCommandScriptFormatter(scriptFormatterCommands(config, reportWarning));
+    return createCommandScriptFormatter(
+        scriptFormatterCommands(config, reportWarning),
+        reportWarning,
+    );
 }
 
 function scriptPreviewHeaderLayout(config: GlowupConfig): ScriptPreviewHeaderLayout {
@@ -135,6 +161,16 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
 
     guardedPi[EXTENSION_LOADED_KEY] = true;
 
+    let codeStreams = createCodeStreamStore();
+    let assistantStreaming: Awaited<ReturnType<typeof installAssistantStreaming>> | undefined;
+    let assistantActivation: Promise<void> = Promise.resolve();
+    const streamCode: CodePreview = (input) =>
+        codeStreams.get({
+            ...input,
+            mode: config.streaming.code,
+            ...(formatter !== undefined && { formatter }),
+        });
+
     const edit = createNativeEditFeature();
     const bash = createNativeBashFeature();
     const codemode = createCodemodePreview(() => formatter);
@@ -143,7 +179,11 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
     const { captureNativeEditSnapshot, finishNativeEditSnapshot } = edit;
     const { captureNativeDeletePreview } = deletion;
     const { explorationGroups } = exploration;
-    const { renderBuiltInToolCall, renderBuiltInToolResult } = createNativeToolRenderers({
+    const {
+        renderBuiltInToolCall,
+        renderBuiltInToolResult,
+        codeSource: nativeCodeSource,
+    } = createNativeToolRenderers({
         edit,
         bash,
         deletion,
@@ -157,8 +197,17 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
     });
 
     let restoreAbort: AbortController | undefined;
+    let stopObservingRendering: (() => void) | undefined;
     const clearSessionState = (): void => {
+        assistantStreaming?.dispose();
+        assistantStreaming = undefined;
+        codeStreams.clear();
+        configureRetainedOutputDiagnostics(undefined);
         syntax.cancel();
+        stopObservingRendering?.();
+        stopObservingRendering = undefined;
+        clearProtocolRenderingState();
+        clearToolRows();
         restoreAbort?.abort();
         restoreAbort = undefined;
         edit.clear();
@@ -169,13 +218,20 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         clearQueuedDiffHighlights();
     };
 
-    const reportWarning = (message: string): void => console.warn(message);
+    const reportWarning = (message: string): void => reportExtensionDiagnostic(message);
     let config = createDefaultGlowupConfig(reportWarning);
     const debugLogger = new DebugFileLogger({
         extensionDirectory: getGlowupDiagnosticsDirectory(),
         reportWarning,
     });
-    debugLogger.configure(config.debugLog);
+    const configureDebugLog = (nextConfig: GlowupConfig): void => {
+        debugLogger.configure({
+            ...nextConfig.debugLog,
+            enabled: nextConfig.debugLog.enabled || isRetainedOutputLoggingEnabled(),
+        });
+    };
+
+    configureDebugLog(config);
 
     let formatter = scriptBlockFormatter(config, reportWarning);
     let headerLayout = scriptPreviewHeaderLayout(config);
@@ -192,9 +248,18 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
 
     const applyConfig = (nextConfig: GlowupConfig): void => {
         config = nextConfig;
+        activateGlowupRendering();
         configureRenderingAppearance(config.appearance);
         configureToolCallIndicator(config.toolCallIndicator);
-        debugLogger.configure(config.debugLog);
+        configureDebugLog(config);
+        configureRetainedOutputDiagnostics((diagnostic) => {
+            const generation = sessionGeneration;
+
+            queueMicrotask(() => {
+                if (generation === sessionGeneration)
+                    debugLogger.record("retained_output", diagnostic);
+            });
+        });
         formatter = scriptBlockFormatter(config, reportWarning);
         headerLayout = scriptPreviewHeaderLayout(config);
 
@@ -208,30 +273,78 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         configureThirdPartyToolRendererPatch(
             true,
             config.patches.thirdPartyToolRenderers
-                ? thirdPartyToolRenderingOptions(config, codemode)
+                ? thirdPartyToolRenderingOptions(config, codemode, streamCode)
                 : { enabled: false },
         );
 
+        const nativeCall = renderBuiltInToolCall({
+            headerLayout: () => headerLayout,
+            maxCodePreviewLines: () => config.scriptMaxCodePreviewLines,
+            showPrologueOmission: () => config.scriptShowPrologueOmission,
+            shellLayout: () => config.shellLayout,
+            shellOperatorPosition: () => config.shellOperatorPosition,
+            labelMode: config.toolLabels.mode,
+            movingWriteViewport: config.writePreview.movingViewport,
+            mutationSettings: config.mutations,
+            recordRender: recordBuiltInRender,
+            ...(config.streaming.code !== "token" && { streamCode }),
+        });
+        const nativeResult = renderBuiltInToolResult({
+            headerLayout: () => headerLayout,
+            mutationSettings: config.mutations,
+            recordRender: recordBuiltInRender,
+        });
+        const renderingOptions = thirdPartyToolRenderingOptions(config, codemode, streamCode);
+
         configureBuiltInToolRendererPatch(true, {
             observeRow: (row, toolCallId, toolName) => {
+                observeToolRow(row);
                 explorationGroups.observeRow(row, toolCallId, isExplorationToolName(toolName));
             },
-            renderCall: renderBuiltInToolCall({
-                headerLayout: () => headerLayout,
-                maxCodePreviewLines: () => config.scriptMaxCodePreviewLines,
-                showPrologueOmission: () => config.scriptShowPrologueOmission,
-                shellLayout: () => config.shellLayout,
-                shellOperatorPosition: () => config.shellOperatorPosition,
-                labelMode: config.toolLabels.mode,
-                movingWriteViewport: config.writePreview.movingViewport,
-                mutationSettings: config.mutations,
-                recordRender: recordBuiltInRender,
-            }),
-            renderResult: renderBuiltInToolResult({
-                headerLayout: () => headerLayout,
-                mutationSettings: config.mutations,
-                recordRender: recordBuiltInRender,
-            }),
+            renderCall(toolName, args, theme, context) {
+                const renderer = selectedGlowupPresentation().createRenderer(
+                    toolName,
+                    {
+                        codeSource: (value, renderContext) =>
+                            nativeCodeSource(toolName, value, renderContext),
+                        renderCall: () =>
+                            nativeCall(toolName, args, theme, context) ?? emptyComponent(),
+                        renderResult: (result, options) =>
+                            nativeResult(toolName, result, options, theme, context) ??
+                            emptyComponent(),
+                    },
+                    renderingOptions,
+                );
+
+                return renderer.renderCall(
+                    jsonValueParser.parse(args),
+                    theme,
+                    thirdPartyRenderContext(toolName, context),
+                );
+            },
+            renderResult(toolName, result, options, theme, context) {
+                const rendered = nativeResult(toolName, result, options, theme, context);
+                if (rendered === undefined) return undefined;
+
+                const renderer = selectedGlowupPresentation().createRenderer(
+                    toolName,
+                    {
+                        codeSource: (value, renderContext) =>
+                            nativeCodeSource(toolName, value, renderContext),
+                        renderCall: () =>
+                            nativeCall(toolName, context.args, theme, context) ?? emptyComponent(),
+                        renderResult: () => rendered,
+                    },
+                    renderingOptions,
+                );
+
+                return renderer.renderResult(
+                    result,
+                    options,
+                    theme,
+                    thirdPartyRenderContext(toolName, context),
+                );
+            },
         });
 
         debugLogger.record("config_applied", () => ({
@@ -241,7 +354,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
     };
 
     const restoreBashPreviews = (ctx: ExtensionContext): void => {
-        if (formatter === undefined) return;
+        if (formatter === undefined || config.streaming.code !== "token") return;
 
         function* calls(): IterableIterator<{ toolCallId: string; command: string }> {
             const branch = ctx.sessionManager.getBranch();
@@ -278,11 +391,10 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
             formatter,
             signal: controller.signal,
             isCurrent: () => sessionGeneration === generation && !controller.signal.aborted,
-            invalidate: () => refreshToolRows(ctx),
+            invalidate: (toolCallId) => refreshToolRows(ctx, toolCallId),
         });
     };
 
-    applyConfig(config);
     debugLogger.record("extension_loaded", diagnosticSnapshot);
     extensionLoadedRecorded = config.debugLog.enabled;
 
@@ -320,7 +432,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
             ...diagnosticSnapshot(),
         }));
 
-        if (event.toolName === "codemode") {
+        if (event.toolName === "codemode" && config.streaming.code === "token") {
             const input = jsonValueParser.parse(event.input);
             const record = jsonObjectParser.parse(input);
             const code = record === undefined ? undefined : getString(record, "code");
@@ -332,7 +444,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
                     code,
                     formatter,
                     isCurrent: () => sessionGeneration === formatterGeneration,
-                    invalidate: () => refreshToolRows(ctx),
+                    invalidate: () => refreshToolRows(ctx, event.toolCallId),
                 });
             }
         }
@@ -344,7 +456,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
             return preimageCapture;
         }
 
-        if (command !== undefined) {
+        if (command !== undefined && config.streaming.code === "token") {
             const formatterGeneration = sessionGeneration;
 
             bash.schedule({
@@ -353,7 +465,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
                 formatter,
                 signal: ctx.signal,
                 isCurrent: () => sessionGeneration === formatterGeneration,
-                invalidate: () => refreshToolRows(ctx),
+                invalidate: () => refreshToolRows(ctx, event.toolCallId),
             });
 
             debugLogger.record("script_preview_remembered", () => ({
@@ -371,7 +483,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         let storedEditPreview = false;
         let persistedEditPierrePayload: PierreDiffPayload | undefined;
 
-        if (event.toolName === "codemode") {
+        if (event.toolName === "codemode" && config.streaming.code === "token") {
             const input = jsonValueParser.parse(event.input);
             const record = jsonObjectParser.parse(input);
             const code = record === undefined ? undefined : getString(record, "code");
@@ -384,12 +496,15 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
                     formatter,
                     completed: true,
                     isCurrent: () => sessionGeneration === formatterGeneration,
-                    invalidate: () => refreshToolRows(ctx),
+                    invalidate: () => refreshToolRows(ctx, event.toolCallId),
                 });
             }
         }
 
-        if (event.toolName === "bash" || compatBuiltInToolName(event.toolName) === "bash") {
+        if (
+            config.streaming.code === "token" &&
+            (event.toolName === "bash" || compatBuiltInToolName(event.toolName) === "bash")
+        ) {
             const command = commandField(event.input);
             if (command !== undefined) {
                 const formatterGeneration = sessionGeneration;
@@ -400,7 +515,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
                     formatter,
                     signal: ctx.signal,
                     isCurrent: () => sessionGeneration === formatterGeneration,
-                    invalidate: () => refreshToolRows(ctx),
+                    invalidate: () => refreshToolRows(ctx, event.toolCallId),
                 });
             }
         }
@@ -454,11 +569,13 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
     pi.on("session_start", async (_event, ctx) => {
         sessionGeneration += 1;
 
+        const currentGeneration = sessionGeneration;
+
         const nextConfig = readGlowupConfig(
             { cwd: ctx.cwd, reportWarning },
             { includeProjectConfig: ctx.isProjectTrusted() },
         );
-        debugLogger.configure(nextConfig.debugLog);
+        configureDebugLog(nextConfig);
 
         if (!extensionLoadedRecorded) {
             debugLogger.record("extension_loaded", diagnosticSnapshot);
@@ -472,13 +589,61 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         }));
 
         clearSessionState();
+        await codeStreams.dispose();
+
+        if (currentGeneration !== sessionGeneration) return;
+
+        codeStreams = createCodeStreamStore();
         restoreExplorationSession(exploration, ctx.sessionManager);
         debugLogger.record("session_start", () => ({
             phase: "after_reset",
             ...diagnosticSnapshot(),
         }));
 
+        try {
+            selectGlowupPresentation(nextConfig.presentation);
+        } catch {
+            reportWarning("[pi-glowup] Selected tool presentation is unavailable.");
+            selectGlowupPresentation("compact");
+        }
+
         applyConfig(nextConfig);
+
+        const activationGeneration = sessionGeneration;
+
+        assistantActivation = assistantActivation
+            .then(async () => {
+                if (activationGeneration !== sessionGeneration || !ctx.hasUI) return;
+                if (config.streaming.prose === "token" && config.streaming.code === "token") return;
+
+                const handle = await installAssistantStreaming({
+                    prose: config.streaming.prose,
+                    code: config.streaming.code,
+                    streams: codeStreams,
+                    ...(formatter !== undefined && { formatter }),
+                    invalidate: () => {
+                        if (activationGeneration === sessionGeneration)
+                            ctx.ui.setStatus("glowup-streaming", undefined);
+                    },
+                });
+                if (activationGeneration !== sessionGeneration) {
+                    handle.dispose();
+                    return;
+                }
+
+                assistantStreaming = handle;
+            })
+            .catch(() => {
+                reportWarning("[pi-glowup] Assistant streaming activation failed.");
+            });
+        await assistantActivation;
+
+        if (ctx.hasUI)
+            stopObservingRendering = observeGlowupRendering(() => {
+                applyConfig(config);
+                refreshToolRows(ctx);
+            });
+
         restoreBashPreviews(ctx);
         refreshToolRows(ctx);
 
@@ -490,6 +655,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
     });
 
     pi.on("session_tree", (_event, ctx) => {
+        codeStreams.clear();
         restoreAbort?.abort();
         restoreBashPreviews(ctx);
     });
@@ -507,7 +673,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         debugLogger.record("turn_end", diagnosticSnapshot);
     });
 
-    pi.on("session_shutdown", async (event) => {
+    pi.on("session_shutdown", async () => {
         sessionGeneration += 1;
         debugLogger.stopMemorySampling();
         debugLogger.record("session_shutdown", () => ({
@@ -521,13 +687,14 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         configureWorkingWidgetSpacingPatch(false);
         configureAutocompleteCleanupPatch(false);
         configureMarkdownSyntaxPatch(false);
-        configureThirdPartyToolRendererPatch(false);
         configureBuiltInToolRendererPatch(false);
+        configureThirdPartyToolRendererPatch(false);
         await syntax.settle();
+        await assistantActivation;
+        await codeStreams.dispose();
+        codeStreams = createCodeStreamStore();
 
-        if (event.reason === "quit") {
-            await disposeSyntaxHighlighting();
-        }
+        await disposeSyntaxHighlighting();
 
         debugLogger.record("session_shutdown", () => ({
             phase: "after_reset",

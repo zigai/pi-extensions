@@ -1,4 +1,12 @@
-import { initTheme, ToolExecutionComponent } from "@earendil-works/pi-coding-agent";
+import {
+    createBashTool,
+    createBashToolDefinition,
+    createReadTool,
+    createReadToolDefinition,
+    createWriteToolDefinition,
+    initTheme,
+    ToolExecutionComponent,
+} from "@earendil-works/pi-coding-agent";
 import {
     getCapabilities,
     setCapabilities,
@@ -7,12 +15,31 @@ import {
     type Component,
     type TUI,
 } from "@earendil-works/pi-tui";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+    existsSync,
+    mkdirSync,
+    mkdtempSync,
+    readFileSync,
+    rmSync,
+    unlinkSync,
+    writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { stripVTControlCharacters } from "node:util";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getGlowupGlobalConfigPath } from "../../src/config/load.ts";
 import { buildPierreDiffPayload } from "../../src/rendering/diff/payload.ts";
+import {
+    initializeSyntaxHighlighting,
+    loadSyntaxLanguageIfReady,
+    onSyntaxHighlightComplete,
+    settleSyntaxHighlights,
+    syntaxHighlightCacheStats,
+    syntaxHighlighterDiagnostics,
+} from "../../src/rendering/syntax/highlighter.ts";
+import type { ExtensionSettings } from "../../src/settings-input.ts";
+import { getScriptFormatterWorkload } from "../../src/tools/built-in/bash/formatter.ts";
 import { configureAutocompleteCleanupPatch } from "../../src/pi/patches/autocomplete-cleanup.ts";
 import { GlowupExtensionHarness } from "./extension-harness.ts";
 import { applyPatchOwnerToolDefinition } from "../support/apply-patch-owner-fixture.ts";
@@ -40,6 +67,15 @@ const currentPatch = `*** Begin Patch
 +export const currentValue = 2;
 *** End Patch`;
 
+class ObservedToolExecutionComponent extends ToolExecutionComponent {
+    invalidations = 0;
+
+    override invalidate(): void {
+        this.invalidations += 1;
+        super.invalidate();
+    }
+}
+
 class LinesComponent implements Component {
     constructor(public lines: string[]) {}
 
@@ -64,6 +100,8 @@ type CleanupPrototype = {
 
 type ExtensionProfile = {
     readonly theme?: "dark" | "light";
+    readonly scriptPreview?: Partial<ExtensionSettings["scriptPreview"]>;
+    readonly streaming?: ExtensionSettings["streaming"];
 
     readonly appearance?:
         | "default"
@@ -162,6 +200,21 @@ function requireDisplayCellSpan(row: InterpretedRow, text: string): CellSpan {
 
     throw new Error(
         `expected terminal row ${row.index} to contain display-cell span ${JSON.stringify(text)}; row=${JSON.stringify(row.text)}`,
+    );
+}
+
+function codeForegrounds(row: InterpretedRow, code: string): Set<string> {
+    const span = requireDisplayCellSpan(row, code);
+
+    return new Set(
+        row.cells
+            .slice(span.start, span.end)
+            .filter((cell) => cell.chars.trim().length > 0)
+            .map((cell) => {
+                if (cell.isForegroundDefault) return "default";
+                if (cell.isForegroundRgb) return `rgb:${cell.foreground}`;
+                return `palette:${cell.foreground}`;
+            }),
     );
 }
 
@@ -285,6 +338,13 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
             appearance,
             profile.mutations !== undefined ? { mutations: profile.mutations } : undefined,
         );
+        if (profile.scriptPreview !== undefined) {
+            Object.assign(config, { scriptPreview: profile.scriptPreview });
+        }
+
+        if (profile.streaming !== undefined)
+            Object.assign(config, { streaming: profile.streaming });
+
         writeFileSync(getGlowupGlobalConfigPath(agentDir), JSON.stringify(config));
         const installedExtension = new GlowupExtensionHarness();
         extension = installedExtension;
@@ -306,6 +366,437 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
 
         return { terminal, tui };
     }
+
+    it("settles a long highlighted transcript without invalidating unrelated tool rows", async () => {
+        await extension?.emitToolCall(
+            {
+                type: "tool_call",
+                toolName: "read",
+                toolCallId: "syntax-start",
+                input: { path: "sample.ts" },
+            },
+            cwd,
+        );
+        await initializeSyntaxHighlighting();
+        expect(await loadSyntaxLanguageIfReady("typescript")).toBe(true);
+        await settleSyntaxHighlights();
+
+        const pendingTerminal = new VirtualTerminal(100, 30);
+        const activeTui = createTui(pendingTerminal);
+        const passive = new ObservedToolExecutionComponent(
+            "write",
+            "plain-history",
+            { path: "notes.txt", content: "A plain historical note." },
+            undefined,
+            createWriteToolDefinition(cwd),
+            activeTui,
+            cwd,
+        );
+        passive.setArgsComplete();
+        passive.updateResult({ content: [], isError: false });
+        passive.render(100);
+        await settleSyntaxHighlights();
+        const initialInvalidations = passive.invalidations;
+        const tools: ToolExecutionComponent[] = [];
+        let completions = 0;
+        const stopCounting = onSyntaxHighlightComplete(() => {
+            completions += 1;
+        });
+        try {
+            for (let index = 0; index < 120; index += 1) {
+                const tool = new ToolExecutionComponent(
+                    "read",
+                    `historical-code-${index}`,
+                    { path: `sample-${index}.ts` },
+                    undefined,
+                    createReadToolDefinition(cwd),
+                    activeTui,
+                    cwd,
+                );
+                tool.setArgsComplete();
+                tool.setExpanded(true);
+                tool.updateResult({
+                    content: [{ type: "text", text: `export const sample${index} = ${index};` }],
+                    isError: false,
+                });
+                tool.render(100);
+                await settleSyntaxHighlights();
+                tools.push(tool);
+            }
+
+            expect(passive.invalidations).toBe(initialInvalidations);
+            expect(completions).toBeGreaterThan(0);
+            const settledCompletions = completions;
+            terminal = pendingTerminal;
+            tui = activeTui;
+
+            for (const tool of tools) activeTui.addChild(tool);
+            activeTui.addChild(passive);
+            activeTui.start();
+            await pendingTerminal.settle();
+
+            for (let repaint = 0; repaint < 3; repaint += 1) {
+                activeTui.requestRender();
+                await pendingTerminal.settle();
+                await settleSyntaxHighlights();
+                expect(completions).toBe(settledCompletions);
+            }
+
+            const source = "export const sample119 = 119;";
+            expect(
+                codeForegrounds(pendingTerminal.requireRowContaining(source), source).size,
+            ).toBeGreaterThan(1);
+
+            pendingTerminal.assertRowsFitWidth();
+        } finally {
+            stopCounting();
+
+            if (terminal !== pendingTerminal) pendingTerminal.dispose();
+        }
+    });
+
+    it.each([
+        {
+            language: "python",
+            label: "Python",
+            firstLine: 'large_native_marker = "ready"',
+            comment: "#",
+            command: (source: string) => `python - <<'PY'\n${source}\nPY`,
+        },
+        {
+            language: "javascript",
+            label: "Node",
+            firstLine: 'const largeNativeMarker = "ready";',
+            comment: "//",
+            command: (source: string) => `node - <<'JS'\n${source}\nJS`,
+        },
+    ])(
+        "retains completed native $label worker colors above the shared-cache source budget",
+        async ({ language, label, firstLine, comment, command }) => {
+            await initializeSyntaxHighlighting({}, { preloadLanguages: [language] });
+            const source = [
+                firstLine,
+                ...Array.from(
+                    { length: 140 },
+                    (_, index) => `${comment} retained native row ${index} ${"padding ".repeat(7)}`,
+                ),
+            ].join("\n");
+            expect(Buffer.byteLength(source)).toBeGreaterThan(8 * 1024);
+            expect(Buffer.byteLength(source)).toBeLessThan(40 * 1024);
+            expect(syntaxHighlighterDiagnostics().loadedLanguages).toContain(language);
+            expect(syntaxHighlightCacheStats().entries).toBe(0);
+
+            const pendingTerminal = new VirtualTerminal(100, 24);
+            const activeTui = createTui(pendingTerminal);
+            const tool = new ToolExecutionComponent(
+                "bash",
+                `completed-native-${language}`,
+                {},
+                undefined,
+                createBashToolDefinition(cwd),
+                activeTui,
+                cwd,
+            );
+
+            // Populate completed history without first warming this source in a streaming slot.
+            tool.setArgsComplete();
+            tool.updateResult({ content: [], isError: false });
+            tool.updateArgs({ command: command(source) });
+            const initial = tool.render(100).join("\n");
+            expect(initial).toContain(firstLine);
+            expect(stripVTControlCharacters(initial)).toContain(`• ${label}`);
+
+            let completions = 0;
+            const stopCounting = onSyntaxHighlightComplete(() => {
+                completions += 1;
+            });
+            try {
+                activeTui.addChild(new LinesComponent(["BEFORE_NATIVE_SYNTAX"]));
+                activeTui.addChild(tool);
+                activeTui.addChild(new LinesComponent(["AFTER_NATIVE_SYNTAX"]));
+                terminal = pendingTerminal;
+                tui = activeTui;
+                activeTui.start();
+                await vi.waitUntil(() => completions > 0);
+                await pendingTerminal.settle();
+
+                expect(
+                    codeForegrounds(pendingTerminal.requireRowContaining(firstLine), firstLine)
+                        .size,
+                ).toBeGreaterThan(1);
+                await settleSyntaxHighlights();
+                expect(syntaxHighlightCacheStats().entries).toBe(0);
+                const settledCompletions = completions;
+
+                // Unrelated transcript repaints must neither lose colors nor submit another job.
+                for (let repaint = 0; repaint < 3; repaint += 1) {
+                    activeTui.requestRender();
+                    await pendingTerminal.settle();
+                    await settleSyntaxHighlights();
+                    expect(
+                        codeForegrounds(pendingTerminal.requireRowContaining(firstLine), firstLine)
+                            .size,
+                    ).toBeGreaterThan(1);
+
+                    expect(completions).toBe(settledCompletions);
+                }
+
+                pendingTerminal.assertUniqueTranscriptMarkers(
+                    `• ${label}`,
+                    "BEFORE_NATIVE_SYNTAX",
+                    "AFTER_NATIVE_SYNTAX",
+                );
+                pendingTerminal.assertNoWrappedRows();
+                pendingTerminal.assertRowsFitWidth();
+            } finally {
+                stopCounting();
+            }
+        },
+    );
+
+    it("retains native script prefix colors as streamed arguments complete and the result arrives", async () => {
+        await initializeSyntaxHighlighting({}, { preloadLanguages: ["python"] });
+        const firstLine = 'streamed_native_marker = "ready"';
+        const command = (source: string) => `python - <<'PY'\n${source}\nPY`;
+        const pendingTerminal = new VirtualTerminal(100, 24);
+        const activeTui = createTui(pendingTerminal);
+        const tool = new ToolExecutionComponent(
+            "bash",
+            "streamed-native-syntax",
+            {},
+            undefined,
+            createBashToolDefinition(cwd),
+            activeTui,
+            cwd,
+        );
+        const initialSource = `${firstLine}\nprint(streamed_native_marker)`;
+        tool.updateArgs({ command: command(initialSource) });
+        await settleSyntaxHighlights();
+        const initialRow = tool
+            .render(100)
+            .find((line) => stripVTControlCharacters(line).includes(firstLine));
+        expect(initialRow).toContain("\u001b[");
+
+        activeTui.addChild(tool);
+        terminal = pendingTerminal;
+        tui = activeTui;
+        activeTui.start();
+        await pendingTerminal.settle();
+        expect(
+            codeForegrounds(pendingTerminal.requireRowContaining(firstLine), firstLine).size,
+        ).toBeGreaterThan(1);
+
+        const source = [
+            initialSource,
+            ...Array.from(
+                { length: 140 },
+                (_, index) => `# appended native row ${index} ${"padding ".repeat(7)}`,
+            ),
+        ].join("\n");
+        expect(Buffer.byteLength(source)).toBeGreaterThan(8 * 1024);
+        tool.updateArgs({ command: command(source) });
+        tool.setArgsComplete();
+        tool.markExecutionStarted();
+
+        // This synchronous render happens before the new worker result can arrive.
+        expect(
+            tool.render(100).find((line) => stripVTControlCharacters(line).includes(firstLine)),
+        ).toBe(initialRow);
+
+        await settleSyntaxHighlights();
+        tool.updateResult({ content: [], isError: false });
+        activeTui.requestRender();
+        await pendingTerminal.settle();
+        expect(
+            codeForegrounds(pendingTerminal.requireRowContaining(firstLine), firstLine).size,
+        ).toBeGreaterThan(1);
+
+        pendingTerminal.assertNoWrappedRows();
+        pendingTerminal.assertRowsFitWidth();
+    });
+
+    it("publishes whole-shell formatter output at the rendered width without changing execution or expanded source", async () => {
+        const formatterOutput = join(cwd, "shell-formatter-output.txt");
+        await installExtension({
+            scriptPreview: {
+                headerLayout: "block",
+                shellLayout: "preserve",
+                formatters: {
+                    bash: {
+                        kind: "command",
+                        command: [
+                            process.execPath,
+                            "-e",
+                            "let source='';process.stdin.on('data',chunk=>source+=chunk);process.stdin.on('end',()=>{const formatted='# FORMAT_WIDTH_'+process.argv[1]+'\\n'+source;require('node:fs').writeFileSync(process.argv[2],formatted);process.stdout.write(formatted)})",
+                            "{width}",
+                            formatterOutput,
+                        ],
+                    },
+                },
+            },
+        });
+        const installedExtension = extension;
+        if (installedExtension === undefined) throw new Error("extension must be installed");
+
+        const command = "printf '%s\\n' SHELL_EXECUTION\n: ORIGINAL_TAIL";
+        const args = Object.freeze({ command });
+        const toolCallId = "whole-shell-formatter";
+        const executedCommands: string[] = [];
+        const nativeBash = createBashTool(cwd, {
+            spawnHook(context) {
+                executedCommands.push(context.command);
+                return context;
+            },
+        });
+        const pendingTerminal = new VirtualTerminal(80, 24);
+        const activeTui = createTui(pendingTerminal);
+        const tool = new ToolExecutionComponent(
+            "bash",
+            toolCallId,
+            args,
+            undefined,
+            createBashToolDefinition(cwd),
+            activeTui,
+            cwd,
+        );
+        tool.setArgsComplete();
+
+        // The installed extension's registered pre-execution handler, not a preview-store helper.
+        await installedExtension.emitToolCall(
+            { type: "tool_call", toolName: "bash", toolCallId, input: args },
+            cwd,
+        );
+        tool.markExecutionStarted();
+        const result = await nativeBash.execute(toolCallId, args);
+        expect(result.content).toEqual([{ type: "text", text: "SHELL_EXECUTION\n" }]);
+        expect(executedCommands).toEqual([command]);
+        expect(args).toEqual({ command });
+        tool.updateResult({ ...result, isError: false });
+        activeTui.addChild(tool);
+        terminal = pendingTerminal;
+        tui = activeTui;
+        activeTui.start();
+
+        await pendingTerminal.settle();
+        await vi.waitUntil(
+            () => existsSync(formatterOutput) && getScriptFormatterWorkload().active === 0,
+        );
+        await pendingTerminal.settle();
+
+        // Prove the real subprocess produced valid display code even if the renderer drops it.
+        expect(readFileSync(formatterOutput, "utf8")).toMatch(/^# FORMAT_WIDTH_\d+\n/u);
+
+        // The block renderer reserves six columns for code and continuation prefixes.
+        expect(pendingTerminal.screenText()).toContain("│ # FORMAT_WIDTH_74");
+        expect(readFileSync(formatterOutput, "utf8")).toBe(`# FORMAT_WIDTH_74\n${command}`);
+        pendingTerminal.assertRowsFitWidth();
+        pendingTerminal.resize(50, 24);
+        await pendingTerminal.settle();
+        await vi.waitUntil(() => getScriptFormatterWorkload().active === 0);
+        await pendingTerminal.settle();
+        expect(pendingTerminal.screenText()).toContain("│ # FORMAT_WIDTH_44");
+        expect(readFileSync(formatterOutput, "utf8")).toBe(`# FORMAT_WIDTH_44\n${command}`);
+        expect(pendingTerminal.screenText()).not.toContain("# FORMAT_WIDTH_74");
+        pendingTerminal.assertNoWrappedRows();
+        pendingTerminal.assertRowsFitWidth();
+
+        tool.setExpanded(true);
+        activeTui.requestRender();
+        await pendingTerminal.settle();
+        const expandedCode = stripVTControlCharacters(tool.render(50).join("\n"))
+            .split("\n")
+            .filter((line) => line.startsWith("  │ "))
+            .map((line) => line.slice(4))
+            .join("\n");
+        expect(expandedCode).toBe(command);
+        expect(pendingTerminal.screenText()).not.toContain("FORMAT_WIDTH_");
+        expect(args).toEqual({ command });
+        expect(executedCommands).toEqual([command]);
+        await vi.waitUntil(() => getScriptFormatterWorkload().active === 0);
+    });
+
+    it.each(["small", "above-shared-cache-budget"])(
+        "repaints completed native read syntax at the same width without an expansion toggle (%s)",
+        async (size) => {
+            await initializeSyntaxHighlighting({}, { preloadLanguages: ["javascript"] });
+            const firstLine = 'const readWorkerMarker = "ready";';
+            let source = firstLine;
+
+            if (size === "above-shared-cache-budget") {
+                source +=
+                    "\n" +
+                    Array.from(
+                        { length: 140 },
+                        (_, index) => `// read row ${index} ${"padding ".repeat(8)}`,
+                    ).join("\n");
+                expect(Buffer.byteLength(source)).toBeGreaterThan(8 * 1024);
+            }
+
+            expect(Buffer.byteLength(source)).toBeLessThan(40 * 1024);
+            const path = `read-worker-${size}.js`;
+            writeFileSync(join(cwd, path), source);
+            const result = await createReadTool(cwd).execute(`read-${size}`, { path });
+            expect(result.content).toEqual([{ type: "text", text: source }]);
+            expect(syntaxHighlighterDiagnostics().loadedLanguages).toContain("javascript");
+            expect(syntaxHighlightCacheStats().entries).toBe(0);
+            const pendingTerminal = new VirtualTerminal(100, 160);
+            const activeTui = createTui(pendingTerminal);
+            const tool = new ToolExecutionComponent(
+                "read",
+                `read-${size}`,
+                { path },
+                undefined,
+                createReadToolDefinition(cwd),
+                activeTui,
+                cwd,
+            );
+            tool.setArgsComplete();
+
+            // Read output is intentionally hidden when collapsed. Keep this state throughout.
+            tool.setExpanded(true);
+            tool.updateResult({ ...result, isError: false });
+            expect(tool.render(100).join("\n")).toContain(firstLine);
+            let completions = 0;
+            const stopCounting = onSyntaxHighlightComplete(() => {
+                completions += 1;
+            });
+            try {
+                activeTui.addChild(new LinesComponent(["BEFORE_READ_SYNTAX"]));
+                activeTui.addChild(tool);
+                activeTui.addChild(new LinesComponent(["AFTER_READ_SYNTAX"]));
+                terminal = pendingTerminal;
+                tui = activeTui;
+                activeTui.start();
+                await settleSyntaxHighlights();
+                await pendingTerminal.settle();
+
+                expect(completions).toBeGreaterThan(0);
+                expect(
+                    codeForegrounds(pendingTerminal.requireRowContaining(firstLine), firstLine)
+                        .size,
+                ).toBeGreaterThan(1);
+                const settledCompletions = completions;
+                activeTui.requestRender();
+                await pendingTerminal.settle();
+                await settleSyntaxHighlights();
+                expect(
+                    codeForegrounds(pendingTerminal.requireRowContaining(firstLine), firstLine)
+                        .size,
+                ).toBeGreaterThan(1);
+
+                expect(completions).toBe(settledCompletions);
+                pendingTerminal.assertUniqueTranscriptMarkers(
+                    "Explored",
+                    "BEFORE_READ_SYNTAX",
+                    "AFTER_READ_SYNTAX",
+                );
+                pendingTerminal.assertNoWrappedRows();
+                pendingTerminal.assertRowsFitWidth();
+            } finally {
+                stopCounting();
+            }
+        },
+    );
 
     it("interprets apply_patch streaming, shrinking, rewriting, and completion without stale cells", async () => {
         const pendingTerminal = new VirtualTerminal(100, 28);
@@ -1801,6 +2292,122 @@ export const grownWriteTwelve = 12;
         await pendingTerminal.settle();
         expect(pendingTerminal.screenText()).toBe(wide);
     });
+
+    it("keeps settled statement-mode Write colors across real host invalidations", async () => {
+        await installExtension({ streaming: { prose: "token", code: "statement" } });
+        await initializeSyntaxHighlighting({}, { preloadLanguages: ["typescript"] });
+        const source = Array.from(
+            { length: 220 },
+            (_value, index) => `export const value${index} = "retained_${index}";`,
+        );
+        const pendingTerminal = new VirtualTerminal(100, 30);
+        const activeTui = createTui(pendingTerminal);
+        const tool = new ToolExecutionComponent(
+            "write",
+            "statement-write-redraw",
+            { path: "src/statements.ts", content: source.join("\n") },
+            undefined,
+            undefined,
+            activeTui,
+            cwd,
+        );
+        tool.setArgsComplete();
+        tool.updateResult({ content: [], isError: false });
+        activeTui.addChild(tool);
+        terminal = pendingTerminal;
+        tui = activeTui;
+        activeTui.start();
+
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+            await settleSyntaxHighlights();
+            await pendingTerminal.settle();
+            const row = pendingTerminal
+                .interpretedRows()
+                .find((line) => line.text.includes("value219"));
+            if (row !== undefined && codeForegrounds(row, source[219]!).size > 1) break;
+        }
+
+        const row = pendingTerminal.requireRowContaining("value219");
+        expect(codeForegrounds(row, source[219]!).size).toBeGreaterThan(1);
+        const settled = pendingTerminal.interpretedRows();
+        for (let redraw = 0; redraw < 4; redraw += 1) {
+            tool.invalidate();
+            activeTui.requestRender();
+            await pendingTerminal.settle(0);
+            expect(pendingTerminal.interpretedRows()).toEqual(settled);
+            await settleSyntaxHighlights();
+            await pendingTerminal.settle();
+            expect(pendingTerminal.interpretedRows()).toEqual(settled);
+        }
+    });
+
+    it.each(["edit", "apply_patch"] as const)(
+        "keeps large %s text-diff syntax colors through real tool-row redraws",
+        async (toolName) => {
+            await initializeSyntaxHighlighting({}, { preloadLanguages: ["typescript"] });
+            const source = Array.from(
+                { length: 180 },
+                (_value, index) =>
+                    `const value${index} = formatValue("syntax_${index}", ${index});`,
+            );
+            expect(Buffer.byteLength(source.join("\n"))).toBeGreaterThan(8 * 1024);
+            const patch = [
+                "*** Begin Patch",
+                "*** Add File: src/colors.ts",
+                ...source.map((line) => `+${line}`),
+                "*** End Patch",
+            ].join("\n");
+            const pendingTerminal = new VirtualTerminal(100, 200);
+            const activeTui = createTui(pendingTerminal);
+            let definition;
+            if (toolName === "apply_patch") definition = applyPatchOwnerToolDefinition;
+
+            const tool = new ToolExecutionComponent(
+                toolName,
+                `call-xterm-retained-colors-${toolName}`,
+                { path: "src/colors.ts", patch },
+                undefined,
+                definition,
+                activeTui,
+                cwd,
+            );
+            const result = () => ({
+                content: [],
+                details: {
+                    diff: source.map((line, index) => `+${index + 1} ${line}`).join("\n"),
+                    // Semantic owner rows without a usable Pierre patch take the text path.
+                    inputPatch: patch,
+                    patch: "",
+                },
+                isError: false,
+            });
+            tool.setExpanded(true);
+            tool.setArgsComplete();
+            tool.updateResult(result());
+            activeTui.addChild(tool);
+            terminal = pendingTerminal;
+            tui = activeTui;
+            activeTui.start();
+            await pendingTerminal.settle();
+            await settleSyntaxHighlights();
+            await pendingTerminal.settle();
+            const row = pendingTerminal.requireRowContaining("const value179");
+            expect(codeForegrounds(row, source[179]!).size).toBeGreaterThan(1);
+            const settled = pendingTerminal.interpretedRows();
+
+            for (let redraw = 0; redraw < 4; redraw += 1) {
+                tool.updateResult(result());
+                activeTui.requestRender();
+                await pendingTerminal.settle(0);
+                expect(pendingTerminal.interpretedRows()).toEqual(settled);
+                await settleSyntaxHighlights();
+                await pendingTerminal.settle();
+                expect(pendingTerminal.interpretedRows()).toEqual(settled);
+            }
+
+            pendingTerminal.assertNoWrappedRows();
+        },
+    );
 
     it("keeps every available row from compatible edit result previews", async () => {
         const pendingTerminal = new VirtualTerminal(100, 30);

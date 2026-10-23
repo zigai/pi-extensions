@@ -106,6 +106,7 @@ For compatibility with the previous appearance, `addedRowBackground` and
 {
   "$schema": "./schemas/pi-glowup.schema.json",
   "preserveTools": [],
+  "presentation": "compact",
   "mutations": {
     "defaultView": "full",
     "previewLines": 6,
@@ -147,6 +148,10 @@ For compatibility with the previous appearance, `addedRowBackground` and
   },
   "writePreview": {
     "movingViewport": true
+  },
+  "streaming": {
+    "prose": "token",
+    "code": "token"
   },
   "syntax": {
     "preloadLanguages": ["markdown", "bash", "python", "typescript", "javascript", "json"],

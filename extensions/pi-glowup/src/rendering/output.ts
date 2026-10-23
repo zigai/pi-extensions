@@ -1,8 +1,20 @@
 import { hasNonWhitespaceText, truncateUtf8ByGrapheme } from "../text-boundaries.ts";
 import { type GlowupRenderTheme, muted, dim } from "./theme.ts";
 import { truncateToWidth, type Component } from "@earendil-works/pi-tui";
-import { type CodeOutputSyntax, highlightCodeOutput } from "./syntax/code-component.ts";
-import { toolExpandHint, emptyComponent, makeComponent, wrapPrefixedLine } from "./component.ts";
+import {
+    type CodeOutputSyntax,
+    highlightCodeOutput,
+    scheduleCodeOutputSyntaxLoad,
+} from "./syntax/code-component.ts";
+import { syntaxLanguageFromFile } from "./syntax/language.ts";
+import { observeSyntaxHighlightSource } from "./syntax/highlighter.ts";
+import {
+    toolExpandHint,
+    emptyComponent,
+    makeComponent,
+    wrapPrefixedLine,
+    omittedLinesLabel,
+} from "./component.ts";
 
 const MAX_COLLAPSED_OUTPUT_PREVIEW_BYTES = 64 * 1024;
 const MAX_COLLAPSED_OUTPUT_LINE_BYTES = 4 * 1024;
@@ -64,11 +76,12 @@ export function collapsedPreviewLinesFromText(
         1,
         Math.min(Math.floor(maxPreviewLines), MAX_COLLAPSED_OUTPUT_PREVIEW_LINES),
     );
+    const retainedLineBudget = Math.min(lineBudget + 1, MAX_COLLAPSED_OUTPUT_PREVIEW_LINES);
     const lineByteBudget = Math.max(
         MIN_COLLAPSED_OUTPUT_LINE_BYTES,
         Math.min(
             MAX_COLLAPSED_OUTPUT_LINE_BYTES,
-            Math.floor(MAX_COLLAPSED_OUTPUT_PREVIEW_BYTES / lineBudget),
+            Math.floor(MAX_COLLAPSED_OUTPUT_PREVIEW_BYTES / retainedLineBudget),
         ),
     );
     const headCount = mode === "headTail" ? Math.ceil(lineBudget / 2) : lineBudget;
@@ -100,7 +113,7 @@ export function collapsedPreviewLinesFromText(
         if (allLines !== undefined) {
             allLines.push(previewLine);
 
-            if (allLines.length > lineBudget) {
+            if (allLines.length > retainedLineBudget) {
                 allLines = undefined;
             }
         }
@@ -144,14 +157,17 @@ export function collapsedPreviewLinesFromText(
         return { isEmpty: true };
     }
 
-    if (lineCount <= lineBudget) {
+    if (lineCount <= retainedLineBudget) {
         return { isEmpty: false, lines: allLines };
     }
 
     if (mode === "head") {
         return {
             isEmpty: false,
-            lines: [...headLines, `… +${lineCount - headLines.length} lines (${omittedHint})`],
+            lines: [
+                ...headLines,
+                `${omittedLinesLabel(lineCount - headLines.length)} (${omittedHint})`,
+            ],
         };
     }
 
@@ -159,7 +175,7 @@ export function collapsedPreviewLinesFromText(
         isEmpty: false,
         lines: [
             ...headLines,
-            `… +${lineCount - headLines.length - tailLines.length} lines (${omittedHint})`,
+            `${omittedLinesLabel(lineCount - headLines.length - tailLines.length)} (${omittedHint})`,
             ...tailLines,
         ],
     };
@@ -246,7 +262,22 @@ export function detachString(text: string): string {
     return Buffer.from(text, "utf8").toString("utf8");
 }
 
-function shouldReportRetainedOutput(): boolean {
+type RetainedOutputDiagnostic = {
+    readonly expanded: boolean;
+    readonly mode: "headTail" | "head" | "hidden";
+    readonly inputBytes: number;
+    readonly retainedBytes: number;
+};
+
+let retainedOutputReporter: ((diagnostic: RetainedOutputDiagnostic) => void) | undefined;
+
+export function configureRetainedOutputDiagnostics(
+    report: ((diagnostic: RetainedOutputDiagnostic) => void) | undefined,
+): void {
+    retainedOutputReporter = report;
+}
+
+export function isRetainedOutputLoggingEnabled(): boolean {
     const value = process.env[RETAINED_OUTPUT_LOG_ENV]?.trim().toLowerCase();
     return value === "1" || value === "true" || value === "yes";
 }
@@ -271,18 +302,14 @@ function reportRetainedOutput(
     input: string | undefined,
     mode: "headTail" | "head" | "hidden",
 ): void {
-    if (!shouldReportRetainedOutput()) {
-        return;
-    }
+    if (!isRetainedOutputLoggingEnabled()) return;
 
-    console.warn(
-        `[pi-glowup] renderGlowupOutput retained ${JSON.stringify({
-            expanded: retained.kind === "expanded",
-            mode,
-            inputBytes: Buffer.byteLength(input ?? "", "utf8"),
-            retainedBytes: retainedOutputBytes(retained),
-        })}`,
-    );
+    retainedOutputReporter?.({
+        expanded: retained.kind === "expanded",
+        mode,
+        inputBytes: Buffer.byteLength(input ?? "", "utf8"),
+        retainedBytes: retainedOutputBytes(retained),
+    });
 }
 
 function visitPhysicalLines(text: string, visit: (line: string) => void): void {
@@ -333,7 +360,7 @@ function renderCollapsedWrappedPreview(
 ): string[] {
     const rendered = flattenWrappedRows(lines);
     const metaIndex = lines.findIndex((line) => line.isMeta);
-    if (metaIndex === -1 && rendered.length <= options.rowBudget) {
+    if (metaIndex === -1 && rendered.length <= options.rowBudget + 1) {
         return rendered;
     }
 
@@ -377,12 +404,14 @@ export type GlowupOutputRenderOptions = {
     readonly expanded: boolean;
     readonly mode?: "headTail" | "head" | "hidden";
     readonly maxPreviewLines?: number;
+    readonly maxExpandedLines?: number;
     readonly prefixFirst?: string;
     readonly prefixRest?: string;
     readonly dimContent?: boolean;
     readonly noOutputLabel?: string | null;
     readonly omittedHint?: string;
     readonly syntax?: CodeOutputSyntax;
+    readonly invalidate?: (() => void) | undefined;
 };
 
 export function renderGlowupOutput(
@@ -397,7 +426,10 @@ export function renderGlowupOutput(
     const dimContent = options.dimContent ?? true;
     const omittedHint = options.omittedHint ?? toolExpandHint();
     const noOutputLabel = options.noOutputLabel;
-    const syntax = options.syntax;
+    let syntax = options.syntax;
+    if (syntax !== undefined && syntax.invalidate === undefined) {
+        syntax = { ...syntax, invalidate: options.invalidate };
+    }
 
     if (!options.expanded && mode === "hidden") {
         return emptyComponent();
@@ -416,6 +448,14 @@ export function renderGlowupOutput(
           };
 
     reportRetainedOutput(retained, text, mode);
+
+    if (syntax?.invalidate !== undefined) {
+        let source = "";
+        if (retained.kind === "expanded") source = retained.text;
+        else if (!retained.preview.isEmpty) source = retained.preview.lines.join("\n");
+
+        observeSyntaxHighlightSource(source, syntax.invalidate);
+    }
 
     return makeComponent((width) => {
         const rawLines =
@@ -439,6 +479,14 @@ export function renderGlowupOutput(
             retained.kind === "collapsed" &&
             visible.some(isPreviewMetaLine) &&
             (syntax?.language?.toLowerCase() === "json" || /\.jsonc?$/iu.test(syntax?.path ?? ""));
+        if (syntax !== undefined && !suppressTruncatedJsonHighlighting) {
+            const language = syntax.language ?? syntaxLanguageFromFile(syntax.path, rawLines[0]);
+            let loadSyntax = syntax;
+            if (language !== undefined) loadSyntax = { ...syntax, language };
+
+            scheduleCodeOutputSyntaxLoad(loadSyntax, syntax.invalidate);
+        }
+
         const displayLines =
             syntax === undefined || suppressTruncatedJsonHighlighting
                 ? visible
@@ -465,7 +513,18 @@ export function renderGlowupOutput(
         }
 
         if (retained.kind === "expanded") {
-            return flattenWrappedRows(wrappedLines);
+            const rows = flattenWrappedRows(wrappedLines);
+            const limit = options.maxExpandedLines;
+            if (limit === undefined || rows.length <= limit + 1) return rows;
+
+            return [
+                ...rows.slice(0, limit),
+                truncateToWidth(
+                    `${prefixRest}${muted(theme, omittedLinesLabel(rows.length - limit))}`,
+                    width,
+                    "",
+                ),
+            ];
         }
 
         return renderCollapsedWrappedPreview(wrappedLines, {

@@ -1,4 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { queryObjects } from "node:v8";
+import {
+    initializeSyntaxHighlighting,
+    settleSyntaxHighlights,
+    disposeSyntaxHighlighting,
+} from "../../../src/rendering/syntax/highlighter.ts";
 import type { Component } from "@earendil-works/pi-tui";
 import { createPlainTheme } from "../../support/plain-theme.ts";
 import {
@@ -43,6 +49,85 @@ const defaultAppearance = {
 
 describe("write rendering", () => {
     beforeEach(() => configureRenderingAppearance(defaultAppearance));
+
+    it("releases old components while statement-mode write previews remain live", () => {
+        class ObsoletePreview implements Component {
+            render(): string[] {
+                return ["obsolete"];
+            }
+
+            invalidate(): void {}
+        }
+
+        function redraw(): Component {
+            let previous: Component = new ObsoletePreview();
+            for (let revision = 0; revision < 25; revision += 1) {
+                previous = renderWriteCallPreview(
+                    { path: "src/retained.ts", content: "export const retained = 1;" },
+                    plainTheme,
+                    {
+                        toolCallId: "statement-write-retention",
+                        streamCode: ({ source }) => source,
+                        isPartial: false,
+                        argsComplete: true,
+                        isError: false,
+                        expanded: false,
+                        lastComponent: previous,
+                    },
+                );
+                previous.render(100);
+            }
+
+            return previous;
+        }
+
+        const current = redraw();
+        expect(queryObjects(ObsoletePreview, { format: "count" })).toBe(0);
+        expect(current.render(100).join("\n")).toContain("export const retained = 1;");
+    });
+
+    it("reuses settled statement-mode Write colors instead of restarting on every redraw", async () => {
+        await initializeSyntaxHighlighting({}, { preloadLanguages: ["typescript"] });
+        const content = Array.from(
+            { length: 220 },
+            (_value, index) => `export const value${index} = "retained_${index}";`,
+        ).join("\n");
+        expect(Buffer.byteLength(content)).toBeGreaterThan(8 * 1024);
+        let invalidations = 0;
+        let previous: Component | undefined;
+        const redraw = () => {
+            previous = renderWriteCallPreview({ path: "src/large.ts", content }, plainTheme, {
+                toolCallId: "statement-write-colors",
+                streamCode: ({ source }) => source,
+                isPartial: false,
+                argsComplete: true,
+                isError: false,
+                expanded: false,
+                lastComponent: previous,
+                invalidate: () => {
+                    invalidations += 1;
+                },
+            });
+
+            return previous.render(100);
+        };
+
+        try {
+            redraw();
+            await settleSyntaxHighlights();
+            expect(invalidations).toBeGreaterThan(0);
+            const settled = redraw();
+            const completed = invalidations;
+
+            for (let revision = 0; revision < 4; revision += 1) {
+                expect(redraw()).toEqual(settled);
+                await settleSyntaxHighlights();
+                expect(invalidations).toBe(completed);
+            }
+        } finally {
+            await disposeSyntaxHighlighting();
+        }
+    });
 
     it("renders successful write content from call arguments", () => {
         const component = renderWriteCallPreview(

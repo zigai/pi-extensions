@@ -15,6 +15,8 @@ import { getPierrePalette } from "../src/rendering/diff/theme.ts";
 import { applyPatchOwnerToolDefinition } from "../test/support/apply-patch-owner-fixture.ts";
 import { configureRenderingAppearance, type GlowupRenderTheme } from "../src/rendering/theme.ts";
 import { renderGlowupDiff } from "../src/rendering/diff/text-renderer.ts";
+import { makeComponent } from "../src/rendering/component.ts";
+import { renderBashCommandCall } from "../src/tools/built-in/bash/renderer.ts";
 import { renderWriteCallPreview } from "../src/tools/built-in/write-preview.ts";
 import {
     clearSyntaxHighlightCache,
@@ -602,6 +604,48 @@ async function reviewFindingTimings(): Promise<Readonly<Record<string, readonly 
     };
 }
 
+function componentRedrawTimings(samples: number): readonly number[] {
+    const lines = Array.from(
+        { length: 300 },
+        (_value, index) =>
+            `\u001b[90m  │ \u001b[0m\u001b[35mexport const\u001b[0m value${index} = \u001b[32m"example_${index}"\u001b[0m;`,
+    );
+    const component = makeComponent(() => lines);
+
+    return Array.from({ length: samples }, () =>
+        measure(() => {
+            component.invalidate();
+            component.render(153);
+        }),
+    );
+}
+
+function formattedBashCallTimings(samples: number): readonly number[] {
+    const code = Array.from({ length: 100 }, (_value, index) => `printf 'value_${index}'`).join(
+        " &&\n",
+    );
+    const command = code.replaceAll("\n", " ");
+    let lastComponent: Component | undefined;
+
+    return Array.from({ length: samples }, () =>
+        measure(() => {
+            lastComponent = renderBashCommandCall(plainTheme, command, {
+                state: "success",
+                expanded: false,
+                maxCodePreviewLines: 8,
+                showPrologueOmission: false,
+                headerLayout: "auto",
+                shellLayout: "auto",
+                shellOperatorPosition: "trailing",
+                pureScriptOverride: { label: "Bash", language: "bash", code },
+                profile: { kind: "bash", command: ["shfmt"] },
+                lastComponent,
+            });
+            lastComponent.render(153);
+        }),
+    );
+}
+
 async function runBenchmark(options: BenchmarkOptions): Promise<BenchmarkReport> {
     configureRenderingAppearance(defaultAppearance);
     globalThis.gc?.();
@@ -610,6 +654,8 @@ async function runBenchmark(options: BenchmarkOptions): Promise<BenchmarkReport>
     const rounds = options.quick ? 1 : 3;
 
     const timings: Record<string, readonly number[]> = {};
+    timings["styled-component-redraw-300"] = componentRedrawTimings(options.quick ? 30 : 150);
+    timings["prepared-shell-call-rebuild"] = formattedBashCallTimings(options.quick ? 30 : 150);
     timings["cold-large-diff"] = renderColdLargeDiff(options.quick ? 3 : 9);
     timings["write-stream-300"] = writeStreamTimings(300, rounds);
     timings["write-stream-1000"] = writeStreamTimings(1_000, rounds);

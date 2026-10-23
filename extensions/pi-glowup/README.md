@@ -35,6 +35,7 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-glowup.json`.
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
+| `presentation` | string | `"compact"` | Whole tool presentation: compact, outline, or an extension-registered name. |
 | `preserveTools` | string[] | `[]` | Keep selected third-party tools on their original renderer. |
 | `mutations.defaultView` | `full` \| `preview` | `"full"` | Show every available completed-mutation row or a bounded semantic preview. |
 | `mutations.previewLines` | integer | `6` | Changed/content rows retained per file in preview view. |
@@ -75,13 +76,16 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-glowup.json`.
 | `scriptPreview.showPrologueOmission` | boolean | `false` | Show a count row when collapsed previews omit leading setup imports. |
 | `scriptPreview.shellLayout` | `preserve` \| `auto` \| `always` | `"auto"` | Choose when composed Bash commands are reflowed at safe syntax boundaries. |
 | `scriptPreview.shellOperatorPosition` | `trailing` \| `leading` | `"trailing"` | Place Bash chain operators before or after reflowed line breaks. |
-| `scriptPreview.formatters` | Record<string, [CommandFormatter](#settings-type-CommandFormatter) \| [PythonFormatter](#settings-type-PythonFormatter) \| [JavaScriptFormatter](#settings-type-JavaScriptFormatter) \| [TypeScriptFormatter](#settings-type-TypeScriptFormatter) \| [BashFormatter](#settings-type-BashFormatter)> | `{}` | Display-only profiles keyed by matching language id; expansion shows original source. |
+| `scriptPreview.formatters` | Record<string, [CommandFormatter](#settings-type-CommandFormatter) \| [PythonFormatter](#settings-type-PythonFormatter) \| [JavaScriptFormatter](#settings-type-JavaScriptFormatter) \| [TypeScriptFormatter](#settings-type-TypeScriptFormatter) \| [BashFormatter](#settings-type-BashFormatter)> | `{}` | Display-only profiles keyed by language id; statement mode formats each unit in both views, otherwise expansion shows original source. |
+| `streaming.prose` | `token` \| `sentence` \| `paragraph` | `"token"` | Reveal assistant prose as tokens, completed sentences, or Markdown paragraphs and list items. |
+| `streaming.code` | `token` \| `statement` \| `block` | `"token"` | Reveal assistant code fences, writes, and script previews as tokens, completed statements, or whole blocks. Statement mode supports JavaScript, TypeScript, Python, and Bash; other languages wait for completion. Configured formatters format each statement separately in both views. Edits and patches are unchanged. |
 
 ### Defaults
 
 ```json
 {
   "$schema": "./schemas/pi-glowup.schema.json",
+  "presentation": "compact",
   "preserveTools": [],
   "mutations": {
     "defaultView": "full",
@@ -153,6 +157,10 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-glowup.json`.
     "shellLayout": "auto",
     "shellOperatorPosition": "trailing",
     "formatters": {}
+  },
+  "streaming": {
+    "prose": "token",
+    "code": "token"
   }
 }
 ```
@@ -162,6 +170,10 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-glowup.json`.
 ```json
 {
   "$schema": "./schemas/pi-glowup.schema.json",
+  "streaming": {
+    "prose": "paragraph",
+    "code": "statement"
+  },
   "scriptPreview": {
     "formatters": {
       "javascript": {
@@ -206,7 +218,7 @@ Additional fields are not allowed.
 | --- | --- | --- | --- |
 | `kind` | `python` | Yes | Use Tuff's Python formatter. |
 | `command` | string[] | Yes | Executable followed by arguments; no shell expansion is performed. |
-| `imports` | `show` \| `omit` | No | Leading import/setup visibility in collapsed display; expansion shows original source. |
+| `imports` | `show` \| `omit` | No | Leading import/setup visibility in collapsed display; expansion retains all source. |
 | `indentWidth` | integer | No | Python indentation width. |
 | `collections` | `fill` \| `ruff-default` | No | Collapse collections that fit; fill instead packs items within multiline brackets. |
 | `magicTrailingComma` | boolean | No | Treat trailing commas as requests for vertical expansion. |
@@ -221,7 +233,7 @@ Additional fields are not allowed.
 | --- | --- | --- | --- |
 | `kind` | `javascript` | Yes | Use Oxfmt's JavaScript parser. |
 | `command` | string[] | Yes | Executable followed by arguments; no shell expansion is performed. |
-| `imports` | `show` \| `omit` | No | Leading import/setup visibility in collapsed display; expansion shows original source. |
+| `imports` | `show` \| `omit` | No | Leading import/setup visibility in collapsed display; expansion retains all source. |
 | `tabWidth` | integer | No | Oxfmt indentation width. |
 | `objectWrap` | `collapse` \| `preserve` | No | Collapse object literals when they fit the actual content width. |
 
@@ -235,7 +247,7 @@ Additional fields are not allowed.
 | --- | --- | --- | --- |
 | `kind` | `typescript` | Yes | Use Oxfmt's TypeScript parser. |
 | `command` | string[] | Yes | Executable followed by arguments; no shell expansion is performed. |
-| `imports` | `show` \| `omit` | No | Leading import/setup visibility in collapsed display; expansion shows original source. |
+| `imports` | `show` \| `omit` | No | Leading import/setup visibility in collapsed display; expansion retains all source. |
 | `tabWidth` | integer | No | Oxfmt indentation width. |
 | `objectWrap` | `collapse` \| `preserve` | No | Collapse object literals when they fit the actual content width. |
 

@@ -1,4 +1,5 @@
 import type { Component } from "@earendil-works/pi-tui";
+import type { CodePreview } from "../../rendering/streaming/presentation.ts";
 import Type, { type Static } from "typebox";
 import { Value } from "typebox/value";
 import type { MutationSettings } from "../../rendering/preview-settings.ts";
@@ -10,12 +11,16 @@ import {
     type GlowupExecutionPhase,
     type GlowupNode,
 } from "./contract.ts";
-import { renderProtocolNode } from "./node-renderer.ts";
+import { selectedGlowupPresentation } from "../../rendering/presentation-registry.ts";
 import type { ThirdPartyToolRenderContext, ThirdPartyToolRenderer } from "../types.ts";
 import { renderExpandableSection } from "../section-expansion.ts";
 
 const MAX_MUTATION_CALL_SLOTS = 500;
 const mutationCallSlots = new Map<string, ProtocolMutationCallSlot>();
+
+export function clearProtocolRenderingState(): void {
+    mutationCallSlots.clear();
+}
 
 class ProtocolMutationCallSlot implements Component {
     private hidden = false;
@@ -67,7 +72,13 @@ function renderProtocolCallNode(
         previousSlot === undefined
             ? context
             : { ...context, lastComponent: previousSlot.innerComponent() };
-    const component = renderProtocolNode(node, theme, nodeContext, labelMode, mutationSettings);
+    const component = selectedGlowupPresentation().renderNode(
+        node,
+        theme,
+        nodeContext,
+        labelMode,
+        mutationSettings,
+    );
     if (node.kind !== "mutation") return component;
 
     const slot = previousSlot ?? new ProtocolMutationCallSlot(context.toolCallId, component);
@@ -138,6 +149,7 @@ export function createProtocolRenderer(
     fallback: ThirdPartyToolRenderer,
     labelMode: ToolLabelMode = "static",
     mutationSettings?: MutationSettings,
+    streamCode?: CodePreview,
 ): ThirdPartyToolRenderer {
     return {
         renderCall(args, theme, initialContext) {
@@ -179,11 +191,14 @@ export function createProtocolRenderer(
                     : renderProtocolCallNode(node, theme, context, labelMode, mutationSettings);
             };
 
+            let callContext = initialContext;
+            if (streamCode !== undefined) callContext = { ...initialContext, streamCode };
+
             return adapter.independentExpansion === true
-                ? renderExpandableSection(initialContext, "call", (expanded) =>
-                      render({ ...initialContext, expanded }),
+                ? renderExpandableSection(callContext, "call", (expanded) =>
+                      render({ ...callContext, expanded }),
                   )
-                : render(initialContext);
+                : render(callContext);
         },
         renderResult(result, initialOptions, theme, initialContext) {
             const render = (
@@ -218,7 +233,13 @@ export function createProtocolRenderer(
                     mutationCallSlots.delete(context.toolCallId);
                 }
 
-                return renderProtocolNode(node, theme, resultContext, labelMode, mutationSettings);
+                return selectedGlowupPresentation().renderNode(
+                    node,
+                    theme,
+                    resultContext,
+                    labelMode,
+                    mutationSettings,
+                );
             };
 
             return adapter.independentExpansion === true

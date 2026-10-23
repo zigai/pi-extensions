@@ -1,13 +1,22 @@
 import type { Component } from "@earendil-works/pi-tui";
+import type { CodePreview } from "../../rendering/streaming/presentation.ts";
 import { scheduleCodeOutputSyntaxLoad } from "../../rendering/syntax/code-component.ts";
-import { inheritSyntaxComponent } from "../../rendering/syntax/component-owner.ts";
+import {
+    createSyntaxComponent,
+    inheritSyntaxComponent,
+} from "../../rendering/syntax/component-owner.ts";
 import {
     countContentLines,
     hasNonWhitespaceText,
     truncateGraphemeText,
     truncateUtf8ByGrapheme,
 } from "../../text-boundaries.ts";
-import { emptyComponent, toolExpandHint } from "../../rendering/component.ts";
+import {
+    makeComponent,
+    emptyComponent,
+    omittedLinesLabel,
+    toolExpandHint,
+} from "../../rendering/component.ts";
 import { formatPathTarget } from "../../rendering/path.ts";
 import {
     renderGlowupCall,
@@ -42,6 +51,9 @@ export type WriteCallArgs = {
 
 export type WriteCallContext = {
     readonly toolCallId?: string;
+    readonly streamCode?: CodePreview;
+    readonly sourceLineCount?: number;
+    readonly waitingForCode?: boolean;
     readonly isError: boolean;
     readonly isPartial: boolean;
     readonly argsComplete?: boolean;
@@ -71,7 +83,7 @@ function writeDiffRenderOptions(
 function writeMutationCallOptions(
     labelColumnWidth: number | undefined,
     body: Component,
-    state: "running" | "success",
+    state: "running" | "success" | "error",
 ): MutationCallRenderOptions {
     let options: MutationCallRenderOptions = {};
     if (labelColumnWidth !== undefined) {
@@ -90,6 +102,8 @@ type PartialWritePreviewUpdate = {
     readonly theme: GlowupRenderTheme;
     readonly path: string;
     readonly content: string;
+    readonly sourceLineCount: number | undefined;
+    readonly waitingForCode: boolean;
     readonly labelMode: ToolLabelMode;
     readonly mutationLabelColumnWidth: number | undefined;
     readonly movingViewport: boolean;
@@ -178,7 +192,7 @@ class PartialWriteContentPreview {
 
         return [
             ...lines,
-            `… +${snapshot.lineCount - lines.length} lines (${toolExpandHint()})`,
+            `${omittedLinesLabel(snapshot.lineCount - lines.length)} (${toolExpandHint()})`,
         ].join("\n");
     }
 
@@ -189,7 +203,7 @@ class PartialWriteContentPreview {
 
         const tailLines = snapshot.tailLines.slice(-PARTIAL_WRITE_MOVING_TAIL_LINES);
         return [
-            `… +${snapshot.lineCount - tailLines.length} lines (${toolExpandHint()})`,
+            `${omittedLinesLabel(snapshot.lineCount - tailLines.length)} (${toolExpandHint()})`,
             ...tailLines,
         ].join("\n");
     }
@@ -339,6 +353,8 @@ class PartialWriteCallPreviewComponent implements Component {
     private movingViewport = true;
     private expanded = false;
     private expandedContent = "";
+    private sourceLineCount: number | undefined;
+    private waitingForCode = false;
     private cachedWidth: number | undefined;
     private cachedLines: string[] | undefined;
     private invalidateHost: (() => void) | undefined;
@@ -365,6 +381,8 @@ class PartialWriteCallPreviewComponent implements Component {
         this.mutationLabelColumnWidth = update.mutationLabelColumnWidth;
         this.movingViewport = update.movingViewport;
         this.expanded = update.expanded;
+        this.sourceLineCount = update.sourceLineCount;
+        this.waitingForCode = update.waitingForCode;
         this.invalidateHost = update.invalidate;
         this.expandedContent = update.expanded
             ? boundedWriteContentPreview(update.content, update.maxWritePreviewBytes)
@@ -378,7 +396,7 @@ class PartialWriteCallPreviewComponent implements Component {
             return this.cachedLines;
         }
 
-        const added = this.preview.lineCount();
+        const added = this.sourceLineCount ?? this.preview.lineCount();
         const previewText = this.expanded
             ? this.expandedContent
             : this.preview.previewText({ movingViewport: this.movingViewport });
@@ -389,6 +407,7 @@ class PartialWriteCallPreviewComponent implements Component {
                       mode: "head",
                       maxPreviewLines: 1,
                       noOutputLabel: "(empty file)",
+                      ...(this.waitingForCode && { noOutputLabel: null }),
                   })
                 : renderGlowupDiff(
                       this.theme,
@@ -446,6 +465,65 @@ function boundedWriteContentPreview(content: string, maxBytes: number | null): s
     return `${truncateUtf8ByGrapheme(content, maxContentBytes)}${WRITE_PREVIEW_TRUNCATION_SUFFIX}`;
 }
 
+type StreamingWriteUpdate = {
+    readonly args: WriteCallArgs;
+    readonly theme: GlowupRenderTheme;
+    readonly context: Omit<WriteCallContext, "lastComponent" | "streamCode">;
+    readonly streamCode: CodePreview;
+    readonly invalidate: () => void;
+};
+
+class StreamingWritePreviewComponent implements Component {
+    private preview: Component | undefined;
+    private readonly rendered = makeComponent((width) => this.renderPreview(width));
+    private readonly toolCallId: string | undefined;
+
+    constructor(private input: StreamingWriteUpdate) {
+        this.toolCallId = input.context.toolCallId;
+    }
+
+    belongsTo(toolCallId: string | undefined): boolean {
+        return this.toolCallId === toolCallId;
+    }
+
+    update(input: StreamingWriteUpdate): void {
+        this.input = input;
+        this.invalidate();
+    }
+
+    render(width: number): string[] {
+        return this.rendered.render(width);
+    }
+
+    invalidate(): void {
+        this.rendered.invalidate();
+    }
+
+    private renderPreview(width: number): string[] {
+        const { args, theme, context, streamCode, invalidate } = this.input;
+        const path = args.path ?? "";
+        const content = args.content ?? "";
+        const display = streamCode({
+            key: `tool:${context.toolCallId ?? ""}:write:${path}`,
+            source: content,
+            path,
+            complete: context.argsComplete === true || !context.isPartial || context.isError,
+            targetWidth: Math.max(1, width - 10),
+            invalidate,
+        });
+
+        this.preview = renderWriteCallPreview({ ...args, content: display }, theme, {
+            ...context,
+            invalidate,
+            sourceLineCount: countContentLines(content),
+            waitingForCode: display.length === 0 && content.length > 0,
+            lastComponent: this.preview,
+        });
+
+        return this.preview.render(width);
+    }
+}
+
 /** Renders a built-in write call with a bounded preview of the content being written. */
 export function renderWriteCallPreview(
     args: WriteCallArgs,
@@ -456,22 +534,56 @@ export function renderWriteCallPreview(
     const content = args.content;
     const labelMode = context.labelMode ?? "static";
     const mutationSettings = context.mutationSettings ?? PREVIEW_MUTATION_SETTINGS;
-    const statusText = toolStatusLabel(labelMode, context, {
+    let statusText = toolStatusLabel(labelMode, context, {
         static: "Write",
         active: "Writing",
         completed: "Wrote",
     });
+    if (context.isError) statusText = "Write";
 
     if (content === undefined && isActiveToolCall(context)) {
         return emptyComponent();
     }
 
-    if (content === undefined || context.isError) {
+    if (
+        content === undefined ||
+        (context.isError &&
+            context.streamCode === undefined &&
+            context.sourceLineCount === undefined)
+    ) {
         return renderGlowupCall(theme, {
             state: context.isError ? "error" : "success",
             statusText: context.isError ? "Write" : statusText,
             body: formatPathTarget(theme, path),
         });
+    }
+
+    const streamCode = context.streamCode;
+    if (streamCode !== undefined) {
+        // Streaming state survives redraws. Never retain context.lastComponent:
+        // that links every old preview and its syntax rows together.
+        const {
+            streamCode: _streamCode,
+            lastComponent: _lastComponent,
+            ...displayContext
+        } = context;
+
+        return createSyntaxComponent(
+            context.lastComponent,
+            context.invalidate,
+            (invalidate, previous) => {
+                const update = { args, theme, context: displayContext, streamCode, invalidate };
+                if (
+                    previous instanceof StreamingWritePreviewComponent &&
+                    previous.belongsTo(displayContext.toolCallId)
+                ) {
+                    previous.update(update);
+                    return previous;
+                }
+
+                return new StreamingWritePreviewComponent(update);
+            },
+        );
     }
 
     if (context.isPartial) {
@@ -480,6 +592,8 @@ export function renderWriteCallPreview(
             theme,
             path,
             content,
+            sourceLineCount: context.sourceLineCount,
+            waitingForCode: context.waitingForCode === true,
             labelMode,
             mutationLabelColumnWidth: context.mutationLabelColumnWidth,
             movingViewport: context.movingViewport !== false,
@@ -500,7 +614,7 @@ export function renderWriteCallPreview(
 
     scheduleCodeOutputSyntaxLoad({ path }, context.invalidate, content);
 
-    const added = countContentLines(content);
+    const added = context.sourceLineCount ?? countContentLines(content);
     const boundedContent = boundedWriteContentPreview(
         content,
         mutationSettings.limits.maxWritePreviewBytes,
@@ -513,6 +627,7 @@ export function renderWriteCallPreview(
                   mode: "head",
                   maxPreviewLines: 1,
                   noOutputLabel: "(empty file)",
+                  ...(context.waitingForCode === true && { noOutputLabel: null }),
               })
             : renderGlowupDiff(
                   theme,
@@ -525,6 +640,9 @@ export function renderWriteCallPreview(
                   },
               );
 
+    let state: "success" | "error" = "success";
+    if (context.isError) state = "error";
+
     const component = renderMutationCall(
         theme,
         {
@@ -533,7 +651,7 @@ export function renderWriteCallPreview(
             added,
             removed: 0,
         },
-        writeMutationCallOptions(context.mutationLabelColumnWidth, body, "success"),
+        writeMutationCallOptions(context.mutationLabelColumnWidth, body, state),
     );
     inheritSyntaxComponent(component, body);
 

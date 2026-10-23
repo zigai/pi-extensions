@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { Worker } from "node:worker_threads";
+import { once } from "node:events";
 
 import { Type } from "typebox";
 import { Value } from "typebox/value";
@@ -19,8 +21,12 @@ const packageManifestSchema = Type.Object({
 });
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const [output, schema, sourceSchema, theme, packageManifest] = await Promise.all([
-  readFile(path.join(packageRoot, "dist", "src", "index.ts"), "utf8"),
+const bundleDirectory = path.join(packageRoot, "dist", "src");
+const bundleFiles = (await readdir(bundleDirectory)).filter(
+  (file) => file.endsWith(".ts") && !file.endsWith(".d.ts"),
+);
+const [outputs, schema, sourceSchema, theme, packageManifest] = await Promise.all([
+  Promise.all(bundleFiles.map(async (file) => readFile(path.join(bundleDirectory, file), "utf8"))),
   readFile(path.join(packageRoot, "dist", "config.schema.json"), "utf8"),
   readFile(path.join(packageRoot, "config.schema.json"), "utf8"),
   readFile(path.join(packageRoot, "themes", "darker-modern-theme.json"), "utf8"),
@@ -28,7 +34,7 @@ const [output, schema, sourceSchema, theme, packageManifest] = await Promise.all
     Value.Parse(packageManifestSchema, JSON.parse(text)),
   ),
 ]);
-
+const output = outputs.join("\n");
 assert.equal(schema, sourceSchema);
 await Promise.all([
   readFile(path.join(packageRoot, packageManifest.exports["."].types)),
@@ -99,4 +105,47 @@ for (const forbidden of [
 }
 
 await checkProtocolPackage(packageRoot);
+
+const statementResponseSchema = Type.Object({
+  id: Type.Integer(),
+  units: Type.Array(Type.Object({ start: Type.Integer(), end: Type.Integer() })),
+});
+
+const statementWorker = new Worker(new URL("../dist/src/statement-worker.mjs", import.meta.url), {
+  execArgv: [],
+});
+
+try {
+  let id = 0;
+  for (const { language, source, expected } of [
+    {
+      language: "javascript",
+      source: "const complete = 1;\nconst pending =",
+      expected: "const complete = 1;",
+    },
+    {
+      language: "typescript",
+      source: "const complete: number = 1;\nconst pending =",
+      expected: "const complete: number = 1;",
+    },
+    { language: "python", source: "complete = 1\npending =", expected: "complete = 1" },
+    { language: "bash", source: 'printf complete\nprintf "', expected: "printf complete" },
+  ]) {
+    id += 1;
+
+    const pending = once(statementWorker, "message");
+
+    statementWorker.postMessage({ id, source, language, complete: false });
+
+    const parsed = Value.Parse(statementResponseSchema, (await pending)[0]);
+    assert.equal(parsed.id, id);
+    assert.deepEqual(
+      parsed.units.map((unit) => source.slice(unit.start, unit.end)),
+      [expected],
+    );
+  }
+} finally {
+  await statementWorker.terminate();
+}
+
 console.log("glowup package check passed");

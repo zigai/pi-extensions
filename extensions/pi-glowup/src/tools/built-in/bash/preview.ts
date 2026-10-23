@@ -1,9 +1,14 @@
 import type { ShellLayout, ShellOperatorPosition } from "./command.ts";
 import { type JsonValue } from "../../../json-value.ts";
-import { emptyComponent } from "../../../rendering/component.ts";
-import { parseScriptInvocation } from "./invocation.ts";
+import { emptyComponent, makeComponent } from "../../../rendering/component.ts";
+import type { CodePreview } from "../../../rendering/streaming/presentation.ts";
+import { parseScriptInvocation, type ScriptInvocation } from "./invocation.ts";
 import { renderGlowupOutput, type GlowupOutputRenderOptions } from "../../../rendering/output.ts";
-import { renderScriptCall, type ScriptPreviewHeaderLayout } from "./script-renderer.ts";
+import {
+    renderScriptCall,
+    type ScriptPreviewHeaderLayout,
+    type ScriptCallRenderOptions,
+} from "./script-renderer.ts";
 import { shouldDeferSimpleToolCall } from "../../../rendering/status-labels.ts";
 import { detectStructuredOutputLanguage } from "../../../rendering/syntax/code-component.ts";
 import { commandField, textOutput } from "../arguments.ts";
@@ -49,6 +54,35 @@ type ScheduledPreview = {
     ready: boolean;
 };
 
+function renderStreamingScriptCall(
+    invocation: ScriptInvocation,
+    theme: BuiltInRenderTheme,
+    context: BuiltInRenderContext,
+    streamCode: CodePreview,
+    options: Omit<ScriptCallRenderOptions, "expanded">,
+) {
+    const { toolCallId, argsComplete, isError } = context;
+
+    return renderExpandableSection(context, "call", (expanded) =>
+        makeComponent((width) => {
+            const code = streamCode({
+                key: `tool:${toolCallId}:script:${invocation.language}`,
+                source: invocation.code,
+                language: invocation.language,
+                complete: argsComplete || isError,
+                targetWidth: Math.max(1, width - 6),
+                ...(options.invalidate !== undefined && { invalidate: options.invalidate }),
+            });
+
+            return renderScriptCall(
+                theme,
+                { ...invocation, code },
+                { ...options, expanded },
+            ).render(width);
+        }),
+    );
+}
+
 export function createNativeBashFeature() {
     const scriptPreviews = createScriptPreviewStore();
     const scheduledCommands = new Map<string, ScheduledPreview>();
@@ -86,11 +120,31 @@ export function createNativeBashFeature() {
         showPrologueOmission: () => boolean,
         shellLayout: () => ShellLayout,
         shellOperatorPosition: () => ShellOperatorPosition,
+        streamCode?: CodePreview,
     ) {
         rememberBashRenderInvalidation(context.toolCallId, context.invalidate);
 
         const state = context.isError ? "error" : context.isPartial ? "running" : "success";
         const command = commandField(args) ?? "";
+        if (streamCode !== undefined) {
+            let script = streamingScriptIdentities.resolve(context.toolCallId, command);
+            if (context.argsComplete) {
+                script = streamingScriptIdentities.finalize(
+                    context.toolCallId,
+                    parseScriptInvocation(command),
+                );
+            }
+
+            const invocation = script ?? { label: "Bash", language: "bash", code: command };
+            return renderStreamingScriptCall(invocation, theme, context, streamCode, {
+                state,
+                maxCodePreviewLines: maxCodePreviewLines(),
+                showPrologueOmission: showPrologueOmission(),
+                headerLayout: headerLayout(),
+                invalidate: context.invalidate,
+            });
+        }
+
         if (
             shouldDeferSimpleToolCall(context) &&
             scriptPreviews.get(context.toolCallId) === undefined
@@ -128,9 +182,11 @@ export function createNativeBashFeature() {
         if (script === undefined && parsedScript !== undefined)
             script = boundedScriptPreview(parsedScript);
 
-        const stableScript = context.argsComplete
-            ? streamingScriptIdentities.finalize(context.toolCallId, script)
-            : script;
+        let stableScript = script;
+        if (context.argsComplete) {
+            stableScript = streamingScriptIdentities.finalize(context.toolCallId, script) ?? script;
+        }
+
         let bashOptions: BashCommandRenderOptions = {
             state,
             expanded: context.expanded,
@@ -159,13 +215,19 @@ export function createNativeBashFeature() {
             bashOptions = { ...bashOptions, profile };
         }
 
+        // The expansion handler outlives this render. Reuse syntax ownership without
+        // retaining a chain of previous transcript components through its closure.
+        let previous = context.lastComponent;
+
         return renderExpandableSection(context, "call", (expanded) => {
-            let options = { ...bashOptions, expanded };
+            let options = { ...bashOptions, expanded, lastComponent: previous };
             if (expanded && profiled && parsedScript !== undefined) {
                 options = { ...options, pureScriptOverride: parsedScript, shellLayout: "preserve" };
             }
 
-            return renderBashCommandCall(theme, displayCommand, options);
+            const component = renderBashCommandCall(theme, displayCommand, options);
+            previous = component;
+            return component;
         });
     }
 
@@ -185,6 +247,7 @@ export function createNativeBashFeature() {
             expanded: options.expanded,
             mode: "headTail",
             maxPreviewLines: 5,
+            invalidate: context.invalidate,
         };
         if (script !== undefined && headerLayout() === "block") {
             outputOptions = {
@@ -351,7 +414,7 @@ export function createNativeBashFeature() {
         readonly formatter: ScriptBlockFormatter | undefined;
         readonly signal: AbortSignal;
         readonly isCurrent: () => boolean;
-        readonly invalidate: () => void;
+        readonly invalidate: (toolCallId: string) => void;
     }): Promise<void> {
         if (options.formatter === undefined) return;
 
@@ -369,7 +432,7 @@ export function createNativeBashFeature() {
                 formatter: options.formatter,
                 signal: options.signal,
                 isCurrent: options.isCurrent,
-                invalidate: options.invalidate,
+                invalidate: () => options.invalidate(call.toolCallId),
             });
             await scheduledCommands.get(call.toolCallId)?.completion;
         }

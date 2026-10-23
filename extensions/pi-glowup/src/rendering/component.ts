@@ -3,7 +3,9 @@ import {
     truncateToWidth,
     wrapTextWithAnsi,
     visibleWidth,
+    sliceByColumn,
 } from "@earendil-works/pi-tui";
+import { stripVTControlCharacters } from "node:util";
 import { neutralizeTerminalControls } from "../text-boundaries.ts";
 import { keyHint } from "@earendil-works/pi-coding-agent";
 
@@ -21,9 +23,7 @@ export function makeComponent(renderLines: (width: number) => string[]): Compone
                 return cachedLines;
             }
 
-            const rendered = renderLines(safeWidth).map((line) =>
-                truncateToWidth(neutralizeTerminalControls(line), safeWidth, ""),
-            );
+            const rendered = renderLines(safeWidth).map((line) => clipLine(line, safeWidth));
             if (shouldCacheRenderedLines(rendered)) {
                 cachedWidth = safeWidth;
                 cachedLines = rendered;
@@ -39,6 +39,33 @@ export function makeComponent(renderLines: (width: number) => string[]): Compone
             cachedLines = undefined;
         },
     };
+}
+
+function clipLine(line: string, width: number): string {
+    const text = neutralizeTerminalControls(line);
+    let escape = text.indexOf("\u001b");
+    if (escape < 0) return truncateToWidth(text, width, "");
+
+    let columns = 0;
+    let start = 0;
+
+    // Neutralization leaves only SGR escapes; Pi measures their text runs separately.
+    while (escape >= 0) {
+        if (escape - start > width) return truncateToWidth(text, width, "");
+
+        columns += visibleWidth(text.slice(start, escape));
+        if (columns > width) return truncateToWidth(text, width, "");
+
+        start = text.indexOf("m", escape) + 1;
+        escape = text.indexOf("\u001b", start);
+    }
+
+    if (text.length - start > width) return truncateToWidth(text, width, "");
+
+    columns += visibleWidth(text.slice(start));
+    if (columns <= width) return text;
+
+    return truncateToWidth(text, width, "");
 }
 
 function shouldCacheRenderedLines(lines: ReadonlyArray<string>): boolean {
@@ -63,12 +90,25 @@ export function emptyComponent(): Component {
 
 export function wrapStyledText(text: string, width: number): string[] {
     const safeWidth = Math.max(1, Math.floor(width));
-    const wrapped = wrapTextWithAnsi(neutralizeTerminalControls(text), safeWidth);
+    const safeText = neutralizeTerminalControls(text);
+    if (visibleWidth(safeText) <= safeWidth) {
+        return [safeText];
+    }
+
+    const leadingSpaces = /^ +(?=\S)/u.exec(stripVTControlCharacters(safeText))?.[0].length ?? 0;
+    const indentWidth = Math.min(leadingSpaces, safeWidth - 1);
+    const indent = " ".repeat(indentWidth);
+    let content = safeText;
+    if (leadingSpaces > 0) {
+        content = sliceByColumn(safeText, leadingSpaces, visibleWidth(safeText));
+    }
+
+    const wrapped = wrapTextWithAnsi(content, safeWidth - indentWidth);
     if (wrapped.length === 0) {
         return [""];
     }
 
-    return wrapped.map((line) => truncateToWidth(line, safeWidth, ""));
+    return wrapped.map((line) => truncateToWidth(`${indent}${line}`, safeWidth, ""));
 }
 
 export function wrapSinglePhysicalLineWithContinuation(
@@ -108,6 +148,14 @@ export function wrapPrefixedLine(
     }
 
     return rendered;
+}
+
+export function omittedLinesLabel(count: number): string {
+    if (count === 1) {
+        return "… +1 line";
+    }
+
+    return `… +${count} lines`;
 }
 
 export function toolExpandHint(): string {

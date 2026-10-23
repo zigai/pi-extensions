@@ -20,7 +20,7 @@ const SENSITIVE_KEY_PATTERN =
 const INTERNAL_DETAIL_PATH_KEY_PATTERN =
     /(?:artifact|transcript|workspace|report|patch|output|attachment|session)(?:[_-]?(?:file|dir(?:ectory)?))?[_-]?paths?$/iu;
 
-type PreviewValue =
+export type PreviewValue =
     | string
     | number
     | boolean
@@ -52,7 +52,7 @@ function isString(value: JsonValue | undefined): value is string {
     return stringParser.parse(value) !== undefined;
 }
 
-function boundedPreviewValue(
+export function boundedPreviewValue(
     value: JsonValue | undefined,
     seen: WeakSet<object>,
     depth: number,

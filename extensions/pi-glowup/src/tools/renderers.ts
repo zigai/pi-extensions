@@ -1,5 +1,5 @@
 import Type, { type Static } from "typebox";
-import { Value } from "typebox/value";
+import { Compile } from "typebox/compile";
 import { createAgentBrowserRenderer } from "./external/agent-browser.ts";
 import { createCodemodeRenderer } from "./external/codemode.ts";
 import {
@@ -13,6 +13,11 @@ import { createPiCoreRenderer, isPiCoreTool } from "./external/pi-tools.ts";
 import { createGenericRenderer } from "./call-rendering.ts";
 import { glowupRenderingAdapter, createProtocolRenderer } from "./protocol/renderer.ts";
 import { baseToolName } from "./tool-values.ts";
+import {
+    contributedToolRenderer,
+    selectedGlowupPresentation,
+} from "../rendering/presentation-registry.ts";
+import { createSchemaRenderer, outputSchemaParser } from "./schema-rendering.ts";
 import { GLOWUP_RENDERING_PROPERTY } from "./protocol/contract.ts";
 import type {
     ThirdPartyToolRenderer,
@@ -31,8 +36,10 @@ const toolDefinitionViewSchema = Type.Object(
     { additionalProperties: true },
 );
 
+const toolDefinitionViewValidator = Compile(toolDefinitionViewSchema);
+
 type ToolDefinitionView = {
-    readonly label: Static<typeof toolDefinitionViewSchema>["label"];
+    readonly metadata: Static<typeof toolDefinitionViewSchema> | undefined;
     readonly preserve: boolean;
     readonly adapter: ReturnType<typeof glowupRenderingAdapter>;
 };
@@ -42,14 +49,14 @@ const toolDefinitionViewParser = {
         const adapter = glowupRenderingAdapter(value);
 
         try {
-            const definition = Value.Parse(toolDefinitionViewSchema, value);
+            const definition = toolDefinitionViewValidator.Parse(value);
             return {
-                label: definition.label,
+                metadata: definition,
                 preserve: definition[GLOWUP_RENDERING_PROPERTY] === "preserve",
                 adapter,
             };
         } catch {
-            return { label: undefined, preserve: false, adapter };
+            return { metadata: undefined, preserve: false, adapter };
         }
     },
 };
@@ -59,7 +66,11 @@ const TRANSITIONAL_RENDERER_PLUGINS: ReadonlyArray<ThirdPartyToolRendererPlugin>
         name: "codemode",
         matches: (toolName) => toolName === "codemode",
         createRenderer: (_toolName, options) =>
-            createCodemodeRenderer(options?.labelMode, options?.codemodePreview),
+            createCodemodeRenderer(
+                options?.labelMode,
+                options?.codemodePreview,
+                options?.streamCode,
+            ),
     },
     {
         name: "agent-browser",
@@ -103,7 +114,10 @@ export function hasThirdPartyToolRendererPlugin(
     toolName: string,
     options?: ThirdPartyToolRenderingOptions,
 ): boolean {
-    return rendererPlugins(options).some((candidate) => candidate.matches(toolName));
+    return (
+        contributedToolRenderer(toolName) !== undefined ||
+        rendererPlugins(options).some((candidate) => candidate.matches(toolName))
+    );
 }
 
 function matcherMatches(toolName: string, matcher: ToolNameMatcher): boolean {
@@ -123,7 +137,7 @@ function hasPreservePreference(toolDefinition: unknown): boolean {
 }
 
 function toolDefinitionLabel(definition: ToolDefinitionView): string | undefined {
-    const label = definition.label;
+    const label = definition.metadata?.label;
     return label === undefined || label.length === 0 ? undefined : label;
 }
 
@@ -180,11 +194,32 @@ export function createThirdPartyToolRenderer(
 ): ThirdPartyToolRenderer {
     const definition = toolDefinitionViewParser.parse(toolDefinition);
     const plugin = rendererPlugins(options).find((candidate) => candidate.matches(toolName));
-    const fallback =
-        plugin?.createRenderer(toolName, options) ??
-        createGenericRenderer(toolName, toolDefinitionLabel(definition), options?.labelMode);
-    const adapter = definition.adapter;
-    return adapter === undefined
-        ? fallback
-        : createProtocolRenderer(adapter, fallback, options?.labelMode, options?.mutationSettings);
+    const generic = createGenericRenderer(
+        toolName,
+        toolDefinitionLabel(definition),
+        options?.labelMode,
+    );
+    if (definition.preserve || options?.enabled === false) return generic;
+
+    const fallback = selectedGlowupPresentation().createRenderer(
+        toolName,
+        plugin?.createRenderer(toolName, options) ?? generic,
+        options,
+    );
+    if (definition.adapter !== undefined)
+        return createProtocolRenderer(
+            definition.adapter,
+            fallback,
+            options?.labelMode,
+            options?.mutationSettings,
+            options?.streamCode,
+        );
+
+    const contributed = contributedToolRenderer(toolName);
+    if (contributed !== undefined) return contributed.create(fallback, options);
+
+    const outputSchema = outputSchemaParser.parse(definition.metadata);
+    if (outputSchema !== undefined) return createSchemaRenderer(outputSchema, fallback, options);
+
+    return fallback;
 }

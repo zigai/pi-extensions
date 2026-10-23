@@ -1,4 +1,5 @@
 import { queryObjects } from "node:v8";
+import { setImmediate } from "node:timers/promises";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import Type from "typebox";
 import { Value } from "typebox/value";
@@ -1385,6 +1386,50 @@ describe("tool execution patches", () => {
         expect(repeated?.render(120)).toEqual(["completed:120"]);
         expect(repeated?.render(45)).toEqual(["completed:45"]);
         expect(callRenders).toBe(1);
+    });
+
+    it("does not root abandoned renderer components through the completed-line LRU", async () => {
+        class RetainedPreview {
+            render(): string[] {
+                return ["small collapsed preview"];
+            }
+
+            invalidate(): void {}
+        }
+
+        const prototype = createPrototype();
+        installBuiltInToolRendererPatch(
+            {
+                renderCall: () => new RetainedPreview(),
+                renderResult: () => undefined,
+            },
+            prototype,
+        );
+
+        function renderAbandonedRow(): void {
+            const instance: FakeToolExecutionInstance = {
+                toolName: "write",
+                builtInToolDefinition: {},
+            };
+            const component = prototype.getCallRenderer.call(instance)?.({}, plainTheme, {
+                ...renderContext,
+                cwd: "/workspace",
+                state: {},
+                invalidate: noop,
+            });
+            expect(component?.render(80)).toEqual(["small collapsed preview"]);
+        }
+
+        try {
+            renderAbandonedRow();
+
+            // The row invalidation WeakRef keeps a newly observed row alive until this job ends.
+            await setImmediate();
+            expect(toolRendererPatchStats(prototype).completedLineCacheEntries).toBeGreaterThan(0);
+            expect(queryObjects(RetainedPreview, { format: "count" })).toBe(0);
+        } finally {
+            configureBuiltInToolRendererPatch(false, undefined, prototype);
+        }
     });
 
     it("bounds completed rendered lines with least-recently-used eviction", () => {

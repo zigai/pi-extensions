@@ -6,7 +6,7 @@ import {
     onSyntaxHighlightComplete,
     refreshSyntaxHighlighting,
 } from "../rendering/syntax/highlighter.ts";
-import { refreshToolRows } from "./session.ts";
+import { refreshToolRows, requestToolRender } from "./session.ts";
 
 const SYNTAX_WARMUP_DELAY_MS = 5_000;
 
@@ -99,7 +99,7 @@ export function createSyntaxLifecycle(options: {
         const currentGeneration = generation();
 
         stopCompletionNotifications = onSyntaxHighlightComplete(() => {
-            if (generation() === currentGeneration) refreshToolRows(context);
+            if (generation() === currentGeneration) requestToolRender(context);
         });
 
         pendingSyntaxStart = {

@@ -257,8 +257,8 @@ export function createAgentBrowserRenderer(
                 expanded: context.expanded,
             });
         },
-        renderResult(result, options, theme) {
-            return renderSimpleResult(theme, result, options);
+        renderResult(result, options, theme, context) {
+            return renderSimpleResult(theme, result, options, context);
         },
     };
 }

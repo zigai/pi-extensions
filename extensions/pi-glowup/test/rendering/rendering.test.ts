@@ -1,4 +1,5 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
+import { stripVTControlCharacters } from "node:util";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
     collapseHome,
@@ -402,6 +403,91 @@ describe("Glowup rendering helpers", () => {
             "    nine",
             "    ten",
         ]);
+    });
+
+    it.each([
+        { mode: "head" as const, markerIndex: 2 },
+        { mode: "headTail" as const, markerIndex: 1 },
+    ])(
+        "reveals equal-height omitted output in $mode mode and rechecks after resize",
+        ({ mode, markerIndex }) => {
+            const component = renderGlowupOutput(plainTheme, "first\nsecond\nthird", {
+                expanded: false,
+                maxPreviewLines: 2,
+                mode,
+                omittedHint: "hint",
+            });
+
+            expect(component.render(40)).toEqual(["  └ first", "    second", "    third"]);
+            const narrow = component.render(8);
+            expect(narrow).toHaveLength(3);
+            expect(narrow[markerIndex]).toContain("…");
+            expectLinesWithinWidth(narrow, 8);
+            expect(component.render(40)).toEqual(["  └ first", "    second", "    third"]);
+        },
+    );
+
+    it.each([false, true])(
+        "keeps indented path tokens nested without blank wrapping rows when expanded=%s",
+        (expanded) => {
+            const component = renderGlowupOutput(
+                plainTheme,
+                '    "/sample/reference/file.md",\n\n    "next.md",',
+                { expanded, maxPreviewLines: 8, dimContent: false },
+            );
+
+            expect(component.render(36)).toEqual([
+                '  └     "/sample/reference/file.md",',
+                "    ",
+                '        "next.md",',
+            ]);
+            const narrow = component.render(24);
+            expect(narrow).toEqual([
+                '  └     "/sample/referen',
+                '        ce/file.md",',
+                "    ",
+                '        "next.md",',
+            ]);
+
+            expectLinesWithinWidth(narrow, 24);
+        },
+    );
+
+    it("preserves ANSI styles and Unicode while wrapping indented code", () => {
+        const component = renderGlowupOutput(plainTheme, '\u001b[31m    "界界界界界",\u001b[0m', {
+            expanded: true,
+            dimContent: false,
+        });
+        const rows = component.render(16);
+
+        expect(rows.map(stripVTControlCharacters)).toEqual(['  └     "界界界', '        界界",']);
+        expect(rows.every((row) => row.includes("\u001b[31m"))).toBe(true);
+        expectLinesWithinWidth(rows, 16);
+    });
+
+    it("shows call content when the omitted row is no taller than its marker", () => {
+        const component = renderGlowupCall(plainTheme, {
+            state: "success",
+            statusText: "Call",
+            body: "first\nsecond\nthird",
+            maxRenderedLines: 2,
+            omittedHint: "hint",
+        });
+
+        expect(component.render(40)).toEqual(["• Call first", "  │ second", "  │ third"]);
+    });
+
+    it("keeps a taller omitted call row hidden", () => {
+        const component = renderGlowupCall(plainTheme, {
+            state: "success",
+            statusText: "Call",
+            body: `first\nsecond\n${"long ".repeat(60)}`,
+            maxRenderedLines: 2,
+            omittedHint: "hint",
+        });
+
+        const rows = component.render(40);
+        expect(rows).toEqual(["• Call first", "  │ second", "  │ … +1 line (hint)"]);
     });
 
     it("skips hidden collapsed output without building hidden preview lines", () => {
@@ -1208,6 +1294,29 @@ describe("Glowup rendering helpers", () => {
         expect(rendered).toHaveLength(6);
         expect(rendered.at(-1)).toContain("… preview truncated");
         expect(rendered.every((line) => visibleWidth(line) <= 44)).toBe(true);
+    });
+
+    it("shows a single omitted script line instead of an equally tall marker", () => {
+        const source = (count: number) =>
+            Array.from({ length: count }, (_value, index) => `value_${index + 1} = ${index}`).join(
+                "\n",
+            );
+
+        const render = (count: number) =>
+            renderScriptCall(
+                plainTheme,
+                { label: "Python", language: "python", code: source(count) },
+                { state: "success", expanded: false, omittedHint: "hint" },
+            ).render(80);
+
+        const oneExtra = render(9);
+        expect(oneExtra.join("\n")).toContain("value_9 = 8");
+        expect(oneExtra.join("\n")).not.toContain("…");
+
+        const twoExtra = render(10).join("\n");
+        expect(twoExtra).toContain("… +2 lines (hint)");
+        expect(twoExtra).not.toContain("value_9 = 8");
+        expect(render(10)).toHaveLength(oneExtra.length);
     });
 
     it("counts omitted rows in collapsed script call previews", () => {

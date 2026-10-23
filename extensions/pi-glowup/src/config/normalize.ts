@@ -10,6 +10,8 @@ import type { MutationSettings } from "../rendering/preview-settings.ts";
 import type { ExtensionSettings } from "../settings.ts";
 
 export type GlowupConfig = {
+    readonly presentation: string;
+    readonly streaming: ExtensionSettings["streaming"];
     readonly preserveTools: readonly string[];
     readonly mutations: MutationSettings;
     readonly appearance: RenderingAppearance;
@@ -65,6 +67,8 @@ export function normalizeGlowupConfig(
     reportWarning: ((message: string) => void) | undefined,
 ): GlowupConfig {
     return {
+        presentation: settings.presentation,
+        streaming: settings.streaming,
         preserveTools: settings.preserveTools.filter((value) => value.trim().length > 0),
         mutations: settings.mutations,
         appearance: settings.appearance,

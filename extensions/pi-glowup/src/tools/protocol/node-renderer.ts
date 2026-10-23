@@ -1,11 +1,12 @@
-import { emptyComponent, makeComponent } from "../../rendering/component.ts";
-import { renderGlowupBody } from "../../rendering/tool-header.ts";
+import { emptyComponent, makeComponent, wrapPrefixedLine } from "../../rendering/component.ts";
 import { renderGlowupOutput, type GlowupOutputRenderOptions } from "../../rendering/output.ts";
-import { type GlowupRenderTheme } from "../../rendering/theme.ts";
+import { dim, type GlowupRenderTheme } from "../../rendering/theme.ts";
 import type { MutationSettings } from "../../rendering/preview-settings.ts";
 import { toolStatusLabel, type ToolLabelMode } from "../../rendering/status-labels.ts";
 import type {
     GlowupCallLabels,
+    GlowupCodeNode,
+    GlowupListNode,
     GlowupInline,
     GlowupNode,
     GlowupPreview,
@@ -21,6 +22,26 @@ import { renderProtocolMutation, type ProtocolMutationRenderOptions } from "./mu
 import type { ThirdPartyToolRenderContext } from "../types.ts";
 
 const DEFAULT_EXPANDED_PREVIEW_LINES = 500;
+const BODY_INDENT = "    ";
+
+type BodyPosition = "first" | "continued";
+
+function bodyFirstPrefix(theme: GlowupRenderTheme, position: BodyPosition): string {
+    if (position === "first") return dim(theme, "  └ ");
+    return BODY_INDENT;
+}
+
+function renderBodyText(
+    theme: GlowupRenderTheme,
+    value: GlowupInline,
+    position: BodyPosition,
+): ReturnType<typeof makeComponent> {
+    const prefixFirst = bodyFirstPrefix(theme, position);
+
+    return makeComponent((width) =>
+        wrapPrefixedLine(toneText(theme, value), width, prefixFirst, BODY_INDENT),
+    );
+}
 
 function toneText(theme: GlowupRenderTheme, value: GlowupInline): string {
     if (!(value instanceof Object) || !("kind" in value)) return value;
@@ -80,7 +101,15 @@ function previewMode(preview: GlowupPreview | undefined): "head" | "headTail" | 
     return preview?.mode ?? "headTail";
 }
 
-function nodeText(node: GlowupNode, theme: GlowupRenderTheme): string {
+type CodeContent = (node: GlowupCodeNode, key: string, indent: number) => string;
+
+function nodeText(
+    node: GlowupNode,
+    theme: GlowupRenderTheme,
+    codeContent: CodeContent = (value) => value.text,
+    key = "root",
+    indent = 0,
+): string {
     switch (node.kind) {
         case "text":
             return toneText(theme, node.text);
@@ -92,19 +121,22 @@ function nodeText(node: GlowupNode, theme: GlowupRenderTheme): string {
                 )
                 .join("\n");
         case "code":
-            return [node.title === undefined ? undefined : toneText(theme, node.title), node.text]
+            return [
+                node.title === undefined ? undefined : toneText(theme, node.title),
+                codeContent(node, key, indent),
+            ]
                 .filter((value): value is string => value !== undefined)
                 .join("\n");
         case "list":
             return node.items
-                .map((item) => {
+                .map((item, index) => {
                     if (!(item instanceof Object)) return `• ${item}`;
 
                     if (item.kind === "text" && ("tone" in item || "bold" in item)) {
                         return `• ${toneText(theme, item)}`;
                     }
 
-                    return `• ${nodeText(item, theme)}`;
+                    return `• ${nodeText(item, theme, codeContent, `${key}.${index}`, indent + 2)}`;
                 })
                 .join("\n");
         case "output":
@@ -119,22 +151,68 @@ function nodeText(node: GlowupNode, theme: GlowupRenderTheme): string {
                 .join("\n");
         case "stack":
             return node.children
-                .map((child) => nodeText(child, theme))
+                .map((child, index) =>
+                    nodeText(child, theme, codeContent, `${key}.${index}`, indent),
+                )
                 .filter(Boolean)
                 .join("\n");
         case "call":
-            return node.body === undefined ? "" : nodeText(node.body, theme);
+            return node.body === undefined
+                ? ""
+                : nodeText(node.body, theme, codeContent, `${key}.body`, indent);
         case "empty":
             return "";
     }
+
+    throw new Error("Unsupported protocol node");
 }
 
-function renderSummary(node: GlowupSummaryNode, theme: GlowupRenderTheme) {
+function renderSummary(node: GlowupSummaryNode, theme: GlowupRenderTheme, position: BodyPosition) {
     return renderGlowupOutput(theme, nodeText(node, theme), {
         expanded: true,
         mode: "headTail",
         maxPreviewLines: DEFAULT_EXPANDED_PREVIEW_LINES,
         noOutputLabel: null,
+        prefixFirst: bodyFirstPrefix(theme, position),
+        prefixRest: BODY_INDENT,
+    });
+}
+
+function renderProtocolList(
+    node: GlowupListNode,
+    theme: GlowupRenderTheme,
+    context: ThirdPartyToolRenderContext,
+    position: BodyPosition,
+) {
+    const { streamCode, streamKey, toolCallId, argsComplete, isError, invalidate } = context;
+    const options: GlowupOutputRenderOptions = {
+        expanded: context.expanded,
+        mode: previewMode(node.preview),
+        maxPreviewLines: previewLines(node.preview, context.expanded),
+        noOutputLabel: null,
+        prefixFirst: bodyFirstPrefix(theme, position),
+        prefixRest: BODY_INDENT,
+    };
+
+    return makeComponent((width) => {
+        const content = nodeText(
+            node,
+            theme,
+            (value, key, indent) => {
+                if (streamCode === undefined) return value.text;
+                return streamCode({
+                    key: `tool:${toolCallId}:code:${key}`,
+                    source: value.text,
+                    ...value.syntax,
+                    complete: argsComplete || isError,
+                    targetWidth: Math.max(1, width - BODY_INDENT.length - indent),
+                    ...(invalidate !== undefined && { invalidate }),
+                });
+            },
+            streamKey ?? "root",
+        );
+
+        return renderGlowupOutput(theme, content, options).render(width);
     });
 }
 
@@ -145,45 +223,67 @@ export function renderProtocolNode(
     context: ThirdPartyToolRenderContext,
     labelMode: ToolLabelMode,
     mutationSettings?: MutationSettings,
+    position: BodyPosition = "first",
 ): ReturnType<typeof emptyComponent> {
     switch (node.kind) {
         case "empty":
             return emptyComponent();
         case "text":
-            return renderGlowupBody(toneText(theme, node.text));
+            return renderBodyText(theme, node.text, position);
         case "summary":
-            return renderSummary(node, theme);
+            return renderSummary(node, theme, position);
         case "code": {
+            const { streamCode, streamKey, toolCallId, argsComplete, isError, invalidate } =
+                context;
+            let contentPosition = position;
+            if (node.title !== undefined) contentPosition = "continued";
+
             let outputOptions: GlowupOutputRenderOptions = {
                 expanded: context.expanded,
                 mode: previewMode(node.preview),
                 maxPreviewLines: previewLines(node.preview, context.expanded),
+                maxExpandedLines: previewLines(node.preview, true),
                 noOutputLabel: null,
+                prefixFirst: bodyFirstPrefix(theme, contentPosition),
+                prefixRest: BODY_INDENT,
+                invalidate: context.invalidate,
             };
             if (node.syntax !== undefined) {
                 outputOptions = { ...outputOptions, syntax: node.syntax };
             }
 
-            const content = renderGlowupOutput(theme, node.text, outputOptions);
+            const content = makeComponent((width) => {
+                let source = node.text;
+                if (streamCode !== undefined)
+                    source = streamCode({
+                        key: `tool:${toolCallId}:code:${streamKey ?? "root"}`,
+                        source,
+                        ...node.syntax,
+                        complete: argsComplete || isError,
+                        targetWidth: Math.max(1, width - BODY_INDENT.length),
+                        ...(invalidate !== undefined && { invalidate }),
+                    });
+
+                return renderGlowupOutput(theme, source, outputOptions).render(width);
+            });
             if (node.title === undefined) return content;
 
-            const title = renderGlowupBody(toneText(theme, node.title));
+            const title = renderBodyText(theme, node.title, position);
 
             return makeComponent((width) => [...title.render(width), ...content.render(width)]);
         }
         case "list":
-            return renderGlowupOutput(theme, nodeText(node, theme), {
-                expanded: context.expanded,
-                mode: previewMode(node.preview),
-                maxPreviewLines: previewLines(node.preview, context.expanded),
-                noOutputLabel: null,
-            });
+            return renderProtocolList(node, theme, context, position);
         case "output": {
             let outputOptions: GlowupOutputRenderOptions = {
                 expanded: context.expanded,
                 mode: previewMode(node.preview),
                 maxPreviewLines: previewLines(node.preview, context.expanded),
+                maxExpandedLines: previewLines(node.preview, true),
                 noOutputLabel: node.noOutputLabel ?? null,
+                prefixFirst: bodyFirstPrefix(theme, position),
+                prefixRest: BODY_INDENT,
+                invalidate: context.invalidate,
             };
             if (node.syntax !== undefined) {
                 outputOptions = { ...outputOptions, syntax: node.syntax };
@@ -224,21 +324,40 @@ export function renderProtocolNode(
             }
 
             const header = renderThirdPartyCall(theme, headerOptions);
-            const body = renderProtocolNode(node.body, theme, context, labelMode, mutationSettings);
+            const body = renderProtocolNode(
+                node.body,
+                theme,
+                {
+                    ...context,
+                    streamKey: `${context.streamKey ?? "root"}.body`,
+                },
+                labelMode,
+                mutationSettings,
+            );
 
             return makeComponent((width) => [...header.render(width), ...body.render(width)]);
         }
         case "stack": {
+            const { lastComponent: _lastComponent, ...childContext } = context;
+            const firstVisible = node.children.findIndex((child) => child.kind !== "empty");
             const buildChildren = () =>
-                node.children.map((child) =>
-                    renderProtocolNode(
+                node.children.map((child, index) => {
+                    let childPosition: BodyPosition = "continued";
+                    if (index === firstVisible) childPosition = position;
+
+                    return renderProtocolNode(
                         child,
                         theme,
-                        { ...context, lastComponent: undefined },
+                        {
+                            ...childContext,
+                            lastComponent: undefined,
+                            streamKey: `${childContext.streamKey ?? "root"}.${index}`,
+                        },
                         labelMode,
                         mutationSettings,
-                    ),
-                );
+                        childPosition,
+                    );
+                });
             let children = buildChildren();
             const rendered = makeComponent((width) =>
                 children.flatMap((child) => child.render(width)),
@@ -256,4 +375,6 @@ export function renderProtocolNode(
             };
         }
     }
+
+    throw new Error("Unsupported protocol node");
 }

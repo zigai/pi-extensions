@@ -1,3 +1,5 @@
+import { parseStreamingJson } from "@earendil-works/pi-ai";
+import type { CodePreview, CodeSource } from "../../rendering/streaming/presentation.ts";
 import { makeComponent, wrapPrefixedLine, toolExpandHint } from "../../rendering/component.ts";
 import type { ScriptBlockFormatter } from "../built-in/bash/formatter.ts";
 import { omitLeadingImportPrologue } from "../built-in/bash/prologue.ts";
@@ -22,7 +24,11 @@ import { boundedExpandedResult, callState } from "../call-rendering.ts";
 import { previewCompactArgs, textOutput } from "../previews.ts";
 import { getArray, getNonEmptyString, getNumber, getString } from "../tool-values.ts";
 import { renderExpandableSection } from "../section-expansion.ts";
-import type { ThirdPartyToolRenderer, ThirdPartyToolResult } from "../types.ts";
+import type {
+    ThirdPartyToolRenderer,
+    ThirdPartyToolResult,
+    ThirdPartyToolRenderContext,
+} from "../types.ts";
 
 const SCRIPT_HEADER = /^Script (?:completed|failed)\nWall time [\d.]+ seconds\nOutput:\n$/u;
 const VISIBLE_CALLS = 8;
@@ -372,14 +378,12 @@ function callRows(
                     ? muted(theme, "⊘")
                     : theme.fg("warning", "…");
         const args = getString(call, "args");
-        let preview: string | undefined;
-        if (args !== undefined) {
-            try {
-                preview = previewCompactArgs(jsonValueParser.parse(JSON.parse(args)));
-            } catch {
-                preview = undefined;
-            }
-        }
+
+        // Codemode cuts long argument previews mid-JSON, so they are parsed as partial JSON.
+        const preview =
+            args === undefined
+                ? undefined
+                : previewCompactArgs(jsonValueParser.parse(parseStreamingJson(args)));
 
         const compact = preview?.replace(/\s+/gu, " ");
         const duration = getNumber(call, "durationMs");
@@ -408,17 +412,32 @@ function callRows(
     return rows;
 }
 
+function callSource(
+    args: JsonValue | undefined,
+    context: Pick<ThirdPartyToolRenderContext, "toolCallId">,
+): CodeSource | undefined {
+    const record = jsonObjectParser.parse(args);
+    if (record === undefined) return undefined;
+
+    const source = getString(record, "code");
+    if (source === undefined) return undefined;
+
+    return { key: `tool:${context.toolCallId}:codemode`, source, language: "javascript" };
+}
+
 export function createCodemodeRenderer(
     labelMode: ToolLabelMode = "static",
     preview: Pick<
         ReturnType<typeof createCodemodePreview>,
         "get" | "observe"
     > = createCodemodePreview(),
+    streamCode?: CodePreview,
 ): ThirdPartyToolRenderer {
     return {
-        renderCall(args, theme, context) {
-            const record = jsonObjectParser.parse(args);
-            const sourceCode = record === undefined ? undefined : getString(record, "code");
+        codeSource: callSource,
+        // A component may outlive many streaming updates. Never close over its predecessor.
+        renderCall(args, theme, { lastComponent: _lastComponent, ...context }) {
+            const sourceCode = callSource(args, context)?.source;
 
             const completed =
                 context.phase === "complete" ||
@@ -436,14 +455,27 @@ export function createCodemodeRenderer(
                 });
 
                 return makeComponent((width) => {
-                    const code =
-                        sourceCode === undefined
-                            ? undefined
-                            : (preview.get(context.toolCallId, sourceCode, {
-                                  contentWidth: Math.max(1, width - 4),
-                                  completed,
-                                  expanded,
-                              }) ?? sourceCode);
+                    let code: string | undefined;
+                    if (sourceCode !== undefined) {
+                        if (streamCode !== undefined) {
+                            code = streamCode({
+                                key: `tool:${context.toolCallId}:codemode`,
+                                source: sourceCode,
+                                language: "javascript",
+                                complete: context.argsComplete || context.isError,
+                                targetWidth: Math.max(1, width - 4),
+                                ...(invalidate !== undefined && { invalidate }),
+                            });
+                        } else {
+                            code =
+                                preview.get(context.toolCallId, sourceCode, {
+                                    contentWidth: Math.max(1, width - 4),
+                                    completed,
+                                    expanded,
+                                }) ?? sourceCode;
+                        }
+                    }
+
                     if (code !== undefined)
                         scheduleCodeOutputSyntaxLoad({ language: "javascript" }, invalidate, code);
 

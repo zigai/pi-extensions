@@ -56,6 +56,8 @@ function numberedDiffLine(line: GlowupMutationLine): string {
         case "omission":
             return `    …${line.text.length === 0 ? "" : ` ${line.text}`}`;
     }
+
+    throw new Error("Unsupported mutation row kind.");
 }
 
 function lineCoordinates(line: GlowupMutationLine): DiffLineCoordinates | undefined {
@@ -129,7 +131,7 @@ function consumePayload(
     return undefined;
 }
 
-function mutationPayloads(
+export function mutationPayloads(
     node: GlowupMutationNode,
     settings: MutationSettings,
 ): ReadonlyArray<PierreDiffPayload | undefined> {
@@ -196,6 +198,8 @@ class ProtocolMutationComponent implements Component {
             const expanded = showsFullMutation(update.mutationSettings, update.context.expanded);
             let diffOptions: GlowupDiffRenderOptions = {
                 collapsedLineBudget: update.mutationSettings.previewLines,
+                lastComponent: previousDiff,
+                invalidate: update.context.invalidate,
             };
             if (!update.context.expanded) {
                 diffOptions = { ...diffOptions, maxWrappedRows: 4 };

@@ -34,6 +34,105 @@ class RecordingPreviewSink {
 }
 
 describe("script preview events", () => {
+    it("publishes compact Python only after readiness and completion and expands original gaps", async () => {
+        const bash = createNativeBashFeature();
+        const theme = new Theme(TEST_THEME_COLORS, TEST_THEME_BACKGROUND_COLORS, "truecolor");
+        const code =
+            'import math\n\n\nclass Sample:\n    text = """first\n\nlast"""\n\n\nassert Sample.text';
+        const command = `python -c '${code}'`;
+        const backend = createCommandScriptFormatter(
+            parseScriptFormatterCommandsValue({
+                python: {
+                    kind: "command",
+                    command: [process.execPath, "-e", "process.stdin.pipe(process.stdout)"],
+                },
+            }),
+        );
+        if (backend === undefined) throw new Error("Expected a configured formatter");
+
+        let release = () => {};
+        const ready = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        const formatter: ScriptBlockFormatter = Object.assign(
+            async (input: ScriptBlockFormatterInput, options?: ScriptBlockFormatterOptions) => {
+                await ready;
+                return backend(input, options);
+            },
+            { profileFor: (language: string) => backend.profileFor?.(language) },
+        );
+        let context: BuiltInRenderContext = {
+            args: { command },
+            toolCallId: "python-display",
+            cwd: "/work",
+            lastComponent: undefined,
+            state: {},
+            executionStarted: true,
+            argsComplete: true,
+            isPartial: true,
+            expanded: false,
+            showImages: false,
+            isError: false,
+            durationMs: undefined,
+            outputPad: 1,
+            invalidate: () => {},
+        };
+        const render = (expanded = false, width = 80) =>
+            stripVTControlCharacters(
+                bash
+                    .renderBashCall(
+                        { command },
+                        theme,
+                        { ...context, expanded },
+                        () => "block",
+                        () => 30,
+                        () => false,
+                        () => "preserve",
+                        () => "trailing",
+                    )
+                    .render(width)
+                    .join("\n"),
+            );
+
+        const raw = "│ import math\n  │ \n  │ \n  │ class Sample:";
+        try {
+            bash.schedule({
+                toolCallId: context.toolCallId,
+                command,
+                formatter,
+                signal: undefined,
+                isCurrent: () => true,
+                invalidate: context.invalidate,
+            });
+
+            expect(render()).toContain(raw);
+            context = { ...context, isPartial: false };
+            bash.renderBashResult(
+                { content: [{ type: "text", text: "SAFE_RESULT" }] },
+                { expanded: false, isPartial: false },
+                theme,
+                context,
+                () => "block",
+            );
+
+            expect(render()).toContain(raw);
+            release();
+            await vi.waitUntil(() => render().includes("│ import math\n  │ class Sample:"));
+            expect(render()).toContain(
+                '│     text = """first\n  │ \n  │ last"""\n  │ assert Sample.text',
+            );
+
+            expect(render(true)).toContain(raw);
+            expect(render(false, 24)).toContain("│ assert Sample.text");
+            expect(render()).toContain("│ import math\n  │ class Sample:");
+            expect(context.args).toEqual({ command });
+        } finally {
+            release();
+            bash.clear();
+            await vi.waitUntil(() => getScriptFormatterWorkload().active === 0);
+        }
+    });
+
     it("holds formatted decoration until completion and expands to original source", async () => {
         const bash = createNativeBashFeature();
         const theme = new Theme(TEST_THEME_COLORS, TEST_THEME_BACKGROUND_COLORS, "truecolor");
@@ -131,6 +230,70 @@ describe("script preview events", () => {
         }
     });
 
+    it("retains whole-shell display profiles after finalizing a Bash identity", async () => {
+        const bash = createNativeBashFeature();
+        const theme = new Theme(TEST_THEME_COLORS, TEST_THEME_BACKGROUND_COLORS, "truecolor");
+        const command = "echo original; printf done";
+
+        const profiles = parseScriptFormatterCommandsValue({
+            bash: { kind: "bash", command: ["shfmt"] },
+        });
+        const formatter: ScriptBlockFormatter = Object.assign(
+            async () => "echo formatted\nprintf done",
+            { profileFor: (language: string) => profiles.get(language) },
+        );
+        const context: BuiltInRenderContext = {
+            args: { command },
+            toolCallId: "bash-display",
+            cwd: "/work",
+            lastComponent: undefined,
+            state: {},
+            executionStarted: true,
+            argsComplete: true,
+            isPartial: false,
+            expanded: false,
+            showImages: false,
+            isError: false,
+            durationMs: undefined,
+            outputPad: 1,
+            invalidate: () => {},
+        };
+        const render = (expanded = false) =>
+            stripVTControlCharacters(
+                bash
+                    .renderBashCall(
+                        { command },
+                        theme,
+                        { ...context, expanded },
+                        () => "block",
+                        () => 8,
+                        () => false,
+                        () => "preserve",
+                        () => "trailing",
+                    )
+                    .render(80)
+                    .join("\n"),
+            );
+
+        try {
+            bash.schedule({
+                toolCallId: context.toolCallId,
+                command,
+                formatter,
+                completed: true,
+                signal: undefined,
+                isCurrent: () => true,
+                invalidate: context.invalidate,
+            });
+            await vi.waitUntil(() => render().includes("│ echo formatted\n"));
+            expect(render()).toContain("│ printf done");
+            expect(render(true)).toContain(command);
+            expect(context.args).toEqual({ command });
+        } finally {
+            bash.clear();
+        }
+    });
+
     it("formats for the rendered content width and restores a single line after widening", async () => {
         const bash = createNativeBashFeature();
         const theme = new Theme(TEST_THEME_COLORS, TEST_THEME_BACKGROUND_COLORS, "truecolor");
@@ -204,6 +367,29 @@ describe("script preview events", () => {
         expect(render(100)).toContain(code);
         expect(render(100)).not.toContain("│ console.log([\n");
         bash.clear();
+    });
+
+    it("identifies the changed tool call when restoring formatted previews", async () => {
+        const bash = createNativeBashFeature();
+        const changed: string[] = [];
+        const formatter: ScriptBlockFormatter = async () => "print('reviewed')";
+        try {
+            await bash.restore({
+                calls: [
+                    { toolCallId: "first", command: "python -c 'print(1)'" },
+                    { toolCallId: "second", command: "python -c 'print(2)'" },
+                ],
+                formatter,
+                signal: new AbortController().signal,
+                isCurrent: () => true,
+                invalidate: (toolCallId) => {
+                    changed.push(toolCallId);
+                },
+            });
+            expect(changed).toEqual(["first", "second"]);
+        } finally {
+            bash.clear();
+        }
     });
 
     it("runs one formatter per finalized command", async () => {

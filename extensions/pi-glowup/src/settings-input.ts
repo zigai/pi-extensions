@@ -65,6 +65,28 @@ const DEFAULT_SCRIPT_PREVIEW = {
     formatters: {},
 } as const;
 
+const streamingSchema = Type.Object(
+    {
+        prose: Type.Union(
+            [Type.Literal("token"), Type.Literal("sentence"), Type.Literal("paragraph")],
+            {
+                default: "token",
+                description:
+                    "Reveal assistant prose as tokens, completed sentences, or Markdown paragraphs and list items.",
+            },
+        ),
+        code: Type.Union(
+            [Type.Literal("token"), Type.Literal("statement"), Type.Literal("block")],
+            {
+                default: "token",
+                description:
+                    "Reveal assistant code fences, writes, and script previews as tokens, completed statements, or whole blocks. Statement mode supports JavaScript, TypeScript, Python, and Bash; other languages wait for completion. Configured formatters format each statement separately in both views. Edits and patches are unchanged.",
+            },
+        ),
+    },
+    { additionalProperties: false, default: { prose: "token", code: "token" } },
+);
+
 const HEX_COLOR_PATTERN = "^#[0-9A-Fa-f]{6}$";
 
 function optionalHexColor(description: string) {
@@ -301,7 +323,7 @@ const formatterCommandSchema = Type.Array(Type.String({ minLength: 1, pattern: "
 const formatterImportsSchema = Type.Optional(
     Type.Union([Type.Literal("show"), Type.Literal("omit")], {
         description:
-            "Leading import/setup visibility in collapsed display; expansion shows original source.",
+            "Leading import/setup visibility in collapsed display; expansion retains all source.",
         default: "omit",
     }),
 );
@@ -426,7 +448,7 @@ const scriptPreviewSchema = Type.Object(
         }),
         formatters: Type.Record(Type.String(), scriptFormatterProfileSchema, {
             description:
-                "Display-only profiles keyed by matching language id; expansion shows original source.",
+                "Display-only profiles keyed by language id; statement mode formats each unit in both views, otherwise expansion shows original source.",
         }),
     },
     {
@@ -437,6 +459,12 @@ const scriptPreviewSchema = Type.Object(
 
 export const settingsSchema = Type.Object(
     {
+        presentation: Type.String({
+            default: "compact",
+            minLength: 1,
+            description:
+                "Whole tool presentation: compact, outline, or an extension-registered name.",
+        }),
         preserveTools: Type.Array(Type.String(), {
             default: [],
             description: "Keep selected third-party tools on their original renderer.",
@@ -451,6 +479,7 @@ export const settingsSchema = Type.Object(
         syntax: syntaxSchema,
         patches: patchesSchema,
         scriptPreview: scriptPreviewSchema,
+        streaming: streamingSchema,
     },
     { additionalProperties: false },
 );
@@ -465,6 +494,7 @@ export const extensionSettingsInput = {
         "https://raw.githubusercontent.com/zigai/pi-tweaks/master/extensions/pi-glowup/config.schema.json",
     schema: settingsSchema,
     exampleSettings: {
+        streaming: { prose: "paragraph", code: "statement" },
         scriptPreview: {
             formatters: {
                 javascript: { kind: "javascript", command: ["oxfmt"], objectWrap: "collapse" },

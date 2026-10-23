@@ -1,4 +1,5 @@
 import { loadPiExtensionSettings, type PiSettingsContext } from "@zigai/pi-extension-settings/pi";
+import type { ExtensionSettingsDefinition } from "@zigai/pi-extension-settings";
 import { definePrevalidatedExtensionSettings } from "@zigai/pi-extension-settings/runtime";
 
 import prevalidatedExtensionSettingsArtifact from "./settings.prevalidated.ts";
@@ -10,7 +11,9 @@ export {
     type ExtensionSettings,
 } from "./settings-input.ts";
 
-export const extensionSettingsDefinition = definePrevalidatedExtensionSettings(
+export const extensionSettingsDefinition: ExtensionSettingsDefinition<
+    typeof extensionSettingsInput.schema
+> = definePrevalidatedExtensionSettings(
     extensionSettingsInput,
     prevalidatedExtensionSettingsArtifact,
 );

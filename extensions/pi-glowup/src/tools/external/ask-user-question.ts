@@ -287,7 +287,7 @@ export function createAskUserQuestionRenderer(
                         });
                     }
 
-                    return renderSimpleResult(theme, result, { ...options, expanded });
+                    return renderSimpleResult(theme, result, { ...options, expanded }, context);
                 },
             );
         },

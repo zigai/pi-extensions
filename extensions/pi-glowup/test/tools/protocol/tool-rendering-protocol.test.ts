@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { renderProtocolNode } from "../../../src/tools/protocol/node-renderer.ts";
+import { createCodeStreamStore } from "../../../src/rendering/streaming/code-stream.ts";
+import type { ThirdPartyToolRenderContext } from "../../../src/tools/types.ts";
 import type { GlowupRenderTheme } from "../../../src/rendering/theme.ts";
 import { jsonValueParser, type JsonValue } from "../../../src/json-value.ts";
 import {
@@ -20,6 +22,116 @@ import {
 } from "../../../src/tools/protocol/contract.ts";
 
 describe("Glowup tool-rendering protocol", () => {
+    it("streams nested list code independently without delaying ordinary output", async () => {
+        const streams = createCodeStreamStore();
+        const node = list([
+            stack([
+                code("const first = 1;\nconst firstPending =", {
+                    syntax: { language: "javascript" },
+                }),
+            ]),
+            call(
+                { static: "Nested" },
+                {
+                    body: list([
+                        code("const second = 2;\nconst secondPending =", {
+                            syntax: { language: "javascript" },
+                        }),
+                        output("stdout stays immediate."),
+                    ]),
+                },
+            ),
+        ]);
+        const theme: GlowupRenderTheme = {
+            fg: (_token, value) => value,
+            bg: (_token, value) => value,
+            bold: (value) => value,
+        };
+        const context: ThirdPartyToolRenderContext = {
+            args: {},
+            toolCallId: "nested-list",
+            executionStarted: false,
+            argsComplete: false,
+            isPartial: true,
+            expanded: true,
+            showImages: false,
+            isError: false,
+            streamCode: (input) => streams.get({ ...input, mode: "statement" }),
+        };
+        const render = (isError = false): string =>
+            renderProtocolNode(node, theme, { ...context, isError }, "static")
+                .render(80)
+                .join("\n");
+        try {
+            const firstFrame = render();
+            expect(firstFrame).toContain("stdout stays immediate.");
+            expect(firstFrame).not.toContain("firstPending");
+            expect(firstFrame).not.toContain("secondPending");
+            await streams.settled();
+            const partial = render();
+            expect(partial).toContain("const first = 1;");
+            expect(partial).toContain("const second = 2;");
+            expect(partial).not.toContain("Pending");
+            render(true);
+            await streams.settled();
+            const failed = render(true);
+            expect(failed).toContain("const firstPending =");
+            expect(failed).toContain("const secondPending =");
+        } finally {
+            await streams.dispose();
+        }
+    });
+
+    it.each([false, true])(
+        "nests message text after metadata through newlines and soft wraps when expanded=%s",
+        (expanded) => {
+            const node = call(
+                { static: "Message" },
+                {
+                    body: stack([
+                        summary([{ label: "Agent", value: "sample" }]),
+                        text("first message words\nsecond line"),
+                    ]),
+                },
+            );
+            const theme: GlowupRenderTheme = {
+                fg: (_token, value) => value,
+                bg: (_token, value) => value,
+                bold: (value) => value,
+            };
+            const component = renderProtocolNode(
+                node,
+                theme,
+                {
+                    args: {},
+                    toolCallId: "message",
+                    executionStarted: true,
+                    argsComplete: true,
+                    isPartial: false,
+                    expanded,
+                    showImages: false,
+                    isError: false,
+                },
+                "static",
+            );
+
+            expect(component.render(40).map((row) => row.trimEnd())).toEqual([
+                "• Message",
+                "  └ Agent → sample",
+                "    first message words",
+                "    second line",
+            ]);
+
+            expect(component.render(18).map((row) => row.trimEnd())).toEqual([
+                "• Message",
+                "  └ Agent → sample",
+                "    first message",
+                "    words",
+                "    second line",
+            ]);
+        },
+    );
+
     it("attaches passive rendering metadata without mutating the definition", () => {
         const definition = { name: "demo" };
         const rendering = {

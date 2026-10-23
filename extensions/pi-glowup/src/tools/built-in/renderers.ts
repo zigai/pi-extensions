@@ -1,4 +1,6 @@
-import { jsonValueParser } from "../../json-value.ts";
+import { jsonValueParser, type JsonValue } from "../../json-value.ts";
+import type { CodePreview, CodeSource } from "../../rendering/streaming/presentation.ts";
+import { parseScriptInvocation } from "./bash/invocation.ts";
 import { emptyComponent } from "../../rendering/component.ts";
 import { renderGlowupOutput } from "../../rendering/output.ts";
 import { type MutationSettings } from "../../rendering/preview-settings.ts";
@@ -11,6 +13,8 @@ import {
 } from "../../rendering/tool-header.ts";
 import {
     findActionArgs,
+    commandField,
+    normalizedWriteArgs,
     grepActionArgs,
     hasImageContent,
     lsActionArgs,
@@ -21,7 +25,7 @@ import {
 import type { ShellLayout, ShellOperatorPosition } from "./bash/command.ts";
 import { createNativeBashFeature } from "./bash/preview.ts";
 import { type ScriptPreviewHeaderLayout } from "./bash/script-renderer.ts";
-import { type BuiltInToolRendererOptions } from "./context.ts";
+import { type BuiltInToolRendererOptions, type BuiltInRenderContext } from "./context.ts";
 import { createNativeDeleteFeature } from "./delete.ts";
 import { createNativeEditFeature } from "./edit.ts";
 import {
@@ -51,6 +55,7 @@ export function createNativeToolRenderers(features: {
         readonly shellOperatorPosition: () => ShellOperatorPosition;
         readonly labelMode: ToolLabelMode;
         readonly movingWriteViewport: boolean;
+        readonly streamCode?: CodePreview;
         readonly mutationSettings: MutationSettings;
         readonly recordRender: (kind: "call", toolName: BuiltInToolName) => void;
     }): BuiltInToolRendererOptions["renderCall"] {
@@ -100,12 +105,14 @@ export function createNativeToolRenderers(features: {
                         options.showPrologueOmission,
                         options.shellLayout,
                         options.shellOperatorPosition,
+                        options.streamCode,
                     );
                 case "write":
                     return renderWriteCall(jsonValueParser.parse(args), theme, context, {
                         labelMode: options.labelMode,
                         movingViewport: options.movingWriteViewport,
                         mutationSettings: options.mutationSettings,
+                        ...(options.streamCode !== undefined && { streamCode: options.streamCode }),
                     });
                 case "edit":
                     return renderEditCall(
@@ -147,6 +154,7 @@ export function createNativeToolRenderers(features: {
                         ? undefined
                         : renderExplorationResult(result, options.expanded, theme, {
                               syntaxPath: syntaxPathFromToolArg(pathField(context.args)),
+                              invalidate: context.invalidate,
                           });
                 case "find":
                 case "grep":
@@ -188,5 +196,33 @@ export function createNativeToolRenderers(features: {
         };
     }
 
-    return { renderBuiltInToolCall, renderBuiltInToolResult };
+    function codeSource(
+        toolName: BuiltInToolName,
+        args: JsonValue | undefined,
+        context: Pick<BuiltInRenderContext, "toolCallId">,
+    ): CodeSource | undefined {
+        if (toolName === "write") {
+            const write = normalizedWriteArgs(args);
+            if (write.content === undefined) return undefined;
+
+            const path = write.path ?? "";
+            return { key: `tool:${context.toolCallId}:write:${path}`, source: write.content, path };
+        }
+
+        if (toolName === "bash") {
+            const command = commandField(args);
+            if (command === undefined) return undefined;
+
+            const script = parseScriptInvocation(command) ?? { language: "bash", code: command };
+            return {
+                key: `tool:${context.toolCallId}:script:${script.language}`,
+                source: script.code,
+                language: script.language,
+            };
+        }
+
+        return undefined;
+    }
+
+    return { renderBuiltInToolCall, renderBuiltInToolResult, codeSource };
 }

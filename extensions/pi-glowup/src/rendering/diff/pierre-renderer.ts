@@ -1,3 +1,4 @@
+import { omittedLinesLabel } from "../component.ts";
 import { keyHint } from "@earendil-works/pi-coding-agent";
 import Type from "typebox";
 import { Value } from "typebox/value";
@@ -726,7 +727,7 @@ class PierreDiffComponent implements Component {
                   ...visible,
                   {
                       kind: "collapsed",
-                      text: `… +${selection.omitted} lines (${pierreExpandHint()})`,
+                      text: `${omittedLinesLabel(selection.omitted)} (${pierreExpandHint()})`,
                       fg: this.palette.metadataFg,
                       bg: this.palette.metadataBg,
                   },
@@ -759,7 +760,7 @@ class PierreDiffComponent implements Component {
                   ...visible,
                   {
                       kind: "collapsed",
-                      text: `… +${selection.omitted} lines (${pierreExpandHint()})`,
+                      text: `${omittedLinesLabel(selection.omitted)} (${pierreExpandHint()})`,
                       fg: this.palette.metadataFg,
                       bg: this.palette.metadataBg,
                   },
@@ -861,7 +862,7 @@ function omittedDiffLineCount(
     );
 }
 
-function summaryDetail(payload: PierreSummaryDiffPayload): string {
+export function summaryDetail(payload: PierreSummaryDiffPayload): string {
     if (payload.summary.reason === "not-readable") {
         return `Diff omitted: ${payload.path} could not be read safely.`;
     }

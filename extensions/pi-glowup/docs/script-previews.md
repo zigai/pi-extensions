@@ -68,14 +68,20 @@ explicit executable path. `kind: "command"` accepts arbitrary formatter argv thr
 
 Profiles format asynchronously at the available content width and after resize. Oxfmt receives
 `printWidth` through an owned temporary configuration; Tuff receives line length and an isolated
-collection profile. Blank-line decisions belong to the formatter, never a text-stripping pass.
+collection profile. Successful Python formatting also compacts root-level structural blank rows
+before unindented code. The syntax worker's Python tokenizer protects strings, expressions, and
+continuations; comment-adjacent and suite-internal gaps remain. This applies to Python command
+profiles too.
 Python/JS/TS profiles omit complete leading imports by default; `imports: "show"` retains them.
-Bash keeps setup statements and heredocs. Expanded Bash-tool and Codemode previews show original source.
+Bash keeps setup statements and heredocs. Expanded Bash-tool and Codemode previews show original source
+unless `streaming.code` is `"statement"`, which retains independently formatted statements in both views.
 
-Streaming previews keep raw source until execution completes. Prepared decoration is then
-published in one update, or once ready if the result arrives first. Formatting never delays tool
-execution or changes submitted arguments. Successful output is cached by language, width, and
-source. Command profiles also accept `{width}`, `{line_length}`, and `{cols}` argv placeholders.
+Token-mode previews keep raw source until execution completes, then publish prepared decoration.
+Statement mode formats each completed statement separately before revealing it; block mode waits for
+complete code. Supported statement languages are JavaScript, TypeScript, Python, and Bash; other
+languages wait for completion. Formatting never delays execution or changes submitted arguments.
+Successful output is cached by language, width, and source. Command profiles also accept
+`{width}`, `{line_length}`, and `{cols}` argv placeholders.
 Missing or failed executables produce a content-free warning; undecorated source remains visible.
 
 ## Highlighting

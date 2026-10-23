@@ -1377,6 +1377,13 @@ describe("third-party tool renderers", () => {
                                 status: "error",
                                 durationMs: 25,
                             },
+                            {
+                                id: "call-1/2",
+                                name: "fetch_page",
+                                args: '{"token":"private","url":"https://example.com/a-long-pa...',
+                                status: "ok",
+                                durationMs: 30,
+                            },
                         ],
                     },
                 },
@@ -1388,6 +1395,7 @@ describe("third-party tool renderers", () => {
             .join("\n");
         expect(result).toContain("read");
         expect(result).toContain("mcp__docs__lookup");
+        expect(result).toContain("https://example.com/a-long-pa");
         expect(result).toContain("File contents");
         expect(result).toContain("[redacted]");
         expect(result).not.toContain('"path"');

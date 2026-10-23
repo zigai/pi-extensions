@@ -1,5 +1,5 @@
 import type { Component } from "@earendil-works/pi-tui";
-import { emptyComponent, toolExpandHint } from "../rendering/component.ts";
+import { emptyComponent, omittedLinesLabel, toolExpandHint } from "../rendering/component.ts";
 import { renderGlowupCall } from "../rendering/tool-header.ts";
 import { renderGlowupOutput, type GlowupOutputRenderOptions } from "../rendering/output.ts";
 import { type GlowupCallState, type GlowupRenderTheme } from "../rendering/theme.ts";
@@ -64,7 +64,7 @@ export function boundedExpandedResult(output: string | undefined): string | unde
     const tailCount = Math.floor(MAX_EXPANDED_RESULT_LINES / 2);
     return [
         ...lines.slice(0, headCount),
-        `… +${lines.length - MAX_EXPANDED_RESULT_LINES} lines (expanded output bounded)`,
+        `${omittedLinesLabel(lines.length - MAX_EXPANDED_RESULT_LINES)} (expanded output bounded)`,
         ...lines.slice(-tailCount),
     ].join("\n");
 }
@@ -73,6 +73,7 @@ export function renderSimpleResult(
     theme: GlowupRenderTheme,
     result: ThirdPartyToolResult,
     options: { readonly expanded: boolean; readonly isPartial: boolean },
+    context: Pick<ThirdPartyToolRenderContext, "invalidate">,
 ): Component {
     const rawOutput = textOutput(result) ?? detailsOutput(result);
     const output = options.expanded ? boundedExpandedResult(rawOutput) : rawOutput;
@@ -82,6 +83,7 @@ export function renderSimpleResult(
         mode: "headTail",
         maxPreviewLines: 4,
         noOutputLabel: null,
+        invalidate: context.invalidate,
     };
     if (language !== undefined) {
         renderOptions = { ...renderOptions, syntax: { language } };
@@ -160,7 +162,7 @@ export function createGenericRenderer(
             return renderExpandableSection(
                 { ...context, expanded: options.expanded },
                 "result",
-                (expanded) => renderSimpleResult(theme, result, { ...options, expanded }),
+                (expanded) => renderSimpleResult(theme, result, { ...options, expanded }, context),
             );
         },
     };

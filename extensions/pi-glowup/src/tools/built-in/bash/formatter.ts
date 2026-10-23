@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
+import { reportExtensionDiagnostic } from "@zigai/pi-extension-internals";
 import { createHash } from "node:crypto";
 import type { Readable, Writable } from "node:stream";
 import type { ScriptInvocation } from "./invocation.ts";
@@ -10,6 +11,7 @@ import {
     type ScriptFormatterProfile,
 } from "../../../settings-input.ts";
 import { prepareFormatterCommand, type PreparedFormatterCommand } from "./display-profile.ts";
+import { compactPythonStructuralBlankRows } from "../../../rendering/syntax/highlighter.ts";
 
 export type ScriptBlockFormatterInput = {
     readonly label: string;
@@ -355,7 +357,7 @@ function startQueuedFormatters(): void {
 
 export function createCommandScriptFormatter(
     commands: ScriptFormatterCommands,
-    reportWarning: ScriptFormatterWarningReporter = console.warn,
+    reportWarning: ScriptFormatterWarningReporter = reportExtensionDiagnostic,
 ): ScriptBlockFormatter | undefined {
     if (commands.size === 0) {
         return undefined;
@@ -419,6 +421,15 @@ export function createCommandScriptFormatter(
             return undefined;
         }
 
+        const completed = cache.get(cacheKey);
+        if (completed !== undefined) {
+            release();
+
+            if (effectiveOptions.signal?.aborted === true) return undefined;
+
+            return completed.output;
+        }
+
         let prepared: PreparedFormatterCommand;
         try {
             prepared = await prepareFormatterCommand(command, effectiveOptions);
@@ -461,8 +472,20 @@ export function createCommandScriptFormatter(
             return undefined;
         }
 
-        const formatted = normalizeCode(output);
+        let formatted = normalizeCode(output);
         if (formatted.trim().length === 0) return undefined;
+
+        if (input.language === "python") {
+            const compacted = await compactPythonStructuralBlankRows(formatted, {
+                ...effectiveOptions,
+                reportWarning,
+            });
+            if (compacted === undefined) return undefined;
+
+            formatted = compacted;
+        }
+
+        if (effectiveOptions.signal?.aborted === true) return undefined;
 
         remember(cacheKey, formatted);
 

@@ -198,6 +198,15 @@ function streamCodemodeResponse(model: Model<string>): AssistantMessageEventStre
     });
 }
 
+function streamFormatterFailureResponse(model: Model<string>): AssistantMessageEventStream {
+    return streamCompletedToolCall(model, {
+        type: "toolCall",
+        id: "pty-formatter-failure",
+        name: "codemode",
+        arguments: { code: "const value = /word/1;" },
+    });
+}
+
 function streamBashChainResponse(model: Model<string>): AssistantMessageEventStream {
     const toolCall: ToolCall = {
         type: "toolCall",
@@ -429,6 +438,8 @@ function streamOfflineProvider(
         return streamWrappingEditResponse(model);
     }
 
+    if (prompt.includes("deterministic formatter failure"))
+        return streamFormatterFailureResponse(model);
     if (prompt.includes("deterministic codemode format")) return streamCodemodeResponse(model);
     if (prompt.includes("deterministic bash chain")) return streamBashChainResponse(model);
     if (prompt.includes("deterministic bash layout")) return streamBashLayoutResponse(model);
@@ -461,6 +472,9 @@ function streamOfflineProvider(
 }
 
 export default function offlinePtyProvider(pi: ExtensionAPI): void {
+    pi.on("tool_call", (event, ctx) => {
+        if (event.toolCallId === "pty-formatter-failure") ctx.ui.setEditorText("DIAGNOSTIC_DRAFT");
+    });
     pi.registerProvider(PROVIDER_NAME, {
         name: "Deterministic offline PTY fixture",
         baseUrl: "offline://local",

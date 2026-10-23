@@ -18,14 +18,25 @@ For a tool, Glowup uses this order:
 
 1. A configured preserve rule or `glowupRendering: "preserve"` keeps the original Pi renderer.
 2. A valid tool-owned `glowupRendering` adapter supplies Glowup views.
-3. A known tool without an owner adapter uses its transitional compatibility renderer in Glowup.
-4. An existing renderer for any other tool remains unchanged.
-5. The generic compatibility renderer is used only when no renderer exists.
+3. A separately registered contribution supplies its protocol views.
+4. A tool without an existing renderer uses its `outputSchema` and `structuredContent` for generated results.
+5. Known tools retain transitional renderers; other existing renderers remain unchanged.
+6. The generic renderer supplies slots without another renderer.
 
 The generic renderer is deliberately domain-neutral. It uses the tool definition label when
 available, produces bounded summaries, redacts secret-like fields, and does not infer semantics
 from unknown tool names. Known transitional renderers retain their current domain-specific
 summaries until migration is complete.
+
+## Presentation and contributions
+
+`@zigai/pi-glowup/presentation` exports `registerGlowupToolRenderer(name, matches, rendering)` for separate protocol contributions. Its handle updates the adapter and disposes registration idempotently. Owner adapters and preservation rules take precedence. Registration does not activate Glowup.
+
+`registerGlowupPresentation(name, presentation)` installs a whole backend; `selectGlowupPresentation(name)` selects it for the session. Handles update or dispose the backend. Disposal restores the previous available selection or compact. The `presentation` setting selects the startup backend. Compact retains specialized previews; outline uses open headings, numbered lists, plain code and signed mutation rows. Backends own both semantic-node rendering and native/transitional renderer construction.
+
+Generated results validate `structuredContent` against `outputSchema`, then display declared field titles and nested values. Missing, partial or invalid structured results retain diagnostics and textual output; tool errors retain their text. Generated results use the same expansion budgets as protocol output.
+
+Glowup owns tool presentation and composition. Response Renderer independently owns assistant tables, fences, paragraph gaps and italic policy. Neither extension is retired; remaining transitional renderers stay until their owners replace them.
 
 ## Protocol version 3
 

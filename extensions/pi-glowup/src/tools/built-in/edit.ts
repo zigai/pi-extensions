@@ -216,6 +216,8 @@ export function createNativeEditFeature() {
             const showAllRows = options.expanded || mutationSettings.defaultView === "full";
             let diffOptions: GlowupDiffRenderOptions = {
                 collapsedLineBudget: mutationSettings.previewLines,
+                lastComponent: context.lastComponent,
+                invalidate: context.invalidate,
             };
             if (!showAllRows) {
                 diffOptions = { ...diffOptions, maxWrappedRows: 1 };

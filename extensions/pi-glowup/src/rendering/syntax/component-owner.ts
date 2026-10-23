@@ -24,14 +24,14 @@ function createOwner(): SyntaxComponentOwner {
 export function createSyntaxComponent(
     previous: Component | undefined,
     invalidateHost: (() => void) | undefined,
-    render: (invalidate: () => void) => Component,
+    render: (invalidate: () => void, previous: Component | undefined) => Component,
 ): Component {
     let owner: SyntaxComponentOwner | undefined;
     if (previous !== undefined) owner = owners.get(previous);
     owner ??= createOwner();
     owner.invalidateHost = invalidateHost;
 
-    const component = render(owner.invalidate);
+    const component = render(owner.invalidate, owner.component);
     owner.component = component;
     owners.set(component, owner);
 
