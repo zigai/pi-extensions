@@ -128,6 +128,62 @@ test("applies Codex apply_patch changes to the local filesystem", async () => {
 
 test.each([
     {
+        name: "replacement and insertion",
+        original: "one\r\ntwo\r\nthree\r\n",
+        body: "@@\n-one\n+uno\n@@\n two\n+\n+between\n three",
+        expected: "uno\r\ntwo\r\n\r\nbetween\r\nthree\r\n",
+    },
+    {
+        name: "append after trailing blank line",
+        original: "one\r\n\r\n",
+        body: "@@\n+two",
+        expected: "one\r\n\r\ntwo\r\n",
+    },
+    {
+        name: "mixed endings and fuzzy context",
+        original: "one\r\n  two  \nthree\rfour\r\n",
+        body: "@@\n-one\n+uno\n two\n-three\n+tres\n four",
+        expected: "uno\r\n  two  \ntres\r\nfour\r\n",
+    },
+    {
+        name: "unterminated line before appended text",
+        original: "one\r\ntwo",
+        body: "@@\n+three",
+        expected: "one\r\ntwo\r\nthree\r\n",
+    },
+    {
+        name: "empty replacement stays empty",
+        original: "one\r\n",
+        body: "@@\n-one",
+        expected: "",
+    },
+])("apply_patch preserves CRLF: $name", async ({ original, body, expected }) => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-crlf-"));
+    try {
+        await writeFile(join(root, "target.txt"), original);
+
+        const result = expectApplyPatchSuccess(
+            await applyPatchText(wrapPatch(`*** Update File: target.txt\n${body}`), root),
+        );
+
+        assert.equal(await readFile(join(root, "target.txt"), "utf8"), expected);
+        assert.deepEqual(result.changes, [
+            {
+                type: "update",
+                path: join(root, "target.txt"),
+                movePath: undefined,
+                oldContent: original,
+                newContent: expected,
+                overwrittenMoveContent: undefined,
+            },
+        ]);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test.each([
+    {
         operation: "add",
         body: "*** Add File: target.txt \n+new",
         remaining: [["target.txt ", "new\n"]],

@@ -60,6 +60,7 @@ export type UpdateFileChunk = {
     readonly changeContext: string | undefined;
     readonly oldLines: readonly string[];
     readonly newLines: readonly string[];
+    readonly contextLineIndices?: readonly (readonly [number, number])[];
     readonly isEndOfFile: boolean;
 };
 
@@ -150,6 +151,7 @@ type MutableUpdateFileChunk = {
     changeContext: string | undefined;
     oldLines: string[];
     newLines: string[];
+    contextLineIndices: [number, number][];
     isEndOfFile: boolean;
 };
 
@@ -166,6 +168,11 @@ type Replacement = {
     readonly startIndex: number;
     readonly oldLength: number;
     readonly newLines: readonly string[];
+};
+
+type SourceLine = {
+    readonly text: string;
+    readonly ending: string | undefined;
 };
 
 type PatchFileMetadata = {
@@ -480,6 +487,7 @@ export class StreamingPatchParser {
 
         if (line.length === 0) {
             const chunk = ensureCurrentUpdateChunk(hunk);
+            chunk.contextLineIndices.push([chunk.oldLines.length, chunk.newLines.length]);
             chunk.oldLines.push("");
             chunk.newLines.push("");
             this.mode = { type: "updateFile", hunkLineNumber };
@@ -489,6 +497,7 @@ export class StreamingPatchParser {
         const contextLine = stripPrefix(line, " ");
         if (contextLine !== undefined) {
             const chunk = ensureCurrentUpdateChunk(hunk);
+            chunk.contextLineIndices.push([chunk.oldLines.length, chunk.newLines.length]);
             chunk.oldLines.push(contextLine);
             chunk.newLines.push(contextLine);
             this.mode = { type: "updateFile", hunkLineNumber };
@@ -747,18 +756,34 @@ function cloneHunks(hunks: readonly MutableApplyPatchHunk[]): ApplyPatchHunk[] {
             type: "update",
             path: hunk.path,
             movePath: hunk.movePath,
-            chunks: hunk.chunks.map((chunk) => ({
-                changeContext: chunk.changeContext,
-                oldLines: [...chunk.oldLines],
-                newLines: [...chunk.newLines],
-                isEndOfFile: chunk.isEndOfFile,
-            })),
+            chunks: hunk.chunks.map((chunk) => {
+                const cloned: UpdateFileChunk = {
+                    changeContext: chunk.changeContext,
+                    oldLines: [...chunk.oldLines],
+                    newLines: [...chunk.newLines],
+                    isEndOfFile: chunk.isEndOfFile,
+                };
+                if (chunk.contextLineIndices.length === 0) return cloned;
+
+                return {
+                    ...cloned,
+                    contextLineIndices: chunk.contextLineIndices.map(
+                        ([oldIndex, newIndex]) => [oldIndex, newIndex] as const,
+                    ),
+                };
+            }),
         };
     });
 }
 
 function makeUpdateChunk(changeContext: string | undefined): MutableUpdateFileChunk {
-    return { changeContext, oldLines: [], newLines: [], isEndOfFile: false };
+    return {
+        changeContext,
+        oldLines: [],
+        newLines: [],
+        contextLineIndices: [],
+        isEndOfFile: false,
+    };
 }
 
 function ensureCurrentUpdateChunk(hunk: MutableUpdateFileHunk): MutableUpdateFileChunk {
@@ -1124,13 +1149,32 @@ function deriveNewContentsFromChunks(
     absolutePath: string,
     chunks: readonly UpdateFileChunk[],
 ): string {
-    const originalLines = originalContents.split("\n");
-    if (originalLines.at(-1) === "") originalLines.pop();
+    const sourceLines: SourceLine[] = [];
+    let lineStart = 0;
+    let preferredEnding: string | undefined;
+    for (const match of originalContents.matchAll(/\r\n|\r|\n/g)) {
+        preferredEnding ??= match[0];
+        sourceLines.push({
+            text: originalContents.slice(lineStart, match.index),
+            ending: match[0],
+        });
+        lineStart = match.index + match[0].length;
+    }
 
-    const replacements = computeReplacements(originalLines, absolutePath, chunks);
-    const newLines = applyReplacements(originalLines, replacements);
-    if (newLines.at(-1) !== "") newLines.push("");
-    return newLines.join("\n");
+    if (lineStart < originalContents.length) {
+        sourceLines.push({ text: originalContents.slice(lineStart), ending: undefined });
+    }
+
+    preferredEnding ??= "\n";
+
+    const replacements = computeReplacements(
+        sourceLines.map((line) => line.text),
+        absolutePath,
+        chunks,
+    );
+    const newLines = applyReplacements(sourceLines, replacements, preferredEnding);
+
+    return newLines.map((line) => line.text + (line.ending ?? preferredEnding)).join("");
 }
 
 function computeReplacements(
@@ -1160,10 +1204,8 @@ function computeReplacements(
         }
 
         if (chunk.oldLines.length === 0) {
-            const insertionIndex =
-                originalLines.at(-1) === "" ? originalLines.length - 1 : originalLines.length;
             replacements.push({
-                startIndex: insertionIndex,
+                startIndex: originalLines.length,
                 oldLength: 0,
                 newLines: [...chunk.newLines],
             });
@@ -1188,7 +1230,31 @@ function computeReplacements(
             );
         }
 
-        replacements.push({ startIndex: found, oldLength: pattern.length, newLines });
+        let oldStart = 0;
+        let newStart = 0;
+        for (const [oldContext, newContext] of chunk.contextLineIndices ?? []) {
+            if (oldContext >= pattern.length || newContext >= newLines.length) break;
+
+            if (oldStart !== oldContext || newStart !== newContext) {
+                replacements.push({
+                    startIndex: found + oldStart,
+                    oldLength: oldContext - oldStart,
+                    newLines: newLines.slice(newStart, newContext),
+                });
+            }
+
+            oldStart = oldContext + 1;
+            newStart = newContext + 1;
+        }
+
+        if (oldStart !== pattern.length || newStart !== newLines.length) {
+            replacements.push({
+                startIndex: found + oldStart,
+                oldLength: pattern.length - oldStart,
+                newLines: newLines.slice(newStart),
+            });
+        }
+
         lineIndex = found + pattern.length;
     }
 
@@ -1196,12 +1262,14 @@ function computeReplacements(
 }
 
 function applyReplacements(
-    lines: readonly string[],
+    lines: readonly SourceLine[],
     replacements: readonly Replacement[],
-): string[] {
+    preferredEnding: string,
+): SourceLine[] {
     const nextLines = [...lines];
     for (const replacement of [...replacements].reverse()) {
-        nextLines.splice(replacement.startIndex, replacement.oldLength, ...replacement.newLines);
+        const inserted = replacement.newLines.map((text) => ({ text, ending: preferredEnding }));
+        nextLines.splice(replacement.startIndex, replacement.oldLength, ...inserted);
     }
 
     return nextLines;
