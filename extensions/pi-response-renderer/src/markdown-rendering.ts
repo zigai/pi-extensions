@@ -11,6 +11,7 @@ const ANSI_OSC_REGEX = new RegExp(`${ESC}\\][^${BEL}]*${BEL}`, "g");
 const ANSI_CSI_REGEX = new RegExp(`${ESC}\\[[0-9;?]*[ -/]*[@-~]`, "g");
 const ANSI_SGR_REGEX = new RegExp(`${ESC}\\[([0-9;]*)m`, "g");
 const fencesHiddenInstances = new WeakSet();
+const tableBoundaryLineTextsByMarkdown = new WeakMap<Pick<Markdown, "render">, Set<string>>();
 
 function stripAnsi(text: string): string {
     return text.replace(ANSI_OSC_REGEX, "").replace(ANSI_CSI_REGEX, "");
@@ -443,6 +444,7 @@ function shouldCollapseBlankLine(
     index: number,
     headingPrefix: string,
     headingLineTexts: ReadonlySet<string>,
+    tableBoundaryLineTexts?: ReadonlySet<string>,
 ): boolean {
     // Array.at(-1) wraps; the first line has no predecessor.
     if (index === 0) return false;
@@ -450,6 +452,13 @@ function shouldCollapseBlankLine(
     const previousLine = lines.at(index - 1);
     const nextLine = lines.at(index + 1);
     if (previousLine === undefined || nextLine === undefined) {
+        return false;
+    }
+
+    if (
+        tableBoundaryLineTexts?.has(normalizeRenderedLine(previousLine)) === true ||
+        tableBoundaryLineTexts?.has(normalizeRenderedLine(nextLine)) === true
+    ) {
         return false;
     }
 
@@ -467,17 +476,53 @@ export function collapseAssistantBlankLines(
     lines: string[],
     headingPrefix: string,
     headingLineTexts: ReadonlySet<string>,
+    tableBoundaryLineTexts?: ReadonlySet<string>,
 ): string[] {
     return lines.filter((line, index) => {
         if (!isBlankRenderedLine(line)) {
             return true;
         }
 
-        return !shouldCollapseBlankLine(lines, index, headingPrefix, headingLineTexts);
+        return !shouldCollapseBlankLine(
+            lines,
+            index,
+            headingPrefix,
+            headingLineTexts,
+            tableBoundaryLineTexts,
+        );
     });
 }
 
-export function shouldHideFences(instance: Markdown): boolean {
+export function recordTableBoundaryLines(
+    instance: Pick<Markdown, "render">,
+    lines: readonly string[],
+): void {
+    const content = lines.filter((line) => !isBlankRenderedLine(line));
+    const first = content.at(0);
+    const last = content.at(-1);
+    if (first === undefined || last === undefined) return;
+
+    let boundaries = tableBoundaryLineTextsByMarkdown.get(instance);
+    if (boundaries === undefined) {
+        boundaries = new Set();
+        tableBoundaryLineTextsByMarkdown.set(instance, boundaries);
+    }
+
+    boundaries.add(normalizeRenderedLine(first));
+    boundaries.add(normalizeRenderedLine(last));
+}
+
+export function getTableBoundaryLineTexts(
+    instance: Pick<Markdown, "render">,
+): ReadonlySet<string> | undefined {
+    return tableBoundaryLineTextsByMarkdown.get(instance);
+}
+
+export function clearTableBoundaryLines(instance: Pick<Markdown, "render">): void {
+    tableBoundaryLineTextsByMarkdown.delete(instance);
+}
+
+export function shouldHideFences(instance: Pick<Markdown, "render">): boolean {
     return fencesHiddenInstances.has(instance);
 }
 

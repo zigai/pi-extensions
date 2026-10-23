@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/zigai/pi-tweaks/master/extensions/pi-response-renderer/config.schema.json",
+  "title": "Pi Response Renderer settings",
+  "description": "Assistant response presentation.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "default": "./schemas/pi-response-renderer.schema.json",
+      "description": "JSON Schema used by editors for this settings file."
+    },
+    "tableRenderer": {
+      "type": "string",
+      "default": "codex",
+      "minLength": 1,
+      "description": "Selected table renderer: codex, native, or an extension-registered name."
+    },
+    "nativeTableBorderStyle": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "normal"
+        },
+        {
+          "type": "string",
+          "const": "dim"
+        }
+      ],
+      "default": "dim",
+      "description": "Border style for native assistant tables: normal or dim."
+    },
+    "tableHeaderColor": {
+      "type": "string",
+      "default": "#5CCCCC",
+      "pattern": "^#[0-9a-fA-F]{6}$",
+      "description": "Color of table headers and their underline."
+    }
+  }
+}

@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { Markdown, type MarkdownTheme } from "@earendil-works/pi-tui";
-import { test } from "vitest";
+import { beforeEach, describe, test } from "vitest";
 
 import { assistantMessageRuntime } from "../src/assistant-message-runtime.ts";
-import assistantRenderingExtension from "../src/index.ts";
+import { installResponseRendering } from "../src/response-rendering.ts";
+import { markFencesHidden } from "../src/markdown-rendering.ts";
 
 const identity = (text: string): string => text;
 const markdownTheme = {
@@ -34,15 +35,6 @@ const AssistantMessageComponent = componentValue;
 const assistantMessagePrototype = componentValue.prototype;
 const originalAssistantRender = assistantMessagePrototype.render;
 const originalAssistantUpdateContent = assistantMessagePrototype.updateContent;
-
-const originalPiFlag = process.env.PI_CODING_AGENT;
-process.env.PI_CODING_AGENT = "true";
-try {
-    await assistantRenderingExtension();
-} finally {
-    if (originalPiFlag === undefined) delete process.env.PI_CODING_AGENT;
-    else process.env.PI_CODING_AGENT = originalPiFlag;
-}
 
 const ESC = String.fromCharCode(0x1b);
 const BEL = String.fromCharCode(0x07);
@@ -94,172 +86,210 @@ const italicTheme: MarkdownTheme = {
     italic: (text: string) => `\x1b[3m${text}\x1b[23m`,
 };
 
-test("preserves the separator before a long rendered Markdown heading", () => {
-    const lines = renderPlainLines(
-        [
+describe("Markdown formatting", () => {
+    beforeEach(async () => {
+        const originalPiFlag = process.env.PI_CODING_AGENT;
+        process.env.PI_CODING_AGENT = "true";
+        try {
+            const handle = await installResponseRendering();
+
+            return () => handle.dispose();
+        } finally {
+            if (originalPiFlag === undefined) delete process.env.PI_CODING_AGENT;
+            else process.env.PI_CODING_AGENT = originalPiFlag;
+        }
+    });
+
+    test("preserves the separator before a long rendered Markdown heading", () => {
+        const lines = renderPlainLines(
+            [
+                "The standards prefer modules that own one cohesive concept/seam.",
+                "",
+                "### 2. Replace string diagnostics with structured diagnostics",
+            ].join("\n"),
+        );
+
+        assert.deepEqual(lines, [
             "The standards prefer modules that own one cohesive concept/seam.",
             "",
             "### 2. Replace string diagnostics with structured diagnostics",
-        ].join("\n"),
-    );
+        ]);
+    });
 
-    assert.deepEqual(lines, [
-        "The standards prefer modules that own one cohesive concept/seam.",
-        "",
-        "### 2. Replace string diagnostics with structured diagnostics",
-    ]);
-});
+    test("still collapses blank lines between plain paragraph lines", () => {
+        const lines = renderPlainLines(
+            ["First paragraph sentence.", "", "Second paragraph sentence."].join("\n"),
+        );
 
-test("still collapses blank lines between plain paragraph lines", () => {
-    const lines = renderPlainLines(
-        ["First paragraph sentence.", "", "Second paragraph sentence."].join("\n"),
-    );
+        assert.deepEqual(lines, ["First paragraph sentence.", "Second paragraph sentence."]);
+    });
 
-    assert.deepEqual(lines, ["First paragraph sentence.", "Second paragraph sentence."]);
-});
+    test("preserves the blank line after a rendered Markdown table", () => {
+        const lines = renderVisibleLines(
+            [
+                "| Layer | Uniform? |",
+                "|-------|----------|",
+                "| Wire protocol | Yes |",
+                "| Adapter import | Yes |",
+                "",
+                "So you're right on the architecture.",
+            ].join("\n"),
+            markdownTheme,
+        );
 
-test("preserves the blank line after a rendered Markdown table", () => {
-    const lines = renderVisibleLines(
-        [
-            "| Layer | Uniform? |",
-            "|-------|----------|",
-            "| Wire protocol | Yes |",
-            "| Adapter import | Yes |",
-            "",
-            "So you're right on the architecture.",
-        ].join("\n"),
-        markdownTheme,
-    );
+        const tableBottomIndex = lines.findIndex((line) => line.startsWith("└"));
+        assert.ok(tableBottomIndex >= 0, "expected a rendered table bottom border");
+        assert.equal(lines[tableBottomIndex + 1], "");
+        assert.equal(lines[tableBottomIndex + 2], "So you're right on the architecture.");
+    });
 
-    const tableBottomIndex = lines.findIndex((line) => line.startsWith("└"));
-    assert.ok(tableBottomIndex >= 0, "expected a rendered table bottom border");
-    assert.equal(lines[tableBottomIndex + 1], "");
-    assert.equal(lines[tableBottomIndex + 2], "So you're right on the architecture.");
-});
+    test("preserves the blank line before a rendered Markdown table", () => {
+        const lines = renderVisibleLines(
+            ["So the split is:", "", "| A | B |", "|---|---|", "| 1 | 2 |"].join("\n"),
+            markdownTheme,
+        );
 
-test("preserves the blank line before a rendered Markdown table", () => {
-    const lines = renderVisibleLines(
-        ["So the split is:", "", "| A | B |", "|---|---|", "| 1 | 2 |"].join("\n"),
-        markdownTheme,
-    );
+        assert.equal(lines[0], "So the split is:");
+        assert.equal(lines[1], "");
+        assert.ok(lines[2].startsWith("┌"), "expected a rendered table top border");
+    });
 
-    assert.equal(lines[0], "So the split is:");
-    assert.equal(lines[1], "");
-    assert.ok(lines[2].startsWith("┌"), "expected a rendered table top border");
-});
+    test.each([
+        {
+            title: "preserves blanks around a styled level-2 heading without # prefix",
+            markdownHeading: "## Release readiness?",
+            renderedHeading: "Release readiness?",
+            theme: boldHeadingTheme,
+        },
+        {
+            title: "detects color-only heading styles",
+            markdownHeading: "## Rollout status?",
+            renderedHeading: "Rollout status?",
+            theme: colorHeadingTheme,
+        },
+        {
+            title: "preserves blanks around an inline-code level-2 heading without # prefix",
+            markdownHeading: "## `render()` behavior?",
+            renderedHeading: "render() behavior?",
+            theme: codeColorTheme,
+        },
+        {
+            title: "preserves blanks around a bold level-2 heading without # prefix",
+            markdownHeading: "## **API compatibility?**",
+            renderedHeading: "API compatibility?",
+            theme: colorHeadingBoldTheme,
+        },
+    ])("$title", ({ markdownHeading, renderedHeading, theme }) => {
+        const beforeHeading = "The summary starts with a short lead-in.";
+        const afterHeading = "The next paragraph should stay visually separated.";
+        const lines = renderVisibleLines(
+            [beforeHeading, "", markdownHeading, "", afterHeading].join("\n"),
+            theme,
+        );
 
-test.each([
-    {
-        title: "preserves blanks around a styled level-2 heading without # prefix",
-        markdownHeading: "## Release readiness?",
-        renderedHeading: "Release readiness?",
-        theme: boldHeadingTheme,
-    },
-    {
-        title: "detects color-only heading styles",
-        markdownHeading: "## Rollout status?",
-        renderedHeading: "Rollout status?",
-        theme: colorHeadingTheme,
-    },
-    {
-        title: "preserves blanks around an inline-code level-2 heading without # prefix",
-        markdownHeading: "## `render()` behavior?",
-        renderedHeading: "render() behavior?",
-        theme: codeColorTheme,
-    },
-    {
-        title: "preserves blanks around a bold level-2 heading without # prefix",
-        markdownHeading: "## **API compatibility?**",
-        renderedHeading: "API compatibility?",
-        theme: colorHeadingBoldTheme,
-    },
-])("$title", ({ markdownHeading, renderedHeading, theme }) => {
-    const beforeHeading = "The summary starts with a short lead-in.";
-    const afterHeading = "The next paragraph should stay visually separated.";
-    const lines = renderVisibleLines(
-        [beforeHeading, "", markdownHeading, "", afterHeading].join("\n"),
-        theme,
-    );
+        assert.deepEqual(lines, [beforeHeading, "", renderedHeading, "", afterHeading]);
+    });
 
-    assert.deepEqual(lines, [beforeHeading, "", renderedHeading, "", afterHeading]);
-});
+    test("collapses blanks around a fully-bold standalone line (not a heading)", () => {
+        const lines = renderVisibleLines(
+            ["Intro paragraph.", "", "**Bold Title?**", "", "Body paragraph."].join("\n"),
+            inlineBoldTheme,
+        );
 
-test("collapses blanks around a fully-bold standalone line (not a heading)", () => {
-    const lines = renderVisibleLines(
-        ["Intro paragraph.", "", "**Bold Title?**", "", "Body paragraph."].join("\n"),
-        inlineBoldTheme,
-    );
+        assert.deepEqual(lines, ["Intro paragraph.", "Bold Title?", "Body paragraph."]);
+    });
 
-    assert.deepEqual(lines, ["Intro paragraph.", "Bold Title?", "Body paragraph."]);
-});
+    test("does not treat a standalone inline-code line as a heading", () => {
+        const lines = renderVisibleLines(
+            [
+                "I also saved these commands to:",
+                "",
+                "`examples/console-rendering/recordings/playback-commands.txt`",
+                "",
+                "I skipped 02 and 05 because they were intentionally not implemented.",
+            ].join("\n"),
+            codeColorTheme,
+        );
 
-test("does not treat a standalone inline-code line as a heading", () => {
-    const lines = renderVisibleLines(
-        [
+        assert.deepEqual(lines, [
             "I also saved these commands to:",
             "",
-            "`examples/console-rendering/recordings/playback-commands.txt`",
-            "",
+            "examples/console-rendering/recordings/playback-commands.txt",
             "I skipped 02 and 05 because they were intentionally not implemented.",
-        ].join("\n"),
-        codeColorTheme,
-    );
+        ]);
+    });
 
-    assert.deepEqual(lines, [
-        "I also saved these commands to:",
-        "",
-        "examples/console-rendering/recordings/playback-commands.txt",
-        "I skipped 02 and 05 because they were intentionally not implemented.",
-    ]);
-});
+    test("does not treat a paragraph with inline bold as a heading", () => {
+        const lines = renderVisibleLines(
+            ["A paragraph with a **bold word** inside.", "", "Next paragraph."].join("\n"),
+            inlineBoldTheme,
+        );
 
-test("does not treat a paragraph with inline bold as a heading", () => {
-    const lines = renderVisibleLines(
-        ["A paragraph with a **bold word** inside.", "", "Next paragraph."].join("\n"),
-        inlineBoldTheme,
-    );
+        assert.deepEqual(lines, ["A paragraph with a bold word inside.", "Next paragraph."]);
+    });
 
-    assert.deepEqual(lines, ["A paragraph with a bold word inside.", "Next paragraph."]);
-});
+    test("does not treat a fully-italic line as a heading (thinking trace)", () => {
+        const lines = renderVisibleLines(
+            [
+                "First plain paragraph.",
+                "",
+                "*Italic standalone line.*",
+                "",
+                "Second plain paragraph.",
+            ].join("\n"),
+            italicTheme,
+        );
 
-test("does not treat a fully-italic line as a heading (thinking trace)", () => {
-    const lines = renderVisibleLines(
-        [
+        assert.deepEqual(lines, [
             "First plain paragraph.",
-            "",
-            "*Italic standalone line.*",
-            "",
+            "Italic standalone line.",
             "Second plain paragraph.",
-        ].join("\n"),
-        italicTheme,
-    );
+        ]);
+    });
 
-    assert.deepEqual(lines, [
-        "First plain paragraph.",
-        "Italic standalone line.",
-        "Second plain paragraph.",
-    ]);
+    test("reuses unchanged Markdown formatting without resolving heading styles again", () => {
+        let headingCalls = 0;
+        const theme: MarkdownTheme = {
+            ...markdownTheme,
+            heading(text) {
+                headingCalls += 1;
+                return `\u001b[1m${text}\u001b[22m`;
+            },
+        };
+        const component = new Markdown("## Sample heading\n\nA sample paragraph.", 1, 0, theme);
+        const initial = component.render(80);
+        assert.ok(initial.some((line) => stripAnsi(line).includes("Sample heading")));
+        const initialCalls = headingCalls;
+        assert.deepEqual(component.render(80), initial);
+        assert.equal(headingCalls, initialCalls);
+    });
+
+    test("updates fence visibility after an unchanged Markdown frame was cached", () => {
+        const component = new Markdown("```ts\nconst sample = 3;\n```", 1, 0, markdownTheme);
+        assert.ok(component.render(80).some((line) => stripAnsi(line).trim().startsWith("```")));
+        markFencesHidden(component);
+        const hidden = component.render(80);
+        assert.equal(
+            hidden.some((line) => stripAnsi(line).trim().startsWith("```")),
+            false,
+        );
+        assert.ok(hidden.some((line) => stripAnsi(line).includes("const sample = 3;")));
+    });
 });
 
 test("assistant message updates render through the patch and shutdown restores its lifecycle", async ({
     onTestFinished,
 }) => {
-    const shutdownHandlers: Array<() => void> = [];
-    const api = {
-        on(event: string, handler: () => void): void {
-            if (event === "session_shutdown") shutdownHandlers.push(handler);
-        },
-    };
+    const handle = await installResponseRendering();
     const originalPiFlag = process.env.PI_CODING_AGENT;
     process.env.PI_CODING_AGENT = "true";
     onTestFinished(() => {
-        shutdownHandlers[0]?.();
+        handle.dispose();
 
         if (originalPiFlag === undefined) delete process.env.PI_CODING_AGENT;
         else process.env.PI_CODING_AGENT = originalPiFlag;
     });
 
-    await assistantRenderingExtension(api);
     const prototype = assistantMessagePrototype;
     const patchedRender = prototype.render;
     const patchedUpdateContent = prototype.updateContent;
@@ -322,8 +352,7 @@ test("assistant message updates render through the patch and shutdown restores i
         false,
     );
 
-    assert.equal(shutdownHandlers.length, 1);
-    shutdownHandlers[0]?.();
+    handle.dispose();
     assert.equal(prototype.render, originalAssistantRender);
     assert.equal(prototype.updateContent, originalAssistantUpdateContent);
     assert.equal(

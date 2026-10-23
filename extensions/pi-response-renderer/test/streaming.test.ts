@@ -6,7 +6,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { expect, test } from "vitest";
 
-import assistantRenderingExtension from "../src/index.ts";
+import { installResponseRendering } from "../src/response-rendering.ts";
 
 initTheme("dark", false);
 
@@ -32,13 +32,8 @@ const message: AssistantMessage = {
 };
 
 test("preserves streaming transitions and omitted flags for response and thinking transformers", async () => {
-    let shutdown: (() => void) | undefined;
+    const handle = await installResponseRendering();
     try {
-        await assistantRenderingExtension({
-            on(_event, handler) {
-                shutdown = handler;
-            },
-        });
         const component = new AssistantMessageComponent(
             undefined,
             false,
@@ -71,6 +66,6 @@ test("preserves streaming transitions and omitted flags for response and thinkin
         expect(rendered).toContain("assistant streaming=false");
         expect(rendered).toContain("assistant-thinking streaming=false");
     } finally {
-        shutdown?.();
+        handle.dispose();
     }
 });

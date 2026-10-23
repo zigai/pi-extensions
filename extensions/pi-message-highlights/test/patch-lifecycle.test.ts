@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import type { AssistantMessage } from "@earendil-works/pi-ai";
+import type { ExtensionContext, SessionStartEvent } from "@earendil-works/pi-coding-agent";
 import {
     Editor,
     Markdown,
@@ -21,7 +22,7 @@ import {
 } from "../src/message-highlight-patch.ts";
 import { DEFAULT_MESSAGE_HIGHLIGHTS_CONFIG } from "../src/settings.ts";
 import plainUserMessagesExtension from "../../pi-plain-user-messages/src/index.ts";
-import responseRendererExtension from "../../pi-response-renderer/src/index.ts";
+import { installResponseRendering } from "../../pi-response-renderer/src/response-rendering.ts";
 
 type RenderPrototype = {
     render: (this: MessageComponent, width: number) => string[];
@@ -253,8 +254,12 @@ type LifecycleApi = {
 function createLifecycleApi(): LifecycleApi {
     const shutdownHandlers: Array<() => void> = [];
     const api = {
-        on(event: string, handler: () => void): void {
-            if (event === "session_shutdown") shutdownHandlers.push(handler);
+        on(
+            ...registration:
+                | ["session_start", (event: SessionStartEvent, context: ExtensionContext) => void]
+                | ["session_shutdown", () => void]
+        ): void {
+            if (registration[0] === "session_shutdown") shutdownHandlers.push(registration[1]);
         },
     };
 
@@ -296,7 +301,8 @@ test("message render wrappers restore cleanly across reload cycles", async () =>
             };
 
             try {
-                await responseRendererExtension(responseLifecycle.api);
+                const responsePatch = await installResponseRendering();
+                responseLifecycle.shutdownHandlers.push(() => responsePatch.dispose());
                 await plainUserMessagesExtension(plainLifecycle.api);
                 const targets = await loadMessageHighlightTargets();
                 assert.ok(targets);

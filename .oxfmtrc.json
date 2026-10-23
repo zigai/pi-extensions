@@ -29,7 +29,8 @@
     "extensions/pi-settings-ui/config.schema.json",
     "extensions/pi-settings-ui/README.md",
     "extensions/pi-toggles/config.schema.json",
-    "extensions/pi-toggles/README.md"
+    "extensions/pi-toggles/README.md",
+    "extensions/pi-response-renderer/README.md"
   ],
   "overrides": [
     {
