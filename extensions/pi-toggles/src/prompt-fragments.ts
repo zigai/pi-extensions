@@ -77,6 +77,24 @@ async function loadFragment(
     }
 }
 
+export function selectPromptReplacement(
+    fragments: readonly ActivePromptFragment[],
+): ActivePromptFragment | undefined {
+    return fragments
+        .filter((entry) => entry.fragment.operation === "replace")
+        .sort((left, right) => {
+            if (left.scope !== right.scope) {
+                if (left.scope === "project") return -1;
+                return 1;
+            }
+            return (
+                right.fragment.priority - left.fragment.priority ||
+                left.fragment.id.localeCompare(right.fragment.id)
+            );
+        })
+        .at(0);
+}
+
 export async function appendActivePromptFragments(
     basePrompt: string,
     fragments: readonly ActivePromptFragment[],
@@ -85,7 +103,20 @@ export async function appendActivePromptFragments(
     const sections: string[] = [];
     const diagnostics: string[] = [];
     let totalBytes = 0;
+    const replacement = selectPromptReplacement(fragments);
+    let prompt = basePrompt;
+    if (replacement !== undefined) {
+        const loaded = await loadFragment(replacement, context);
+        if (loaded.content === undefined)
+            throw new Error(
+                `Selected prompt replacement ${replacement.fragment.id} could not be loaded.`,
+            );
+        prompt = loaded.content;
+    }
+    const seen = new Set<string>();
     for (const scoped of fragments) {
+        if (scoped.fragment.operation === "replace" || seen.has(scoped.fragment.id)) continue;
+        seen.add(scoped.fragment.id);
         const loaded = await loadFragment(scoped, context);
         if (loaded.diagnostic !== undefined) {
             diagnostics.push(loaded.diagnostic);
@@ -102,8 +133,6 @@ export async function appendActivePromptFragments(
         totalBytes += bytes;
         sections.push(section);
     }
-    return {
-        prompt: sections.length === 0 ? basePrompt : `${basePrompt}\n\n${sections.join("\n\n")}`,
-        diagnostics,
-    };
+    if (sections.length > 0) prompt = `${prompt}\n\n${sections.join("\n\n")}`;
+    return { prompt, diagnostics };
 }

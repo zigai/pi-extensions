@@ -20,7 +20,8 @@ export type DecisionOrigin =
     | "profile"
     | "rule"
     | "rule-profile"
-    | "extension-proposal";
+    | "extension-proposal"
+    | "restriction";
 
 export type DecisionScope = PolicyScope | "extension";
 

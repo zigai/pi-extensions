@@ -14,6 +14,53 @@ afterEach(async () => {
 });
 
 describe("appendActivePromptFragments", () => {
+    it("selects a full project replacement before global replacements and appends each owned fragment once", async () => {
+        const fragments: readonly ActivePromptFragment[] = [
+            {
+                scope: "global",
+                fragment: {
+                    id: "global",
+                    priority: 100,
+                    operation: "replace",
+                    content: { kind: "inline", text: "Global replacement" },
+                },
+                activatedBy: ["condition"],
+            },
+            {
+                scope: "project",
+                fragment: {
+                    id: "project",
+                    priority: 0,
+                    operation: "replace",
+                    content: { kind: "inline", text: "Project replacement" },
+                },
+                activatedBy: ["profile"],
+            },
+            {
+                scope: "global",
+                fragment: {
+                    id: "guide",
+                    priority: 0,
+                    content: { kind: "inline", text: "Owned guidance" },
+                },
+                activatedBy: ["condition", "profile"],
+            },
+        ];
+        const context = {
+            cwd: process.cwd(),
+            projectTrusted: true,
+            globalConfigPath: "/agent/settings.json",
+            projectConfigPath: "/project/settings.json",
+        };
+        expect(
+            (await appendActivePromptFragments("Generated tools and context", fragments, context))
+                .prompt,
+        ).toBe("Project replacement\n\n## Pi Toggles: guide\n\nOwned guidance");
+        expect((await appendActivePromptFragments("Fresh base", [], context)).prompt).toBe(
+            "Fresh base",
+        );
+    });
+
     it("appends owned inline and file fragments in resolved order", async () => {
         const root = await mkdtemp(join(tmpdir(), "pi-toggles-prompts-"));
         temporaryDirectories.push(root);

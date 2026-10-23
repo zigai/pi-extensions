@@ -1,5 +1,10 @@
 import { Terminal as HeadlessTerminal } from "@xterm/headless";
-import { visibleWidth, type Terminal } from "@earendil-works/pi-tui";
+import {
+    formatProgramStatus,
+    visibleWidth,
+    type ProgramStatus,
+    type Terminal,
+} from "@earendil-works/pi-tui";
 import { setTimeout as delay } from "node:timers/promises";
 
 export interface ScreenCell {
@@ -96,11 +101,13 @@ export class VirtualTerminal implements Terminal {
         this.write(`\u001b]2;${title}\u0007`);
     }
 
+    setProgramStatus(status: ProgramStatus): void {
+        this.write(formatProgramStatus(status));
+    }
+
     setProgress(active: boolean): void {
         void active;
     }
-
-    setProgramStatus(): void {}
 
     sendInput(data: string): void {
         this.inputHandler?.(data);

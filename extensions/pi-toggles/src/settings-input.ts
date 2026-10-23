@@ -167,6 +167,17 @@ export const policyDecisionSchema = Type.Object(
     { additionalProperties: false, title: "PolicyDecision" },
 );
 
+export const modelRoleSchema = Type.Object(
+    {
+        provider: Type.String({ minLength: 1 }),
+        modelId: Type.String({ minLength: 1 }),
+        thinkingLevel: Type.Optional(
+            Type.Enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const),
+        ),
+    },
+    { additionalProperties: false, title: "ModelRole" },
+);
+
 export const profileSchema = Type.Object(
     {
         decisions: Type.Array(policyDecisionSchema, {
@@ -177,6 +188,33 @@ export const profileSchema = Type.Object(
             default: [],
             description: "System-prompt fragment IDs activated by this profile.",
         }),
+        modelMode: Type.Optional(
+            Type.String({
+                minLength: 1,
+                description:
+                    "Model mode selected at the next agent start; requires Pi Model Modes.",
+            }),
+        ),
+        modelRoles: Type.Optional(
+            Type.Record(
+                Type.String({ pattern: identifierPattern }),
+                Type.Union([
+                    modelRoleSchema,
+                    Type.String({ pattern: "^@[a-zA-Z0-9][a-zA-Z0-9._-]*$" }),
+                ]),
+                {
+                    description:
+                        "Named model roles or @role references. The main role selects the next agent model; manual model choices take precedence until profile selection.",
+                },
+            ),
+        ),
+        compactionHandler: Type.Optional(
+            Type.String({
+                minLength: 1,
+                description:
+                    "Named compaction handler selected for subsequent operations; pi selects the host implementation.",
+            }),
+        ),
     },
     { additionalProperties: false, title: "CapabilityProfile" },
 );
@@ -210,6 +248,12 @@ export const promptFragmentSchema = Type.Object(
     {
         id: Type.String({ pattern: identifierPattern }),
         content: promptFragmentContentSchema,
+        operation: Type.Optional(
+            Type.Enum(["append", "replace"] as const, {
+                description:
+                    "Append owned guidance, or replace the entire system prompt including generated guidance and context.",
+            }),
+        ),
         priority: Type.Integer({ default: 0 }),
         when: Type.Optional(conditionSchema),
     },
@@ -229,6 +273,13 @@ export const ruleSchema = Type.Object(
             default: [],
             description: "Profiles contributed while this rule matches.",
         }),
+        compactionHandler: Type.Optional(
+            Type.String({
+                minLength: 1,
+                description:
+                    "Named handler selected while this condition matches, independently of profiles.",
+            }),
+        ),
     },
     { additionalProperties: false, title: "PolicyRule" },
 );
@@ -286,7 +337,7 @@ export const settingsSchema = Type.Object(
         }),
         profiles: Type.Record(Type.String({ pattern: identifierPattern }), profileSchema, {
             default: {},
-            description: "Named bundles of capability decisions and prompt fragments.",
+            description: "Named capability, prompt, model-role, mode, and compaction selections.",
         }),
         promptFragments: Type.Array(promptFragmentSchema, {
             default: [],

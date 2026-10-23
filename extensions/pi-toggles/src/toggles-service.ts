@@ -1,9 +1,20 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import type {
     ExtensionAPI,
     ExtensionContext,
     Skill,
     ToolInfo,
 } from "@earendil-works/pi-coding-agent";
+import {
+    registerCompactionSelector,
+    type CompactionSelectionHandle,
+} from "@zigai/pi-extension-internals/compaction-handlers";
+import {
+    resolveModelRole,
+    selectCompactionHandler,
+    selectPreset,
+    type PresetSelection,
+} from "./preset-selection.ts";
 import type { ExtensionActivationProposal } from "./activation-coordination.ts";
 import { buildCapabilityCatalog, LAZY_SEARCH_TOOL_NAME } from "./capability-catalog.ts";
 import {
@@ -29,8 +40,13 @@ import {
     type SetContextInput,
 } from "./context-facts.ts";
 import { getReferencedFacts } from "./condition.ts";
+import {
+    GOAL_POLICY_ACCEPTED_EVENT,
+    GOAL_POLICY_RELEASED_EVENT,
+    type GoalPolicy,
+} from "./goal-policy.ts";
 import { decideToolInvocation, rankLazyTools } from "./lazy-tool-search.ts";
-import { appendActivePromptFragments } from "./prompt-fragments.ts";
+import { appendActivePromptFragments, selectPromptReplacement } from "./prompt-fragments.ts";
 import { applySkillPolicyToPrompt, decideSkillInvocation } from "./skill-policy.ts";
 import {
     resolveCapabilityPolicy,
@@ -67,6 +83,7 @@ function writeResultToMutation(result: SettingsWriteResult): MutationResult {
 }
 
 function formatDecisionTraceSource(trace: DecisionTrace): string {
+    if (trace.origin === "restriction") return `restriction ${trace.source}`;
     if (trace.origin === "extension-proposal") return `extension proposal ${trace.source}`;
     if (trace.origin === "override") return `${trace.scope} override`;
     if (trace.origin === "profile") return `${trace.scope} profile ${trace.source}`;
@@ -97,6 +114,27 @@ export class TogglesService {
     #reconcilePending: Promise<void> | undefined;
     #reconcileDirty = false;
     #disposed = false;
+    readonly #lifetime = new AbortController();
+    #goalPolicy: GoalPolicy | undefined;
+    readonly #promptBases = new WeakMap<
+        object,
+        { basePrompt: string; composedBase?: string; output?: string; skills?: readonly Skill[] }
+    >();
+    readonly #promptPreparation = new WeakMap<object, Promise<void>>();
+    #compactionSelection: CompactionSelectionHandle | undefined;
+    #preset: PresetSelection | undefined;
+    #appliedPreset: string | undefined;
+    #manualModel = false;
+    readonly #presetSelection = new AsyncLocalStorage<boolean>();
+    #manualSelectionRevision = 0;
+    #manualSelection:
+        | {
+              model: ExtensionContext["model"];
+              thinkingLevel: ReturnType<ExtensionAPI["getThinkingLevel"]>;
+          }
+        | undefined;
+    #modeContextInitialized = false;
+    #promptStarted = false;
 
     constructor(
         private readonly pi: ExtensionAPI,
@@ -200,6 +238,22 @@ export class TogglesService {
         return true;
     }
 
+    acceptGoalPolicy(policy: GoalPolicy): void {
+        if (
+            this.#disposed ||
+            !this.#configuration.enabled ||
+            policy.sessionId !== this.ctx.sessionManager.getSessionId()
+        )
+            return;
+        this.pi.events.emit(GOAL_POLICY_ACCEPTED_EVENT, {
+            version: 1,
+            sessionId: policy.sessionId,
+        });
+        this.#goalPolicy = policy;
+        this.refreshCatalogAndPlan();
+        void this.reconcile();
+    }
+
     async settleActivation(): Promise<void> {
         await this.#reconcileTail;
         if (this.#reconcilePending !== undefined) {
@@ -212,6 +266,8 @@ export class TogglesService {
             return;
         }
         this.#disposed = true;
+        this.#lifetime.abort();
+        this.#compactionSelection?.dispose();
         const available = new Set(this.pi.getAllTools().map((tool) => tool.name));
         const current = new Set(this.pi.getActiveTools());
         const restored = new Set(current);
@@ -231,23 +287,34 @@ export class TogglesService {
         this.#inheritedToolState.clear();
         this.#lazyActivated.clear();
         this.#extensionActivationProposals.clear();
+        if (this.#goalPolicy !== undefined) {
+            this.pi.events.emit(GOAL_POLICY_RELEASED_EVENT, {
+                version: 1,
+                sessionId: this.#goalPolicy.sessionId,
+            });
+            this.#goalPolicy = undefined;
+        }
         if (this.ctx.mode === "tui") {
             this.ctx.ui.setStatus("pi-toggles", undefined);
         }
     }
 
     async refresh(prompt?: string): Promise<void> {
+        if (this.#disposed) return;
         if (prompt !== undefined) {
             this.#facts.set("prompt.text", prompt);
         }
         this.updateStaticFacts();
         await this.refreshGitFacts();
+        if (this.#disposed) return;
         this.refreshCatalogAndPlan();
         await this.reconcile();
     }
 
     async refreshAfterTurn(): Promise<void> {
+        if (this.#disposed) return;
         await this.refreshGitFacts();
+        if (this.#disposed) return;
         this.refreshCatalogAndPlan();
         await this.reconcile();
     }
@@ -263,6 +330,16 @@ export class TogglesService {
     }
 
     setContext(input: SetContextInput): void {
+        if (input.owner === "pi-model-modes" && input.key === "mode.active") {
+            if (this.#presetSelection.getStore() !== true) {
+                if (!this.#modeContextInitialized && !this.#promptStarted) {
+                    this.#manualModel = false;
+                } else {
+                    this.noteModelSelection();
+                }
+            }
+            this.#modeContextInitialized = true;
+        }
         this.#facts.setContext(input);
         this.refreshCatalogAndPlan();
         void this.reconcile();
@@ -525,6 +602,8 @@ export class TogglesService {
                 return writeResultToMutation(result);
             }
         }
+        this.#manualModel = false;
+        this.#appliedPreset = undefined;
         this.#configuration = this.createConfiguration();
         this.updateProfileFact();
         this.refreshCatalogAndPlan();
@@ -556,6 +635,8 @@ export class TogglesService {
                 return writeResultToMutation(result);
             }
         }
+        this.#manualModel = false;
+        this.#appliedPreset = undefined;
         this.#configuration = this.createConfiguration();
         this.updateProfileFact();
         this.refreshCatalogAndPlan();
@@ -568,6 +649,7 @@ export class TogglesService {
         decisions: readonly PolicyDecision[],
         activeProfile: string | undefined,
     ): Promise<MutationResult> {
+        const profileChanged = activeProfile !== this.getActiveProfile(scope);
         const profiles =
             scope === "global"
                 ? this.#configuration.global.profiles
@@ -591,6 +673,10 @@ export class TogglesService {
             if (result.status !== "saved") {
                 return writeResultToMutation(result);
             }
+        }
+        if (profileChanged) {
+            this.#manualModel = false;
+            this.#appliedPreset = undefined;
         }
         this.#configuration = this.createConfiguration();
         this.updateProfileFact();
@@ -646,6 +732,7 @@ export class TogglesService {
     canInvokeTool(
         name: string,
     ): { readonly allowed: true } | { readonly allowed: false; readonly reason: string } {
+        this.refreshCatalogAndPlan();
         return decideToolInvocation(this.#plan, name, this.#lazyActivated);
     }
 
@@ -660,7 +747,12 @@ export class TogglesService {
         if (entry === undefined) {
             return `Capability ${capability.id} is not in the current policy plan.`;
         }
+        let modelSelection = "preset at next agent start";
+        if (this.#manualModel) modelSelection = "manual";
         const lines = [
+            `Preset: ${this.#preset?.name ?? "none"} (${this.#preset?.reason ?? "no matching selection"})`,
+            `Model selection: ${modelSelection}`,
+            `Compaction handler: ${selectCompactionHandler(this.#configuration, this.#facts.resolve) ?? "automatic"}`,
             `Capability: ${capability.id}`,
             `Observed: ${capability.observedState}`,
             ...(capability.exposure === undefined
@@ -675,6 +767,19 @@ export class TogglesService {
             "",
             "Decision trace:",
         ];
+        if (capability.kind === "system-fragment") {
+            const fragment = mergePromptFragments(this.#configuration).find(
+                (candidate) => candidate.fragment.id === capability.name,
+            );
+            const replacement = selectPromptReplacement(this.#plan.activePromptFragments);
+            lines.push(
+                `  prompt operation: ${fragment?.fragment.operation ?? "append"}; selected replacement: ${replacement?.fragment.id ?? "none"}`,
+            );
+            const active = this.#plan.activePromptFragments.find(
+                (candidate) => candidate.fragment.id === capability.name,
+            );
+            lines.push(`  activated by: ${active?.activatedBy.join(", ") ?? "inactive"}`);
+        }
         if (entry.trace.length === 0) {
             lines.push("  inherited from Pi runtime");
         } else {
@@ -688,6 +793,197 @@ export class TogglesService {
             }
         }
         return lines.join("\n");
+    }
+
+    preparePrompt(prompt: string | undefined, options: object): Promise<void> {
+        this.#promptStarted = true;
+        const prepared = this.#promptPreparation.get(options);
+        if (prepared !== undefined) return prepared;
+        const operation = (async () => {
+            this.#facts.set("prompt.text", prompt);
+            await this.refresh();
+            await this.applyPreset();
+            await this.settleActivation();
+            if (!this.#disposed) {
+                const active = this.pi.getActiveTools();
+                const tools = this.pi.getAllTools().filter((tool) => active.includes(tool.name));
+                // Keep the host's promptSnippet map intact, including inactive tools that
+                // may be activated later. Tools without snippets must remain omitted.
+                Object.assign(options, {
+                    selectedTools: active,
+                    toolGuidelines: Object.fromEntries(
+                        tools.map((tool) => [tool.name, tool.promptGuidelines ?? []]),
+                    ),
+                });
+            }
+        })();
+        this.#promptPreparation.set(options, operation);
+        return operation;
+    }
+
+    promptComposer(
+        basePrompt: string,
+        options: object,
+        skills?: readonly Skill[],
+    ): { basePrompt: string; compose: (prompt: string) => Promise<string> } {
+        const turn = this.#promptBases.get(options) ?? { basePrompt };
+        this.#promptBases.set(options, turn);
+        if (skills !== undefined) turn.skills = skills;
+        let unownedPrefix = "";
+        let unownedSuffix = "";
+        if (turn.output !== undefined) {
+            const previousOutputIndex = basePrompt.indexOf(turn.output);
+            if (previousOutputIndex >= 0) {
+                unownedPrefix = basePrompt.slice(0, previousOutputIndex);
+                unownedSuffix = basePrompt.slice(previousOutputIndex + turn.output.length);
+            }
+        }
+        const withoutOwnedComposition = (prompt: string): string => {
+            const { output, composedBase } = turn;
+            if (output === undefined || composedBase === undefined) return prompt;
+            if (prompt.includes(output)) {
+                return prompt.replace(output, () => composedBase);
+            }
+            if (output.startsWith(composedBase)) {
+                const appended = output.slice(composedBase.length);
+                if (appended.length > 0) return prompt.replace(appended, "");
+            }
+            return prompt;
+        };
+        return {
+            basePrompt: withoutOwnedComposition(basePrompt),
+            compose: async (prompt) => {
+                let composedBase = withoutOwnedComposition(prompt);
+                const replacing =
+                    selectPromptReplacement(this.#plan.activePromptFragments) !== undefined;
+                if (replacing) {
+                    if (unownedPrefix.length > 0 && composedBase.startsWith(unownedPrefix)) {
+                        composedBase = composedBase.slice(unownedPrefix.length);
+                    }
+                    if (unownedSuffix.length > 0 && composedBase.endsWith(unownedSuffix)) {
+                        composedBase = composedBase.slice(0, -unownedSuffix.length);
+                    }
+                }
+                let output: string;
+                try {
+                    output = await this.buildSystemPrompt(
+                        composedBase,
+                        turn.skills ?? this.#skills ?? [],
+                    );
+                } catch (cause: unknown) {
+                    if (!this.#disposed) this.ctx.abort();
+                    throw cause;
+                }
+                turn.composedBase = composedBase;
+                turn.output = output;
+                if (replacing) return `${unownedPrefix}${output}${unownedSuffix}`;
+                return output;
+            },
+        };
+    }
+
+    getModelRole(role: string): ReturnType<typeof resolveModelRole> {
+        if (this.#preset === undefined)
+            return { status: "missing", reason: "No preset is selected." };
+        return resolveModelRole(this.#preset.profile, role);
+    }
+
+    noteModelSelection(): void {
+        if (this.#disposed || this.#presetSelection.getStore() === true) return;
+        this.#manualModel = true;
+        this.#manualSelectionRevision += 1;
+        this.#manualSelection = {
+            model: this.ctx.model,
+            thinkingLevel: this.pi.getThinkingLevel(),
+        };
+    }
+
+    async applyPreset(): Promise<void> {
+        if (this.#disposed || this.#manualModel || this.#preset === undefined) return;
+        const preset = this.#preset;
+        const signature = JSON.stringify([
+            preset.name,
+            preset.profile.modelMode,
+            preset.profile.modelRoles,
+        ]);
+        if (signature === this.#appliedPreset) return;
+        const revision = this.#manualSelectionRevision;
+        // Pi uses source "set" for both user and extension selections. Async context
+        // tags only our operation, including the mode owner's accepted promise and
+        // the SDK's awaited authentication and model_select listener chain.
+        await this.#presetSelection.run(true, async () => {
+            try {
+                if (preset.profile.modelMode !== undefined) {
+                    let operation: Promise<void> | undefined;
+                    const accept = (value: Promise<void>): void => {
+                        operation = value;
+                    };
+                    this.pi.events.emit("pi-model-modes:select", {
+                        version: 1,
+                        sessionId: this.ctx.sessionManager.getSessionId(),
+                        mode: preset.profile.modelMode,
+                        accept,
+                    });
+                    if (operation === undefined) {
+                        throw new Error("Required model mode owner is unavailable.");
+                    }
+                    await operation;
+                } else if (preset.profile.modelRoles?.main !== undefined) {
+                    const role = resolveModelRole(preset.profile, "main");
+                    if (role.status !== "resolved") {
+                        throw new Error("Required main model role is invalid.");
+                    }
+                    const model = this.ctx.modelRegistry.find(
+                        role.model.provider,
+                        role.model.modelId,
+                    );
+                    if (model === undefined) {
+                        throw new Error("Required main model is unavailable.");
+                    }
+                    if (this.#disposed) return;
+                    if (!(await this.pi.setModel(model))) {
+                        throw new Error("Required main model has no credentials.");
+                    }
+                    if (this.#disposed || revision !== this.#manualSelectionRevision) return;
+                    if (role.model.thinkingLevel !== undefined)
+                        this.pi.setThinkingLevel(role.model.thinkingLevel);
+                }
+                if (this.#disposed) return;
+                if (revision === this.#manualSelectionRevision) this.#appliedPreset = signature;
+            } catch {
+                if (this.#disposed || revision !== this.#manualSelectionRevision) return;
+                const message = `Preset ${preset.name} model selection failed.`;
+                this.recordDiagnostics(message);
+                this.ctx.abort();
+                throw new Error(message);
+            } finally {
+                if (revision !== this.#manualSelectionRevision) await this.restoreManualSelection();
+            }
+        });
+    }
+
+    private async restoreManualSelection(): Promise<void> {
+        // A model switch cannot be cancelled after checkAuth starts. If it commits
+        // late, restore the newest manual snapshot; a user can also supersede this
+        // restoration while its own authentication is pending.
+        while (!this.#disposed) {
+            const revision = this.#manualSelectionRevision;
+            const selection = this.#manualSelection;
+            if (selection === undefined) return;
+            if (
+                selection.model !== undefined &&
+                (selection.model.provider !== this.ctx.model?.provider ||
+                    selection.model.id !== this.ctx.model?.id)
+            ) {
+                if (!(await this.pi.setModel(selection.model))) {
+                    throw new Error("Manual model selection could not be restored.");
+                }
+            }
+            if (this.#disposed) return;
+            if (revision !== this.#manualSelectionRevision) continue;
+            this.pi.setThinkingLevel(selection.thinkingLevel);
+            return;
+        }
     }
 
     async buildSystemPrompt(basePrompt: string, skills: readonly Skill[]): Promise<string> {
@@ -733,7 +1029,7 @@ export class TogglesService {
     }
 
     updateStatus(): void {
-        if (this.ctx.mode !== "tui") {
+        if (this.#disposed || this.ctx.mode !== "tui") {
             return;
         }
         if (!this.#configuration.defaults.showStatus) {
@@ -794,7 +1090,9 @@ export class TogglesService {
         const repository = await this.pi.exec("git", ["rev-parse", "--is-inside-work-tree"], {
             cwd: this.ctx.cwd,
             timeout: 2_000,
+            signal: this.#lifetime.signal,
         });
+        if (this.#disposed) return;
         const isRepository = repository.code === 0 && repository.stdout.trim() === "true";
         this.#facts.set("project.gitRepository", isRepository);
         if (!isRepository) {
@@ -806,9 +1104,15 @@ export class TogglesService {
             this.pi.exec("git", ["branch", "--show-current"], {
                 cwd: this.ctx.cwd,
                 timeout: 2_000,
+                signal: this.#lifetime.signal,
             }),
-            this.pi.exec("git", ["status", "--porcelain"], { cwd: this.ctx.cwd, timeout: 2_000 }),
+            this.pi.exec("git", ["status", "--porcelain"], {
+                cwd: this.ctx.cwd,
+                timeout: 2_000,
+                signal: this.#lifetime.signal,
+            }),
         ]);
+        if (this.#disposed) return;
         this.#facts.set("project.gitBranch", branch.code === 0 ? branch.stdout.trim() : undefined);
         this.#facts.set(
             "project.gitDirty",
@@ -837,6 +1141,16 @@ export class TogglesService {
     }
 
     private refreshCatalogAndPlan(): void {
+        if (this.#configuration.enabled && !this.#disposed) {
+            this.#compactionSelection ??= registerCompactionSelector(this.pi, "pi-toggles", () =>
+                selectCompactionHandler(this.#configuration, this.#facts.resolve),
+            );
+        } else {
+            this.#compactionSelection?.dispose();
+            this.#compactionSelection = undefined;
+        }
+        this.#preset = selectPreset(this.#configuration, this.#facts.resolve);
+        this.#facts.set("preset.active", this.#preset?.name ?? null);
         const fragments = mergePromptFragments(this.#configuration);
         const discovered = buildCapabilityCatalog({
             tools: this.pi.getAllTools(),
@@ -846,12 +1160,45 @@ export class TogglesService {
             promptFragments: fragments,
         });
         this.#catalog = this.addUnavailableOverrides(discovered);
-        this.#plan = resolveCapabilityPolicy(
+        const plan = resolveCapabilityPolicy(
             this.#catalog,
             this.#configuration,
             this.#facts.resolve,
             this.extensionActivationProposals(),
         );
+        let restrictions: readonly string[] = [];
+        if (this.#goalPolicy?.status === "active") restrictions = this.#goalPolicy.disabledTools;
+        this.#plan = {
+            ...plan,
+            capabilities: plan.capabilities.map((entry) => {
+                if (
+                    entry.capability.kind !== "tool" ||
+                    !restrictions.includes(entry.capability.name)
+                )
+                    return entry;
+                const winner: DecisionTrace = {
+                    scope: "extension",
+                    origin: "restriction",
+                    source: "pi-goal active",
+                    state: "off",
+                    selected: true,
+                };
+                return {
+                    ...entry,
+                    desiredState: "off",
+                    effectiveState: "inactive",
+                    winner,
+                    trace: [
+                        winner,
+                        ...entry.trace.map((trace) => ({
+                            ...trace,
+                            selected: false,
+                            reason: "Goal restriction",
+                        })),
+                    ],
+                };
+            }),
+        };
         this.updateStatus();
     }
 

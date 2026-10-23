@@ -186,6 +186,60 @@
               },
               "default": [],
               "description": "System-prompt fragment IDs activated by this profile."
+            },
+            "modelMode": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Model mode selected at the next agent start; requires Pi Model Modes."
+            },
+            "modelRoles": {
+              "type": "object",
+              "patternProperties": {
+                "^[a-zA-Z0-9][a-zA-Z0-9._-]*$": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "provider",
+                        "modelId"
+                      ],
+                      "properties": {
+                        "provider": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "modelId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "thinkingLevel": {
+                          "enum": [
+                            "off",
+                            "minimal",
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh",
+                            "max"
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "title": "ModelRole"
+                    },
+                    {
+                      "type": "string",
+                      "pattern": "^@[a-zA-Z0-9][a-zA-Z0-9._-]*$"
+                    }
+                  ]
+                }
+              },
+              "description": "Named model roles or @role references. The main role selects the next agent model; manual model choices take precedence until profile selection."
+            },
+            "compactionHandler": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Named compaction handler selected for subsequent operations; pi selects the host implementation."
             }
           },
           "additionalProperties": false,
@@ -193,7 +247,7 @@
         }
       },
       "default": {},
-      "description": "Named bundles of capability decisions and prompt fragments."
+      "description": "Named capability, prompt, model-role, mode, and compaction selections."
     },
     "promptFragments": {
       "type": "array",
@@ -252,6 +306,13 @@
                 "additionalProperties": false
               }
             ]
+          },
+          "operation": {
+            "enum": [
+              "append",
+              "replace"
+            ],
+            "description": "Append owned guidance, or replace the entire system prompt including generated guidance and context."
           },
           "priority": {
             "type": "integer",
@@ -1542,6 +1603,11 @@
             },
             "default": [],
             "description": "Profiles contributed while this rule matches."
+          },
+          "compactionHandler": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Named handler selected while this condition matches, independently of profiles."
           }
         },
         "additionalProperties": false,

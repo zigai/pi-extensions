@@ -11,6 +11,8 @@ Pi Toggles is a central control panel for deciding which tools and skills Pi exp
 
 ## Install
 
+Requires Pi 1.3 or later for safe cancellation before a provider request.
+
 ```sh
 pi install npm:@zigai/pi-toggles
 ```
@@ -49,7 +51,7 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-toggles.json`.
 | `defaults.showStatus` | boolean | `true` | Show a compact footer status when policy changes Pi or has diagnostics. |
 | `activeProfile` | string | — | Persistent profile selected at this settings scope. |
 | `overrides` | [PolicyDecision](#settings-type-PolicyDecision)[] | `[]` | Explicit persistent capability decisions. |
-| `profiles` | Record<string, [CapabilityProfile](#settings-type-CapabilityProfile)> | `{}` | Named bundles of capability decisions and prompt fragments. |
+| `profiles` | Record<string, [CapabilityProfile](#settings-type-CapabilityProfile)> | `{}` | Named capability, prompt, model-role, mode, and compaction selections. |
 | `promptFragments` | [PromptFragment](#settings-type-PromptFragment)[] | `[]` | Owned system-prompt fragments available to profiles and conditions. |
 | `rules` | [PolicyRule](#settings-type-PolicyRule)[] | `[]` | Conditional decisions and profile activations. |
 
@@ -129,6 +131,9 @@ Additional fields are not allowed.
 | --- | --- | --- | --- |
 | `decisions` | [PolicyDecision](#settings-type-PolicyDecision)[] | Yes | Capability decisions activated by this profile. |
 | `promptFragments` | string[] | Yes | System-prompt fragment IDs activated by this profile. |
+| `modelMode` | string | No | Model mode selected at the next agent start; requires Pi Model Modes. |
+| `modelRoles` | Record<string, [ModelRole](#settings-type-ModelRole) \| string> | No | Named model roles or @role references. The main role selects the next agent model; manual model choices take precedence until profile selection. |
+| `compactionHandler` | string | No | Named compaction handler selected for subsequent operations; pi selects the host implementation. |
 
 <a id="settings-type-PromptFragment"></a>
 
@@ -140,6 +145,7 @@ Additional fields are not allowed.
 | --- | --- | --- | --- |
 | `id` | string | Yes |  |
 | `content` | { kind: `inline`; text: string } \| { kind: `file`; path: string } | Yes |  |
+| `operation` | `append` \| `replace` | No | Append owned guidance, or replace the entire system prompt including generated guidance and context. |
 | `priority` | integer | Yes |  |
 | `when` | Condition | No | Declarative condition evaluated against typed Pi and project context facts. |
 
@@ -156,11 +162,26 @@ Additional fields are not allowed.
 | `when` | Condition | Yes | Declarative condition evaluated against typed Pi and project context facts. |
 | `decisions` | [PolicyDecision](#settings-type-PolicyDecision)[] | Yes | Capability decisions contributed while this rule matches. |
 | `activateProfiles` | string[] | Yes | Profiles contributed while this rule matches. |
+| `compactionHandler` | string | No | Named handler selected while this condition matches, independently of profiles. |
+
+<a id="settings-type-ModelRole"></a>
+
+#### ModelRole
+
+Additional fields are not allowed.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `provider` | string | Yes |  |
+| `modelId` | string | Yes |  |
+| `thinkingLevel` | `off` \| `minimal` \| `low` \| `medium` \| `high` \| `xhigh` \| `max` | No |  |
 <!-- pi-extension-settings:end -->
 
 Trusted-project settings use `.pi/extension-settings/pi-toggles.json` and are ignored until Pi trusts the project.
 
-Profiles group decisions and prompt fragments. Declarative rules activate them from session, model, prompt, Git, project-file, or extension-provided facts without running JavaScript or shell commands. Frequently changing rules can reduce prompt-cache reuse.
+Profiles group capability decisions, prompt fragments, model modes, named model roles, and compaction handlers. Rules select them from current context; explicit profile selections precede rules. Model changes apply at the next agent start; manual model, thinking, or mode choices persist until profile selection. `@role` references resolve within the selected profile.
+
+Prompt fragments append by default; `operation: "replace"` replaces the full prompt. Project replacements precede global ones, then priority and ID decide; owned additions follow once per turn. `goal.status`, `mode.active`, and `preset.active` provide lifecycle facts. Active Goal restrictions precede manual capability enabling.
 
 ## Limits
 

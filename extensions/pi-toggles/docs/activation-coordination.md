@@ -81,11 +81,12 @@ Pi Toggles waits for proposals submitted during its own startup handler and alwa
 
 The effective order, highest first, is:
 
-1. Session overrides and profiles
-2. Project overrides and profiles
-3. Global overrides and profiles
-4. Project and global rules
-5. Extension activation proposals
-6. Pi's inherited active state
+1. Active Goal restrictions
+2. Session overrides and profiles
+3. Project overrides and profiles
+4. Global overrides and profiles
+5. Project and global rules
+6. Extension activation proposals
+7. Pi's inherited active state
 
-This makes extension proposals defaults rather than authority. Users can always resolve a disagreement without editing either companion extension.
+Activation proposals remain defaults. Goal publishes `goal.status` and a current-session restriction snapshot; acceptance transfers tool-set ownership to Toggles. Ending the restriction recomputes remaining policy rather than blindly enabling tools.
