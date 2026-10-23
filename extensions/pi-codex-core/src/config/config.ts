@@ -1,3 +1,4 @@
+import { reportExtensionDiagnostic } from "@zigai/pi-extension-internals";
 import { randomUUID } from "node:crypto";
 import {
     existsSync,
@@ -298,9 +299,18 @@ export function formatCodexModelSelection(configuredModel: string | undefined): 
 export function writeCodexCoreConfig(
     config: CodexCoreConfig,
     configPath: string = getCodexCoreConfigPath(),
+    reportFailure: (message: string) => void = (message) => {
+        reportExtensionDiagnostic(
+            `[pi-codex-core] Failed to write ${configPath}: ${message}`,
+            "warning",
+        );
+    },
 ): { readonly ok: true } | { readonly ok: false; readonly error: string } {
     const unsafeExistingConfig = existingConfigWriteBlocker(configPath);
-    if (unsafeExistingConfig) return { ok: false, error: unsafeExistingConfig };
+    if (unsafeExistingConfig) {
+        reportFailure(unsafeExistingConfig);
+        return { ok: false, error: unsafeExistingConfig };
+    }
 
     try {
         mkdirSync(dirname(configPath), { recursive: true });
@@ -312,7 +322,7 @@ export function writeCodexCoreConfig(
         return { ok: true };
     } catch (cause: unknown) {
         const message = cause instanceof Error ? cause.message : String(cause);
-        console.warn(`[pi-codex-core] Failed to write ${configPath}: ${message}`);
+        reportFailure(message);
         return { ok: false, error: message };
     }
 }
@@ -350,7 +360,10 @@ function writeJsonFileIfMissing(filePath: string, value: ScaffoldedJson): void {
         if (hasNodeErrorCode(cause, "EEXIST")) return;
 
         const message = cause instanceof Error ? cause.message : String(cause);
-        console.warn(`[pi-codex-core] Failed to create ${filePath}: ${message}`);
+        reportExtensionDiagnostic(
+            `[pi-codex-core] Failed to create ${filePath}: ${message}`,
+            "warning",
+        );
     }
 }
 
@@ -364,7 +377,10 @@ function writeJsonFileIfChanged(filePath: string, value: ScaffoldedJson): void {
         writeFileAtomically(filePath, nextContent, existingFileMode(filePath, 0o644));
     } catch (cause: unknown) {
         const message = cause instanceof Error ? cause.message : String(cause);
-        console.warn(`[pi-codex-core] Failed to write ${filePath}: ${message}`);
+        reportExtensionDiagnostic(
+            `[pi-codex-core] Failed to write ${filePath}: ${message}`,
+            "warning",
+        );
     }
 }
 

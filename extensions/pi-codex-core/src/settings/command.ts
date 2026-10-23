@@ -103,11 +103,10 @@ function saveAndApply(
 
     const globalConfig = globalRead.config;
     const configToPersist = applyChangedConfigValues(globalConfig, options.getConfig(), config);
-    const result = writeCodexCoreConfig(configToPersist);
-    if (!result.ok) {
-        notify(ctx, `Failed to save Codex settings: ${result.error}`, "error");
-        return { ok: false };
-    }
+    const result = writeCodexCoreConfig(configToPersist, undefined, (message) => {
+        notify(ctx, `Failed to save Codex settings: ${message}`, "error");
+    });
+    if (!result.ok) return { ok: false };
 
     const effectiveConfig = ctx.isProjectTrusted()
         ? readCodexCoreConfig({ cwd: ctx.cwd })

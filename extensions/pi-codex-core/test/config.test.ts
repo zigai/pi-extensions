@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
 import { test } from "vitest";
+import { bindExtensionDiagnostics } from "@zigai/pi-extension-internals";
 import extension from "../src/index.ts";
 import {
     CODEX_CURRENT_MODEL_SELECTION,
@@ -311,6 +312,68 @@ test("fails session startup on trusted project config diagnostics", async () => 
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
 
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("standalone Codex write failures notify once and permit owner reporting instead", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-write-diagnostic-"));
+    const notices: string[] = [];
+    const binding = bindExtensionDiagnostics({
+        hasUI: true,
+        ui: {
+            notify: (message) => {
+                notices.push(message);
+            },
+        },
+    });
+    notices.length = 0;
+    try {
+        const blocker = join(root, "not-a-directory");
+        await writeFile(blocker, "keep");
+        const configPath = join(blocker, "config.json");
+        const result = writeCodexCoreConfig(DEFAULT_CODEX_CORE_CONFIG, configPath);
+        assert.equal(result.ok, false);
+        assert.equal(notices.length, 1);
+        assert.match(notices[0] ?? "", /^\[pi-codex-core\] Failed to write /);
+        const owned: string[] = [];
+        const second = writeCodexCoreConfig(DEFAULT_CODEX_CORE_CONFIG, configPath, (message) => {
+            owned.push(message);
+        });
+        assert.equal(second.ok, false);
+        assert.equal(owned.length, 1);
+        assert.equal(notices.length, 1);
+        assert.equal(await readFile(blocker, "utf8"), "keep");
+    } finally {
+        binding.dispose();
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("Codex scaffold failures preserve diagnostics through notifications", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-scaffold-diagnostic-"));
+    const notices: string[] = [];
+    const binding = bindExtensionDiagnostics({
+        hasUI: true,
+        ui: {
+            notify: (message) => {
+                notices.push(message);
+            },
+        },
+    });
+    notices.length = 0;
+    try {
+        const agentDir = join(root, "blocked");
+        await writeFile(agentDir, "keep");
+        readCodexCoreConfig({ agentDir });
+        assert.ok(
+            notices.some((message) => message.startsWith("[pi-codex-core] Failed to create ")),
+        );
+        assert.ok(
+            notices.some((message) => message.startsWith("[pi-codex-core] Failed to write ")),
+        );
+    } finally {
+        binding.dispose();
         await rm(root, { recursive: true, force: true });
     }
 });
