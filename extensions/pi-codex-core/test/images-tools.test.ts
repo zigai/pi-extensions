@@ -32,7 +32,7 @@ import {
     testDouble,
 } from "./helpers.ts";
 
-test("model-facing Codex tool guidance matches v0.145.0", async () => {
+test("model-facing Codex tool guidance includes v0.163.0 image transparency", async () => {
     const webDescriptionSource = await readFile("src/tools/web-run/web-run-description.md");
     const imagegenDescriptionSource = await readFile("src/tools/imagegen-description.md");
     assert.equal(
@@ -41,7 +41,7 @@ test("model-facing Codex tool guidance matches v0.145.0", async () => {
     );
     assert.equal(
         createHash("sha256").update(imagegenDescriptionSource).digest("hex"),
-        "77a992a7c90e45fcd11623a1efa34bfd4c7870697e0aa54ce9b28f690877170e",
+        "ee89dd3b9df94cc8b42b14e48714c68d11d4cd66113853b42ccf9cbd7858af61",
     );
 
     const webRunTool = createWebRunTool({ getConfig: () => DEFAULT_CODEX_CORE_CONFIG });
@@ -845,6 +845,79 @@ test("web_run rejects invalid unsigned command fields", () => {
     assert.throws(
         () => webRunTool.prepareArguments?.({ click: [{ ref_id: "turn0view0", id: 1.5 }] }),
         /Invalid web_run arguments/,
+    );
+});
+
+test.each([
+    { transparency: true, background: "transparent", edit: false },
+    { transparency: false, background: "opaque", edit: false },
+    { transparency: undefined, background: "auto", edit: false },
+    { transparency: true, background: "transparent", edit: true },
+    { transparency: false, background: "opaque", edit: true },
+    { transparency: undefined, background: "auto", edit: true },
+])(
+    "imagegen transparent_background=$transparency edit=$edit maps request background",
+    async ({ transparency, background, edit }) => {
+        const root = await mkdtemp(join(tmpdir(), "pi-codex-core-transparent-"));
+        try {
+            const png = solidPngBytes(1, 1, [20, 40, 60, 0]);
+            await writeFile(join(root, "input.png"), png);
+            let requestBody: unknown;
+            let requestUrl = "";
+            const tool = createImagegenTool({
+                getConfig: () => DEFAULT_CODEX_CORE_CONFIG,
+                runtime: makeTestRuntime(async (input, init) => {
+                    requestUrl = String(input);
+                    requestBody = JSON.parse(String(init?.body));
+                    return new Response(
+                        JSON.stringify({ data: [{ b64_json: png.toString("base64") }] }),
+                    );
+                }),
+                async saveImage() {
+                    return {
+                        path: join(root, "output.png"),
+                        absolutePath: join(root, "output.png"),
+                        latestPath: join(root, "latest.png"),
+                        latestAbsolutePath: join(root, "latest.png"),
+                    };
+                },
+            });
+            let args: JsonObject = { prompt: "Draw a robot" };
+            if (transparency !== undefined)
+                args = { ...args, transparent_background: transparency };
+
+            if (edit) args = { ...args, referenced_image_paths: ["input.png"] };
+            assert.ok(tool.prepareArguments);
+            const params = tool.prepareArguments(args);
+            assert.equal(params.transparent_background, transparency);
+
+            const result = await tool.execute(
+                "transparent",
+                params,
+                undefined,
+                undefined,
+                makeWebRunContext(root),
+            );
+
+            assert.ok(isRecord(requestBody));
+            assert.equal(requestBody.background, background);
+            assert.equal(result.details.generatedCount, 1);
+            assert.equal(result.content[0]?.type, "image");
+
+            if (edit) assert.match(requestUrl, /\/images\/edits$/);
+            else assert.match(requestUrl, /\/images\/generations$/);
+        } finally {
+            await rm(root, { recursive: true, force: true });
+        }
+    },
+);
+
+test.each(["true", 1, null])("imagegen transparent_background rejects non-boolean %j", (value) => {
+    const tool = createImagegenTool({ getConfig: () => DEFAULT_CODEX_CORE_CONFIG });
+    assert.ok(tool.prepareArguments);
+    assert.throws(
+        () => tool.prepareArguments?.({ prompt: "Draw a robot", transparent_background: value }),
+        /Invalid imagegen arguments/,
     );
 });
 

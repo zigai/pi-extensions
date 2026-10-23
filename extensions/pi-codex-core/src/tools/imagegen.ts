@@ -57,6 +57,12 @@ let cachedImagegenDescription: string | undefined;
 const IMAGEGEN_PARAMETERS = Type.Object(
     {
         prompt: Type.String({ description: "Detailed image generation or edit instruction." }),
+        transparent_background: Type.Optional(
+            Type.Boolean({
+                description:
+                    "Use a transparent background when true, opaque when false; omit to preserve automatic background handling, including existing transparency in edits.",
+            }),
+        ),
         referenced_image_paths: Type.Optional(
             Type.Array(Type.String(), {
                 maxItems: 5,
@@ -183,7 +189,7 @@ export function createImagegenTool(options: ImagegenOptions): ToolDefinition<
             const config = options.getConfig();
             const editImages = await resolveEditImages(params, ctx, { signal });
             const response = await requestImageGeneration(
-                params.prompt,
+                params,
                 editImages,
                 config,
                 ctx,
@@ -257,6 +263,10 @@ export function prepareImagegenArguments(args: unknown): ImagegenParams {
     if (prompt.length === 0) throw new Error("imagegen requires a non-empty prompt.");
 
     const prepared: ImagegenParams = { prompt };
+    if (input.transparent_background !== undefined) {
+        prepared.transparent_background = input.transparent_background;
+    }
+
     if (input.referenced_image_paths) {
         prepared.referenced_image_paths = input.referenced_image_paths.map(
             normalizeImageReferencePath,
@@ -342,7 +352,7 @@ async function resolveEditImages(
 }
 
 async function requestImageGeneration(
-    prompt: string,
+    params: ImagegenParams,
     editImages: readonly ImageContent[],
     config: CodexCoreConfig,
     ctx: ExtensionContext,
@@ -364,19 +374,22 @@ async function requestImageGeneration(
 
     const isEdit = editImages.length > 0;
     const path = isEdit ? "images/edits" : "images/generations";
+    let background = "auto";
+    if (params.transparent_background === true) background = "transparent";
+    else if (params.transparent_background === false) background = "opaque";
 
     const body = isEdit
         ? {
               images: editImages.map((image) => ({ image_url: imageContentToDataUrl(image) })),
-              prompt,
-              background: "auto",
+              prompt: params.prompt,
+              background,
               model: config.openai.imageModel,
               quality: "auto",
               size: "auto",
           }
         : {
-              prompt,
-              background: "auto",
+              prompt: params.prompt,
+              background,
               model: config.openai.imageModel,
               quality: "auto",
               size: "auto",
