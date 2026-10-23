@@ -31,6 +31,7 @@ const GPT_5_5_PRAGMATIC_PERSONALITY_PATH = fileURLToPath(
 );
 
 const CODEX_PROMPT_PATHS_BY_MODEL = new Map<string, string>([
+    ["gpt-6.1-sol", fileURLToPath(new URL("./codex-gpt-6.1-sol.md", import.meta.url))],
     ["gpt-6-astra", fileURLToPath(new URL("./codex-gpt-6-astra.md", import.meta.url))],
     ["gpt-6-sol", fileURLToPath(new URL("./codex-gpt-6-sol.md", import.meta.url))],
     ["gpt-6-luna", fileURLToPath(new URL("./codex-gpt-6-luna.md", import.meta.url))],

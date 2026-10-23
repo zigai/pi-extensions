@@ -131,26 +131,48 @@ test("normalizes ultra to supported model reasoning without changing the medium 
     }
 });
 
-test("routes Astra through Lite with the upstream low default and ultra override", () => {
-    const payload = {
-        model: "gpt-6-astra",
-        instructions: "astra system",
-        tools: [],
-        input: [],
-        service_tier: "priority",
-    };
-    const normal = rewriteCodexResponsesPayload(payload, "astra-session", "gpt-6-astra");
-    assert.ok(normal);
-    assert.deepEqual(normal.reasoning, { effort: "low", context: "all_turns" });
-    assert.equal(normal.service_tier, "priority");
-    assert.equal(normal.parallel_tool_calls, false);
-    const ultra = rewriteCodexResponsesPayload(
-        { ...payload, reasoning: { effort: "ultra" } },
-        "astra-session",
-    );
-    assert.deepEqual(ultra?.reasoning, { effort: "xhigh", context: "all_turns" });
-    assert.equal(rewriteCodexResponsesPayload(payload, "astra-session", "gpt-5.6-sol"), undefined);
-});
+test.each(["gpt-6-astra", "gpt-6.1-sol"])(
+    "routes %s through Lite with the upstream low default and ultra override",
+    (model) => {
+        const payload = {
+            model,
+            instructions: "model instructions",
+            tools: [],
+            input: [],
+            service_tier: "priority",
+        };
+        const normal = rewriteCodexResponsesPayload(payload, "model-session", model);
+        assert.ok(normal);
+        assert.deepEqual(normal.reasoning, { effort: "low", context: "all_turns" });
+        assert.equal(normal.service_tier, "priority");
+        assert.equal(normal.parallel_tool_calls, false);
+        const ultra = rewriteCodexResponsesPayload(
+            { ...payload, reasoning: { effort: "ultra" } },
+            "model-session",
+        );
+        assert.deepEqual(ultra?.reasoning, { effort: "xhigh", context: "all_turns" });
+        const compact = buildRemoteCompactionV2Request({
+            model,
+            sessionId: "model-session",
+            input: [],
+            instructions: "model instructions",
+            promptCacheKey: "model-session",
+            verbosity: "low",
+            fast: true,
+            reasoning: buildReasoning(
+                parseCodexCoreConfig({ openai: { compactionReasoning: "current" } }),
+                model,
+            ).reasoning,
+        });
+        assert.deepEqual(compact.reasoning, { effort: "low", context: "all_turns" });
+        assert.equal(compact.instructions, undefined);
+        assert.equal(compact.client_metadata?.[CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY], "true");
+        assert.equal(
+            rewriteCodexResponsesPayload(payload, "model-session", "gpt-5.6-sol"),
+            undefined,
+        );
+    },
+);
 
 test("routes GPT-6 Sol and Luna through Lite with their supported reasoning", () => {
     for (const model of ["gpt-6-sol", "gpt-6-luna"]) {
