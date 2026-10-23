@@ -1,5 +1,6 @@
 import { ModelSelectorComponent } from "@earendil-works/pi-coding-agent";
 import {
+    reportExtensionDiagnostic,
     installLinkedMethodPatch,
     type LinkedMethodPatchHandle,
 } from "@zigai/pi-extension-internals";
@@ -43,7 +44,7 @@ function warnModelSelectorHintPatchUnavailable(reason?: string): void {
     let suffix = "";
     if (reason !== undefined) suffix = `: ${reason}`;
 
-    console.warn(
+    reportExtensionDiagnostic(
         `[pi-ui-tweaks] model picker hint patch unavailable; Pi internals may have changed${suffix}`,
     );
 }

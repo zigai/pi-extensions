@@ -1,5 +1,6 @@
 import { InteractiveMode } from "@earendil-works/pi-coding-agent";
 import {
+    reportExtensionDiagnostic,
     installLinkedMethodPatch,
     type LinkedMethodPatchHandle,
 } from "@zigai/pi-extension-internals";
@@ -41,7 +42,7 @@ function warnModelStatusPatchUnavailable(reason?: string): void {
     let suffix = "";
     if (reason !== undefined) suffix = `: ${reason}`;
 
-    console.warn(
+    reportExtensionDiagnostic(
         `[pi-ui-tweaks] model status patch unavailable; Pi internals may have changed${suffix}`,
     );
 }

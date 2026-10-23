@@ -1,5 +1,6 @@
 import { InteractiveMode, type SourceInfo } from "@earendil-works/pi-coding-agent";
 import {
+    reportExtensionDiagnostic,
     installLinkedMethodPatch,
     type LinkedMethodPatchHandle,
 } from "@zigai/pi-extension-internals";
@@ -54,7 +55,7 @@ function warnSlashCommandSourcePatchUnavailable(reason?: string): void {
     let suffix = "";
     if (reason !== undefined) suffix = `: ${reason}`;
 
-    console.warn(
+    reportExtensionDiagnostic(
         `[pi-ui-tweaks] slash command source patch unavailable; Pi internals may have changed${suffix}`,
     );
 }

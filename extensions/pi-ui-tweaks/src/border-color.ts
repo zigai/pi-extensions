@@ -1,5 +1,6 @@
 import { Theme } from "@earendil-works/pi-coding-agent";
 import {
+    reportExtensionDiagnostic,
     installLinkedMethodPatch,
     type LinkedMethodPatchHandle,
 } from "@zigai/pi-extension-internals";
@@ -41,7 +42,7 @@ export async function installNeutralBorderColorPatch(
 ): Promise<NeutralBorderColorHandle> {
     const prototype: unknown = Theme.prototype;
     if (!isThemePrototype(prototype)) {
-        console.warn(
+        reportExtensionDiagnostic(
             "[pi-ui-tweaks] neutral border color patch unavailable; Pi internals may have changed",
         );
 

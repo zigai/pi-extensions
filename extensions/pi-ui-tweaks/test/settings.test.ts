@@ -30,6 +30,7 @@ test("loadUiTweaksSettings scaffolds missing global config and schema", async ()
             bashExecPromptSpacing: true,
             anchorInputToBottom: false,
             compactModelSelector: true,
+            dimInputBorder: true,
             hideAutocompleteScrollInfo: true,
             hideModelChangeStatus: true,
             hideModelProviderHint: true,
@@ -37,6 +38,7 @@ test("loadUiTweaksSettings scaffolds missing global config and schema", async ()
             highlightSelectedModelProvider: true,
             inputPromptPrefix: "> ",
             neutralBorderColor: true,
+            mainScreenSynchronizedOutput: true,
             pasteCollapseCharThreshold: 1000,
             pasteCollapseEnabled: true,
             pasteCollapseExpandKey: null,
@@ -80,6 +82,7 @@ test("ui tweaks settings default to enabled tweaks", () => {
     assert.equal(loaded.config.highlightSelectedModelProvider, true);
     assert.equal(loaded.config.inputPromptPrefix, "> ");
     assert.equal(loaded.config.neutralBorderColor, true);
+    assert.equal(loaded.config.mainScreenSynchronizedOutput, true);
     assert.equal(loaded.config.pasteCollapseCharThreshold, 1000);
     assert.equal(loaded.config.pasteCollapseEnabled, true);
     assert.equal(loaded.config.pasteCollapseExpandKey, null);
@@ -231,6 +234,7 @@ test("ui tweaks settings report invalid custom values", () => {
     assert.equal(loaded.config.highlightSelectedModelProvider, true);
     assert.equal(loaded.config.inputPromptPrefix, "> ");
     assert.equal(loaded.config.neutralBorderColor, true);
+    assert.equal(loaded.config.mainScreenSynchronizedOutput, true);
     assert.equal(loaded.config.pasteCollapseCharThreshold, 1000);
     assert.equal(loaded.config.pasteCollapseEnabled, true);
     assert.equal(loaded.config.pasteCollapseExpandKey, null);
@@ -304,4 +308,18 @@ test("ui tweaks settings reject unknown config keys", () => {
     assert.equal(loaded.errors.length, 1);
     assert.match(loaded.errors[0] ?? "", /global is invalid:/);
     assert.match(loaded.errors[0] ?? "", /additional properties/);
+});
+
+test("regular-mode synchronization can be disabled independently and by the master switch", () => {
+    const individual = resolveUiTweaksConfig([
+        { label: "test", settings: { mainScreenSynchronizedOutput: false } },
+    ]);
+    assert.deepEqual(individual.errors, []);
+    assert.equal(individual.config.mainScreenSynchronizedOutput, false);
+    assert.equal(individual.config.autocompleteAboveInput, true);
+    const disabled = resolveUiTweaksConfig([
+        { label: "test", settings: { enabled: false, mainScreenSynchronizedOutput: true } },
+    ]);
+    assert.deepEqual(disabled.errors, []);
+    assert.equal(disabled.config.mainScreenSynchronizedOutput, false);
 });

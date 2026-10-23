@@ -1,4 +1,5 @@
 import {
+    reportExtensionDiagnostic,
     installLinkedRenderPatch,
     type LinkedMethodPatchHandle,
 } from "@zigai/pi-extension-internals";
@@ -46,7 +47,7 @@ function warnAutocompleteScrollInfoPatchUnavailable(reason?: string): void {
     let suffix = "";
     if (reason !== undefined) suffix = `: ${reason}`;
 
-    console.warn(
+    reportExtensionDiagnostic(
         `[pi-ui-tweaks] autocomplete scroll info patch unavailable; Pi internals may have changed${suffix}`,
     );
 }

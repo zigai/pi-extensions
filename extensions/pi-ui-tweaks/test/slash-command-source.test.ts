@@ -3,7 +3,7 @@ import { InteractiveMode } from "@earendil-works/pi-coding-agent";
 import { test } from "vitest";
 
 import { installSlashCommandSourcePatch } from "../src/slash-command-source.ts";
-import { captureConsoleWarnings } from "./capture-console-warnings.ts";
+import { captureDiagnostics } from "./capture-diagnostics.ts";
 
 function interactiveMode() {
     return {
@@ -15,7 +15,7 @@ function interactiveMode() {
 }
 
 test("explicit null does not patch Pi's default slash-command formatter", async () => {
-    const warnings = await captureConsoleWarnings(() => {
+    const diagnostics = await captureDiagnostics(() => {
         const original = Object.getOwnPropertyDescriptor(
             InteractiveMode.prototype,
             "prefixAutocompleteDescription",
@@ -33,8 +33,12 @@ test("explicit null does not patch Pi's default slash-command formatter", async 
         handle.dispose();
     });
 
-    assert.deepEqual(warnings, [
-        "[pi-ui-tweaks] slash command source patch unavailable; Pi internals may have changed: missing prefixAutocompleteDescription",
+    assert.deepEqual(diagnostics, [
+        {
+            message:
+                "[pi-ui-tweaks] slash command source patch unavailable; Pi internals may have changed: missing prefixAutocompleteDescription",
+            severity: "warning",
+        },
     ]);
 });
 

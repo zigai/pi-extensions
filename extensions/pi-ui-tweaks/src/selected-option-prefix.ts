@@ -1,6 +1,7 @@
 import { Theme } from "@earendil-works/pi-coding-agent";
 import { SelectList, truncateToWidth, visibleWidth, type SelectItem } from "@earendil-works/pi-tui";
 import {
+    reportExtensionDiagnostic,
     installLinkedMethodPatch,
     type LinkedMethodPatchHandle,
 } from "@zigai/pi-extension-internals";
@@ -68,7 +69,7 @@ function normalizeSelectedOptionPrefix(prefix: string): string {
 }
 
 function warnSelectedOptionPrefixPatchUnavailable(): void {
-    console.warn(
+    reportExtensionDiagnostic(
         "[pi-ui-tweaks] selected option prefix patch unavailable; Pi internals may have changed",
     );
 }

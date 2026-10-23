@@ -1,6 +1,7 @@
 import { Editor, getKeybindings } from "@earendil-works/pi-tui";
 
 import {
+    reportExtensionDiagnostic,
     installLinkedMethodPatch,
     installLinkedRenderPatch,
     type LinkedMethodPatchHandle,
@@ -80,7 +81,7 @@ function warnAutocompletePositionPatchUnavailable(reason?: string): void {
         suffix = `: ${reason}`;
     }
 
-    console.warn(
+    reportExtensionDiagnostic(
         `[pi-ui-tweaks] autocomplete position patch unavailable; Pi internals may have changed${suffix}`,
     );
 }

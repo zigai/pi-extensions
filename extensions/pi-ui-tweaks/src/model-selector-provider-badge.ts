@@ -1,5 +1,6 @@
 import { ModelSelectorComponent } from "@earendil-works/pi-coding-agent";
 import {
+    reportExtensionDiagnostic,
     installLinkedMethodPatch,
     type LinkedMethodPatchHandle,
 } from "@zigai/pi-extension-internals";
@@ -54,7 +55,7 @@ function warnModelSelectorProviderBadgePatchUnavailable(cause?: unknown): void {
         suffix = `: ${cause.message}`;
     }
 
-    console.warn(
+    reportExtensionDiagnostic(
         `[pi-ui-tweaks] selected model provider badge patch unavailable; Pi internals may have changed${suffix}`,
     );
 }

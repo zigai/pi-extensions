@@ -36,6 +36,11 @@
       "default": true,
       "description": "Use compact model-selector rows."
     },
+    "dimInputBorder": {
+      "type": "boolean",
+      "default": true,
+      "description": "Dim the input editor's horizontal border lines."
+    },
     "hideAutocompleteScrollInfo": {
       "type": "boolean",
       "default": true,
@@ -66,6 +71,11 @@
       "minLength": 1,
       "default": "> ",
       "description": "Prefix displayed before input text."
+    },
+    "mainScreenSynchronizedOutput": {
+      "type": "boolean",
+      "default": true,
+      "description": "Present regular-mode content and final cursor updates in one synchronized-output frame."
     },
     "neutralBorderColor": {
       "type": "boolean",

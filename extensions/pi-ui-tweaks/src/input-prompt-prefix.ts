@@ -1,6 +1,7 @@
 import { CURSOR_MARKER, Input, sliceByColumn, visibleWidth } from "@earendil-works/pi-tui";
 
 import {
+    reportExtensionDiagnostic,
     installLinkedRenderPatch,
     type LinkedMethodPatchHandle,
 } from "@zigai/pi-extension-internals";
@@ -42,7 +43,7 @@ function warnInputPromptPrefixPatchUnavailable(reason?: string): void {
         suffix = `: ${reason}`;
     }
 
-    console.warn(
+    reportExtensionDiagnostic(
         `[pi-ui-tweaks] input prompt prefix patch unavailable; Pi internals may have changed${suffix}`,
     );
 }

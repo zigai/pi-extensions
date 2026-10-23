@@ -11,6 +11,7 @@ export type UiTweaksConfig = {
     readonly bashExecPromptSpacing: boolean;
     readonly anchorInputToBottom: boolean;
     readonly compactModelSelector: boolean;
+    readonly dimInputBorder: boolean;
     readonly hideAutocompleteScrollInfo: boolean;
     readonly hideModelChangeStatus: boolean;
     readonly hideModelProviderHint: boolean;
@@ -18,6 +19,7 @@ export type UiTweaksConfig = {
     readonly highlightSelectedModelProvider: boolean;
     readonly inputPromptPrefix: string;
     readonly neutralBorderColor: boolean;
+    readonly mainScreenSynchronizedOutput: boolean;
     readonly pasteCollapseCharThreshold: number;
     readonly pasteCollapseEnabled: boolean;
     readonly pasteCollapseExpandKey: string | null;
@@ -45,6 +47,7 @@ export type UiTweaksSettings = {
     bashExecPromptSpacing?: boolean;
     anchorInputToBottom?: boolean;
     compactModelSelector?: boolean;
+    dimInputBorder?: boolean;
     enabled?: boolean;
     hideAutocompleteScrollInfo?: boolean;
     hideModelChangeStatus?: boolean;
@@ -53,6 +56,7 @@ export type UiTweaksSettings = {
     highlightSelectedModelProvider?: boolean;
     inputPromptPrefix?: string;
     neutralBorderColor?: boolean;
+    mainScreenSynchronizedOutput?: boolean;
     pasteCollapseCharThreshold?: number;
     pasteCollapseEnabled?: boolean;
     pasteCollapseExpandKey?: string | null;
@@ -97,6 +101,10 @@ export const extensionSettingsInput = {
                 default: true,
                 description: "Use compact model-selector rows.",
             }),
+            dimInputBorder: Type.Boolean({
+                default: true,
+                description: "Dim the input editor's horizontal border lines.",
+            }),
             hideAutocompleteScrollInfo: Type.Boolean({
                 default: true,
                 description: "Hide autocomplete scroll-position text.",
@@ -121,6 +129,11 @@ export const extensionSettingsInput = {
                 minLength: 1,
                 default: "> ",
                 description: "Prefix displayed before input text.",
+            }),
+            mainScreenSynchronizedOutput: Type.Boolean({
+                default: true,
+                description:
+                    "Present regular-mode content and final cursor updates in one synchronized-output frame.",
             }),
             neutralBorderColor: Type.Boolean({
                 default: true,

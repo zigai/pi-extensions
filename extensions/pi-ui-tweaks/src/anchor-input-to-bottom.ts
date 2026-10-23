@@ -1,6 +1,7 @@
 import { TuiAltScreen, TuiMainScreen, type Component } from "@earendil-works/pi-tui";
 
 import {
+    reportExtensionDiagnostic,
     installLinkedMethodPatch,
     installLinkedRenderPatch,
     type LinkedMethodPatchHandle,
@@ -87,7 +88,7 @@ function warnAnchorInputToBottomPatchUnavailable(reason?: string): void {
         suffix = `: ${reason}`;
     }
 
-    console.warn(
+    reportExtensionDiagnostic(
         `[pi-ui-tweaks] anchor input to bottom patch unavailable; Pi internals may have changed${suffix}`,
     );
 }

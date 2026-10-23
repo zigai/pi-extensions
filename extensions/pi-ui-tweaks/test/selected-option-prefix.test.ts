@@ -7,7 +7,7 @@ import {
     installSelectedOptionPrefixSelectListPatch,
     installSelectedOptionPrefixThemePatch,
 } from "../src/selected-option-prefix.ts";
-import { captureConsoleWarnings } from "./capture-console-warnings.ts";
+import { captureDiagnostics } from "./capture-diagnostics.ts";
 
 function createList(): SelectList {
     return new SelectList(
@@ -24,7 +24,7 @@ function createList(): SelectList {
 }
 
 test("explicit null does not patch Pi's default select-list prototype", async () => {
-    const warnings = await captureConsoleWarnings(() => {
+    const diagnostics = await captureDiagnostics(() => {
         const originalRender = Object.getOwnPropertyDescriptor(SelectList.prototype, "render");
         const handle = installSelectedOptionPrefixSelectListPatch(
             { selectedOptionPrefix: "▌" },
@@ -39,8 +39,12 @@ test("explicit null does not patch Pi's default select-list prototype", async ()
         handle.dispose();
     });
 
-    assert.deepEqual(warnings, [
-        "[pi-ui-tweaks] selected option prefix patch unavailable; Pi internals may have changed",
+    assert.deepEqual(diagnostics, [
+        {
+            message:
+                "[pi-ui-tweaks] selected option prefix patch unavailable; Pi internals may have changed",
+            severity: "warning",
+        },
     ]);
 });
 

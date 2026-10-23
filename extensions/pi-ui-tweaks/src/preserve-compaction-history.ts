@@ -1,5 +1,6 @@
 import { InteractiveMode } from "@earendil-works/pi-coding-agent";
 import {
+    reportExtensionDiagnostic,
     installLinkedMethodPatch,
     type LinkedMethodPatchHandle,
 } from "@zigai/pi-extension-internals";
@@ -38,6 +39,7 @@ type InteractiveModeCompactionTarget = {
     chatContainer: ChatContainer;
     handleEvent: HandleEvent;
     rebuildChatFromMessages: () => void;
+    renderSessionEntries: () => void;
     [PRESERVE_COMPACTION_HISTORY_PATCH]?: PreserveCompactionHistoryRecord;
 };
 
@@ -56,6 +58,7 @@ type PreserveCompactionHistoryRecord = {
 type ChatContainerView = {
     readonly chatContainer?: unknown;
     readonly rebuildChatFromMessages?: unknown;
+    readonly renderSessionEntries?: unknown;
 };
 
 type ClearView = {
@@ -98,7 +101,9 @@ function isInteractiveModeCompactionTarget(
     // SAFETY: ClearView exposes only the clear method validated below.
     const clearView = chatContainer as ClearView;
     return (
-        typeof clearView.clear === "function" && typeof view.rebuildChatFromMessages === "function"
+        typeof clearView.clear === "function" &&
+        typeof view.rebuildChatFromMessages === "function" &&
+        typeof view.renderSessionEntries === "function"
     );
 }
 
@@ -106,7 +111,7 @@ function warnPreserveCompactionHistoryPatchUnavailable(reason?: string): void {
     let suffix = "";
     if (reason !== undefined) suffix = `: ${reason}`;
 
-    console.warn(
+    reportExtensionDiagnostic(
         `[pi-ui-tweaks] preserve compaction history patch unavailable; Pi internals may have changed${suffix}`,
     );
 }
@@ -150,17 +155,24 @@ export function installPreserveCompactionHistoryPatch(
                 )
                     return predecessor.call(this, event);
 
-                const originalClear = this.chatContainer.clear;
-                const originalRebuild = this.rebuildChatFromMessages;
+                // Pi replays the retained window directly after clearing. Preserve the existing
+                // rows instead of appending duplicates, while still allowing the new summary.
+                const originalMethods = {
+                    clear: this.chatContainer.clear,
+                    rebuild: this.rebuildChatFromMessages,
+                    renderEntries: this.renderSessionEntries,
+                };
 
                 this.chatContainer.clear = () => {};
                 this.rebuildChatFromMessages = () => {};
+                this.renderSessionEntries = () => {};
 
                 try {
                     await predecessor.call(this, event);
                 } finally {
-                    this.chatContainer.clear = originalClear;
-                    this.rebuildChatFromMessages = originalRebuild;
+                    this.chatContainer.clear = originalMethods.clear;
+                    this.rebuildChatFromMessages = originalMethods.rebuild;
+                    this.renderSessionEntries = originalMethods.renderEntries;
                 }
             },
     );

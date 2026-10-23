@@ -4,6 +4,8 @@
 
 Small configurable UI tweaks for polishing Pi's interface.
 
+Regular-mode frames include content and final hardware-cursor updates in one synchronized-output transaction. This does not change full-screen rendering. Set `mainScreenSynchronizedOutput: false` (or `enabled: false`) to retain native regular-mode output; session shutdown removes the patch.
+
 ## Install
 
 ```sh
@@ -22,12 +24,14 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-ui-tweaks.json`
 | `bashExecPromptSpacing` | boolean | `true` | Add spacing around bash execution prompts. |
 | `anchorInputToBottom` | boolean | `false` | Anchor the input editor to the terminal bottom. |
 | `compactModelSelector` | boolean | `true` | Use compact model-selector rows. |
+| `dimInputBorder` | boolean | `true` | Dim the input editor's horizontal border lines. |
 | `hideAutocompleteScrollInfo` | boolean | `true` | Hide autocomplete scroll-position text. |
 | `hideModelChangeStatus` | boolean | `true` | Hide model-change status messages. |
 | `hideModelProviderHint` | boolean | `true` | Hide provider hints in the model selector. |
 | `hideSlashCommandSourceTags` | boolean | `true` | Hide source tags in slash-command completion. |
 | `highlightSelectedModelProvider` | boolean | `true` | Highlight the selected model provider. |
 | `inputPromptPrefix` | string | `"> "` | Prefix displayed before input text. |
+| `mainScreenSynchronizedOutput` | boolean | `true` | Present regular-mode content and final cursor updates in one synchronized-output frame. |
 | `neutralBorderColor` | boolean | `true` | Use a neutral border color when Pi is idle. |
 | `pasteCollapseCharThreshold` | integer | `1000` | Character threshold that collapses pasted content. |
 | `pasteCollapseEnabled` | boolean | `true` | Collapse large pasted content. |
@@ -47,12 +51,14 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-ui-tweaks.json`
   "bashExecPromptSpacing": true,
   "anchorInputToBottom": false,
   "compactModelSelector": true,
+  "dimInputBorder": true,
   "hideAutocompleteScrollInfo": true,
   "hideModelChangeStatus": true,
   "hideModelProviderHint": true,
   "hideSlashCommandSourceTags": true,
   "highlightSelectedModelProvider": true,
   "inputPromptPrefix": "> ",
+  "mainScreenSynchronizedOutput": true,
   "neutralBorderColor": true,
   "pasteCollapseCharThreshold": 1000,
   "pasteCollapseEnabled": true,

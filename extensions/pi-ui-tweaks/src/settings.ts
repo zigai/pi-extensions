@@ -35,6 +35,7 @@ const UiTweaksConfigSchema = Type.Object(
         bashExecPromptSpacing: Type.Optional(Type.Boolean()),
         anchorInputToBottom: Type.Optional(Type.Boolean()),
         compactModelSelector: Type.Optional(Type.Boolean()),
+        dimInputBorder: Type.Optional(Type.Boolean()),
         enabled: Type.Optional(Type.Boolean()),
         hideAutocompleteScrollInfo: Type.Optional(Type.Boolean()),
         hideModelChangeStatus: Type.Optional(Type.Boolean()),
@@ -43,6 +44,7 @@ const UiTweaksConfigSchema = Type.Object(
         highlightSelectedModelProvider: Type.Optional(Type.Boolean()),
         inputPromptPrefix: Type.Optional(Type.String({ minLength: 1 })),
         neutralBorderColor: Type.Optional(Type.Boolean()),
+        mainScreenSynchronizedOutput: Type.Optional(Type.Boolean()),
         pasteCollapseCharThreshold: Type.Optional(Type.Integer({ minimum: 0 })),
         pasteCollapseEnabled: Type.Optional(Type.Boolean()),
         pasteCollapseExpandKey: Type.Optional(OptionalPasteCollapseExpandKeySchema),
@@ -61,6 +63,7 @@ const DEFAULT_UI_TWEAKS_CONFIG: UiTweaksConfig = {
     bashExecPromptSpacing: true,
     anchorInputToBottom: false,
     compactModelSelector: true,
+    dimInputBorder: true,
     hideAutocompleteScrollInfo: true,
     hideModelChangeStatus: true,
     hideModelProviderHint: true,
@@ -68,6 +71,7 @@ const DEFAULT_UI_TWEAKS_CONFIG: UiTweaksConfig = {
     highlightSelectedModelProvider: true,
     inputPromptPrefix: "> ",
     neutralBorderColor: true,
+    mainScreenSynchronizedOutput: true,
     pasteCollapseCharThreshold: DEFAULT_PASTE_COLLAPSE_CHAR_THRESHOLD,
     pasteCollapseEnabled: DEFAULT_PASTE_COLLAPSE_ENABLED,
     pasteCollapseExpandKey: DEFAULT_PASTE_COLLAPSE_EXPAND_KEY,
@@ -130,6 +134,7 @@ function buildUiTweaksConfig(settings: UiTweaksSettings): UiTweaksConfig {
             bashExecPromptSpacing: false,
             anchorInputToBottom: false,
             compactModelSelector: false,
+            dimInputBorder: false,
             hideAutocompleteScrollInfo: false,
             hideModelChangeStatus: false,
             hideModelProviderHint: false,
@@ -137,6 +142,7 @@ function buildUiTweaksConfig(settings: UiTweaksSettings): UiTweaksConfig {
             highlightSelectedModelProvider: false,
             inputPromptPrefix: DEFAULT_UI_TWEAKS_CONFIG.inputPromptPrefix,
             neutralBorderColor: false,
+            mainScreenSynchronizedOutput: false,
             pasteCollapseCharThreshold: DEFAULT_UI_TWEAKS_CONFIG.pasteCollapseCharThreshold,
             pasteCollapseEnabled: false,
             pasteCollapseExpandKey: DEFAULT_UI_TWEAKS_CONFIG.pasteCollapseExpandKey,
@@ -158,6 +164,7 @@ function buildUiTweaksConfig(settings: UiTweaksSettings): UiTweaksConfig {
             settings.anchorInputToBottom ?? DEFAULT_UI_TWEAKS_CONFIG.anchorInputToBottom,
         compactModelSelector:
             settings.compactModelSelector ?? DEFAULT_UI_TWEAKS_CONFIG.compactModelSelector,
+        dimInputBorder: settings.dimInputBorder ?? DEFAULT_UI_TWEAKS_CONFIG.dimInputBorder,
         hideAutocompleteScrollInfo:
             settings.hideAutocompleteScrollInfo ??
             DEFAULT_UI_TWEAKS_CONFIG.hideAutocompleteScrollInfo,
@@ -172,6 +179,9 @@ function buildUiTweaksConfig(settings: UiTweaksSettings): UiTweaksConfig {
             settings.highlightSelectedModelProvider ??
             DEFAULT_UI_TWEAKS_CONFIG.highlightSelectedModelProvider,
         inputPromptPrefix: settings.inputPromptPrefix ?? DEFAULT_UI_TWEAKS_CONFIG.inputPromptPrefix,
+        mainScreenSynchronizedOutput:
+            settings.mainScreenSynchronizedOutput ??
+            DEFAULT_UI_TWEAKS_CONFIG.mainScreenSynchronizedOutput,
         neutralBorderColor:
             settings.neutralBorderColor ?? DEFAULT_UI_TWEAKS_CONFIG.neutralBorderColor,
         pasteCollapseCharThreshold:
