@@ -1,0 +1,37 @@
+{
+  "name": "@zigai/pi-background",
+  "version": "0.1.0",
+  "description": "Run shell commands in the background and notify Pi when they finish.",
+  "license": "MIT",
+  "files": [
+    "src/index.ts",
+    "src/commands.ts",
+    "src/presentation.ts",
+    "src/log-pages.ts",
+    "src/log-viewer.ts",
+    "src/pinned-rows.ts",
+    "src/rendering.ts",
+    "README.md"
+  ],
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@zigai/pi-extension-internals": "0.2.0",
+    "@zigai/pi-glowup": "2.0.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "^1.3.0",
+    "@earendil-works/pi-tui": "^1.3.0",
+    "typebox": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  }
+}

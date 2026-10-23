@@ -30,8 +30,11 @@ A collection of small Pi extensions for improving interaction, display, and mode
 | [@zigai/pi-toggles](extensions/pi-toggles)                         | Central capability policy, profiles, conditions, and session overrides for Pi     | `pi install npm:@zigai/pi-toggles`             |
 | [@zigai/pi-settings-ui](extensions/pi-settings-ui)                 | Schema-driven TUI editor for Pi extension settings.                               | `pi install npm:@zigai/pi-settings-ui`         |
 | [@zigai/pi-enhanced-skills](extensions/pi-expanded-skills)         | Enhanced Pi skills                                                                | `pi install npm:@zigai/pi-enhanced-skills`     |
+| [@zigai/pi-background](extensions/pi-background)                   | Run shell commands in the background and notify Pi when they finish.              | `pi install npm:@zigai/pi-background`          |
 | [@zigai/pi-lazy-mcp](extensions/pi-lazy-mcp)                       | Start MCP servers only when their tools are called.                               | `pi install npm:@zigai/pi-lazy-mcp`            |
 | [@zigai/pi-workspace](extensions/pi-workspace)                     | Customize Pi's chat and sidebar; search saved history.                            | `pi install npm:@zigai/pi-workspace`           |
+
+Background Commands, Lazy MCP, and Workspace are excluded from ordinary root and full-collection loading; select their packages explicitly. Root `piWorkspace` declares repository-only optional-extension and collection groups, not native Pi flags. Pi still loads each selected package through its standard `pi.extensions` entrypoints. Run `npm run collection:generate` after inventory or version changes and `npm run collection:check` to verify generated collection resources.
 
 ## Libraries
 
