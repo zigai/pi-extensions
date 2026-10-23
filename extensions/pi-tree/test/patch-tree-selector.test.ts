@@ -246,14 +246,16 @@ function isRuntimeTreeList(value: unknown): value is RuntimeTreeList {
 
 type RecordedExtensionLifecycle = {
     readonly api: Pick<ExtensionAPI, "on">;
-    readonly handlers: Map<string, unknown>;
+    readonly handlers: Map<string, unknown[]>;
 };
 
 function createRecordedExtensionLifecycle(): RecordedExtensionLifecycle {
-    const handlers = new Map<string, unknown>();
+    const handlers = new Map<string, unknown[]>();
     const api: Pick<ExtensionAPI, "on"> = {
         on(event, handler): () => void {
-            handlers.set(event, handler);
+            const registered = handlers.get(event) ?? [];
+            registered.push(handler);
+            handlers.set(event, registered);
 
             return () => {};
         },
@@ -269,13 +271,17 @@ function isRecordedHandler(value: unknown): value is RecordedHandler {
 }
 
 async function emitRecordedHandler(
-    handlers: ReadonlyMap<string, unknown>,
+    handlers: ReadonlyMap<string, readonly unknown[]>,
     eventName: string,
     ...args: unknown[]
 ): Promise<void> {
-    const handler = handlers.get(eventName);
-    if (!isRecordedHandler(handler)) assert.fail(`missing ${eventName} handler`);
-    await handler(...args);
+    const registered = handlers.get(eventName);
+    if (registered === undefined) assert.fail(`missing ${eventName} handlers`);
+
+    for (const handler of registered) {
+        if (!isRecordedHandler(handler)) assert.fail(`invalid ${eventName} handler`);
+        await handler(...args);
+    }
 }
 
 const runtimeTreeListParser = {
@@ -710,10 +716,7 @@ test("registered session lifecycle patches and exercises the installed Pi tree s
         Object.defineProperty(selectorPrototype, "getTreeList", originalGetTreeListDescriptor);
         clearPatchState();
         try {
-            const shutdownHandler = lifecycle.handlers.get("session_shutdown");
-            if (isRecordedHandler(shutdownHandler)) {
-                await shutdownHandler();
-            }
+            await emitRecordedHandler(lifecycle.handlers, "session_shutdown");
         } finally {
             await rm(agentDir, { recursive: true, force: true });
 

@@ -3,8 +3,11 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
+import { bindExtensionDiagnostics } from "@zigai/pi-extension-internals";
 
 import {
+    flushSettingsWrites,
+    persistMode,
     getPersistedMaxVisibleLines,
     getPersistedMode,
     getPersistedPreviewEnabled,
@@ -87,5 +90,43 @@ test("tree settings reject unknown config keys", async () => {
         } else {
             process.env.PI_CODING_AGENT_DIR = originalAgentDir;
         }
+    }
+});
+
+test("failed tree settings writes notify their owner, not a replacement session", async () => {
+    const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
+    const agentDir = await mkdtemp(path.join(tmpdir(), "pi-tree-write-"));
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    const notices: string[] = [];
+    const binding = bindExtensionDiagnostics({
+        hasUI: true,
+        ui: {
+            notify: (message) => {
+                notices.push(message);
+            },
+        },
+    });
+    notices.length = 0;
+    try {
+        const context = { cwd: agentDir, isProjectTrusted: () => false };
+        setSettingsContext(context);
+        getPersistedMode();
+        const configPath = path.join(agentDir, "extension-settings", "pi-tree.json");
+        await writeFile(configPath, "{broken");
+        persistMode("off");
+        await flushSettingsWrites();
+        assert.equal(notices.length, 1);
+        assert.match(notices[0] ?? "", /^\[pi-tree\] settings update was not saved/);
+        notices.length = 0;
+        persistMode("off");
+        setSettingsContext(context);
+        await flushSettingsWrites();
+        assert.deepEqual(notices, []);
+    } finally {
+        binding.dispose();
+        await rm(agentDir, { recursive: true, force: true });
+
+        if (originalAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = originalAgentDir;
     }
 });

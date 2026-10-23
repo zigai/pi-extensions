@@ -1,3 +1,4 @@
+import { registerExtensionDiagnostics } from "@zigai/pi-extension-internals";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { restoreTreeHeaderText } from "./patch-tree-header.ts";
@@ -31,4 +32,5 @@ export default function treeTimestampsExtension(pi: Pick<ExtensionAPI, "on">): v
         await flushSettingsWrites();
         restoreTreeHeaderText();
     });
+    registerExtensionDiagnostics(pi);
 }

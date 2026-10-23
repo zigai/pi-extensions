@@ -36,6 +36,7 @@
     "access": "public"
   },
   "dependencies": {
+    "@zigai/pi-extension-internals": "0.2.0",
     "@zigai/pi-extension-settings": "0.6.1"
   },
   "peerDependencies": {

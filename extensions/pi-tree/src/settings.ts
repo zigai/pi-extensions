@@ -1,3 +1,4 @@
+import { reportExtensionDiagnostic } from "@zigai/pi-extension-internals";
 import {
     loadPiExtensionSettings,
     updatePiExtensionSettings,
@@ -36,6 +37,7 @@ type SettingsReadContext = {
     projectTrusted: boolean;
 };
 
+let settingsGeneration = 0;
 let settingsReadContext: SettingsReadContext | undefined;
 let cachedSettings: LoadedPiExtensionSettings<typeof extensionSettingsInput.schema> | undefined;
 let cachedMode: TreeTimestampMode | null = null;
@@ -58,6 +60,7 @@ function clearReadCaches(): void {
 }
 
 export function setSettingsContext(ctx: TreeSettingsContext): void {
+    settingsGeneration += 1;
     settingsReadContext = {
         cwd: ctx.cwd,
         projectTrusted: isProjectTrusted(ctx),
@@ -186,27 +189,35 @@ function warnSettingsWriteFailed(cause: unknown): void {
         suffix = `: ${cause.message}`;
     }
 
-    console.warn(`[pi-tree] settings update was not saved${suffix}`);
+    reportExtensionDiagnostic(`[pi-tree] settings update was not saved${suffix}`, "warning");
 }
 
 export function persistPreviewEnabled(enabled: boolean): void {
+    const current = settingsGeneration;
     const write = updateSettingsObject((settings) => {
         settings[PREVIEW_SETTINGS_KEY] = enabled;
     })
         .then(() => {
-            cachedPreviewEnabled = enabled;
+            if (current === settingsGeneration) cachedPreviewEnabled = enabled;
         })
-        .catch(warnSettingsWriteFailed);
+        .catch((cause: unknown) => {
+            if (current === settingsGeneration) warnSettingsWriteFailed(cause);
+        });
+
     trackSettingsWrite(write);
 }
 
 export function persistMode(mode: TreeTimestampMode): void {
+    const current = settingsGeneration;
     const write = updateSettingsObject((settings) => {
         settings[SETTINGS_KEY] = mode;
     })
         .then(() => {
-            cachedMode = mode;
+            if (current === settingsGeneration) cachedMode = mode;
         })
-        .catch(warnSettingsWriteFailed);
+        .catch((cause: unknown) => {
+            if (current === settingsGeneration) warnSettingsWriteFailed(cause);
+        });
+
     trackSettingsWrite(write);
 }
