@@ -34,8 +34,6 @@ A collection of small Pi extensions for improving interaction, display, and mode
 | [@zigai/pi-lazy-mcp](extensions/pi-lazy-mcp)                       | Start MCP servers only when their tools are called.                               | `pi install npm:@zigai/pi-lazy-mcp`            |
 | [@zigai/pi-workspace](extensions/pi-workspace)                     | Customize Pi's chat and sidebar; search saved history.                            | `pi install npm:@zigai/pi-workspace`           |
 
-Background Commands, Lazy MCP, and Workspace are excluded from ordinary root and full-collection loading; select their packages explicitly. Root `piWorkspace` declares repository-only optional-extension and collection groups, not native Pi flags. Pi still loads each selected package through its standard `pi.extensions` entrypoints. Run `npm run collection:generate` after inventory or version changes and `npm run collection:check` to verify generated collection resources.
-
 ## Libraries
 
 - [@zigai/pi-extension-internals](packages/pi-extension-internals): composition protocols and guarded Pi-internal loading.
