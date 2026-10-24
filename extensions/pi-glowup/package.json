@@ -30,6 +30,7 @@
     "src/tools/protocol/decode.ts",
     "src/tools/protocol/contract.ts",
     "src/tools/protocol/nodes.ts",
+    "src/tools/protocol/streaming.ts",
     "src/json-value.ts",
     "docs",
     "themes",

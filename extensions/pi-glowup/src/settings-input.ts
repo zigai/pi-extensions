@@ -72,7 +72,7 @@ const streamingSchema = Type.Object(
             {
                 default: "token",
                 description:
-                    "Reveal assistant response and thinking prose as tokens, completed sentences, or Markdown paragraphs and list items. Completed content blocks always reveal their remaining tail.",
+                    "Reveal assistant/thinking prose and declared generated tool previews as tokens, completed sentences, or Markdown paragraphs and list items. Completed content blocks always reveal their remaining tail.",
             },
         ),
         code: Type.Union(
@@ -80,7 +80,7 @@ const streamingSchema = Type.Object(
             {
                 default: "token",
                 description:
-                    "Reveal assistant code fences, writes, and script previews as tokens, completed statements, or whole blocks. Statement mode supports JavaScript, TypeScript, Python, and Bash; other languages wait for completion. Configured formatters format each statement separately in both views. Edits and patches are unchanged.",
+                    "Reveal generated code in assistant/thinking Markdown, writes, and script/protocol previews as tokens, completed statements, or whole blocks. Statement mode supports JavaScript, TypeScript, Python, and Bash; unknown languages and indented code wait for completion. Configured formatters format each statement separately in both views. Diffs, ordinary tool output, and the user shell are unchanged.",
             },
         ),
     },

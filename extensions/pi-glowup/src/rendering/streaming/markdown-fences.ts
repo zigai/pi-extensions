@@ -244,7 +244,30 @@ export function markdownFences(source: string): MarkdownFence[] {
                         depth: listDepth + 1,
                     });
                 }
-            } else if (Value.Check(codeSchema, token) && token.codeBlockStyle !== "indented") {
+            } else if (Value.Check(codeSchema, token) && token.codeBlockStyle === "indented") {
+                // Indented Markdown code has no language declaration. Treat it as an
+                // unknown-language block (hold until complete), never as prose.
+                const logical = project(block, token.text);
+                const firstPosition = logical.positions.find((position) => position !== undefined);
+                if (firstPosition === undefined) continue;
+
+                const originalStart = lineStart(source, firstPosition);
+                const prefix = source.slice(originalStart, firstPosition);
+
+                result.push({
+                    start: originalStart,
+                    end: block.end,
+                    opener: "",
+                    closer: "",
+                    code: token.text,
+                    language: undefined,
+                    closed: false,
+                    complete: block.end < sourceContentEnd,
+                    widthInset,
+                    prefix,
+                    originalCode: source.slice(originalStart, block.end),
+                });
+            } else if (Value.Check(codeSchema, token)) {
                 const opening = /^ {0,3}(`{3,}|~{3,})([^\n]*)(?:\n|$)/u.exec(token.raw);
                 const marker = opening?.[1];
                 const markerOffset = opening?.[0].indexOf(marker ?? "") ?? 0;

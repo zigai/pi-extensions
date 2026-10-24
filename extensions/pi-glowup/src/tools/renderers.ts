@@ -76,7 +76,7 @@ const TRANSITIONAL_RENDERER_PLUGINS: ReadonlyArray<ThirdPartyToolRendererPlugin>
         name: "agent-browser",
         matches: (toolName) => toolName === "agent_browser",
         createRenderer: (toolName, options) =>
-            createAgentBrowserRenderer(toolName, options?.labelMode),
+            createAgentBrowserRenderer(toolName, options?.labelMode, options?.streamCode),
     },
     {
         name: "mcp-gateway",
@@ -88,7 +88,7 @@ const TRANSITIONAL_RENDERER_PLUGINS: ReadonlyArray<ThirdPartyToolRendererPlugin>
         name: "chrome-devtools-mcp-tools",
         matches: hasChromeDevtoolsName,
         createRenderer: (toolName, options) =>
-            createChromeDevtoolsMcpRenderer(toolName, options?.labelMode),
+            createChromeDevtoolsMcpRenderer(toolName, options?.labelMode, options?.streamCode),
     },
     {
         name: "direct-mcp-tools",

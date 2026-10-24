@@ -191,8 +191,12 @@ export function createProtocolRenderer(
                     : renderProtocolCallNode(node, theme, context, labelMode, mutationSettings);
             };
 
-            let callContext = initialContext;
-            if (streamCode !== undefined) callContext = { ...initialContext, streamCode };
+            let callContext: ThirdPartyToolRenderContext = {
+                ...initialContext,
+                streamPhase: "call",
+                contentComplete: initialContext.argsComplete || initialContext.isError,
+            };
+            if (streamCode !== undefined) callContext = { ...callContext, streamCode };
 
             return adapter.independentExpansion === true
                 ? renderExpandableSection(callContext, "call", (expanded) =>
@@ -242,14 +246,27 @@ export function createProtocolRenderer(
                 );
             };
 
+            let phase: GlowupExecutionPhase = "complete";
+            if (initialOptions.isPartial) phase = "running";
+
+            const resultContext: ThirdPartyToolRenderContext = {
+                ...initialContext,
+                streamPhase: "result",
+                phase,
+                isPartial: initialOptions.isPartial,
+                expanded: initialOptions.expanded,
+                contentComplete: !initialOptions.isPartial || initialContext.isError,
+                ...(streamCode !== undefined && { streamCode }),
+            };
+
             return adapter.independentExpansion === true
                 ? renderExpandableSection(
-                      { ...initialContext, expanded: initialOptions.expanded },
+                      { ...resultContext, expanded: initialOptions.expanded },
                       "result",
                       (expanded) =>
-                          render({ ...initialContext, expanded }, { ...initialOptions, expanded }),
+                          render({ ...resultContext, expanded }, { ...initialOptions, expanded }),
                   )
-                : render(initialContext, initialOptions);
+                : render(resultContext, initialOptions);
         },
     };
 }

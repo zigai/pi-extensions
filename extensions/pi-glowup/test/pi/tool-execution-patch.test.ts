@@ -223,6 +223,55 @@ describe("tool execution patches", () => {
         }
     });
 
+    it.each(["call", "result"] as const)(
+        "preserves the native opposite side of a %s-only owner adapter",
+        (side) => {
+            const prototype = createPrototype();
+            const originalCall = prototype.getCallRenderer.call({});
+            const originalResult = prototype.getResultRenderer.call({});
+            const base = { version: 3, parseArgs: (value: JsonValue) => value };
+            const callAdapter = { ...base, renderCall: () => text("declared call") };
+            const resultAdapter = {
+                ...base,
+                parseResult: (value: JsonValue) => value,
+                renderResult: () => text("declared result"),
+            };
+            const definition = {
+                renderCall: originalCall,
+                renderResult: originalResult,
+                glowupRendering: side === "call" ? callAdapter : resultAdapter,
+            };
+            const instance = { toolName: "owner-tool", toolDefinition: definition };
+            configureThirdPartyToolRendererPatch(true, undefined, prototype);
+            try {
+                if (side === "call") {
+                    expect(prototype.getResultRenderer.call(instance)).toBe(originalResult);
+                    expect(
+                        prototype.getCallRenderer
+                            .call(instance)?.({}, plainTheme, renderContext)
+                            .render(80)
+                            .join("\n"),
+                    ).toContain("declared call");
+                } else {
+                    expect(prototype.getCallRenderer.call(instance)).toBe(originalCall);
+                    expect(
+                        prototype.getResultRenderer
+                            .call(instance)?.(
+                                {},
+                                { expanded: false, isPartial: false },
+                                plainTheme,
+                                renderContext,
+                            )
+                            .render(80)
+                            .join("\n"),
+                    ).toContain("declared result");
+                }
+            } finally {
+                configureThirdPartyToolRendererPatch(false, undefined, prototype);
+            }
+        },
+    );
+
     it("observes ready generic rows before renderer selection without replacing their renderer", () => {
         const prototype = createPrototype();
         const observed: object[] = [];

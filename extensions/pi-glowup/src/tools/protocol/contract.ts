@@ -164,3 +164,13 @@ export {
     DEFAULT_GLOWUP_NODE_DECODE_LIMITS,
     type GlowupNodeDecodeLimits,
 } from "./decode.ts";
+
+export {
+    presentGlowupContent,
+    presentGlowupSnapshot,
+    registerGlowupStreamingPolicy,
+    type GlowupContentInput,
+    type GlowupContentKind,
+    type GlowupStreaming,
+    type GlowupStreamingPolicy,
+} from "./streaming.ts";

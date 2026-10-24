@@ -193,3 +193,46 @@ pi.registerTool({
 
 Users can also preserve tools through `preserveTools` in
 `~/.pi/agent/extension-settings/pi-glowup.json`.
+
+## Generated-content streaming contract
+
+Streaming is presentation-only: never change execution arguments, model-visible results,
+provider events, or persisted history. Call arguments and result output have separate stream
+identities and completion boundaries. A completed argument object does **not** complete a
+partial result. Compact and outline layouts use the same policy before bounding previews.
+
+`code(source, { syntax: { language: "javascript" } })` declares generated code and inherits
+`streaming.code`. A tool owner can opt generated result prose into the shared policy without
+misclassifying terminal logs:
+
+```ts
+import { output } from "@zigai/pi-glowup/protocol";
+
+output(currentText, {
+  streaming: { kind: "markdown", key: "answer" },
+});
+```
+
+The renderer supplies call/result completion. Use `complete: false` for a snapshot of an
+independently running child, and `complete: true` when that child's block is finished. Keep
+its key stable. `kind: "prose"` uses only prose boundaries; `"markdown"` also gates embedded
+code; `"code"` uses the syntax language/path. `mode: "immediate"` is an explicit raw-display
+override. Ordinary `output()` and `text()` remain immediate, even with syntax metadata;
+mutations retain their independent diff policy.
+
+Extension-owned views outside tool components can import `presentGlowupContent()` (synchronous,
+with optional invalidation callback) or await `presentGlowupSnapshot()` from the same public
+protocol. Supply a session-scoped key, content kind, original source and explicit completion.
+Without an active Glowup policy these preserve the source. `registerGlowupStreamingPolicy()`
+provides the replaceable policy seam; registrations are owned/disposed with their sessions,
+and pending snapshots reject results across replacement/reset. Renderers do not read settings.
+
+Assistant responses and thinking share this service. Thinking remains plain-styled. Indented
+Markdown code has no declared language and waits for block completion instead of being treated
+as prose. Unsupported languages and parser failures also hold unfinished input rather than
+publishing speculative code. `!`/`!!`, terminal stdout/logs, raw transcript/history viewers,
+and noninteractive/RPC transport are intentionally unaffected.
+
+A tool-owned adapter may own only its call or only its result. Glowup preserves an explicitly
+provided native renderer on the undeclared opposite side; adding a code-call adapter must not
+silently replace a tool's result sanitization or recovery display with a generic fallback.

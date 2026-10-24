@@ -117,9 +117,11 @@ export class PiPtyProcess {
             scrollback: 4_000,
         });
 
-        const cliPath = fileURLToPath(
-            new URL("./cli.js", import.meta.resolve("@earendil-works/pi-coding-agent")),
-        );
+        const cliPath =
+            process.env.PI_GLOWUP_TEST_CLI ??
+            fileURLToPath(
+                new URL("./cli.js", import.meta.resolve("@earendil-works/pi-coding-agent")),
+            );
 
         const args = [
             cliPath,

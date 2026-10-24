@@ -1,3 +1,7 @@
+import {
+    registerGlowupStreamingPolicy,
+    presentGlowupContent,
+} from "../../../src/tools/protocol/contract.ts";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
     AssistantMessageComponent,
@@ -105,6 +109,66 @@ async function install(
 }
 
 describe("assistant structured streaming", () => {
+    it("uses the selected shared policy rather than a captured assistant-only implementation", async () => {
+        initTheme("dark");
+        const streams = createCodeStreamStore();
+        stores.push(streams);
+        const selected = registerGlowupStreamingPolicy({
+            present: () => "SELECTED_POLICY",
+            settled: async () => {},
+        });
+        disposals.push(() => selected.dispose());
+        const handle = await installAssistantStreaming({
+            prose: "sentence",
+            code: "statement",
+            streams,
+            presentation: { present: presentGlowupContent },
+            invalidate: () => {},
+        });
+        disposals.push(() => handle.dispose());
+        const component = new AssistantMessageComponent();
+        component.updateContent(message("Unfinished source"), true);
+        expect(text(component)).toContain("SELECTED_POLICY");
+        expect(text(component)).not.toContain("Unfinished source");
+    });
+
+    it.each(["text", "thinking"] as const)(
+        "gates code embedded in %s without exposing an unfinished tail",
+        async (kind) => {
+            const { streams } = await install("sentence", "statement");
+            const source = "```javascript\nconst SHARED_READY = 1;\nconst SHARED_PENDING =\n\n";
+            const raw = message(source);
+            if (kind === "thinking") raw.content = [{ type: "thinking", thinking: source }];
+            const component = new AssistantMessageComponent();
+            component.updateContent(raw, true);
+            text(component);
+            await streams.settled();
+            expect(text(component)).toContain("SHARED_READY");
+            expect(text(component)).not.toContain("SHARED_PENDING");
+            component.updateContent(raw, false);
+            text(component);
+            await streams.settled();
+            expect(text(component)).toContain("SHARED_PENDING");
+            if (kind === "thinking")
+                expect(raw.content[0]).toEqual({ type: "thinking", thinking: source });
+            else expect(raw.content[0]).toEqual({ type: "text", text: source });
+        },
+    );
+
+    it("does not reveal indented assistant code through a prose paragraph boundary", async () => {
+        const { streams } = await install("sentence", "statement");
+        const raw = message("    const INDENTED_PENDING =\n\n");
+        const component = new AssistantMessageComponent();
+        component.updateContent(raw, true);
+        text(component);
+        await streams.settled();
+        expect(text(component)).not.toContain("INDENTED_PENDING");
+        component.updateContent(raw, false);
+        text(component);
+        await streams.settled();
+        expect(text(component)).toContain("INDENTED_PENDING");
+    });
+
     it("leaves ordinary rendering intact when activation cannot patch the renderer", async () => {
         initTheme("dark");
         const prototype = AssistantMessageComponent.prototype;

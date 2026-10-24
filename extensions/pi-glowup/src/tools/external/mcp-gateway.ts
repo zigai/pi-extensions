@@ -1,3 +1,6 @@
+import type { CodePreview } from "../../rendering/streaming/presentation.ts";
+import { renderProtocolNode } from "../protocol/node-renderer.ts";
+import { call, code } from "../protocol/contract.ts";
 import { emptyComponent } from "../../rendering/component.ts";
 import {
     shouldDeferSimpleToolCall,
@@ -379,15 +382,39 @@ export function createMcpGatewayRenderer(
 export function createChromeDevtoolsMcpRenderer(
     toolName: string,
     labelMode: ToolLabelMode = "static",
+    streamCode?: CodePreview,
 ): ThirdPartyToolRenderer {
     return {
         renderCall(args, theme, context) {
-            if (shouldDeferSimpleToolCall(context)) return emptyComponent();
-
             const command = baseToolName(toolName).replace(/^chrome[-_]?devtools(?:__|[_-])?/i, "");
             const label = MCP_COMMAND_LABELS.get(command) ?? `MCP ${baseToolName(toolName)}`;
             const parsedArgs = jsonValueParser.parse(args);
+            const record = jsonObjectParser.parse(parsedArgs);
+            const script = record === undefined ? undefined : getNonEmptyString(record, "function");
+            if (command === "evaluate_script" && script !== undefined && streamCode !== undefined) {
+                const labels = mcpLifecycleLabels(label);
 
+                return renderProtocolNode(
+                    call(
+                        {
+                            static: labels.static,
+                            running: labels.active,
+                            completed: labels.completed,
+                        },
+                        {
+                            body: code(script, {
+                                syntax: { language: "javascript" },
+                                preview: { mode: "head", collapsedLines: 8 },
+                            }),
+                        },
+                    ),
+                    theme,
+                    { ...context, streamCode },
+                    labelMode,
+                );
+            }
+
+            if (shouldDeferSimpleToolCall(context)) return emptyComponent();
             return renderThirdPartyCall(theme, {
                 state: callState(context),
                 statusText: toolStatusLabel(labelMode, context, mcpLifecycleLabels(label)),

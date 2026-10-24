@@ -36,6 +36,7 @@ export function registerGlowupToolRenderer<Args, Result>(
                     fallback,
                     options?.labelMode,
                     options?.mutationSettings,
+                    options?.streamCode,
                 ),
         };
     };

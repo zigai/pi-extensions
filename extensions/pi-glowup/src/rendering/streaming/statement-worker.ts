@@ -145,15 +145,41 @@ function indentAt(source: string, start: number): string {
     return "";
 }
 
+/** Tree-sitter's Python grammar permits physical newlines in some simple assignments
+ * that CPython rejects. Only bracket nesting or an explicit continuation may cross
+ * those token gaps; string/comment contents are atomic, not statement boundaries. */
+function crossesPythonStatementBoundary(node: Node, source: string): boolean {
+    let end = node.startIndex;
+    let nesting = 0;
+    let crossed = false;
+
+    function scan(token: Node): void {
+        if (token.type === "string" || token.type === "comment" || token.childCount === 0) {
+            const gap = source.slice(end, token.startIndex).replace(/\\\r?\n/gu, "");
+            if (nesting === 0 && /[\r\n]/u.test(gap)) crossed = true;
+            if (["(", "[", "{"].includes(token.type)) nesting++;
+            if ([")", "]", "}"].includes(token.type)) nesting = Math.max(0, nesting - 1);
+            end = token.endIndex;
+            return;
+        }
+
+        for (const child of token.children) scan(child);
+    }
+
+    scan(node);
+
+    return crossed;
+}
+
 /** An EOF parse is speculative: in JS even a trailing newline permits `.then(...)`.
  * A following identifier must itself have a terminator (the prefix `i` can become `instanceof`). */
 function isSettled(node: Node, source: string, language: string, complete: boolean): boolean {
     if (complete) return true;
 
     const tail = source.slice(node.endIndex);
-    if (node.type === "comment") return tail.startsWith("\n") || node.text.endsWith("*/");
+    if (node.type === "comment") return /^(?:\r?\n|\r)/u.test(tail) || node.text.endsWith("*/");
     if (language === "python") return /^[\t ]*(?:;|\r?\n)/u.test(tail);
-    if (language === "bash") return /^[\t ]*(?:;|\r?\n)/u.test(tail);
+    if (language === "bash") return /^[\t ]*(?:;|&(?!&)|\r?\n)/u.test(tail);
     if (node.text.endsWith(";")) return true;
     if (
         [
@@ -233,6 +259,7 @@ function unitsFor(
                 units.length === before &&
                 !node.hasError &&
                 !node.isMissing &&
+                !(language === "python" && crossesPythonStatementBoundary(node, source)) &&
                 isSettled(node, source, language, complete)
             ) {
                 let end = node.endIndex;
@@ -288,6 +315,15 @@ function unitsFor(
     let end = 0;
     for (const unit of structured) {
         if (unit.start < end) continue;
+
+        // Recovery can find a valid statement after an invalid prefix. Only lexical
+        // separators may be copied between validated units while generation is live;
+        // otherwise hold this gap and everything after it until final completion.
+        const gap = source.slice(end, unit.start);
+        let safeGap = /^[\s;]*$/u.test(gap);
+        if (language === "bash") safeGap = /^(?:\s|;|&(?!&))*$/u.test(gap);
+        if (!complete && !safeGap) break;
+
         ordered.push(unit);
         end = unit.end;
     }

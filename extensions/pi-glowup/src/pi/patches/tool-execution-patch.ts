@@ -1,3 +1,4 @@
+import { glowupRenderingAdapter } from "../../tools/protocol/renderer.ts";
 import {
     ToolExecutionComponent,
     type AgentToolResult,
@@ -1046,6 +1047,12 @@ export function configureThirdPartyToolRendererPatch(
 
     const getCallRenderer: RendererPatchWrappers["getCallRenderer"] =
         function getGlowupCallRenderer(this: ToolExecutionInstance) {
+            if (state.enabled && this.toolDefinition?.renderCall !== undefined) {
+                const adapter = glowupRenderingAdapter(this.toolDefinition);
+                if (adapter !== undefined && adapter.renderCall === undefined)
+                    return originalGetCallRenderer?.call(this);
+            }
+
             const hasOriginalRendererDefinition = hasExplicitToolRenderer(this);
             if (
                 state.enabled &&
@@ -1098,6 +1105,12 @@ export function configureThirdPartyToolRendererPatch(
 
     const getResultRenderer: RendererPatchWrappers["getResultRenderer"] =
         function getGlowupResultRenderer(this: ToolExecutionInstance) {
+            if (state.enabled && this.toolDefinition?.renderResult !== undefined) {
+                const adapter = glowupRenderingAdapter(this.toolDefinition);
+                if (adapter !== undefined && adapter.renderResult === undefined)
+                    return originalGetResultRenderer?.call(this);
+            }
+
             const hasOriginalRendererDefinition = hasExplicitToolRenderer(this);
             if (
                 state.enabled &&

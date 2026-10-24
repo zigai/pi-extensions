@@ -1,3 +1,5 @@
+import type { GlowupStreaming } from "./streaming.ts";
+
 /** Semantic tones understood by the Glowup style engine. */
 export type GlowupTone =
     | "default"
@@ -62,6 +64,7 @@ export type GlowupSummaryNode = {
 export type GlowupCodeNode = {
     readonly kind: "code";
     readonly text: string;
+    readonly streaming?: GlowupStreaming;
     readonly title?: GlowupInline;
     readonly syntax?: GlowupSyntax;
     readonly preview?: GlowupPreview;
@@ -86,6 +89,9 @@ export type GlowupCallNode = {
 export type GlowupOutputNode = {
     readonly kind: "output";
     readonly text?: string;
+
+    /** Generated content opts in; ordinary stdout/log output stays immediate. */
+    readonly streaming?: GlowupStreaming;
     readonly syntax?: GlowupSyntax;
     readonly preview?: GlowupPreview;
     readonly noOutputLabel?: string | null;
@@ -163,11 +169,14 @@ export function code(
     value: string,
     options: {
         readonly title?: GlowupInline;
+        readonly streaming?: GlowupStreaming;
         readonly syntax?: GlowupSyntax;
         readonly preview?: GlowupPreview;
     } = {},
 ): GlowupCodeNode {
     let node: GlowupCodeNode = { kind: "code", text: value };
+    if (options.streaming !== undefined) node = { ...node, streaming: options.streaming };
+
     if (options.title !== undefined) {
         node = { ...node, title: options.title };
     }
@@ -217,12 +226,15 @@ export function call(
 export function output(
     value: string | undefined,
     options: {
+        readonly streaming?: GlowupStreaming;
         readonly syntax?: GlowupSyntax;
         readonly preview?: GlowupPreview;
         readonly noOutputLabel?: string | null;
     } = {},
 ): GlowupOutputNode {
     let node: GlowupOutputNode = { kind: "output" };
+    if (options.streaming !== undefined) node = { ...node, streaming: options.streaming };
+
     if (value !== undefined) {
         node = { ...node, text: value };
     }

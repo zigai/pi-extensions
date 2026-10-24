@@ -592,6 +592,93 @@ describe("actual Pi CLI in a real PTY", () => {
         }
     }, 45_000);
 
+    it.each(["compact", "outline"])(
+        "enforces generated-content policy in %s results while stdout stays immediate",
+        async (presentation) => {
+            const fixture = createFixtureWorkspace();
+            fixtures.push(fixture);
+            writeFileSync(
+                getGlowupGlobalConfigPath(fixture.agentDir),
+                JSON.stringify({
+                    presentation,
+                    streaming: { prose: "sentence", code: "statement" },
+                }),
+            );
+            const pi = new PiPtyProcess(
+                launchOptions(fixture, { initialPrompt: "run the deterministic generated policy" }),
+            );
+            try {
+                const partial = await pi.waitForFrame(
+                    (frame) =>
+                        frame.text.includes("const POLICY_READY = 1;") &&
+                        frame.text.includes("POLICY_PROSE_READY.") &&
+                        frame.text.includes("POLICY_STDOUT_IMMEDIATE"),
+                    PTY_TIMEOUT_MS,
+                );
+                expect(partial.text).not.toContain("POLICY_PENDING");
+                expect(partial.text).not.toContain("POLICY_PROSE_PENDING");
+                const expandedSequence = pi.frames().length;
+                pi.sendKey(CTRL_O);
+                pi.resize(80, 42);
+                const expanded = await pi.waitForFrame(
+                    (frame) => frame.columns === 80 && frame.text.includes("POLICY_READY"),
+                    PTY_TIMEOUT_MS,
+                    expandedSequence,
+                );
+                expect(expanded.text).not.toContain("POLICY_PENDING");
+                expect(expanded.text).not.toContain("POLICY_PROSE_PENDING");
+                for (const frame of pi.frames()) {
+                    expect(frame.text).not.toContain("POLICY_PENDING");
+                    expect(frame.text).not.toContain("POLICY_PROSE_PENDING");
+                }
+                writeFileSync(join(fixture.cwd, "release-generated-policy"), "release");
+                const completed = await pi.waitForFrame(
+                    (frame) =>
+                        frame.text.includes("STREAM_COMPLETE") &&
+                        frame.text.includes("const POLICY_PENDING = 2;") &&
+                        frame.text.includes("POLICY_PROSE_PENDING"),
+                    PTY_TIMEOUT_MS,
+                );
+                expectTerminalInvariants(completed, [
+                    resolve("test/pty/fixtures/offline-provider.ts"),
+                ]);
+            } catch (cause: unknown) {
+                await pi.writeFailureArtifacts(`generated-policy-${presentation}`, cause);
+                throw cause;
+            } finally {
+                await pi.stop();
+            }
+        },
+        45_000,
+    );
+
+    it.each(["!", "!!"])(
+        "leaves the user's %s shell output immediate",
+        async (prefix) => {
+            const fixture = createFixtureWorkspace();
+            fixtures.push(fixture);
+            writeFileSync(
+                getGlowupGlobalConfigPath(fixture.agentDir),
+                JSON.stringify({ streaming: { prose: "paragraph", code: "block" } }),
+            );
+            const pi = new PiPtyProcess(launchOptions(fixture));
+            try {
+                await pi.waitForText("POLICY_FIXTURE_READY", PTY_TIMEOUT_MS);
+                pi.sendText(`${prefix}printf '%s' SHELL_RAW_MARKER\r`);
+                await pi.waitForFrame(
+                    (frame) => frame.rows.some((row) => row.text.trim() === "SHELL_RAW_MARKER"),
+                    PTY_TIMEOUT_MS,
+                );
+            } catch (cause: unknown) {
+                await pi.writeFailureArtifacts(`untouched-shell-${prefix.length}`, cause);
+                throw cause;
+            } finally {
+                await pi.stop();
+            }
+        },
+        45_000,
+    );
+
     it("formats codemode JavaScript in the real transcript", async () => {
         const fixture = createFixtureWorkspace();
         fixtures.push(fixture);

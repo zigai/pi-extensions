@@ -1,3 +1,4 @@
+import { protocolContent } from "./content.ts";
 import { emptyComponent, makeComponent, wrapPrefixedLine } from "../../rendering/component.ts";
 import { renderGlowupOutput, type GlowupOutputRenderOptions } from "../../rendering/output.ts";
 import { dim, type GlowupRenderTheme } from "../../rendering/theme.ts";
@@ -101,12 +102,16 @@ function previewMode(preview: GlowupPreview | undefined): "head" | "headTail" | 
     return preview?.mode ?? "headTail";
 }
 
-type CodeContent = (node: GlowupCodeNode, key: string, indent: number) => string;
+type CodeContent = (
+    node: GlowupCodeNode | Extract<GlowupNode, { kind: "output" }>,
+    key: string,
+    indent: number,
+) => string;
 
 function nodeText(
     node: GlowupNode,
     theme: GlowupRenderTheme,
-    codeContent: CodeContent = (value) => value.text,
+    codeContent: CodeContent = (value) => value.text ?? "",
     key = "root",
     indent = 0,
 ): string {
@@ -140,7 +145,7 @@ function nodeText(
                 })
                 .join("\n");
         case "output":
-            return node.text ?? "";
+            return codeContent(node, key, indent);
         case "mutation":
             return node.files
                 .map((file) =>
@@ -181,10 +186,10 @@ function renderSummary(node: GlowupSummaryNode, theme: GlowupRenderTheme, positi
 function renderProtocolList(
     node: GlowupListNode,
     theme: GlowupRenderTheme,
-    context: ThirdPartyToolRenderContext,
+    { lastComponent: _lastComponent, ...context }: ThirdPartyToolRenderContext,
     position: BodyPosition,
 ) {
-    const { streamCode, streamKey, toolCallId, argsComplete, isError, invalidate } = context;
+    const { streamKey } = context;
     const options: GlowupOutputRenderOptions = {
         expanded: context.expanded,
         mode: previewMode(node.preview),
@@ -198,22 +203,55 @@ function renderProtocolList(
         const content = nodeText(
             node,
             theme,
-            (value, key, indent) => {
-                if (streamCode === undefined) return value.text;
-                return streamCode({
-                    key: `tool:${toolCallId}:code:${key}`,
-                    source: value.text,
-                    ...value.syntax,
-                    complete: argsComplete || isError,
-                    targetWidth: Math.max(1, width - BODY_INDENT.length - indent),
-                    ...(invalidate !== undefined && { invalidate }),
-                });
-            },
+            (value, key, indent) =>
+                protocolContent(
+                    value,
+                    context,
+                    Math.max(1, width - BODY_INDENT.length - indent),
+                    key,
+                ),
             streamKey ?? "root",
         );
 
         return renderGlowupOutput(theme, content, options).render(width);
     });
+}
+
+function renderProtocolContent(
+    node: Extract<GlowupNode, { kind: "code" | "output" }>,
+    theme: GlowupRenderTheme,
+    { lastComponent: _lastComponent, ...context }: ThirdPartyToolRenderContext,
+    position: BodyPosition,
+) {
+    let contentPosition = position;
+    if (node.kind === "code" && node.title !== undefined) contentPosition = "continued";
+
+    let noOutputLabel: string | null = null;
+    if (node.kind === "output") noOutputLabel = node.noOutputLabel ?? null;
+
+    const options: GlowupOutputRenderOptions = {
+        expanded: context.expanded,
+        mode: previewMode(node.preview),
+        maxPreviewLines: previewLines(node.preview, context.expanded),
+        maxExpandedLines: previewLines(node.preview, true),
+        noOutputLabel,
+        prefixFirst: bodyFirstPrefix(theme, contentPosition),
+        prefixRest: BODY_INDENT,
+        invalidate: context.invalidate,
+        ...(node.syntax !== undefined && { syntax: node.syntax }),
+    };
+    const content = makeComponent((width) =>
+        renderGlowupOutput(
+            theme,
+            protocolContent(node, context, Math.max(1, width - BODY_INDENT.length)),
+            options,
+        ).render(width),
+    );
+    if (node.kind !== "code" || node.title === undefined) return content;
+
+    const title = renderBodyText(theme, node.title, position);
+
+    return makeComponent((width) => [...title.render(width), ...content.render(width)]);
 }
 
 /** Renders a decoded public protocol node through Glowup's private style engine. */
@@ -232,65 +270,11 @@ export function renderProtocolNode(
             return renderBodyText(theme, node.text, position);
         case "summary":
             return renderSummary(node, theme, position);
-        case "code": {
-            const { streamCode, streamKey, toolCallId, argsComplete, isError, invalidate } =
-                context;
-            let contentPosition = position;
-            if (node.title !== undefined) contentPosition = "continued";
-
-            let outputOptions: GlowupOutputRenderOptions = {
-                expanded: context.expanded,
-                mode: previewMode(node.preview),
-                maxPreviewLines: previewLines(node.preview, context.expanded),
-                maxExpandedLines: previewLines(node.preview, true),
-                noOutputLabel: null,
-                prefixFirst: bodyFirstPrefix(theme, contentPosition),
-                prefixRest: BODY_INDENT,
-                invalidate: context.invalidate,
-            };
-            if (node.syntax !== undefined) {
-                outputOptions = { ...outputOptions, syntax: node.syntax };
-            }
-
-            const content = makeComponent((width) => {
-                let source = node.text;
-                if (streamCode !== undefined)
-                    source = streamCode({
-                        key: `tool:${toolCallId}:code:${streamKey ?? "root"}`,
-                        source,
-                        ...node.syntax,
-                        complete: argsComplete || isError,
-                        targetWidth: Math.max(1, width - BODY_INDENT.length),
-                        ...(invalidate !== undefined && { invalidate }),
-                    });
-
-                return renderGlowupOutput(theme, source, outputOptions).render(width);
-            });
-            if (node.title === undefined) return content;
-
-            const title = renderBodyText(theme, node.title, position);
-
-            return makeComponent((width) => [...title.render(width), ...content.render(width)]);
-        }
+        case "code":
+        case "output":
+            return renderProtocolContent(node, theme, context, position);
         case "list":
             return renderProtocolList(node, theme, context, position);
-        case "output": {
-            let outputOptions: GlowupOutputRenderOptions = {
-                expanded: context.expanded,
-                mode: previewMode(node.preview),
-                maxPreviewLines: previewLines(node.preview, context.expanded),
-                maxExpandedLines: previewLines(node.preview, true),
-                noOutputLabel: node.noOutputLabel ?? null,
-                prefixFirst: bodyFirstPrefix(theme, position),
-                prefixRest: BODY_INDENT,
-                invalidate: context.invalidate,
-            };
-            if (node.syntax !== undefined) {
-                outputOptions = { ...outputOptions, syntax: node.syntax };
-            }
-
-            return renderGlowupOutput(theme, node.text, outputOptions);
-        }
         case "mutation": {
             let mutationOptions: ProtocolMutationRenderOptions = {
                 label: statusLabel(labelMode, context, node.labels),

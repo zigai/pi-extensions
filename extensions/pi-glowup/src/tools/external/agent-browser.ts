@@ -1,3 +1,6 @@
+import type { CodePreview } from "../../rendering/streaming/presentation.ts";
+import { renderProtocolNode } from "../protocol/node-renderer.ts";
+import { call, code } from "../protocol/contract.ts";
 import { emptyComponent } from "../../rendering/component.ts";
 import {
     shouldDeferSimpleToolCall,
@@ -231,10 +234,35 @@ function summarizeAgentBrowserArgs(
 export function createAgentBrowserRenderer(
     _toolName: string,
     labelMode: ToolLabelMode = "static",
+    streamCode?: CodePreview,
 ): ThirdPartyToolRenderer {
     return {
         renderCall(args, theme, context) {
             const record = jsonObjectParser.parse(args);
+            const script = record === undefined ? undefined : getNonEmptyString(record, "script");
+            if (script !== undefined && streamCode !== undefined) {
+                const labels = browserLifecycleLabels("Browser Script");
+
+                return renderProtocolNode(
+                    call(
+                        {
+                            static: labels.static,
+                            running: labels.active,
+                            completed: labels.completed,
+                        },
+                        {
+                            body: code(script, {
+                                syntax: { language: "javascript" },
+                                preview: { mode: "head", collapsedLines: 8 },
+                            }),
+                        },
+                    ),
+                    theme,
+                    { ...context, streamCode },
+                    labelMode,
+                );
+            }
+
             const hasEvolvingContent =
                 record !== undefined &&
                 (getNonEmptyString(record, "script") !== undefined ||

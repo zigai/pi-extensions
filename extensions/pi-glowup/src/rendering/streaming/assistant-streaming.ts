@@ -9,8 +9,9 @@ import {
 } from "@zigai/pi-extension-internals";
 import type { ScriptBlockFormatter } from "../../tools/built-in/bash/formatter.ts";
 import type { CodeStreamingMode, CodeStreamStore } from "./code-stream.ts";
-import { revealProse, type ProseStreamingMode } from "./prose.ts";
-import { displayFenceCode, markdownFences } from "./markdown-fences.ts";
+import type { ProseStreamingMode } from "./prose.ts";
+import { createStreamingPresentation } from "./content-presentation.ts";
+import type { GlowupStreamingPolicy } from "../../tools/protocol/streaming.ts";
 
 export type AssistantStreamingOptions = {
     readonly prose: ProseStreamingMode;
@@ -18,6 +19,7 @@ export type AssistantStreamingOptions = {
     readonly streams: CodeStreamStore;
     readonly formatter?: ScriptBlockFormatter | undefined;
     readonly invalidate: () => void;
+    readonly presentation?: Pick<GlowupStreamingPolicy, "present">;
 };
 
 type ComponentState = {
@@ -36,83 +38,6 @@ const componentPrototypeSchema = Type.Object({
 });
 const outputPaddingSchema = Type.Number({ minimum: 0 });
 let nextComponent = 0;
-
-function renderText(
-    source: string,
-    key: string,
-    complete: boolean,
-    options: AssistantStreamingOptions,
-    targetWidth: number | undefined,
-    invalidate: () => void,
-): string {
-    // Prepare every independent fence once, even while an earlier one is held.
-    // Readiness can then be coalesced into one paint without requiring another
-    // provider chunk or a component rebuild to start the following block.
-    const previews = markdownFences(source).map((fence, index) => {
-        const fenceKey = `${key}:fence:${index}`;
-        let codeWidth = targetWidth;
-        if (codeWidth !== undefined) codeWidth = Math.max(1, codeWidth - fence.widthInset);
-
-        const display = options.streams.get({
-            key: fenceKey,
-            source: fence.code,
-            language: fence.language,
-            complete: complete || fence.complete,
-            mode: options.code,
-            formatter: options.formatter,
-            targetWidth: codeWidth,
-            invalidate,
-        });
-
-        return { fence, fenceKey, display };
-    });
-    let output = "";
-    let offset = 0;
-    for (const { fence, fenceKey, display } of previews) {
-        const preceding = source.slice(offset, fence.start);
-        const code = fence.code;
-
-        // A fence completes ordinary preceding prose, but a trailing heading
-        // belongs to its following content, not to an empty pending code block.
-        const trailingHeading =
-            /(?:^|\n) {0,3}#{1,6}(?:[ \t]+[^\r\n]*)?\r?\n(?:[ \t]*\r?\n)*$/u.test(preceding);
-        const emptyCompleteFence = code.trim().length === 0 && (complete || fence.complete);
-        if (
-            options.prose === "paragraph" &&
-            trailingHeading &&
-            display.trim().length === 0 &&
-            !emptyCompleteFence
-        ) {
-            return output + revealProse(preceding, options.prose, false);
-        }
-
-        output += preceding;
-
-        // Do not display an empty placeholder or later prose ahead of a pending
-        // code unit. The store's completion callback will reveal it in order.
-        if (display.length === 0 && code.length > 0) return output;
-
-        if (display.length > 0 || fence.complete || complete) {
-            output += fence.opener + displayFenceCode(fence, display);
-            if (fence.complete) {
-                // A ready prefix is not the whole closed block. Keep its real
-                // closing fence and following prose behind the remaining units.
-                if (options.code !== "token" && !options.streams.ready(fenceKey)) return output;
-
-                if (fence.closed) {
-                    if (display.length > 0 && !/[\r\n]$/u.test(display)) output += "\n";
-                    output += fence.closer;
-                }
-            }
-        } else if (options.code === "token") {
-            output += fence.opener;
-        }
-
-        offset = fence.end;
-    }
-
-    return output + revealProse(source.slice(offset), options.prose, complete);
-}
 
 /**
  * Patches the exported host component before its Markdown constructor trims text.
@@ -164,6 +89,7 @@ export async function installAssistantStreaming(
         return { dispose() {} };
     }
 
+    const presentation = options.presentation ?? createStreamingPresentation(() => options);
     let active = true;
     const states = new WeakMap<AssistantMessageComponent, ComponentState>();
     const components = new Set<WeakRef<AssistantMessageComponent>>();
@@ -215,7 +141,16 @@ export async function installAssistantStreaming(
                 if (block.type === "thinking") {
                     return {
                         ...block,
-                        thinking: revealProse(block.thinking, options.prose, blockComplete),
+                        thinking: presentation.present({
+                            key: `${remembered.key}:thinking:${index}`,
+                            kind: "markdown",
+                            source: block.thinking,
+                            complete: blockComplete,
+                            ...(remembered.targetWidth !== undefined && {
+                                targetWidth: remembered.targetWidth,
+                            }),
+                            invalidate,
+                        }),
                     };
                 }
 
@@ -223,14 +158,16 @@ export async function installAssistantStreaming(
 
                 return {
                     ...block,
-                    text: renderText(
-                        block.text,
-                        `${remembered.key}:text:${index}`,
-                        blockComplete,
-                        options,
-                        remembered.targetWidth,
+                    text: presentation.present({
+                        key: `${remembered.key}:text:${index}`,
+                        kind: "markdown",
+                        source: block.text,
+                        complete: blockComplete,
+                        ...(remembered.targetWidth !== undefined && {
+                            targetWidth: remembered.targetWidth,
+                        }),
                         invalidate,
-                    ),
+                    }),
                 };
             });
             const clone: AssistantMessage = { ...raw, content };

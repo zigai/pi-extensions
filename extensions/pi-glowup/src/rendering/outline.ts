@@ -1,3 +1,4 @@
+import { protocolContent } from "../tools/protocol/content.ts";
 import Type from "typebox";
 import type { CodePreview } from "./streaming/presentation.ts";
 import { Value } from "typebox/value";
@@ -238,16 +239,7 @@ function nodeRows(
             if (node.syntax !== undefined)
                 outputOptions = { ...outputOptions, syntax: node.syntax };
 
-            let content = node.text;
-            if (node.kind === "code" && context.streamCode !== undefined)
-                content = context.streamCode({
-                    key: `tool:${context.toolCallId}:code:${context.streamKey ?? "root"}`,
-                    source: node.text,
-                    ...node.syntax,
-                    complete: context.argsComplete || context.isError,
-                    targetWidth: Math.max(1, width),
-                    ...(context.invalidate !== undefined && { invalidate: context.invalidate }),
-                });
+            const content = protocolContent(node, context, Math.max(1, width));
 
             const rows = renderGlowupOutput(theme, content, outputOptions).render(width);
             if (node.kind === "code" && node.title !== undefined)

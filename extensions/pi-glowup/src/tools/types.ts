@@ -20,6 +20,8 @@ export type ThirdPartyToolRenderContext = Omit<GlowupCallContext, "toolName" | "
     readonly toolName?: string;
     readonly streamCode?: CodePreview;
     readonly streamKey?: string;
+    readonly streamPhase?: "call" | "result";
+    readonly contentComplete?: boolean;
     readonly phase?: GlowupExecutionPhase;
     readonly args: JsonValue | undefined;
     readonly executionStarted?: boolean;

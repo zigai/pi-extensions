@@ -30,6 +30,20 @@ function renderSnapshot(
             });
         case "protocol":
             return renderProtocolNode({ kind: "code", text: source }, theme, context, "static");
+        case "protocol-output":
+            return renderProtocolNode(
+                { kind: "output", text: source, streaming: { kind: "code" } },
+                theme,
+                context,
+                "static",
+            );
+        case "protocol-list":
+            return renderProtocolNode(
+                { kind: "list", items: [{ kind: "code", text: source }] },
+                theme,
+                context,
+                "static",
+            );
         case "protocol-stack":
             return renderProtocolNode(
                 { kind: "stack", children: [{ kind: "code", text: source }] },
@@ -89,41 +103,46 @@ describe("streaming component ownership", () => {
         expect(independent.render(80).join("\n")).toContain("const other = 3;");
     });
 
-    it.each(["codemode", "write", "protocol", "protocol-stack", "outline"])(
-        "%s releases previous snapshots while the newest component remains live",
-        (renderer) => {
-            class PreviousSnapshot {
-                render(): string[] {
-                    return ["obsolete snapshot"];
-                }
-
-                invalidate(): void {}
+    it.each([
+        "codemode",
+        "write",
+        "protocol",
+        "protocol-output",
+        "protocol-list",
+        "protocol-stack",
+        "outline",
+    ])("%s releases previous snapshots while the newest component remains live", (renderer) => {
+        class PreviousSnapshot {
+            render(): string[] {
+                return ["obsolete snapshot"];
             }
 
-            function createCurrentComponent(): Component {
-                let current: Component = new PreviousSnapshot();
-                for (let index = 0; index < 100; index += 1) {
-                    const source = `const marker = ${index};`;
-                    current = renderSnapshot(renderer, source, {
-                        args: { code: source },
-                        toolCallId: "one-streaming-call",
-                        argsComplete: false,
-                        isPartial: true,
-                        isError: false,
-                        expanded: false,
-                        showImages: false,
-                        lastComponent: current,
-                    });
-                }
+            invalidate(): void {}
+        }
 
-                return current;
+        function createCurrentComponent(): Component {
+            let current: Component = new PreviousSnapshot();
+            for (let index = 0; index < 100; index += 1) {
+                const source = `const marker = ${index};`;
+                current = renderSnapshot(renderer, source, {
+                    args: { code: source },
+                    toolCallId: "one-streaming-call",
+                    argsComplete: false,
+                    isPartial: true,
+                    isError: false,
+                    expanded: false,
+                    showImages: false,
+                    lastComponent: current,
+                });
             }
 
-            const current = createCurrentComponent();
-            // V8 performs a full collection; assert reachability rather than a heap/time threshold.
-            expect(queryObjects(PreviousSnapshot, { format: "count" })).toBe(0);
-            expect(current.render(80).join("\n")).toContain("const marker = 99;");
-            expect(current.render(40).join("\n")).toContain("const marker = 99;");
-        },
-    );
+            return current;
+        }
+
+        const current = createCurrentComponent();
+        // V8 performs a full collection; assert reachability rather than a heap/time threshold.
+        expect(queryObjects(PreviousSnapshot, { format: "count" })).toBe(0);
+        expect(current.render(80).join("\n")).toContain("const marker = 99;");
+        expect(current.render(40).join("\n")).toContain("const marker = 99;");
+    });
 });

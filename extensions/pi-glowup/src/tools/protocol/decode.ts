@@ -85,6 +85,15 @@ const previewSchema = captureSchema(
     }),
 );
 
+const streamingSchema = captureSchema(
+    Type.Object({
+        kind: Type.Union([Type.Literal("prose"), Type.Literal("markdown"), Type.Literal("code")]),
+        complete: Type.Optional(Type.Boolean()),
+        key: Type.Optional(Type.String({ minLength: 1 })),
+        mode: Type.Optional(Type.Union([Type.Literal("inherit"), Type.Literal("immediate")])),
+    }),
+);
+
 const labelsSchema = captureSchema(
     Type.Object({
         static: Type.String({ minLength: 1 }),
@@ -118,6 +127,7 @@ const nodeSchemas = {
         Type.Object({
             kind: Type.Literal("code"),
             text: Type.String(),
+            streaming: Type.Optional(Type.Unknown()),
             title: Type.Optional(Type.Unknown()),
             syntax: Type.Optional(Type.Unknown()),
             preview: Type.Optional(Type.Unknown()),
@@ -142,6 +152,7 @@ const nodeSchemas = {
         Type.Object({
             kind: Type.Literal("output"),
             text: Type.Optional(Type.String()),
+            streaming: Type.Optional(Type.Unknown()),
             syntax: Type.Optional(Type.Unknown()),
             preview: Type.Optional(Type.Unknown()),
             noOutputLabel: Type.Optional(Type.Union([Type.String(), Type.Null()])),
@@ -345,6 +356,12 @@ function decodeVariant(value: unknown, state: DecodeState, depth: number): Glowu
         case "code": {
             const source = capture(nodeSchemas.code, value, state, ["text"]);
             let node: GlowupCodeNode = { kind: "code", text: source.text };
+            if (source.streaming !== undefined)
+                node = {
+                    ...node,
+                    streaming: capture(streamingSchema, source.streaming, state, ["key"]),
+                };
+
             if (source.title !== undefined)
                 node = { ...node, title: decodeInline(source.title, state) };
 
@@ -400,6 +417,12 @@ function decodeVariant(value: unknown, state: DecodeState, depth: number): Glowu
         case "output": {
             const source = capture(nodeSchemas.output, value, state, ["text", "noOutputLabel"]);
             let node: GlowupOutputNode = { kind: "output" };
+            if (source.streaming !== undefined)
+                node = {
+                    ...node,
+                    streaming: capture(streamingSchema, source.streaming, state, ["key"]),
+                };
+
             if (source.text !== undefined) node = { ...node, text: source.text };
             if (source.noOutputLabel !== undefined)
                 node = { ...node, noOutputLabel: source.noOutputLabel };

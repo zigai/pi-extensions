@@ -1,3 +1,8 @@
+import { createStreamingPresentation } from "../rendering/streaming/content-presentation.ts";
+import {
+    presentGlowupContent,
+    registerGlowupStreamingPolicy,
+} from "../tools/protocol/streaming.ts";
 import { reportExtensionDiagnostic } from "@zigai/pi-extension-internals";
 import Type from "typebox";
 import { Value } from "typebox/value";
@@ -164,12 +169,14 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
     let codeStreams = createCodeStreamStore();
     let assistantStreaming: Awaited<ReturnType<typeof installAssistantStreaming>> | undefined;
     let assistantActivation: Promise<void> = Promise.resolve();
-    const streamCode: CodePreview = (input) =>
-        codeStreams.get({
-            ...input,
-            mode: config.streaming.code,
-            ...(formatter !== undefined && { formatter }),
-        });
+    const presentation = createStreamingPresentation(() => ({
+        prose: config.streaming.prose,
+        code: config.streaming.code,
+        streams: codeStreams,
+        formatter,
+    }));
+    let streamingPolicy: { dispose(): void } | undefined;
+    const streamCode: CodePreview = (input) => presentGlowupContent({ ...input, kind: "code" });
 
     const edit = createNativeEditFeature();
     const bash = createNativeBashFeature();
@@ -201,6 +208,8 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
     const clearSessionState = (): void => {
         assistantStreaming?.dispose();
         assistantStreaming = undefined;
+        streamingPolicy?.dispose();
+        streamingPolicy = undefined;
         codeStreams.clear();
         configureRetainedOutputDiagnostics(undefined);
         syntax.cancel();
@@ -608,6 +617,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         }
 
         applyConfig(nextConfig);
+        if (ctx.hasUI) streamingPolicy = registerGlowupStreamingPolicy(presentation);
 
         const activationGeneration = sessionGeneration;
 
@@ -617,6 +627,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
                 if (config.streaming.prose === "token" && config.streaming.code === "token") return;
 
                 const handle = await installAssistantStreaming({
+                    presentation: { present: presentGlowupContent },
                     prose: config.streaming.prose,
                     code: config.streaming.code,
                     streams: codeStreams,

@@ -1,3 +1,7 @@
+import { access } from "node:fs/promises";
+import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
+import { Value } from "typebox/value";
 import {
     createAssistantMessageEventStream,
     type AssistantMessage,
@@ -8,7 +12,13 @@ import {
     type ToolCall,
 } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { withGlowupRendering } from "../../../src/tools/protocol/contract.ts";
+import {
+    withGlowupRendering,
+    call,
+    code,
+    output as outputNode,
+    stack,
+} from "../../../src/tools/protocol/contract.ts";
 import { Type } from "typebox";
 import { applyPatchOwnerRendering } from "../../support/apply-patch-owner-fixture.ts";
 
@@ -441,6 +451,13 @@ function streamOfflineProvider(
     if (prompt.includes("deterministic formatter failure"))
         return streamFormatterFailureResponse(model);
     if (prompt.includes("deterministic codemode format")) return streamCodemodeResponse(model);
+    if (prompt.includes("deterministic generated policy"))
+        return streamCompletedToolCall(model, {
+            type: "toolCall",
+            id: "pty-generated-policy",
+            name: "generated_policy",
+            arguments: {},
+        });
     if (prompt.includes("deterministic bash chain")) return streamBashChainResponse(model);
     if (prompt.includes("deterministic bash layout")) return streamBashLayoutResponse(model);
 
@@ -472,6 +489,9 @@ function streamOfflineProvider(
 }
 
 export default function offlinePtyProvider(pi: ExtensionAPI): void {
+    pi.on("session_start", (_event, ctx) => {
+        ctx.ui.setStatus("fixture-ready", "POLICY_FIXTURE_READY");
+    });
     pi.on("tool_call", (event, ctx) => {
         if (event.toolCallId === "pty-formatter-failure") ctx.ui.setEditorText("DIAGNOSTIC_DRAFT");
     });
@@ -494,6 +514,61 @@ export default function offlinePtyProvider(pi: ExtensionAPI): void {
         ],
         streamSimple: streamOfflineProvider,
     });
+
+    const stageSchema = Type.Object({ details: Type.Object({ stage: Type.String() }) });
+    pi.registerTool(
+        withGlowupRendering(
+            defineTool({
+                name: "generated_policy",
+                label: "Generated Content",
+                description: "Deterministic policy fixture with a test-owned release checkpoint.",
+                parameters: Type.Object({}),
+                async execute(_id, _params, signal, onUpdate, ctx) {
+                    onUpdate?.({
+                        content: [{ type: "text", text: "raw partial source" }],
+                        details: { stage: "partial" },
+                    });
+                    for (let attempt = 0; attempt < 200; attempt++) {
+                        signal?.throwIfAborted();
+                        const released = await access(
+                            join(ctx.cwd, "release-generated-policy"),
+                        ).then(
+                            () => true,
+                            () => false,
+                        );
+                        if (released)
+                            return {
+                                content: [{ type: "text", text: "raw final source" }],
+                                details: { stage: "complete" },
+                            };
+                        await delay(FRAME_DELAY_MS, undefined, { signal });
+                    }
+                    throw new Error("Generated policy checkpoint was not released");
+                },
+            }),
+            {
+                version: 3,
+                parseArgs: (value) => value,
+                parseResult: (value) => (Value.Check(stageSchema, value) ? value : undefined),
+                renderCall: () => call({ static: "Generated Content" }),
+                renderResult: (result) => {
+                    const complete = result.details.stage === "complete";
+                    return stack([
+                        code(
+                            complete
+                                ? "const POLICY_READY = 1;\nconst POLICY_PENDING = 2;"
+                                : "const POLICY_READY = 1;\nconst POLICY_PENDING =",
+                            { syntax: { language: "javascript" } },
+                        ),
+                        outputNode("POLICY_PROSE_READY. POLICY_PROSE_PENDING", {
+                            streaming: { kind: "prose" },
+                        }),
+                        outputNode("POLICY_STDOUT_IMMEDIATE"),
+                    ]);
+                },
+            },
+        ),
+    );
 
     pi.registerTool(
         defineTool({
