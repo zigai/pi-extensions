@@ -1,6 +1,6 @@
 # Pi Background Commands
 
-Run shell commands while Pi continues other work. A compact panel above the working indicator tracks each job. Completion sends the agent its exit status and output path, waking it if idle.
+Run shell commands while Pi continues other work. A compact right-aligned status-bar count tracks running shells without adding rows above the input. Completion sends the agent its exit status and output path, waking it if idle.
 
 - **Keep working:** Commands return a job ID immediately.
 - **Get notified:** Completion arrives automatically; no polling is needed.
@@ -27,7 +27,9 @@ Run npm test in the background. Continue reviewing the code and tell me when the
 | `background_status` | Inspect a job's status and recent output by ID.           |
 | `background_stop`   | Stop a job by ID.                                         |
 
-Use `/background` to read full output in bounded pages (PgUp/PgDn, Home/End, ↑/↓ to scroll, r to refresh, q/Esc to close), stop a running job, or dismiss a finished row. The panel stays pinned as chat scrolls and coexists with subagent progress. Tool calls use Glowup styling when Glowup is active.
+The indicator uses the `@zigai/pi-status-bar/api` segment API: `1 shell running` or `2 shells running`, visible while Pi is working or idle and hidden when no shells are running. Load `@zigai/pi-status-bar` to display it; without that extension, tools, notifications, and `/background` still work, with no fallback panel.
+
+Use `/background` to inspect current and finished jobs, read full output in bounded pages (PgUp/PgDn, Home/End, ↑/↓ to scroll, r to refresh, q/Esc to close), or stop a running job. Tool calls use Glowup styling when Glowup is active.
 
 Run commands directly, without appending `&`. Completion waits until the agent finishes its current work before starting a follow-up.
 

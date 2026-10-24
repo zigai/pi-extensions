@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
 import { beforeEach, test } from "vitest";
 import type { CustomEntry, SessionEntry } from "@earendil-works/pi-coding-agent";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { RenderCountingTui } from "./tui-fixture.ts";
 
-import { configureStatusBar, resetStatusBarStateForTests } from "../src/status-bar-api.ts";
+import {
+    configureStatusBar,
+    registerStatusBarSegment,
+    resetStatusBarStateForTests,
+} from "../src/status-bar-api.ts";
 import {
     clearWorkedForWidget,
     formatDuration,
@@ -208,4 +213,40 @@ test("clearWorkedForWidget removes configured idle status during active runs", (
     clearWorkedForWidget(ctx);
     assert.equal(currentWidget(), undefined);
     assert.equal(updateCount(), 2);
+});
+
+test("right-side idle segments align to the right with or without a run summary", () => {
+    registerStatusBarSegment({ id: "background.shells", text: "2 shells running", side: "right" });
+    const { ctx, currentWidget } = widgetContext();
+    const theme = { fg: (_role: string, text: string) => text };
+
+    for (const summary of [undefined, "9s"]) {
+        setWorkedForWidget(ctx, summary);
+        const widget = currentWidget();
+        if (widget === undefined) throw new Error("Expected widget factory");
+
+        const component = widget(new RenderCountingTui(), theme);
+        const lines = component.render(80);
+        assert.equal(lines.length, 1);
+        assert.equal(lines[0]?.indexOf("2 shells running"), 63);
+        assert.equal(lines[0]?.endsWith("2 shells running"), true);
+        if (summary !== undefined) assert.equal(lines[0]?.startsWith(" Worked for 9s."), true);
+
+        for (const width of [0, 1, 2, 8, 16, 24]) {
+            const narrow = component.render(width);
+            assert.equal(narrow.length, 1);
+            assert.ok(visibleWidth(narrow[0] ?? "") <= width);
+        }
+    }
+});
+
+test("clearing the last idle segment removes an otherwise empty status line", () => {
+    const segment = registerStatusBarSegment({ id: "background.shells", text: "1 shell running" });
+    const { ctx, currentWidget } = widgetContext();
+    setWorkedForWidget(ctx);
+    assert.notEqual(currentWidget(), undefined);
+    segment.clear();
+    setWorkedForWidget(ctx);
+    assert.equal(currentWidget(), undefined);
+    segment.dispose();
 });

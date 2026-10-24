@@ -4,7 +4,7 @@ import type {
     SessionEntry,
     Theme,
 } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth, type Component, type TUI } from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth, type Component, type TUI } from "@earendil-works/pi-tui";
 
 import { getStatusBarSnapshot } from "./status-bar-api.ts";
 
@@ -171,13 +171,21 @@ export function setWorkedForWidget(
                 parts.push(summary);
             }
 
-            if (idleSegments.length > 0) {
-                parts.push(idleSegments);
+            const text = parts.join(" · ");
+            if (idleSegments.length === 0) {
+                const truncated = truncateToWidth(text, Math.max(0, width - 1), "");
+                return [theme.fg("dim", ` ${truncated}`)];
             }
 
-            const text = parts.join(" · ");
-            const truncated = truncateToWidth(text, Math.max(0, width - 1), "");
-            return [theme.fg("dim", ` ${truncated}`)];
+            const available = Math.max(0, width - 2);
+            const right = truncateToWidth(idleSegments, available, "");
+            const left = truncateToWidth(
+                text,
+                Math.max(0, available - visibleWidth(right) - 2),
+                "",
+            );
+            const gap = Math.max(0, available - visibleWidth(left) - visibleWidth(right));
+            return [theme.fg("dim", ` ${left}${" ".repeat(gap)}${right}`)];
         },
         invalidate() {},
     }));

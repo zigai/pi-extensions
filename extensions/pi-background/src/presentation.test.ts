@@ -1,13 +1,6 @@
-import type { Theme } from "@earendil-works/pi-coding-agent";
-import { stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
 import { expect, it } from "vitest";
-import { BackgroundView } from "./presentation.ts";
+import { commandLabel, commandStatus, plainOutput, runningShellStatus } from "./presentation.ts";
 import type { CommandSnapshot } from "./commands.ts";
-
-const theme: Pick<Theme, "fg" | "bold"> = {
-    fg: (_color, value) => value,
-    bold: (value) => value,
-};
 
 function job(overrides: Partial<CommandSnapshot> = {}): CommandSnapshot {
     return {
@@ -22,53 +15,41 @@ function job(overrides: Partial<CommandSnapshot> = {}): CommandSnapshot {
     };
 }
 
-it("shows job commands and states without internal IDs or paths", () => {
-    const view = new BackgroundView();
-    view.update([
-        job(),
-        job({ id: "task-two", command: "npm run build", state: "completed", exitCode: 0 }),
-    ]);
-    const lines = view.render(80, theme).map(stripTerminalSequences);
-
-    expect(lines.join("\n")).toContain("npm test");
-    expect(lines.join("\n")).toContain("running");
-    expect(lines.join("\n")).toContain("npm run build");
-    expect(lines.join("\n")).toContain("done");
-    expect(lines.join("\n")).not.toContain("task-one");
-    expect(lines.join("\n")).not.toContain("/private");
+it("hides the indicator when there are no running shells", () => {
+    expect(runningShellStatus([])).toBe("");
+    expect(
+        runningShellStatus([
+            job({ state: "completed", exitCode: 0 }),
+            job({ state: "completed", exitCode: 7 }),
+            job({ state: "failed" }),
+            job({ state: "stopped" }),
+        ]),
+    ).toBe("");
 });
 
-it.each([1, 12, 32, 80])(
-    "keeps Unicode and multiline commands inside %s terminal columns",
-    (width) => {
-        const view = new BackgroundView();
-        view.update([
-            job({
-                command:
-                    "printf '界界 🧪'\n\u001b]2;UNSAFE\u0007\tcontinued command with a long tail",
-            }),
-        ]);
-        const lines = view.render(width, theme);
+it("counts only running shells with singular and plural wording", () => {
+    expect(runningShellStatus([job()])).toBe("1 shell running");
+    expect(runningShellStatus([job(), job({ state: "completed", exitCode: 0 })])).toBe(
+        "1 shell running",
+    );
 
-        for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
-        expect(lines.join("\n")).not.toContain("\u001b]2;");
-        expect(lines.join("\n")).not.toContain("\u0007");
-    },
-);
+    expect(runningShellStatus([job(), job({ id: "task-two" })])).toBe("2 shells running");
+});
 
-it("updates completed states and keeps dismissed jobs hidden after later updates", () => {
-    const view = new BackgroundView();
-    view.update([job()]);
-    view.update([job({ state: "completed", exitCode: 7 })]);
-    expect(view.render(80, theme).map(stripTerminalSequences).join("\n")).toContain("exit 7");
+it("keeps terminal controls and multiline commands out of labels", () => {
+    expect(commandLabel("printf '界界 🧪'\n\u001b]2;UNSAFE\u0007\tcontinued")).toBe(
+        "printf '界界 🧪' continued",
+    );
 
-    view.dismiss("task-one");
-    expect(view.render(80, theme)).toEqual([]);
-    view.update([
-        job({ state: "completed", exitCode: 7 }),
-        job({ id: "task-two", command: "npm run build" }),
-    ]);
-    const visible = view.render(80, theme).map(stripTerminalSequences).join("\n");
-    expect(visible).not.toContain("npm test");
-    expect(visible).toContain("npm run build");
+    expect(plainOutput("first\n\tsecond\r\u0000")).toBe("first\n\tsecond  ");
+});
+
+it.each([
+    [job(), "running"],
+    [job({ state: "stopped" }), "stopped"],
+    [job({ state: "failed" }), "failed"],
+    [job({ state: "completed", exitCode: 0 }), "done"],
+    [job({ state: "completed", exitCode: 7 }), "exit 7"],
+])("keeps detailed statuses available for the job picker", (snapshot, text) => {
+    expect(commandStatus(snapshot).text).toBe(text);
 });

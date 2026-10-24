@@ -7,6 +7,7 @@ import {
     type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { registerExtensionDiagnostics } from "@zigai/pi-extension-internals";
+import { registerStatusBarSegment, type StatusBarSegmentHandle } from "@zigai/pi-status-bar/api";
 import { withGlowupRendering } from "@zigai/pi-glowup/protocol";
 import {
     BackgroundCommands,
@@ -16,9 +17,8 @@ import {
     startArgsSchema,
     type CommandSnapshot,
 } from "./commands.ts";
-import { BackgroundView, commandLabel, commandStatus, plainOutput } from "./presentation.ts";
+import { commandLabel, commandStatus, plainOutput, runningShellStatus } from "./presentation.ts";
 import { LogViewer } from "./log-viewer.ts";
-import { mountPinnedRows, type PinnedRows } from "./pinned-rows.ts";
 import {
     renderJobResult,
     renderOutputResult,
@@ -51,8 +51,7 @@ function describe(job: CommandSnapshot): string {
 type ActiveSession = {
     readonly owner: symbol;
     readonly commands: BackgroundCommands;
-    readonly view: BackgroundView;
-    panel: PinnedRows | undefined;
+    status: StatusBarSegmentHandle | undefined;
     viewer: LogViewer | undefined;
 };
 
@@ -72,15 +71,14 @@ export default function backgroundExtension(pi: ExtensionAPI): void {
     const refresh = (): void => {
         if (active === undefined) return;
 
-        active.view.update(active.commands.list());
-        active.panel?.refresh();
+        active.status?.setText(runningShellStatus(active.commands.list()));
     };
 
     const reset = async (): Promise<void> => {
         generation += 1;
 
         const previous = active;
-        previous?.panel?.dispose();
+        previous?.status?.dispose();
         previous?.viewer?.close();
 
         const disposed = previous?.commands.dispose();
@@ -129,15 +127,18 @@ export default function backgroundExtension(pi: ExtensionAPI): void {
         const state: ActiveSession = {
             owner,
             commands,
-            view: new BackgroundView(),
-            panel: undefined,
+            status: undefined,
             viewer: undefined,
         };
         active = state;
 
         if (mode !== "tui" || ui === undefined) return;
 
-        state.panel = mountPinnedRows(ui, state.view.render.bind(state.view));
+        state.status = registerStatusBarSegment({
+            id: "pi-background.shells",
+            states: ["active", "idle"],
+            side: "right",
+        });
     });
     pi.on("session_shutdown", reset);
 
@@ -149,8 +150,7 @@ export default function backgroundExtension(pi: ExtensionAPI): void {
     };
 
     pi.registerCommand("background", {
-        description:
-            "Inspect background command output, stop running jobs, or dismiss finished rows",
+        description: "Inspect background command output or stop running jobs",
         getArgumentCompletions(prefix) {
             if (active === undefined) return null;
             return active.commands
@@ -191,7 +191,6 @@ export default function backgroundExtension(pi: ExtensionAPI): void {
                 const job = state.commands.get(id);
                 const actions = ["View output", "View details"];
                 if (job.state === "running") actions.push("Stop command");
-                else actions.push("Dismiss row");
 
                 actions.push("Close");
 
@@ -199,7 +198,6 @@ export default function backgroundExtension(pi: ExtensionAPI): void {
                 if (active !== state || action === undefined || action === "Close") return;
 
                 if (action === "Stop command") await state.commands.stop(id);
-                else if (action === "Dismiss row") state.view.dismiss(id);
                 else if (action === "View details")
                     await ctx.ui.editor(
                         "Background command details (changes are not saved)",
