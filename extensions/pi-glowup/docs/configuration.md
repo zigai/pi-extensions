@@ -100,6 +100,24 @@ For compatibility with the previous appearance, `addedRowBackground` and
 | `scriptPreview.shellOutputStyle`          | `"terminal"`     | Show Bash output flush left, or behind a dim `│` gutter.        |
 | `scriptPreview.formatters`                | `{}`             | Commands that format script previews through stdin/stdout.      |
 
+### Render diagnostics
+
+While `debugLog.enabled` is `true`, the JSONL log also records how Glowup rendered code.
+The log may contain formatter stderr, so keep it private. `codeHash` is the first 16 hex
+characters of the SHA-256 of the exact code text, so the same code can be matched across
+events. Offsets are UTF-16 indices into the original command.
+
+- `script_analysis`: one per completed `bash` or `codemode` call: the standalone or shell
+  path, plus each extracted heredoc or inline program with its offsets, whether it was sent
+  to the formatter, and why not (`skipReason`).
+- `script_format`: one per formatter call, with `stage`, `outcome`, timing, exit status,
+  and the start of stderr. `outputHash` matches the highlighted text when the output is shown.
+- `syntax_highlight`: one per code, language, and outcome per session (`highlighted`,
+  `cached`, `unsupported-language`, `unavailable`, `over-budget`, `failed`, `cancelled`,
+  `backpressure`).
+- `render_error`: an exception Glowup caught and ignored while rendering, formatting, or
+  highlighting.
+
 ## Full default configuration
 
 ```json

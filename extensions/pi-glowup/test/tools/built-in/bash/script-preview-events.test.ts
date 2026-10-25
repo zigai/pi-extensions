@@ -1,5 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, onTestFinished, vi } from "vitest";
+import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
+import Type from "typebox";
+import { Value } from "typebox/value";
 import { dirname, join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import { Theme } from "@earendil-works/pi-coding-agent";
@@ -20,6 +23,17 @@ import {
 } from "../../../../src/tools/built-in/bash/format-preview.ts";
 import type { ScriptInvocation } from "../../../../src/tools/built-in/bash/invocation.ts";
 import type { BuiltInRenderContext } from "../../../../src/tools/built-in/context.ts";
+import {
+    createCodeStreamStore,
+    type CodeStreamStore,
+} from "../../../../src/rendering/streaming/code-stream.ts";
+import {
+    disposeSyntaxHighlighting,
+    initializeSyntaxHighlighting,
+    settleSyntaxHighlights,
+} from "../../../../src/rendering/syntax/highlighter.ts";
+import { configureRenderDiagnostics } from "../../../../src/diagnostics/render-events.ts";
+import type { DebugLogFields } from "../../../../src/diagnostics/logger.ts";
 
 class RecordingPreviewSink {
     readonly previews = new Map<string, ScriptInvocation>();
@@ -505,5 +519,251 @@ describe("script preview events", () => {
 
         expect(sink.previews.size).toBe(0);
         expect(formatterCalls).toBe(0);
+    });
+});
+
+type RecordedRenderEvent = { readonly event: string; readonly fields: DebugLogFields };
+
+function recordRenderEvents(): RecordedRenderEvent[] {
+    const events: RecordedRenderEvent[] = [];
+    configureRenderDiagnostics((event, fields) => events.push({ event, fields: fields() }));
+    onTestFinished(() => configureRenderDiagnostics(undefined));
+    return events;
+}
+
+const renderedEventSchema = Type.Object({
+    toolCallId: Type.Optional(Type.String()),
+    stage: Type.Optional(Type.String()),
+    language: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+    codeHash: Type.String(),
+    outputHash: Type.Optional(Type.String()),
+    outcome: Type.String(),
+});
+const segmentSchema = Type.Object({
+    language: Type.String(),
+    origin: Type.String(),
+    start: Type.Optional(Type.Number()),
+    end: Type.Optional(Type.Number()),
+    codeHash: Type.String(),
+    formattable: Type.Boolean(),
+    formatted: Type.Optional(Type.Boolean()),
+    skipReason: Type.Optional(Type.String()),
+});
+const analysisSchema = Type.Object({
+    toolCallId: Type.String(),
+    path: Type.String(),
+    segments: Type.Array(segmentSchema),
+    inlineSkipReason: Type.Optional(Type.String()),
+});
+
+function eventsNamed(events: readonly RecordedRenderEvent[], name: string) {
+    return events
+        .filter((entry) => entry.event === name)
+        .map((entry) => Value.Parse(renderedEventSchema, entry.fields));
+}
+
+function analysisFor(events: readonly RecordedRenderEvent[], toolCallId: string) {
+    const analyses = events
+        .filter((entry) => entry.event === "script_analysis")
+        .map((entry) => Value.Parse(analysisSchema, entry.fields))
+        .filter((analysis) => analysis.toolCallId === toolCallId);
+    expect(analyses).toHaveLength(1);
+    const [analysis] = analyses;
+    if (analysis === undefined) throw new Error(`Missing analysis for ${toolCallId}`);
+    return analysis;
+}
+
+function sha16(text: string): string {
+    return createHash("sha256").update(text).digest("hex").slice(0, 16);
+}
+
+describe("script render diagnostics", () => {
+    const stores: CodeStreamStore[] = [];
+    const theme = new Theme(TEST_THEME_COLORS, TEST_THEME_BACKGROUND_COLORS, "truecolor");
+
+    beforeAll(async () => {
+        await disposeSyntaxHighlighting();
+        await initializeSyntaxHighlighting(process.env, {
+            preloadLanguages: ["bash", "python", "javascript"],
+        });
+    });
+
+    afterAll(async () => {
+        await Promise.all(stores.splice(0).map(async (store) => store.dispose()));
+        await disposeSyntaxHighlighting();
+    });
+
+    function setup() {
+        const store = createCodeStreamStore();
+        stores.push(store);
+        // Splits `a=1;b=2` statements so the heredoc body observably changes.
+        const splitStatements =
+            "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(s.replace(/;/g,'\\n')))";
+        const formatter = createCommandScriptFormatter(
+            parseScriptFormatterCommandsValue({
+                python: { kind: "command", command: [process.execPath, "-e", splitStatements] },
+                javascript: { kind: "command", command: [process.execPath, "-e", splitStatements] },
+            }),
+        );
+        if (formatter === undefined) throw new Error("Expected a configured formatter");
+
+        const bash = createNativeBashFeature(
+            () => formatter,
+            async (input, backend, options) => store.formatEmbedded(input, backend, options),
+        );
+        onTestFinished(() => bash.clear());
+
+        const show = async (toolCallId: string, command: string): Promise<void> => {
+            bash.schedule({
+                toolCallId,
+                command,
+                formatter,
+                signal: undefined,
+                completed: true,
+                isCurrent: () => true,
+                invalidate: () => {},
+            });
+            await vi.waitUntil(() => getScriptFormatterWorkload().active === 0);
+            await store.settled();
+
+            const context: BuiltInRenderContext = {
+                args: { command },
+                toolCallId,
+                cwd: "/work",
+                lastComponent: undefined,
+                state: {},
+                executionStarted: true,
+                argsComplete: true,
+                isPartial: false,
+                expanded: false,
+                showImages: false,
+                isError: false,
+                durationMs: undefined,
+                outputPad: 1,
+                invalidate: () => {},
+            };
+            const render = () =>
+                bash
+                    .renderBashCall(
+                        { command },
+                        theme,
+                        context,
+                        () => 30,
+                        () => false,
+                        () => "preserve",
+                        () => "trailing",
+                    )
+                    .render(120);
+            render();
+            await settleSyntaxHighlights();
+            render();
+        };
+
+        return { show };
+    }
+
+    it("joins extracted heredoc and inline programs to their format and highlight events", async () => {
+        const events = recordRenderEvents();
+        const { show } = setup();
+        const heredocCommand =
+            "python3 - <<'PY'\na=1;b=2\nprint(a + b)\nPY\nnode -e 'console.log(1)'\necho done";
+        const inlineCommand = `cd /tmp && node -e 'console.log("inline")'`;
+
+        await show("heredoc-call", heredocCommand);
+        await show("inline-call", inlineCommand);
+
+        await vi.waitUntil(() => events.some((entry) => entry.event === "script_analysis"));
+        const heredocAnalysis = analysisFor(events, "heredoc-call");
+        expect(heredocAnalysis.path).toBe("shell");
+        // Glowup does not recognize inline programs in commands that open a heredoc.
+        expect(heredocAnalysis.inlineSkipReason).toBe("heredoc-present");
+        const [heredoc] = heredocAnalysis.segments;
+        expect(heredocAnalysis.segments).toHaveLength(1);
+        expect(heredoc).toMatchObject({
+            language: "python",
+            origin: "heredoc",
+            formattable: true,
+            formatted: true,
+        });
+        if (heredoc?.start === undefined || heredoc.end === undefined)
+            throw new Error("Expected heredoc offsets");
+        expect(sha16(heredocCommand.slice(heredoc.start, heredoc.end))).toBe(heredoc.codeHash);
+
+        const heredocFormat = eventsNamed(events, "script_format").find(
+            (event) => event.codeHash === heredoc.codeHash,
+        );
+        expect(heredocFormat).toMatchObject({
+            toolCallId: "heredoc-call",
+            stage: "embedded-heredoc",
+            language: "python",
+            outcome: "formatted",
+        });
+        // The preview highlights the formatted body, so its hash is the formatter output.
+        expect(eventsNamed(events, "syntax_highlight")).toContainEqual(
+            expect.objectContaining({
+                language: "python",
+                codeHash: heredocFormat?.outputHash,
+                outcome: "highlighted",
+            }),
+        );
+
+        const inlineAnalysis = analysisFor(events, "inline-call");
+        const [inline] = inlineAnalysis.segments;
+        expect(inlineAnalysis.segments).toHaveLength(1);
+        expect(inline).toMatchObject({
+            language: "javascript",
+            origin: "inline",
+            formattable: false,
+            codeHash: sha16('console.log("inline")'),
+        });
+        if (inline?.start === undefined || inline.end === undefined)
+            throw new Error("Expected inline offsets");
+        expect(inlineCommand.slice(inline.start, inline.end)).toBe('console.log("inline")');
+        expect(eventsNamed(events, "syntax_highlight")).toContainEqual(
+            expect.objectContaining({
+                language: "javascript",
+                codeHash: inline.codeHash,
+                outcome: "highlighted",
+            }),
+        );
+    });
+
+    it("explains rejected heredocs without invoking the formatter on them", async () => {
+        const events = recordRenderEvents();
+        const { show } = setup();
+        const invalid = "def broken(:\n    pass\n";
+        const command = [
+            "python3 - <<'PY'",
+            invalid + "PY",
+            "python3 - <<PY",
+            "print('$HOME')",
+            "PY",
+            "cat <<'EOF'",
+            "plain data",
+            "EOF",
+            "echo done",
+        ].join("\n");
+
+        await show("rejected-call", command);
+
+        await vi.waitUntil(() => events.some((entry) => entry.event === "script_analysis"));
+        const analysis = analysisFor(events, "rejected-call");
+        expect(
+            analysis.segments.map(({ language, formattable, skipReason }) => ({
+                language,
+                formattable,
+                skipReason,
+            })),
+        ).toEqual([
+            { language: "python", formattable: false, skipReason: "malformed" },
+            { language: "python", formattable: false, skipReason: "unquoted-expansion" },
+            { language: "text", formattable: false, skipReason: "data-heredoc" },
+        ]);
+        expect(analysis.segments[0]?.codeHash).toBe(sha16(invalid));
+
+        const rejected = new Set(analysis.segments.map((segment) => segment.codeHash));
+        expect(
+            eventsNamed(events, "script_format").filter((event) => rejected.has(event.codeHash)),
+        ).toEqual([]);
     });
 });

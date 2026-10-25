@@ -5,6 +5,10 @@ import {
 } from "./formatter.ts";
 import { boundedScriptPreview } from "./preview-store.ts";
 import { parseScriptInvocation, type ScriptInvocation } from "./invocation.ts";
+import {
+    recordRenderError,
+    type ScriptFormatDiagnostics,
+} from "../../../diagnostics/render-events.ts";
 
 type ScriptPreviewSink = {
     get(toolCallId: string): ScriptInvocation | undefined;
@@ -21,6 +25,7 @@ export type FormatScriptPreviewOptions = {
     readonly targetWidth?: number;
     readonly isCurrent?: () => boolean;
     readonly invalidate?: () => void;
+    readonly recordSegment?: ScriptFormatDiagnostics["recordSegment"];
 };
 
 export function scriptForPreview(
@@ -66,6 +71,11 @@ export async function formatAndStoreScriptPreview(
     const formatterOptions: ScriptBlockFormatterOptions = {
         ...(options.signal !== undefined && { signal: options.signal }),
         ...(options.targetWidth !== undefined && { targetWidth: options.targetWidth }),
+        diagnostics: {
+            toolCallId: options.toolCallId,
+            stage: "preview",
+            ...(options.recordSegment !== undefined && { recordSegment: options.recordSegment }),
+        },
     };
     const formattedScript = await formatScriptInvocation(
         script,
@@ -83,5 +93,7 @@ export async function formatAndStoreScriptPreview(
 
 /** Starts best-effort formatter work without blocking Pi tool preflight or result delivery. */
 export function scheduleFormattedScriptPreview(options: FormatScriptPreviewOptions): void {
-    void formatAndStoreScriptPreview(options).catch(() => {});
+    void formatAndStoreScriptPreview(options).catch((cause: unknown) => {
+        recordRenderError("bash.format-preview", cause, options.toolCallId);
+    });
 }

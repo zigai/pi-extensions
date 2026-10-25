@@ -4,7 +4,9 @@ import { dirname, join } from "node:path";
 import { createRequire } from "node:module";
 import { stripVTControlCharacters } from "node:util";
 import type { ScriptFormatterProfile } from "../../../../src/settings-input.ts";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
+import { configureRenderDiagnostics } from "../../../../src/diagnostics/render-events.ts";
+import type { DebugLogFields } from "../../../../src/diagnostics/logger.ts";
 import { renderScriptCall } from "../../../../src/tools/built-in/bash/script-renderer.ts";
 import {
     createCommandScriptFormatter,
@@ -216,6 +218,61 @@ describe("script formatter settings", () => {
             ).resolves.toEqual(invocation);
 
         expect(warnings).toEqual(["[pi-glowup] bash display formatter exited with status 7"]);
+    });
+
+    it("records failed formatter outcomes with exit details only while diagnostics are on", async () => {
+        const events: { readonly event: string; readonly fields: DebugLogFields }[] = [];
+        configureRenderDiagnostics((event, fields) => events.push({ event, fields: fields() }));
+        onTestFinished(() => configureRenderDiagnostics(undefined));
+        const warnings: string[] = [];
+        const formatter = createCommandScriptFormatter(
+            parseScriptFormatterCommandsValue({
+                bash: {
+                    kind: "command",
+                    command: [
+                        process.execPath,
+                        "-e",
+                        "process.stdin.resume();process.stdin.on('end',()=>{process.stderr.write('formatter detail');process.exitCode=7;})",
+                    ],
+                },
+                javascript: { kind: "javascript", command: ["/missing/display-formatter"] },
+            }),
+            (message) => {
+                warnings.push(message);
+            },
+        );
+        const shell = { label: "Bash", language: "bash", code: "echo input" };
+        const node = { label: "Node", language: "javascript", code: "const value = 1;" };
+
+        await expect(
+            formatScriptInvocation(shell, formatter, {
+                targetWidth: 60,
+                diagnostics: { toolCallId: "call-7", stage: "preview" },
+            }),
+        ).resolves.toEqual(shell);
+        await formatScriptInvocation(node, formatter);
+        await formatScriptInvocation({ ...node, language: "ruby" }, formatter);
+
+        expect(events.map((entry) => entry.fields)).toEqual([
+            expect.objectContaining({
+                toolCallId: "call-7",
+                stage: "preview",
+                language: "bash",
+                profileKind: "command",
+                targetWidth: 60,
+                outcome: "failed",
+                exitCode: 7,
+                stderr: "formatter detail",
+            }),
+            expect.objectContaining({ language: "javascript", outcome: "missing-executable" }),
+            expect.objectContaining({ language: "ruby", outcome: "no-profile" }),
+        ]);
+        // stderr goes only to the private log, never to user-facing warnings.
+        expect(warnings.join("\n")).not.toContain("formatter detail");
+
+        configureRenderDiagnostics(undefined);
+        await formatScriptInvocation({ ...shell, code: "echo other" }, formatter);
+        expect(events).toHaveLength(3);
     });
 
     it("leaves formatter commands empty by default", () => {

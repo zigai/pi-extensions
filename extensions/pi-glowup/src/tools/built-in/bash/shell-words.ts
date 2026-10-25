@@ -1,4 +1,5 @@
 import { parse, type Node, type Redirect, type Word } from "unbash";
+import { recordRenderError } from "../../../diagnostics/render-events.ts";
 
 type ShellWord = Pick<Word, "pos" | "end" | "text">;
 
@@ -77,7 +78,8 @@ export function shellWords(source: string): readonly ShellWord[] {
 
     try {
         for (const statement of parse(source).commands) walk(statement);
-    } catch {
+    } catch (cause: unknown) {
+        recordRenderError("bash.shell-words-parse", cause);
         return [];
     }
 

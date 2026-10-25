@@ -1,7 +1,10 @@
 import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import { Markdown, type Component, type MarkdownTheme } from "@earendil-works/pi-tui";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, onTestFinished } from "vitest";
+import { createHash } from "node:crypto";
+import { configureRenderDiagnostics } from "../../../src/diagnostics/render-events.ts";
+import type { DebugLogFields } from "../../../src/diagnostics/logger.ts";
 import { Theme, type ThemeColor } from "@earendil-works/pi-coding-agent";
 import { buildPierreDiffPayload } from "../../../src/rendering/diff/payload.ts";
 import { renderPierreDiff } from "../../../src/rendering/diff/pierre-renderer.ts";
@@ -140,6 +143,33 @@ describe("central syntax highlighting", () => {
 
     afterAll(async () => {
         await disposeSyntaxHighlighting();
+    });
+
+    it("records each highlight outcome once per code and language without hiding failures", async () => {
+        const events: { readonly event: string; readonly fields: DebugLogFields }[] = [];
+        configureRenderDiagnostics((event, fields) => events.push({ event, fields: fields() }));
+        onTestFinished(() => configureRenderDiagnostics(undefined));
+        const source = "diagnostic_sample = 41 + 1";
+        const aborted = new AbortController();
+        aborted.abort();
+
+        await highlightSyntaxCodeAsync(source, "python");
+        highlightSyntaxCode(source, "python");
+        highlightSyntaxCode(source, "python");
+        highlightSyntaxCode(source, "not-a-language");
+        highlightSyntaxCode(source, "not-a-language");
+        await highlightSyntaxCodeAsync(source, "python", { signal: aborted.signal });
+
+        const codeHash = createHash("sha256").update(source).digest("hex").slice(0, 16);
+        expect(
+            events
+                .filter((entry) => entry.event === "syntax_highlight")
+                .map(({ fields }) => [fields.codeHash, fields.language, fields.outcome]),
+        ).toEqual([
+            [codeHash, "python", "highlighted"],
+            [codeHash, "not-a-language", "unsupported-language"],
+            [codeHash, "python", "cancelled"],
+        ]);
     });
 
     it("loads syntax env config including default, custom override, and off switch", () => {

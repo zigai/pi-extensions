@@ -4,7 +4,14 @@ import { stripVTControlCharacters } from "node:util";
 import type { BundledLanguage, CreateHighlighterFactory, HighlighterGeneric } from "shiki";
 import { normalizedCodeLines } from "../../text-boundaries.ts";
 import type { DiffSection } from "../diff/text-diff.ts";
-import { createSyntaxTokenizer } from "./tokenizer.ts";
+import { createSyntaxTokenizer, type TokenizeUnavailableReason } from "./tokenizer.ts";
+import {
+    diagnosticCodeHash,
+    recordRenderError,
+    recordRenderEvent,
+    renderDiagnosticsEnabled,
+    utf8Bytes,
+} from "../../diagnostics/render-events.ts";
 import { configureBracketPairColoring } from "./brackets.ts";
 import {
     isBundledSyntaxLanguage,
@@ -323,11 +330,13 @@ export function highlightSyntaxCode(
         normalizedLanguage === "text" ||
         !state.loadedLanguages.has(normalizedLanguage)
     ) {
+        recordUnhighlightedRequest(code, language, normalizedLanguage);
         return normalizedCodeLines(code);
     }
 
     const codeByteLength = Buffer.byteLength(code, "utf8");
     if (codeByteLength > MAX_CODE_BYTES) {
+        recordSyntaxHighlight(code, language, normalizedLanguage, "over-budget");
         return normalizedCodeLines(code);
     }
 
@@ -340,6 +349,7 @@ export function highlightSyntaxCode(
     const completed = owned?.results.get(key) ?? owned?.previousResults.get(key);
     if (completed !== undefined) {
         owned?.results.set(key, completed);
+        recordSyntaxHighlight(code, language, normalizedLanguage, "cached");
         return completed.lines;
     }
 
@@ -349,6 +359,7 @@ export function highlightSyntaxCode(
             key,
             highlightedSource(code, normalizedLanguage, state.theme.name, cached.lines),
         );
+        recordSyntaxHighlight(code, language, normalizedLanguage, "cached");
         return cached.lines;
     }
 
@@ -358,6 +369,7 @@ export function highlightSyntaxCode(
             key,
             highlightedSource(code, normalizedLanguage, state.theme.name, unowned),
         );
+        recordSyntaxHighlight(code, language, normalizedLanguage, "cached");
         return unowned;
     }
 
@@ -447,11 +459,21 @@ export async function highlightSyntaxCodeAsync(
         state?.status !== "ready" ||
         normalizedLanguage === undefined ||
         normalizedLanguage === "text" ||
-        !state.loadedLanguages.has(normalizedLanguage) ||
-        size > MAX_CODE_BYTES ||
-        options.signal?.aborted === true
-    )
+        !state.loadedLanguages.has(normalizedLanguage)
+    ) {
+        recordUnhighlightedRequest(code, language, normalizedLanguage);
         return plainLines;
+    }
+
+    if (size > MAX_CODE_BYTES) {
+        recordSyntaxHighlight(code, language, normalizedLanguage, "over-budget");
+        return plainLines;
+    }
+
+    if (options.signal?.aborted === true) {
+        recordSyntaxHighlight(code, language, normalizedLanguage, "cancelled");
+        return plainLines;
+    }
 
     const key = highlightedCodeCacheKey(state.theme.name, normalizedLanguage, code, size);
     const shouldCache = options.cache !== false && size <= MAX_CACHEABLE_CODE_BYTES;
@@ -463,6 +485,7 @@ export async function highlightSyntaxCodeAsync(
     const ownedResult = owner?.results.get(key) ?? owner?.previousResults.get(key);
     if (ownedResult !== undefined) {
         owner?.results.set(key, ownedResult);
+        recordSyntaxHighlight(code, language, normalizedLanguage, "cached");
         return ownedResult.lines;
     }
 
@@ -472,6 +495,7 @@ export async function highlightSyntaxCodeAsync(
             key,
             highlightedSource(code, normalizedLanguage, state.theme.name, cached.lines),
         );
+        recordSyntaxHighlight(code, language, normalizedLanguage, "cached");
         return cached.lines;
     }
 
@@ -488,19 +512,41 @@ export async function highlightSyntaxCodeAsync(
         (pendingKey === undefined ? undefined : pendingHighlights.get(pendingKey));
     if (pending === undefined) {
         highlightControllers.add(controller);
+
+        let started = 0;
+        if (renderDiagnosticsEnabled()) started = performance.now();
+
+        let unavailable: { reason: TokenizeUnavailableReason; error?: string } | undefined;
+        const onUnavailable = (reason: TokenizeUnavailableReason, error?: string): void => {
+            unavailable = { reason };
+            if (error !== undefined) unavailable.error = error;
+        };
+
+        const record = (outcome: SyntaxHighlightOutcome, error?: string): void =>
+            recordSyntaxHighlight(code, language, normalizedLanguage, outcome, started, error);
+
         pending = state.tokenizer
             .tokenize(plainLines.join("\n"), normalizedLanguage, bracketPairColoringEnabled, {
                 signal,
                 retryWhenCapacityAvailable: owner?.retryWhenCapacityAvailable,
+                ...(renderDiagnosticsEnabled() && { onUnavailable }),
             })
             .then((lines) => {
                 if (
                     signal.aborted ||
                     syntaxState !== state ||
-                    syntaxRenderingVersion !== generation ||
-                    lines === undefined
-                )
+                    syntaxRenderingVersion !== generation
+                ) {
+                    record("cancelled");
                     return plainLines;
+                }
+
+                if (lines === undefined) {
+                    record(unavailable?.reason ?? "failed", unavailable?.error);
+                    return plainLines;
+                }
+
+                record("highlighted");
 
                 const highlighted = normalizeHighlightedLineCount(lines, plainLines.length);
                 if (shouldCache) rememberHighlightedCode(key, highlighted);
@@ -529,7 +575,11 @@ export async function highlightSyntaxCodeAsync(
 
                 return highlighted;
             })
-            .catch(() => plainLines)
+            .catch((cause: unknown) => {
+                recordRenderError("syntax.highlight", cause);
+                record("failed", errorMessage(cause));
+                return plainLines;
+            })
             .finally(() => {
                 highlightControllers.delete(controller);
 
@@ -933,6 +983,95 @@ function formatConfiguredLanguageForWarning(language: string): string {
     const trimmed = language.trim();
     const displayed = trimmed.length > 80 ? `${trimmed.slice(0, 80)}…` : trimmed;
     return JSON.stringify(displayed);
+}
+
+type SyntaxHighlightOutcome =
+    | "highlighted"
+    | "cached"
+    | "unsupported-language"
+    | "not-ready"
+    | "unavailable"
+    | "over-budget"
+    | "failed"
+    | "cancelled"
+    | "backpressure";
+
+function errorMessage(cause: unknown): string {
+    if (cause instanceof Error) return cause.message;
+    return String(cause);
+}
+
+/** Records why a request stayed plain, including transient not-ready states (deduplicated). */
+function recordUnhighlightedRequest(
+    code: string,
+    language: string | undefined,
+    normalizedLanguage: string | undefined,
+): void {
+    if (!renderDiagnosticsEnabled() || code.length === 0) return;
+
+    // Unlabelled and plain-text requests are deliberately plain, not failures.
+    if (normalizedLanguage === undefined) {
+        if (language !== undefined && language.trim().length > 0)
+            recordSyntaxHighlight(code, language, normalizedLanguage, "unsupported-language");
+
+        return;
+    }
+
+    if (normalizedLanguage === "text") return;
+
+    const state = syntaxState;
+    if (state === undefined) {
+        recordSyntaxHighlight(code, language, normalizedLanguage, "not-ready", 0, "uninitialized");
+        return;
+    }
+
+    if (state.status !== "ready") {
+        recordSyntaxHighlight(code, language, normalizedLanguage, "unavailable", 0, state.reason);
+        return;
+    }
+
+    if (!state.loadedLanguages.has(normalizedLanguage))
+        recordSyntaxHighlight(
+            code,
+            language,
+            normalizedLanguage,
+            "not-ready",
+            0,
+            "language not loaded",
+        );
+}
+
+/** One event per (code, requested language, outcome) and session. */
+function recordSyntaxHighlight(
+    code: string,
+    language: string | undefined,
+    resolvedLanguage: string | undefined,
+    outcome: SyntaxHighlightOutcome,
+    started = 0,
+    error?: string,
+): void {
+    if (!renderDiagnosticsEnabled()) return;
+
+    let ms = 0;
+    if (started > 0) ms = Math.round((performance.now() - started) * 10) / 10;
+
+    // A completed highlight is later served from cache on every redraw; one success suffices.
+    let dedupeOutcome: string = outcome;
+    if (outcome === "highlighted" || outcome === "cached") dedupeOutcome = "success";
+
+    recordRenderEvent(
+        "syntax_highlight",
+        () => ({
+            language: language ?? null,
+            resolvedLanguage,
+            codeHash: diagnosticCodeHash(code),
+            bytes: utf8Bytes(code),
+            outcome,
+            ms,
+            error,
+        }),
+        () => `${diagnosticCodeHash(code)}\0${language ?? ""}\0${dedupeOutcome}`,
+    );
 }
 
 function normalizeHighlightedLineCount(lines: string[], expectedCount: number): string[] {

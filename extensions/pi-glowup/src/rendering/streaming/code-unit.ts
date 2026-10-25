@@ -3,6 +3,7 @@ import type {
     ScriptBlockFormatterInput,
     ScriptBlockFormatterOptions,
 } from "../../tools/built-in/bash/formatter.ts";
+import { recordRenderError, type ScriptFormatStage } from "../../diagnostics/render-events.ts";
 import type { CodeStreamInput } from "./code-stream.ts";
 import type { StatementUnit } from "./statement-worker.ts";
 import { maskStatementLiterals } from "./literal-formatting.ts";
@@ -162,14 +163,21 @@ export async function formatCodeUnit(
             language,
             code,
         };
-        let formatterOptions: ScriptBlockFormatterOptions = { signal };
+        let stage: ScriptFormatStage = "statement";
+        if (input.mode === "block") stage = "block";
+
+        let formatterOptions: ScriptBlockFormatterOptions = {
+            signal,
+            diagnostics: input.diagnostics ?? { stage },
+        };
         if (input.targetWidth !== undefined) {
             formatterInput = { ...formatterInput, targetWidth: input.targetWidth };
             formatterOptions = { ...formatterOptions, targetWidth: input.targetWidth };
         }
 
         formatted = await abortable(input.formatter(formatterInput, formatterOptions), signal);
-    } catch {
+    } catch (cause: unknown) {
+        recordRenderError("statement.format", cause, input.diagnostics?.toolCallId);
         reportExtensionDiagnostic(
             "[pi-glowup] Statement display formatter failed; preserving this unit's original text.",
         );

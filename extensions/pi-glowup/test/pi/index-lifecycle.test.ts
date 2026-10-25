@@ -36,6 +36,7 @@ import {
     initializeSyntaxHighlighting,
     isSyntaxHighlightingReady,
 } from "../../src/rendering/syntax/highlighter.ts";
+import { getScriptFormatterWorkload } from "../../src/tools/built-in/bash/formatter.ts";
 
 type AssistantSourceMessage = { readonly role: "assistant"; readonly content: readonly ToolCall[] };
 type ToolCallInput = {
@@ -348,6 +349,97 @@ describe("extension lifecycle", () => {
         );
 
         await pi.shutdownSession();
+    });
+
+    it("writes render diagnostics only when debugLog itself is enabled", async () => {
+        const root = await mkdtemp(join(tmpdir(), "pi-glowup-render-diagnostics-"));
+        const agentDir = join(root, "agent");
+        const log = join(agentDir, "pi-glowup", "debug.log");
+        const marker = join(root, "formatter-ran");
+        const originalRetainedLog = process.env.PI_GLOWUP_RETAINED_OUTPUT_LOG;
+        process.env[AGENT_DIR_ENV] = agentDir;
+        process.env[SCRIPT_FORMATTERS_ENV] = JSON.stringify({
+            python: {
+                kind: "command",
+                command: [
+                    process.execPath,
+                    "-e",
+                    `require("node:fs").appendFileSync(${JSON.stringify(marker)}, "x");process.stdin.pipe(process.stdout)`,
+                ],
+            },
+        });
+        onTestFinished(async () => {
+            if (originalRetainedLog === undefined) delete process.env.PI_GLOWUP_RETAINED_OUTPUT_LOG;
+            else process.env.PI_GLOWUP_RETAINED_OUTPUT_LOG = originalRetainedLog;
+
+            await rm(root, { recursive: true, force: true });
+        });
+        const command = "python - <<'PY'\nprint('hi')\nPY";
+        const renderEvents = (): Static<typeof renderLogEntrySchema>[] =>
+            readFileSync(log, "utf8")
+                .trim()
+                .split("\n")
+                .map((line) => Value.Parse(renderLogEntrySchema, JSON.parse(line)))
+                .filter((entry) =>
+                    [
+                        "script_analysis",
+                        "script_format",
+                        "syntax_highlight",
+                        "render_error",
+                    ].includes(entry.event),
+                );
+
+        // Retained-output telemetry activates the logger without enabling debugLog.
+        process.env.PI_GLOWUP_RETAINED_OUTPUT_LOG = "1";
+        const quiet = new FakeExtensionApi();
+        installGlowup(quiet);
+        await quiet.startSession(join(root, "project"), false);
+        await Promise.all(quiet.runBashToolCall(command));
+        await vi.waitUntil(() => existsSync(marker), { timeout: 10_000 });
+        await vi.waitUntil(() => getScriptFormatterWorkload().active === 0);
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        await quiet.shutdownSession();
+        expect(readLogEvents(log)).toContain("session_start");
+        expect(renderEvents()).toEqual([]);
+
+        delete process.env.PI_GLOWUP_RETAINED_OUTPUT_LOG;
+        await rm(log);
+        const configPath = getGlowupGlobalConfigPath(agentDir);
+        mkdirSync(dirname(configPath), { recursive: true });
+        writeFileSync(
+            configPath,
+            JSON.stringify({ debugLog: { enabled: true, memorySampleIntervalMs: 0 } }),
+        );
+        const verbose = new FakeExtensionApi();
+        installGlowup(verbose);
+        try {
+            await verbose.startSession(join(root, "project"), false);
+            await Promise.all(verbose.runBashToolCall(command));
+            await vi.waitUntil(
+                () => renderEvents().some((entry) => entry.event === "script_analysis"),
+                { timeout: 10_000 },
+            );
+        } finally {
+            await verbose.shutdownSession();
+        }
+
+        const analysis = renderEvents().find((entry) => entry.event === "script_analysis");
+        expect(analysis?.fields).toMatchObject({
+            toolName: "bash",
+            toolCallId: "call-1",
+            path: "standalone",
+            standalone: { language: "python" },
+            segments: [{ language: "python", origin: "standalone", formattable: true }],
+        });
+        const codeHash = analysis?.fields.segments?.[0]?.codeHash;
+        const format = renderEvents().find(
+            (entry) => entry.event === "script_format" && entry.fields.codeHash === codeHash,
+        );
+        expect(format?.fields).toMatchObject({
+            toolCallId: "call-1",
+            stage: "preview",
+            outcome: "unchanged",
+        });
     });
 
     it("sends opt-in retained-output telemetry to the debug file instead of the terminal", async () => {
@@ -1132,6 +1224,24 @@ const logEntrySchema = Type.Object(
 );
 
 type LogEntry = Static<typeof logEntrySchema>;
+
+const renderLogEntrySchema = Type.Object({
+    event: Type.String(),
+    fields: Type.Object(
+        {
+            toolCallId: Type.Optional(Type.String()),
+            stage: Type.Optional(Type.String()),
+            codeHash: Type.Optional(Type.String()),
+            outcome: Type.Optional(Type.String()),
+            segments: Type.Optional(
+                Type.Array(
+                    Type.Object({ codeHash: Type.String() }, { additionalProperties: true }),
+                ),
+            ),
+        },
+        { additionalProperties: true },
+    ),
+});
 
 function readLogEvents(filePath: string): string[] {
     return readLogEntries(filePath).map((entry) => entry.event);

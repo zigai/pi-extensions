@@ -12,6 +12,14 @@ import {
 } from "../../../settings-input.ts";
 import { prepareFormatterCommand, type PreparedFormatterCommand } from "./display-profile.ts";
 import { compactPythonStructuralBlankRows } from "../../../rendering/syntax/highlighter.ts";
+import {
+    diagnosticCodeHash,
+    recordRenderError,
+    recordRenderEvent,
+    renderDiagnosticsEnabled,
+    utf8Bytes,
+    type ScriptFormatDiagnostics,
+} from "../../../diagnostics/render-events.ts";
 
 export type ScriptBlockFormatterInput = {
     readonly label: string;
@@ -23,6 +31,7 @@ export type ScriptBlockFormatterInput = {
 export type ScriptBlockFormatterOptions = {
     readonly signal?: AbortSignal;
     readonly targetWidth?: number;
+    readonly diagnostics?: ScriptFormatDiagnostics;
 };
 
 export type ScriptBlockFormatter = ((
@@ -48,6 +57,35 @@ const MAX_CONCURRENT_FORMATTERS = 2;
 const MAX_QUEUED_FORMATTERS = 20;
 const MAX_FORMATTER_CACHE_ENTRIES = 300;
 const MAX_FORMATTER_CACHE_BYTES = 4 * 1024 * 1024;
+const MAX_DIAGNOSTIC_STDERR_CHARS = 600;
+
+type ScriptFormatOutcome =
+    | "formatted"
+    | "unchanged"
+    | "cached"
+    | "declined"
+    | "failed"
+    | "timeout"
+    | "output-limit"
+    | "input-limit"
+    | "missing-executable"
+    | "cancelled"
+    | "queue-full"
+    | "no-profile";
+
+type FormatterRun = {
+    readonly output: string | undefined;
+    readonly outcome: ScriptFormatOutcome;
+    readonly exitCode?: number;
+    readonly signal?: string;
+    readonly stderr?: string;
+};
+
+type FormatAttempt = FormatterRun & {
+    readonly profileKind?: string;
+    readonly targetWidth?: number;
+    readonly detail?: string;
+};
 
 type FormatterQueueEntry = {
     readonly signal: AbortSignal | undefined;
@@ -171,10 +209,10 @@ async function runFormatterCommand(
     release: () => void,
     cwd: string | undefined,
     reportFailure: (message: string) => void,
-): Promise<string | undefined> {
+): Promise<FormatterRun> {
     if (options.signal?.aborted === true) {
         release();
-        return Promise.resolve(undefined);
+        return Promise.resolve({ output: undefined, outcome: "cancelled" });
     }
 
     const targetWidth = options.targetWidth;
@@ -189,44 +227,63 @@ async function runFormatterCommand(
               };
     const env = { ...process.env, ...widthEnv };
 
+    // Formatter stderr is read only for the private debug log; otherwise it stays ignored.
+    const captureStderr = renderDiagnosticsEnabled();
+
     return new Promise((resolve) => {
         let settled = false;
         let terminating = false;
         let stdout = "";
         let stdoutBytes = 0;
+        let stderr = "";
         let escalation: ReturnType<typeof setTimeout> | undefined;
-        let child: ChildProcessByStdio<Writable, Readable, null>;
+        let child: ChildProcessByStdio<Writable, Readable, Readable | null>;
+
         try {
-            child = spawn(executable, [...finalArgs], {
-                shell: false,
-                signal: options.signal,
-                cwd,
-                env,
-                stdio: ["pipe", "pipe", "ignore"],
-            });
-        } catch {
+            const spawnOptions = { shell: false, signal: options.signal, cwd, env } as const;
+            if (captureStderr) {
+                child = spawn(executable, [...finalArgs], {
+                    ...spawnOptions,
+                    stdio: ["pipe", "pipe", "pipe"],
+                });
+            } else {
+                child = spawn(executable, [...finalArgs], {
+                    ...spawnOptions,
+                    stdio: ["pipe", "pipe", "ignore"],
+                });
+            }
+        } catch (cause: unknown) {
             release();
 
+            recordRenderError("formatter.spawn", cause, options.diagnostics?.toolCallId);
+
             if (options.signal?.aborted !== true) reportFailure("could not start");
-            resolve(undefined);
+            resolve({ output: undefined, outcome: "failed" });
 
             return;
         }
 
-        const finish = (value: string | undefined): void => {
+        const finish = (run: FormatterRun): void => {
             if (settled) return;
 
             settled = true;
             clearTimeout(timeout);
             stdout = "";
-            resolve(value);
+            resolve(run);
         };
 
-        const fail = (reason?: string): void => {
+        const capturedStderr = (): string | undefined => {
+            if (!captureStderr || stderr.length === 0) return undefined;
+            return stderr;
+        };
+
+        const fail = (reason?: string, outcome: ScriptFormatOutcome = "failed"): void => {
             if (reason !== undefined && options.signal?.aborted !== true && !settled)
                 reportFailure(reason);
 
-            finish(undefined);
+            let resolvedOutcome = outcome;
+            if (options.signal?.aborted === true) resolvedOutcome = "cancelled";
+            finish({ output: undefined, outcome: resolvedOutcome });
 
             if (terminating) return;
 
@@ -241,7 +298,7 @@ async function runFormatterCommand(
         };
 
         const timeout = setTimeout(
-            () => fail(`timed out after ${FORMATTER_TIMEOUT_MS} ms`),
+            () => fail(`timed out after ${FORMATTER_TIMEOUT_MS} ms`, "timeout"),
             FORMATTER_TIMEOUT_MS,
         );
         timeout.unref();
@@ -252,25 +309,35 @@ async function runFormatterCommand(
 
             stdoutBytes += Buffer.byteLength(chunk, "utf8");
             if (stdoutBytes > FORMATTER_MAX_BUFFER) {
-                fail(`output exceeded ${FORMATTER_MAX_BUFFER} bytes`);
+                fail(`output exceeded ${FORMATTER_MAX_BUFFER} bytes`, "output-limit");
                 return;
             }
 
             stdout += chunk;
         });
 
+        if (child.stderr !== null) {
+            child.stderr.setEncoding("utf8");
+            child.stderr.on("data", (chunk: string) => {
+                if (stderr.length < MAX_DIAGNOSTIC_STDERR_CHARS)
+                    stderr = (stderr + chunk).slice(0, MAX_DIAGNOSTIC_STDERR_CHARS);
+            });
+        }
+
         child.stdin.on("error", () => fail());
         child.on("error", (cause: unknown) => {
+            let outcome: ScriptFormatOutcome = "failed";
             if (options.signal?.aborted !== true) {
                 let reason = "failed";
                 if (cause instanceof Error && "code" in cause && cause.code === "ENOENT") {
                     reason = "executable not found";
+                    outcome = "missing-executable";
                 }
 
                 reportFailure(reason);
             }
 
-            fail();
+            fail(undefined, outcome);
         });
 
         const abort = (): void => fail();
@@ -286,7 +353,20 @@ async function runFormatterCommand(
                 else reportFailure("failed");
             }
 
-            finish(code === 0 ? stdout : undefined);
+            const exit = {
+                ...(code !== null && { exitCode: code }),
+                ...(signal !== null && { signal }),
+            };
+            const capturedError = capturedStderr();
+            const diagnostics = {
+                ...exit,
+                ...(capturedError !== undefined && { stderr: capturedError }),
+            };
+            if (code === 0) finish({ output: stdout, outcome: "formatted", ...diagnostics });
+            else if (options.signal?.aborted === true)
+                finish({ output: undefined, outcome: "cancelled", ...diagnostics });
+            else finish({ output: undefined, outcome: "failed", ...diagnostics });
+
             release();
         });
 
@@ -367,6 +447,58 @@ function startQueuedFormatters(): void {
     }
 }
 
+function recordScriptFormat(
+    input: ScriptBlockFormatterInput,
+    options: ScriptBlockFormatterOptions,
+    attempt: FormatAttempt,
+    started: number,
+): void {
+    const ms = Math.round((performance.now() - started) * 10) / 10;
+    const context = options.diagnostics;
+    const targetWidth = attempt.targetWidth ?? input.targetWidth ?? options.targetWidth;
+    const dedupe = (): string =>
+        [
+            context?.toolCallId ?? "",
+            context?.stage ?? "",
+            input.language,
+            String(targetWidth ?? ""),
+            attempt.outcome,
+            diagnosticCodeHash(input.code),
+        ].join("\0");
+
+    const fields = () => {
+        let sourceCodeHash: string | undefined;
+        if (context?.sourceCode !== undefined && context.sourceCode !== input.code)
+            sourceCodeHash = diagnosticCodeHash(context.sourceCode);
+
+        let outputHash: string | undefined;
+        if (attempt.output !== undefined) outputHash = diagnosticCodeHash(attempt.output);
+
+        return {
+            toolCallId: context?.toolCallId,
+            stage: context?.stage,
+            language: input.language,
+            profileKind: attempt.profileKind,
+            codeHash: diagnosticCodeHash(input.code),
+            sourceCodeHash,
+            outputHash,
+            bytes: utf8Bytes(input.code),
+            targetWidth,
+            outcome: attempt.outcome,
+            ms,
+            exitCode: attempt.exitCode,
+            signal: attempt.signal,
+            stderr: attempt.stderr,
+            detail: attempt.detail,
+        };
+    };
+
+    // Re-renders repeat cache hits and missing profiles; record each such pair once.
+    if (attempt.outcome === "cached" || attempt.outcome === "no-profile")
+        recordRenderEvent("script_format", fields, dedupe);
+    else recordRenderEvent("script_format", fields);
+}
+
 export function createCommandScriptFormatter(
     commands: ScriptFormatterCommands,
     reportWarning: ScriptFormatterWarningReporter = reportExtensionDiagnostic,
@@ -410,19 +542,27 @@ export function createCommandScriptFormatter(
         return undefined;
     };
 
-    const formatter: ScriptBlockFormatter = async (input, options = {}) => {
-        if (options.signal?.aborted === true) return undefined;
+    const formatScriptBlock = async (
+        input: ScriptBlockFormatterInput,
+        options: ScriptBlockFormatterOptions,
+    ): Promise<FormatAttempt> => {
+        if (options.signal?.aborted === true) return { output: undefined, outcome: "cancelled" };
 
         const command = profileFor(input.language);
         if (command === undefined) {
-            return undefined;
-        }
-
-        if (Buffer.byteLength(input.code, "utf8") > FORMATTER_MAX_INPUT_BYTES) {
-            return undefined;
+            return { output: undefined, outcome: "no-profile" };
         }
 
         const targetWidth = input.targetWidth ?? options.targetWidth;
+        const described = {
+            profileKind: command.kind,
+            ...(targetWidth !== undefined && { targetWidth }),
+        };
+
+        if (Buffer.byteLength(input.code, "utf8") > FORMATTER_MAX_INPUT_BYTES) {
+            return { output: undefined, outcome: "input-limit", ...described };
+        }
+
         const effectiveOptions: ScriptBlockFormatterOptions =
             targetWidth === undefined ? options : { ...options, targetWidth };
 
@@ -434,32 +574,38 @@ export function createCommandScriptFormatter(
             .update(input.code)
             .digest("hex");
         const cached = cache.get(cacheKey);
-        if (cached !== undefined) return cached.output;
+        if (cached !== undefined) return { output: cached.output, outcome: "cached", ...described };
 
         const release = await acquireFormatterSlot(effectiveOptions);
         if (release === undefined) {
-            return undefined;
+            if (effectiveOptions.signal?.aborted === true)
+                return { output: undefined, outcome: "cancelled", ...described };
+
+            return { output: undefined, outcome: "queue-full", ...described };
         }
 
         const completed = cache.get(cacheKey);
         if (completed !== undefined) {
             release();
 
-            if (effectiveOptions.signal?.aborted === true) return undefined;
+            if (effectiveOptions.signal?.aborted === true)
+                return { output: undefined, outcome: "cancelled", ...described };
 
-            return completed.output;
+            return { output: completed.output, outcome: "cached", ...described };
         }
 
         let prepared: PreparedFormatterCommand;
         try {
             prepared = await prepareFormatterCommand(command, effectiveOptions, input.language);
-        } catch {
+        } catch (cause: unknown) {
             release();
+
+            recordRenderError("formatter.prepare", cause, options.diagnostics?.toolCallId);
 
             if (effectiveOptions.signal?.aborted !== true)
                 reportFailure(input.language, "profile could not be prepared");
 
-            return undefined;
+            return { output: undefined, outcome: "failed", ...described };
         }
 
         let resolveClosed = () => {};
@@ -470,9 +616,9 @@ export function createCommandScriptFormatter(
             release();
             resolveClosed();
         };
-        let output: string | undefined;
+        let run: FormatterRun;
         try {
-            output = await runFormatterCommand(
+            run = await runFormatterCommand(
                 prepared.executable,
                 prepared.args,
                 input.code,
@@ -488,28 +634,62 @@ export function createCommandScriptFormatter(
             }
         }
 
+        const output = run.output;
         if (output === undefined) {
-            return undefined;
+            return { ...run, ...described };
         }
 
         let formatted = normalizeCode(output);
-        if (formatted.trim().length === 0) return undefined;
+        if (formatted.trim().length === 0)
+            return { ...run, ...described, output: undefined, outcome: "declined" };
 
         if (input.language === "python") {
             const compacted = await compactPythonStructuralBlankRows(formatted, {
                 ...effectiveOptions,
                 reportWarning,
             });
-            if (compacted === undefined) return undefined;
+            if (compacted === undefined) {
+                let outcome: ScriptFormatOutcome = "declined";
+                if (effectiveOptions.signal?.aborted === true) outcome = "cancelled";
+
+                return {
+                    ...run,
+                    ...described,
+                    output: undefined,
+                    outcome,
+                    detail: "python blank-row compaction unavailable",
+                };
+            }
 
             formatted = compacted;
         }
 
-        if (effectiveOptions.signal?.aborted === true) return undefined;
+        if (effectiveOptions.signal?.aborted === true)
+            return { ...run, ...described, output: undefined, outcome: "cancelled" };
 
         remember(cacheKey, formatted);
 
-        return formatted;
+        let outcome: ScriptFormatOutcome = "formatted";
+        if (formatted === normalizeCode(input.code)) outcome = "unchanged";
+
+        return { ...run, ...described, output: formatted, outcome };
+    };
+
+    const formatter: ScriptBlockFormatter = async (input, options = {}) => {
+        if (!renderDiagnosticsEnabled()) return (await formatScriptBlock(input, options)).output;
+
+        const started = performance.now();
+        let attempt: FormatAttempt;
+        try {
+            attempt = await formatScriptBlock(input, options);
+        } catch (cause: unknown) {
+            recordScriptFormat(input, options, { output: undefined, outcome: "failed" }, started);
+            throw cause;
+        }
+
+        recordScriptFormat(input, options, attempt, started);
+
+        return attempt.output;
     };
 
     return Object.assign(formatter, { profileFor });
@@ -530,7 +710,8 @@ export async function formatScriptInvocation(
             },
             options,
         );
-    } catch {
+    } catch (cause: unknown) {
+        recordRenderError("formatter.invocation", cause, options.diagnostics?.toolCallId);
         return invocation;
     }
 

@@ -21,6 +21,7 @@ import { expandTerminalTabs } from "../../text-boundaries.ts";
 import type { Properties } from "hast";
 import Type from "typebox";
 import { Value } from "typebox/value";
+import { recordRenderError } from "../../diagnostics/render-events.ts";
 
 const PIERRE_RENDER_OPTIONS = {
     useTokenTransformer: false,
@@ -248,7 +249,8 @@ function renderHighlightedDiffCode(
             deletionLines: highlighted.code.deletionLines,
             additionLines: highlighted.code.additionLines,
         };
-    } catch {
+    } catch (cause: unknown) {
+        recordRenderError("diff.highlight", cause);
         return undefined;
     }
 }

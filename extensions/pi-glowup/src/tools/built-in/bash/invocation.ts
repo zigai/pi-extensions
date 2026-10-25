@@ -1034,8 +1034,21 @@ type EmbeddedInlineScript = {
     readonly language: string;
 };
 
+/** Embedded inline programs are not recognized in commands that open a heredoc. */
+export function hasHeredocOperator(command: string): boolean {
+    return heredocOpenPattern.test(command);
+}
+
+/** True for `cat > file.ext` heredocs, whose source language comes from the destination path. */
+export function isFileWritingHeredocCommand(command: string): boolean {
+    const words = tokenizeShellWords(command);
+    return (
+        directScriptInterpreter(words) === undefined && commandBasename(words[0] ?? "") === "cat"
+    );
+}
+
 export function embeddedInlineScripts(command: string): EmbeddedInlineScript[] {
-    if (heredocOpenPattern.test(command)) return [];
+    if (hasHeredocOperator(command)) return [];
 
     const lexemes = tokenizeShellLexemes(command);
     const scripts: EmbeddedInlineScript[] = [];

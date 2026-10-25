@@ -24,6 +24,11 @@ import {
 } from "../rendering/output.ts";
 import { DebugFileLogger } from "../diagnostics/logger.ts";
 import {
+    configureRenderDiagnostics,
+    resetRenderDiagnostics,
+    type RenderDiagnosticSink,
+} from "../diagnostics/render-events.ts";
+import {
     configDiagnostics,
     createDiagnosticSnapshot,
     detailsDiagnostics,
@@ -218,6 +223,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         deletion.clear();
         exploration.clear();
         clearQueuedDiffHighlights();
+        resetRenderDiagnostics();
     };
 
     const reportWarning = (message: string): void => reportExtensionDiagnostic(message);
@@ -231,6 +237,12 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
             ...nextConfig.debugLog,
             enabled: nextConfig.debugLog.enabled || isRetainedOutputLoggingEnabled(),
         });
+
+        let renderSink: RenderDiagnosticSink | undefined;
+        if (nextConfig.debugLog.enabled)
+            renderSink = (event, fields) => debugLogger.record(event, fields);
+
+        configureRenderDiagnostics(renderSink);
     };
 
     configureDebugLog(config);
@@ -701,6 +713,8 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
             phase: "after_reset",
             ...diagnosticSnapshot(),
         }));
+
+        configureRenderDiagnostics(undefined);
         guardedPi[EXTENSION_LOADED_KEY] = false;
     });
 }

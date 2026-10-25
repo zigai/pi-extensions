@@ -37,6 +37,7 @@ import { parse, type WordPart } from "unbash";
 import { shellWords } from "./shell-words.ts";
 import { highlightDoubleQuotedSource } from "./quoted-source.ts";
 import type { ScriptFormatterProfile } from "../../../settings-input.ts";
+import { recordRenderError } from "../../../diagnostics/render-events.ts";
 
 type ScriptPreview = {
     readonly code: string;
@@ -365,6 +366,62 @@ function highlightBashScriptPreviewLines(
     flushHeredocBody();
 
     return highlighted;
+}
+
+export type BashHeredocHighlightBody = {
+    readonly language: string;
+    readonly start: number;
+    readonly end: number;
+    readonly code: string;
+};
+
+/** Heredoc bodies the Bash preview highlights with an interpreter grammar, by UTF-16 offset. */
+export function bashHeredocHighlightBodies(source: string): BashHeredocHighlightBody[] {
+    const bodies: BashHeredocHighlightBody[] = [];
+    let heredoc: BashHeredocHighlight | undefined;
+    let bodyStart = 0;
+    let bodyLines: string[] = [];
+    let offset = 0;
+
+    const flush = (end: number): void => {
+        if (heredoc !== undefined && bodyLines.length > 0)
+            bodies.push({
+                language: heredoc.language,
+                start: bodyStart,
+                end,
+                code: bodyLines.join("\n"),
+            });
+
+        bodyLines = [];
+    };
+
+    for (const line of source.split("\n")) {
+        const lineStart = offset;
+        offset += line.length + 1;
+
+        if (isPreviewMetaLine(line)) {
+            flush(Math.max(bodyStart, lineStart - 1));
+            continue;
+        }
+
+        if (heredoc !== undefined) {
+            if (line.trim() === heredoc.marker) {
+                flush(Math.max(bodyStart, lineStart - 1));
+                heredoc = undefined;
+                continue;
+            }
+
+            if (bodyLines.length === 0) bodyStart = lineStart;
+            bodyLines.push(line);
+            continue;
+        }
+
+        heredoc = bashHeredocHighlightFromLine(line);
+    }
+
+    flush(Math.min(source.length, offset - 1));
+
+    return bodies;
 }
 
 function highlightScriptPreviewLines(
@@ -885,7 +942,8 @@ function shellValue(theme: GlowupRenderTheme, token: string): string {
             if (parts !== undefined)
                 return parts.map((part) => shellPart(theme, part, false)).join("");
         }
-    } catch {
+    } catch (cause: unknown) {
+        recordRenderError("bash.highlight-shell-word", cause);
         return shellText(theme, token);
     }
 

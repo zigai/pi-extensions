@@ -14,6 +14,7 @@ import {
 import { selectedGlowupPresentation } from "../../rendering/presentation-registry.ts";
 import type { ThirdPartyToolRenderContext, ThirdPartyToolRenderer } from "../types.ts";
 import { renderExpandableSection } from "../section-expansion.ts";
+import { recordRenderError } from "../../diagnostics/render-events.ts";
 
 const MAX_MUTATION_CALL_SLOTS = 500;
 const mutationCallSlots = new Map<string, ProtocolMutationCallSlot>();
@@ -138,7 +139,8 @@ function publicCallContext(context: ThirdPartyToolRenderContext): GlowupCallCont
 function safelyRender(render: () => GlowupNode | undefined): GlowupNode | undefined {
     try {
         return render();
-    } catch {
+    } catch (cause: unknown) {
+        recordRenderError("protocol.render", cause);
         return undefined;
     }
 }

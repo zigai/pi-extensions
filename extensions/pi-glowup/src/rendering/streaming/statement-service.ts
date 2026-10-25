@@ -2,6 +2,7 @@ import { Worker } from "node:worker_threads";
 import { reportExtensionDiagnostic } from "@zigai/pi-extension-internals";
 import { MAX_SCRIPT_PREVIEW_ENTRIES } from "../../tools/built-in/bash/preview-store.ts";
 import type { StatementRequest, StatementResponse } from "./statement-worker.ts";
+import { recordRenderError } from "../../diagnostics/render-events.ts";
 
 declare global {
     interface ImportMeta {
@@ -100,7 +101,8 @@ export function createStatementService() {
 
             worker.ref();
             worker.postMessage(job.request);
-        } catch {
+        } catch (cause: unknown) {
+            recordRenderError("statement.worker-dispatch", cause);
             fail();
         }
     }

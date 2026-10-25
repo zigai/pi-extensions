@@ -35,6 +35,12 @@ import {
 import { renderBashCommandCall, type BashCommandRenderOptions } from "./renderer.ts";
 import { StreamingScriptIdentityStore } from "./streaming-identity.ts";
 import { renderExpandableSection } from "../../section-expansion.ts";
+import {
+    recordRenderError,
+    renderDiagnosticsEnabled,
+    type ScriptSegmentDiagnostic,
+} from "../../../diagnostics/render-events.ts";
+import { recordScriptAnalysis } from "./script-analysis.ts";
 
 type ScriptPreviewSchedule = {
     readonly toolCallId: string;
@@ -169,6 +175,29 @@ export function createNativeBashFeature(
 
         const state = context.isError ? "error" : context.isPartial ? "running" : "success";
         const command = commandField(args) ?? "";
+        if (context.argsComplete && renderDiagnosticsEnabled()) {
+            // The token preview records analysis after formatting whenever it formats.
+            const formatter =
+                formatterAccessor?.() ??
+                scheduledCommands.get(context.toolCallId)?.options.formatter;
+            if (
+                streamCode !== undefined ||
+                formatter === undefined ||
+                scriptForPreview(command, formatter, formatEmbedded !== undefined) === undefined
+            ) {
+                let heredocSkipReason: string | undefined;
+                if (streamCode !== undefined) heredocSkipReason = "untracked-streaming";
+
+                recordScriptAnalysis({
+                    toolName: "bash",
+                    toolCallId: context.toolCallId,
+                    command,
+                    formatter,
+                    ...(heredocSkipReason !== undefined && { heredocSkipReason }),
+                });
+            }
+        }
+
         if (streamCode !== undefined) {
             let script = streamingScriptIdentities.resolve(context.toolCallId, command);
             if (context.argsComplete) {
@@ -410,6 +439,17 @@ export function createNativeBashFeature(
             );
         }
 
+        let heredocs: ScriptSegmentDiagnostic[] | undefined;
+        let recordSegment: ((segment: ScriptSegmentDiagnostic) => void) | undefined;
+        if (renderDiagnosticsEnabled()) {
+            const recorded: ScriptSegmentDiagnostic[] = [];
+
+            recordSegment = (segment) => {
+                heredocs = recorded;
+                recorded.push(segment);
+            };
+        }
+
         const formatted = await formatAndStoreScriptPreview({
             sink: scriptPreviews,
             toolCallId: options.toolCallId,
@@ -418,12 +458,16 @@ export function createNativeBashFeature(
             embeddedHeredocs: formatEmbedded !== undefined,
             signal,
             ...(targetWidth !== undefined && { targetWidth }),
+            ...(recordSegment !== undefined && { recordSegment }),
             isCurrent: () =>
                 !signal.aborted &&
                 options.isCurrent() &&
                 scheduledCommands.get(options.toolCallId) === scheduled &&
                 scheduled.controller === controller,
-        }).catch(() => false);
+        }).catch((cause: unknown) => {
+            recordRenderError("bash.format-preview", cause, options.toolCallId);
+            return false;
+        });
 
         if (
             signal.aborted ||
@@ -432,6 +476,22 @@ export function createNativeBashFeature(
             scheduled.controller !== controller
         )
             return;
+
+        if (recordSegment !== undefined) {
+            let heredocSkipReason: string | undefined;
+            if (formatEmbedded === undefined) heredocSkipReason = "embedded-formatting-disabled";
+
+            recordScriptAnalysis({
+                toolName: "bash",
+                toolCallId: options.toolCallId,
+                command: options.command,
+                formatter: options.formatter,
+                formatted,
+                ...(heredocs !== undefined && { heredocs }),
+                ...(heredocSkipReason !== undefined && { heredocSkipReason }),
+                displayCode: scriptPreviews.get(options.toolCallId)?.code ?? options.command,
+            });
+        }
 
         if (!formatted) return;
 

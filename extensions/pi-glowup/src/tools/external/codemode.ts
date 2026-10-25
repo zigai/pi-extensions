@@ -2,6 +2,8 @@ import { parseStreamingJson } from "@earendil-works/pi-ai";
 import type { CodePreview, CodeSource } from "../../rendering/streaming/presentation.ts";
 import { makeComponent, wrapPrefixedLine, toolExpandHint } from "../../rendering/component.ts";
 import type { ScriptBlockFormatter } from "../built-in/bash/formatter.ts";
+import { recordScriptAnalysis } from "../built-in/bash/script-analysis.ts";
+import { recordRenderError } from "../../diagnostics/render-events.ts";
 import { omitLeadingImportPrologue } from "../built-in/bash/prologue.ts";
 import { PreviewStore } from "../built-in/file-previews.ts";
 import { renderGlowupOutput } from "../../rendering/output.ts";
@@ -101,9 +103,16 @@ export function createCodemodePreview(formatterAccessor?: () => ScriptBlockForma
         const code = await options
             .formatter?.(
                 { label: "Codemode", language: "javascript", code: options.code },
-                { signal, targetWidth: width },
+                {
+                    signal,
+                    targetWidth: width,
+                    diagnostics: { toolCallId: options.toolCallId, stage: "preview" },
+                },
             )
-            .catch(() => undefined);
+            .catch((cause: unknown) => {
+                recordRenderError("codemode.format", cause, options.toolCallId);
+                return undefined;
+            });
         if (
             code === undefined ||
             signal.aborted ||
@@ -215,6 +224,13 @@ export function createCodemodePreview(formatterAccessor?: () => ScriptBlockForma
                 : preview.code;
         },
         schedule(options: CodemodeSchedule): void {
+            recordScriptAnalysis({
+                toolName: "codemode",
+                toolCallId: options.toolCallId,
+                command: options.code,
+                formatter: options.formatter,
+            });
+
             const previous = scheduled.get(options.toolCallId);
             if (
                 previous?.options.code === options.code &&

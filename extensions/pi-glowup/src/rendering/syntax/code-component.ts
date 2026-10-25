@@ -7,6 +7,7 @@ import {
     loadSyntaxLanguageIfReady,
     onSyntaxHighlightingStateChange,
 } from "./highlighter.ts";
+import { recordRenderError } from "../../diagnostics/render-events.ts";
 
 export type CodeOutputSyntax = {
     readonly language?: string;
@@ -125,7 +126,9 @@ function requestPendingCodeOutputSyntaxLoad(language: string): void {
                 }
             }
         })
-        .catch(() => {
+        .catch((cause: unknown) => {
+            recordRenderError("syntax.language-load", cause);
+
             if (pendingCodeOutputSyntaxLoads.get(language) === invalidations)
                 pendingCodeOutputSyntaxLoads.delete(language);
         })

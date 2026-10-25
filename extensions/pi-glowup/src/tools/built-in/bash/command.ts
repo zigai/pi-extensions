@@ -8,6 +8,7 @@ import {
 } from "unbash";
 
 import { parseScriptInvocation, type ScriptInvocation } from "./invocation.ts";
+import { recordRenderError } from "../../../diagnostics/render-events.ts";
 
 export type ShellLayout = "preserve" | "auto" | "always";
 export type ShellOperatorPosition = "trailing" | "leading";
@@ -380,7 +381,8 @@ function analyzeBashLayout(
     let script: ParsedScript;
     try {
         script = parse(command);
-    } catch {
+    } catch (cause: unknown) {
+        recordRenderError("bash.layout-parse", cause);
         return unchanged;
     }
 

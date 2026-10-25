@@ -49,6 +49,7 @@ import { neutralizeTerminalControls } from "../../text-boundaries.ts";
 import { syntaxHighlightingVersion } from "../syntax/highlighter.ts";
 import { PREVIEW_MUTATION_SETTINGS, type MutationSettings } from "../preview-settings.ts";
 import { replacementFocusColumns } from "./intraline.ts";
+import { recordRenderError } from "../../diagnostics/render-events.ts";
 
 const ANSI_SEQUENCE_PREFIX = ansiStyles.modifier.reset.open.slice(0, 2);
 const DIFF_STYLE_RESET = `${ansiStyles.modifier.bold.close}${ansiStyles.color.close}${ansiStyles.bgColor.close}`;
@@ -159,7 +160,8 @@ class DiffHighlightScheduler {
         let result: HighlightedDiffLoadResult;
         try {
             result = await task.run();
-        } catch {
+        } catch (cause: unknown) {
+            recordRenderError("diff.pierre-highlight", cause);
             result = { value: emptyHighlightedDiffSet(), failed: true };
         }
 

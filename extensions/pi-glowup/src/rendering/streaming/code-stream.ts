@@ -10,6 +10,10 @@ import { formatCodeUnit } from "./code-unit.ts";
 import { MAX_SCRIPT_PREVIEW_ENTRIES } from "../../tools/built-in/bash/preview-store.ts";
 import { createStatementService } from "./statement-service.ts";
 import type { StatementUnit } from "./statement-worker.ts";
+import {
+    recordRenderError,
+    type ScriptFormatDiagnostics,
+} from "../../diagnostics/render-events.ts";
 
 export type CodeStreamingMode = "token" | "statement" | "block";
 
@@ -23,6 +27,7 @@ export type CodeStreamInput = {
     readonly formatter?: ScriptBlockFormatter | undefined;
     readonly targetWidth?: number | undefined;
     readonly invalidate?: (() => void) | undefined;
+    readonly diagnostics?: ScriptFormatDiagnostics | undefined;
 };
 
 export type CodeStreamStore = {
@@ -114,8 +119,9 @@ export function createCodeStreamStore(): CodeStreamStore {
 
         try {
             entry.input.invalidate?.();
-        } catch {
+        } catch (cause: unknown) {
             // A renderer disappearing must not turn a completed unit into a failed job.
+            recordRenderError("code-stream.invalidate", cause);
         }
     }
 
@@ -270,7 +276,9 @@ export function createCodeStreamStore(): CodeStreamStore {
                 visible = entry.display;
             }
         })()
-            .catch(() => {
+            .catch((cause: unknown) => {
+                recordRenderError("code-stream.run", cause);
+
                 if (!current(entry)) return;
 
                 reportExtensionDiagnostic(
