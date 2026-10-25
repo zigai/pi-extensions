@@ -76,7 +76,7 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-glowup.json`.
 | `scriptPreview.shellLayout` | `preserve` \| `auto` \| `always` | `"auto"` | Choose when composed Bash commands are reflowed at safe syntax boundaries. |
 | `scriptPreview.shellOperatorPosition` | `trailing` \| `leading` | `"trailing"` | Place Bash chain operators before or after reflowed line breaks. |
 | `scriptPreview.shellOutputStyle` | `terminal` \| `gutter` | `"terminal"` | Show Bash command output flush left like a terminal, or behind a dim │ gutter. |
-| `scriptPreview.formatters` | Record<string, [CommandFormatter](#settings-type-CommandFormatter) \| [PythonFormatter](#settings-type-PythonFormatter) \| [JavaScriptFormatter](#settings-type-JavaScriptFormatter) \| [TypeScriptFormatter](#settings-type-TypeScriptFormatter) \| [BashFormatter](#settings-type-BashFormatter)> | `{}` | Display-only profiles keyed by language id; statement mode formats each unit in both views, otherwise expansion shows original source. |
+| `scriptPreview.formatters` | Record<string, [CommandFormatter](#settings-type-CommandFormatter) \| [PythonFormatter](#settings-type-PythonFormatter) \| [OxfmtFormatter](#settings-type-OxfmtFormatter) \| [BashFormatter](#settings-type-BashFormatter) \| [AwkFormatter](#settings-type-AwkFormatter) \| [JqFormatter](#settings-type-JqFormatter)> | `{}` | Display-only profiles keyed by language id; statement mode formats each unit in both views, otherwise expansion shows original source. |
 | `streaming.prose` | `token` \| `sentence` \| `paragraph` | `"token"` | Reveal assistant/thinking prose and declared generated tool previews as tokens, completed sentences, or Markdown paragraphs and list items. Completed content blocks always reveal their remaining tail. |
 | `streaming.code` | `token` \| `statement` \| `block` | `"token"` | Reveal generated code in assistant/thinking Markdown, writes, and script/protocol previews as tokens, completed statements, or whole blocks. Statement mode supports JavaScript, TypeScript, Python, and Bash; unknown languages and indented code wait for completion. Configured formatters format each statement separately in both views. Diffs, ordinary tool output, and the user shell are unchanged. |
 
@@ -223,29 +223,15 @@ Additional fields are not allowed.
 | `collections` | `fill` \| `ruff-default` | No | Collapse collections that fit; fill instead packs items within multiline brackets. |
 | `magicTrailingComma` | boolean | No | Treat trailing commas as requests for vertical expansion. |
 
-<a id="settings-type-JavaScriptFormatter"></a>
+<a id="settings-type-OxfmtFormatter"></a>
 
-#### JavaScriptFormatter
-
-Additional fields are not allowed.
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `kind` | `javascript` | Yes | Use Oxfmt's JavaScript parser. |
-| `command` | string[] | Yes | Executable followed by arguments; no shell expansion is performed. |
-| `imports` | `show` \| `omit` | No | Leading import/setup visibility in collapsed display; expansion retains all source. |
-| `tabWidth` | integer | No | Oxfmt indentation width. |
-| `objectWrap` | `collapse` \| `preserve` | No | Collapse object literals when they fit the actual content width. |
-
-<a id="settings-type-TypeScriptFormatter"></a>
-
-#### TypeScriptFormatter
+#### OxfmtFormatter
 
 Additional fields are not allowed.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `kind` | `typescript` | Yes | Use Oxfmt's TypeScript parser. |
+| `kind` | `javascript` \| `typescript` | Yes | Oxfmt parser: JavaScript or TypeScript. |
 | `command` | string[] | Yes | Executable followed by arguments; no shell expansion is performed. |
 | `imports` | `show` \| `omit` | No | Leading import/setup visibility in collapsed display; expansion retains all source. |
 | `tabWidth` | integer | No | Oxfmt indentation width. |
@@ -265,6 +251,30 @@ Additional fields are not allowed.
 | `caseIndent` | boolean | No | Indent Bash case arms. |
 | `spaceRedirects` | boolean | No | Separate redirect operators from targets. |
 | `binaryNextLine` | boolean | No | Start continued Bash chains with their operator. |
+
+<a id="settings-type-AwkFormatter"></a>
+
+#### AwkFormatter
+
+Additional fields are not allowed.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `kind` | `awk` | Yes | Pretty-print single-quoted inline awk programs that do not fit with gawk, which parses without running them. |
+| `command` | string[] | No | Executable followed by arguments; defaults to gawk on PATH. |
+| `indentWidth` | integer | No | Indentation width for formatted rows. |
+
+<a id="settings-type-JqFormatter"></a>
+
+#### JqFormatter
+
+Additional fields are not allowed.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `kind` | `jq` | Yes | Format single-quoted inline jq programs that do not fit with jqfmt, breaking pipes, then objects, then arrays only as needed. |
+| `command` | string[] | No | Executable followed by arguments; defaults to jqfmt on PATH. |
+| `indentWidth` | integer | No | Indentation width for formatted rows. |
 <!-- pi-extension-settings:end -->
 
 ## License

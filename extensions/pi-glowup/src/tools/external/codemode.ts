@@ -214,6 +214,8 @@ export function createCodemodePreview(formatterAccessor?: () => ScriptBlockForma
                 profile === undefined ||
                 profile.kind === "command" ||
                 profile.kind === "bash" ||
+                profile.kind === "awk" ||
+                profile.kind === "jq" ||
                 profile.imports === "show"
             )
                 return preview.code;

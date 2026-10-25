@@ -49,7 +49,7 @@ function stripShellWrapper(command: string | undefined): string {
     return stripShellQuotedValue(wrapperMatch[1] ?? "");
 }
 
-function decodeShellWord(word: string): string {
+export function decodeShellWord(word: string): string {
     let decoded = "";
     let quote: "'" | '"' | "$'" | undefined;
     let escaped = false;
@@ -776,7 +776,7 @@ const wrapperOptionsWithValues = new Set([
     "-u",
 ]);
 
-function commandBasename(word: string): string {
+export function commandBasename(word: string): string {
     const cleanWord = unquoteCommandWord(word);
     const parts = cleanWord.replace(/\\/g, "/").split("/");
     return (parts[parts.length - 1] ?? cleanWord).toLowerCase().replace(/\.exe$/u, "");
@@ -806,19 +806,27 @@ function commandIndexAfterOptions(words: readonly string[], start: number): numb
     return undefined;
 }
 
-function directScriptInterpreterFrom(
+/** Index of the first word accepted by `matches`, looking through supported launch wrappers. */
+export function wrappedCommandIndex(
+    words: readonly string[],
+    matches: (word: string) => boolean,
+): number | undefined {
+    return wrappedCommandIndexFrom(words, 0, 0, matches);
+}
+
+function wrappedCommandIndexFrom(
     words: readonly string[],
     initialStart: number,
     depth: number,
-): DirectScriptInterpreter | undefined {
+    matches: (word: string) => boolean,
+): number | undefined {
     if (depth > 4) return undefined;
 
     let start = initialStart;
     while (isEnvironmentAssignment(words[start] ?? "")) start += 1;
 
     const executable = commandBasename(words[start] ?? "");
-    const direct = scriptInterpreterForWord(words[start] ?? "");
-    if (direct !== undefined) return { interpreter: direct, index: start };
+    if (matches(words[start] ?? "")) return start;
 
     let commandIndex: number | undefined;
     if (executable === "env" || executable === "command" || executable === "exec") {
@@ -839,11 +847,20 @@ function directScriptInterpreterFrom(
 
     if (commandIndex === undefined) return undefined;
 
-    return directScriptInterpreterFrom(words, commandIndex, depth + 1);
+    return wrappedCommandIndexFrom(words, commandIndex, depth + 1, matches);
 }
 
 function directScriptInterpreter(words: readonly string[]): DirectScriptInterpreter | undefined {
-    return directScriptInterpreterFrom(words, 0, 0);
+    const index = wrappedCommandIndex(
+        words,
+        (word) => scriptInterpreterForWord(word) !== undefined,
+    );
+    if (index === undefined) return undefined;
+
+    const interpreter = scriptInterpreterForWord(words[index] ?? "");
+    if (interpreter === undefined) return undefined;
+
+    return { interpreter, index };
 }
 
 function inlineScriptFlagsForInterpreter(interpreter: ScriptInterpreter): ReadonlySet<string> {

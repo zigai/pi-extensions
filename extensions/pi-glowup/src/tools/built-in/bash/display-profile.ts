@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import type { ScriptFormatterProfile } from "../../../settings-input.ts";
 import type { ScriptBlockFormatterOptions } from "./formatter.ts";
+import { filterFormatterCommand } from "./filter-formatting.ts";
 
 export type PreparedFormatterCommand = {
     readonly executable: string;
@@ -17,6 +18,15 @@ export async function prepareFormatterCommand(
     language?: string,
 ): Promise<PreparedFormatterCommand> {
     const signal = options.signal;
+
+    if (profile.kind === "awk" || profile.kind === "jq") {
+        const [executable, ...filterArgs] = filterFormatterCommand(profile);
+
+        if (executable === undefined) throw new Error("Display formatter command is empty");
+
+        return { executable, args: filterArgs };
+    }
+
     const [command, ...args] = profile.command;
 
     if (command === undefined) throw new Error("Display formatter command is empty");

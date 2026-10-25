@@ -9,6 +9,7 @@ import {
     recordRenderError,
     type ScriptFormatDiagnostics,
 } from "../../../diagnostics/render-events.ts";
+import { hasFormattableFilterProgram } from "../../../rendering/streaming/embedded-filters.ts";
 
 type ScriptPreviewSink = {
     get(toolCallId: string): ScriptInvocation | undefined;
@@ -28,6 +29,16 @@ export type FormatScriptPreviewOptions = {
     readonly recordSegment?: ScriptFormatDiagnostics["recordSegment"];
 };
 
+/** Source the embedded formatter can rewrite in place inside a Bash command. */
+export function hasEmbeddedSource(
+    command: string,
+    formatter: ScriptBlockFormatter | undefined,
+): boolean {
+    if (formatter === undefined) return false;
+
+    return command.includes("<<") || hasFormattableFilterProgram(command, formatter);
+}
+
 export function scriptForPreview(
     command: string,
     formatter: ScriptBlockFormatter | undefined,
@@ -38,7 +49,7 @@ export function scriptForPreview(
 
     if (
         formatter?.profileFor?.("bash") === undefined &&
-        !(embeddedHeredocs && formatter !== undefined && command.includes("<<"))
+        !(embeddedHeredocs && hasEmbeddedSource(command, formatter))
     )
         return undefined;
 

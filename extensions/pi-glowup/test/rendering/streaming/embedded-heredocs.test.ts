@@ -15,6 +15,7 @@ import {
     type ScriptBlockFormatterInput,
 } from "../../../src/tools/built-in/bash/formatter.ts";
 import { heredocScriptInterpreter } from "../../../src/tools/built-in/bash/invocation.ts";
+import { shellWords } from "../../../src/tools/built-in/bash/shell-words.ts";
 
 const stores: CodeStreamStore[] = [];
 afterEach(async () => {
@@ -331,4 +332,200 @@ it("cancels session-owned embedded formatting even when a backend ignores its ab
     await expect(pending).resolves.toBe(code);
     release("a = 1\nb = 2\n");
     await subject.settled();
+});
+
+// Inline awk/jq programs are formatted in place like source heredocs: only the literal program
+// word changes, continuation rows hang from the row's indentation, and the shell stays valid.
+function filterSetup() {
+    const subject = createCodeStreamStore();
+    stores.push(subject);
+    const inputs: ScriptBlockFormatterInput[] = [];
+    const profiles = parseScriptFormatterCommandsValue({
+        awk: { kind: "awk" },
+        jq: { kind: "jq" },
+    });
+    const formatter: ScriptBlockFormatter = Object.assign(
+        async (input: ScriptBlockFormatterInput) => {
+            inputs.push(input);
+
+            if (input.language === "jq") return input.code.split(" | ").join(" |\n  ");
+
+            if (input.language === "awk")
+                return input.code
+                    .replace(/\{ /gu, "{\n  ")
+                    .replace(/; /gu, "\n  ")
+                    .replace(/ \}/gu, "\n}");
+
+            return undefined;
+        },
+        { profileFor: (language: string) => profiles.get(language) },
+    );
+
+    return { subject, formatter, inputs };
+}
+
+function programWords(command: string): string[] {
+    return shellWords(command)
+        .filter((word) => word.text.startsWith("'"))
+        .map((word) => word.text.slice(1, -1));
+}
+
+it("formats awk and jq programs in place without touching option values", async () => {
+    const { subject, formatter, inputs } = filterSetup();
+    const code = [
+        "if [ -f data.json ]; then",
+        "  jq -r --arg tag 'a | b' '.items[] | select(.tags | index($tag)) | .name' data.json",
+        "fi",
+        "awk -F ':' '{ total += $3; count++ } END { print total / count }' /etc/passwd | tee out.txt",
+    ].join("\n");
+
+    const display = await subject.formatEmbedded(
+        { label: "Bash", language: "bash", code, targetWidth: 40 },
+        formatter,
+    );
+
+    expect(display).toBe(
+        [
+            "if [ -f data.json ]; then",
+            "  jq -r --arg tag 'a | b' '.items[] |",
+            "    select(.tags |",
+            "    index($tag)) |",
+            "    .name' data.json",
+            "fi",
+            "awk -F ':' '{",
+            "  total += $3",
+            "  count++",
+            "} END {",
+            "  print total / count",
+            "}' /etc/passwd | tee out.txt",
+        ].join("\n"),
+    );
+
+    // The display is still one valid command with the same option values.
+    expect(programWords(display).slice(0, 1)).toEqual(["a | b"]);
+    expect(programWords(display)).toContain(":");
+    expect(
+        inputs.map(({ language, code, targetWidth, firstLineOffset }) => ({
+            language,
+            code,
+            targetWidth,
+            firstLineOffset,
+        })),
+    ).toEqual([
+        {
+            language: "jq",
+            code: ".items[] | select(.tags | index($tag)) | .name",
+            targetWidth: 38,
+            firstLineOffset: 25,
+        },
+        {
+            language: "awk",
+            code: "{ total += $3; count++ } END { print total / count }",
+            targetWidth: 40,
+            firstLineOffset: 12,
+        },
+    ]);
+});
+
+it.each([
+    "awk -f summarize.awk -v limit=10 access.log | sort | head -n 20 | tee summary.txt",
+    'jq -r ".items[] | select(.name == \\"$NAME\\") | .id" data.json | xargs -n1 echo',
+    "jq -rf filter.jq data.json | awk 'NF' | sort -u | tee filtered-output.txt",
+    "printf '%s\\n' '{ print $1 } | jq .a | awk' | wc -l",
+])("never sends file programs, data, or expanding programs: %s", async (code) => {
+    const { subject, formatter, inputs } = filterSetup();
+    const display = await subject.formatEmbedded(
+        { label: "Bash", language: "bash", code, targetWidth: 20 },
+        formatter,
+    );
+
+    expect(display).toBe(code);
+    expect(inputs.filter((input) => input.code !== "NF")).toEqual([]);
+});
+
+it("keeps programs that fit and re-lays out others when the width changes", async () => {
+    const { subject, formatter, inputs } = filterSetup();
+    const code = "curl -s https://example.test/items | jq '.items[] | .name | ascii_downcase'";
+
+    const wide = await subject.formatEmbedded(
+        { label: "Bash", language: "bash", code, targetWidth: 120 },
+        formatter,
+    );
+    expect(wide).toBe(code);
+    expect(inputs).toEqual([]);
+
+    const narrow = await subject.formatEmbedded(
+        { label: "Bash", language: "bash", code, targetWidth: 60 },
+        formatter,
+    );
+    expect(narrow).toBe(
+        "curl -s https://example.test/items | jq '.items[] |\n  .name |\n  ascii_downcase'",
+    );
+
+    expect(inputs.map((input) => input.targetWidth)).toEqual([60]);
+});
+
+it("shows formatted awk programs collapsed and expanded, like source heredocs", async () => {
+    const { subject, formatter } = filterSetup();
+    const feature = createNativeBashFeature(
+        () => formatter,
+        async (input, backend, options) => subject.formatEmbedded(input, backend, options),
+    );
+    const theme = new Theme(TEST_THEME_COLORS, TEST_THEME_BACKGROUND_COLORS, "truecolor");
+    const command = `awk -F, '{ sum += $2; rows++ } END { print sum / rows }' ${"measurements/".repeat(4)}data.csv`;
+    const context: BuiltInRenderContext = {
+        args: { command },
+        toolCallId: "awk-embedded",
+        cwd: "/work",
+        state: {},
+        lastComponent: undefined,
+        executionStarted: true,
+        argsComplete: true,
+        isPartial: false,
+        expanded: false,
+        showImages: false,
+        isError: false,
+        durationMs: undefined,
+        outputPad: 1,
+        invalidate: () => {},
+    };
+    const render = (expanded: boolean, width = 50) =>
+        stripVTControlCharacters(
+            feature
+                .renderBashCall(
+                    { command },
+                    theme,
+                    { ...context, expanded },
+                    () => 30,
+                    () => false,
+                    () => "auto",
+                    () => "trailing",
+                )
+                .render(width)
+                .join("\n"),
+        );
+    try {
+        feature.schedule({
+            toolCallId: context.toolCallId,
+            command,
+            formatter,
+            completed: true,
+            signal: undefined,
+            isCurrent: () => true,
+            invalidate: context.invalidate,
+        });
+
+        render(false);
+        await vi.waitUntil(() => render(false).includes("  sum += $2"));
+
+        for (const expanded of [false, true]) {
+            const rows = render(expanded);
+            expect(rows).toContain("$ awk -F, '{\n    sum += $2\n    rows++\n  }");
+            expect(rows).toContain("data.csv");
+        }
+
+        expect(context.args).toEqual({ command });
+    } finally {
+        feature.clear();
+    }
 });

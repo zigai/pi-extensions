@@ -1,6 +1,13 @@
 import path from "node:path";
-import type { BundledLanguage } from "shiki";
+import type { BundledLanguage, LanguageRegistration } from "shiki";
 import { BUNDLED_SYNTAX_LANGUAGE_NAMES } from "./bundled-language-names.ts";
+import { jqGrammar } from "./grammars/jq.ts";
+
+/** Languages Shiki does not bundle, registered from vendored TextMate grammars. */
+const CUSTOM_SYNTAX_LANGUAGES = new Map<string, LanguageRegistration>([["jq", jqGrammar]]);
+
+export type CustomSyntaxLanguage = "jq";
+export type SyntaxLanguage = BundledLanguage | CustomSyntaxLanguage;
 
 const LANGUAGE_ALIASES = new Map<string, string>([
     ["bash", "bash"],
@@ -124,7 +131,7 @@ export const PRELOADED_SYNTAX_LANGUAGES = [
 /** Normalizes a Markdown/tool language hint to a Shiki bundled language when known. */
 export function normalizeSyntaxLanguage(
     language: string | undefined | null,
-): BundledLanguage | "text" | undefined {
+): SyntaxLanguage | "text" | undefined {
     const raw = language?.trim().toLowerCase();
     if (raw === undefined || raw.length === 0) {
         return undefined;
@@ -136,13 +143,14 @@ export function normalizeSyntaxLanguage(
         return "text";
     }
 
+    if (isCustomSyntaxLanguage(normalized)) return normalized;
     return isBundledSyntaxLanguage(normalized) ? normalized : undefined;
 }
 
 /** Infers a Shiki language from a file path or basename. */
 export function syntaxLanguageFromPath(
     filePath: string | undefined,
-): BundledLanguage | "text" | undefined {
+): SyntaxLanguage | "text" | undefined {
     if (filePath === undefined || filePath.length === 0) {
         return undefined;
     }
@@ -157,9 +165,7 @@ export function syntaxLanguageFromPath(
 }
 
 /** Infers a Shiki language from a common script-interpreter shebang. */
-export function syntaxLanguageFromShebang(
-    content: string | undefined,
-): BundledLanguage | undefined {
+export function syntaxLanguageFromShebang(content: string | undefined): SyntaxLanguage | undefined {
     if (content === undefined || !content.startsWith("#!")) {
         return undefined;
     }
@@ -227,11 +233,28 @@ function environmentShebangCommand(arguments_: ReadonlyArray<string>): ReadonlyA
 export function syntaxLanguageFromFile(
     filePath: string | undefined,
     content: string | undefined,
-): BundledLanguage | "text" | undefined {
+): SyntaxLanguage | "text" | undefined {
     return syntaxLanguageFromPath(filePath) ?? syntaxLanguageFromShebang(content);
 }
 
 /** Returns true when Shiki can load the language name or alias. */
 export function isBundledSyntaxLanguage(language: string): language is BundledLanguage {
     return BUNDLED_SYNTAX_LANGUAGE_NAMES.has(language);
+}
+
+function isCustomSyntaxLanguage(language: string): language is CustomSyntaxLanguage {
+    return CUSTOM_SYNTAX_LANGUAGES.has(language);
+}
+
+/** Returns true when Shiki can load the language, bundled or vendored. */
+export function isLoadableSyntaxLanguage(language: string): language is SyntaxLanguage {
+    return isBundledSyntaxLanguage(language) || isCustomSyntaxLanguage(language);
+}
+
+/** The argument Shiki's `loadLanguage` and `createHighlighter` need for a language. */
+export function syntaxLanguageInput(
+    language: SyntaxLanguage,
+): BundledLanguage | LanguageRegistration {
+    if (language === "jq") return jqGrammar;
+    return language;
 }

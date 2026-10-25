@@ -36,6 +36,7 @@ import { type Component, visibleWidth } from "@earendil-works/pi-tui";
 import { parse, type WordPart } from "unbash";
 import { shellWords } from "./shell-words.ts";
 import { highlightDoubleQuotedSource } from "./quoted-source.ts";
+import { embeddedFilterPrograms } from "./filter-programs.ts";
 import type { ScriptFormatterProfile } from "../../../settings-input.ts";
 import { recordRenderError } from "../../../diagnostics/render-events.ts";
 
@@ -232,6 +233,15 @@ function highlightShellLine(theme: GlowupRenderTheme, line: string): string {
     return `${highlightedShell}${commentPart.length === 0 ? "" : dim(theme, commentPart)}`;
 }
 
+/** Inline interpreter source and awk/jq programs, ordered by position. */
+function embeddedSourceSpans(
+    source: string,
+): ReadonlyArray<{ readonly start: number; readonly end: number; readonly language: string }> {
+    return [...embeddedInlineScripts(source), ...embeddedFilterPrograms(source)].sort(
+        (left, right) => left.start - right.start,
+    );
+}
+
 type EmbeddedInlineHighlightRow = {
     readonly start: number;
     readonly end: number;
@@ -244,7 +254,7 @@ function embeddedInlineHighlightRows(
     invalidate: (() => void) | undefined,
 ): ReadonlyMap<number, ReadonlyArray<EmbeddedInlineHighlightRow>> {
     const source = lines.join("\n");
-    const scripts = embeddedInlineScripts(source);
+    const scripts = embeddedSourceSpans(source);
     if (scripts.length === 0) return new Map();
 
     const lineStarts: number[] = [0];
@@ -454,7 +464,7 @@ function scriptPreviewSyntaxLanguages(invocation: ScriptInvocation): readonly st
         }
     }
 
-    for (const script of embeddedInlineScripts(invocation.code)) {
+    for (const script of embeddedSourceSpans(invocation.code)) {
         languages.add(script.language);
     }
 
@@ -480,7 +490,8 @@ function collapsedScriptPreview(
     showPrologueOmission: boolean,
     profile?: ScriptFormatterProfile,
 ): ScriptPreview {
-    if (profile?.kind === "bash") return { code: invocation.code };
+    if (profile?.kind === "bash" || profile?.kind === "awk" || profile?.kind === "jq")
+        return { code: invocation.code };
 
     if (profile !== undefined && profile.kind !== "command") {
         if (profile.imports === "show") return { code: invocation.code };

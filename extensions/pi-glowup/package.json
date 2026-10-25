@@ -36,7 +36,8 @@
     "themes",
     "config.schema.json",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "type": "module",
   "main": "dist/src/index.ts",

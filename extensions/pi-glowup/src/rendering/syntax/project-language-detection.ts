@@ -1,8 +1,7 @@
 import { readdirSync, type Dirent } from "node:fs";
 import path from "node:path";
 
-import type { BundledLanguage } from "shiki";
-import { syntaxLanguageFromPath } from "./language.ts";
+import { syntaxLanguageFromPath, type SyntaxLanguage } from "./language.ts";
 
 const DEFAULT_MAX_PROJECT_LANGUAGE_SCAN_FILES = 10_000;
 const DEFAULT_MAX_PROJECT_LANGUAGE_SCAN_DIRECTORIES = 2_000;
@@ -42,7 +41,7 @@ export type ProjectLanguageDetectionOptions = {
 };
 
 export type ProjectLanguageDetectionResult = {
-    readonly languages: readonly BundledLanguage[];
+    readonly languages: readonly SyntaxLanguage[];
     readonly scannedFiles: number;
     readonly scannedDirectories: number;
     readonly readErrors: number;
@@ -58,7 +57,7 @@ export function detectProjectSyntaxLanguages(
     const maxDirectories = options.maxDirectories ?? DEFAULT_MAX_PROJECT_LANGUAGE_SCAN_DIRECTORIES;
     const maxMillis = options.maxMillis ?? DEFAULT_MAX_PROJECT_LANGUAGE_SCAN_MS;
     const startedAtMs = Date.now();
-    const languages = new Set<BundledLanguage>();
+    const languages = new Set<SyntaxLanguage>();
     const pendingDirectories = [path.resolve(cwd)];
     let scannedFiles = 0;
     let scannedDirectories = 0;

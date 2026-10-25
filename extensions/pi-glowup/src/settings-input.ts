@@ -342,6 +342,20 @@ const javascriptFormatterProperties = {
     ),
 };
 
+function filterFormatterCommandSchema(defaultCommand: readonly string[]) {
+    return Type.Optional(
+        Type.Array(Type.String({ minLength: 1, pattern: "^[^\\u0000]+$" }), {
+            minItems: 1,
+            default: defaultCommand,
+            description: `Executable followed by arguments; defaults to ${defaultCommand.join(" ")} on PATH.`,
+        }),
+    );
+}
+
+const filterIndentWidthSchema = Type.Optional(
+    Type.Integer({ minimum: 1, default: 2, description: "Indentation width for formatted rows." }),
+);
+
 export const scriptFormatterProfileSchema = Type.Union([
     Type.Object(
         {
@@ -378,17 +392,16 @@ export const scriptFormatterProfileSchema = Type.Union([
     ),
     Type.Object(
         {
-            kind: Type.Literal("javascript", { description: "Use Oxfmt's JavaScript parser." }),
+            kind: Type.Union(
+                [
+                    Type.Literal("javascript", { description: "Use Oxfmt's JavaScript parser." }),
+                    Type.Literal("typescript", { description: "Use Oxfmt's TypeScript parser." }),
+                ],
+                { description: "Oxfmt parser: JavaScript or TypeScript." },
+            ),
             ...javascriptFormatterProperties,
         },
-        { additionalProperties: false, title: "JavaScriptFormatter" },
-    ),
-    Type.Object(
-        {
-            kind: Type.Literal("typescript", { description: "Use Oxfmt's TypeScript parser." }),
-            ...javascriptFormatterProperties,
-        },
-        { additionalProperties: false, title: "TypeScriptFormatter" },
+        { additionalProperties: false, title: "OxfmtFormatter" },
     ),
     Type.Object(
         {
@@ -416,6 +429,28 @@ export const scriptFormatterProfileSchema = Type.Union([
             ),
         },
         { additionalProperties: false, title: "BashFormatter" },
+    ),
+    Type.Object(
+        {
+            kind: Type.Literal("awk", {
+                description:
+                    "Pretty-print single-quoted inline awk programs that do not fit with gawk, which parses without running them.",
+            }),
+            command: filterFormatterCommandSchema(["gawk"]),
+            indentWidth: filterIndentWidthSchema,
+        },
+        { additionalProperties: false, title: "AwkFormatter" },
+    ),
+    Type.Object(
+        {
+            kind: Type.Literal("jq", {
+                description:
+                    "Format single-quoted inline jq programs that do not fit with jqfmt, breaking pipes, then objects, then arrays only as needed.",
+            }),
+            command: filterFormatterCommandSchema(["jqfmt"]),
+            indentWidth: filterIndentWidthSchema,
+        },
+        { additionalProperties: false, title: "JqFormatter" },
     ),
 ]);
 

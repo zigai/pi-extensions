@@ -19,6 +19,7 @@ import {
 } from "../context.ts";
 import {
     formatAndStoreScriptPreview,
+    hasEmbeddedSource,
     rememberRawScriptPreview,
     scriptForPreview,
 } from "./format-preview.ts";
@@ -260,7 +261,8 @@ export function createNativeBashFeature(
             profile !== undefined ||
             (formatEmbedded !== undefined &&
                 parsedScript?.language === "bash" &&
-                displayCommand.includes("<<"));
+                (displayCommand.includes("<<") ||
+                    hasEmbeddedSource(displayCommand, scheduled?.options.formatter)));
         let script = scriptPreviews.get(context.toolCallId);
         if (profiled && scheduled?.completed !== true) script = undefined;
 

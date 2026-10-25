@@ -609,9 +609,19 @@
                   ],
                   "properties": {
                     "kind": {
-                      "type": "string",
-                      "const": "javascript",
-                      "description": "Use Oxfmt's JavaScript parser."
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "javascript",
+                          "description": "Use Oxfmt's JavaScript parser."
+                        },
+                        {
+                          "type": "string",
+                          "const": "typescript",
+                          "description": "Use Oxfmt's TypeScript parser."
+                        }
+                      ],
+                      "description": "Oxfmt parser: JavaScript or TypeScript."
                     },
                     "command": {
                       "type": "array",
@@ -659,67 +669,7 @@
                     }
                   },
                   "additionalProperties": false,
-                  "title": "JavaScriptFormatter"
-                },
-                {
-                  "type": "object",
-                  "required": [
-                    "kind",
-                    "command"
-                  ],
-                  "properties": {
-                    "kind": {
-                      "type": "string",
-                      "const": "typescript",
-                      "description": "Use Oxfmt's TypeScript parser."
-                    },
-                    "command": {
-                      "type": "array",
-                      "items": {
-                        "type": "string",
-                        "minLength": 1,
-                        "pattern": "^[^\\u0000]+$"
-                      },
-                      "minItems": 1,
-                      "description": "Executable followed by arguments; no shell expansion is performed."
-                    },
-                    "imports": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "const": "show"
-                        },
-                        {
-                          "type": "string",
-                          "const": "omit"
-                        }
-                      ],
-                      "description": "Leading import/setup visibility in collapsed display; expansion retains all source.",
-                      "default": "omit"
-                    },
-                    "tabWidth": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "default": 2,
-                      "description": "Oxfmt indentation width."
-                    },
-                    "objectWrap": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "const": "collapse"
-                        },
-                        {
-                          "type": "string",
-                          "const": "preserve"
-                        }
-                      ],
-                      "default": "collapse",
-                      "description": "Collapse object literals when they fit the actual content width."
-                    }
-                  },
-                  "additionalProperties": false,
-                  "title": "TypeScriptFormatter"
+                  "title": "OxfmtFormatter"
                 },
                 {
                   "type": "object",
@@ -767,6 +717,74 @@
                   },
                   "additionalProperties": false,
                   "title": "BashFormatter"
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "kind"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "awk",
+                      "description": "Pretty-print single-quoted inline awk programs that do not fit with gawk, which parses without running them."
+                    },
+                    "command": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "^[^\\u0000]+$"
+                      },
+                      "minItems": 1,
+                      "default": [
+                        "gawk"
+                      ],
+                      "description": "Executable followed by arguments; defaults to gawk on PATH."
+                    },
+                    "indentWidth": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "default": 2,
+                      "description": "Indentation width for formatted rows."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "title": "AwkFormatter"
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "kind"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "jq",
+                      "description": "Format single-quoted inline jq programs that do not fit with jqfmt, breaking pipes, then objects, then arrays only as needed."
+                    },
+                    "command": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "^[^\\u0000]+$"
+                      },
+                      "minItems": 1,
+                      "default": [
+                        "jqfmt"
+                      ],
+                      "description": "Executable followed by arguments; defaults to jqfmt on PATH."
+                    },
+                    "indentWidth": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "default": 2,
+                      "description": "Indentation width for formatted rows."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "title": "JqFormatter"
                 }
               ]
             }

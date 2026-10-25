@@ -20,12 +20,15 @@ import {
     utf8Bytes,
     type ScriptFormatDiagnostics,
 } from "../../../diagnostics/render-events.ts";
+import { filterFormatterCommand, formatFilterProgram } from "./filter-formatting.ts";
 
 export type ScriptBlockFormatterInput = {
     readonly label: string;
     readonly language: string;
     readonly code: string;
     readonly targetWidth?: number;
+    /** Columns before the first row, for programs embedded after a command prefix. */
+    readonly firstLineOffset?: number;
 };
 
 export type ScriptBlockFormatterOptions = {
@@ -112,7 +115,7 @@ function isSafeFormatterCommandPart(value: JsonValue): value is string {
 function formatterProfile(value: JsonValue): ScriptFormatterProfile | undefined {
     try {
         const profile = Value.Parse(scriptFormatterProfileSchema, value);
-        if (!profile.command.every(isSafeFormatterCommandPart)) return undefined;
+        if (!(profile.command ?? []).every(isSafeFormatterCommandPart)) return undefined;
         return profile;
     } catch {
         return undefined;
@@ -571,10 +574,85 @@ export function createCommandScriptFormatter(
             .update("\0")
             .update(targetWidth === undefined ? "" : String(targetWidth))
             .update("\0")
+            .update(String(input.firstLineOffset ?? 0))
+            .update("\0")
             .update(input.code)
             .digest("hex");
         const cached = cache.get(cacheKey);
         if (cached !== undefined) return { output: cached.output, outcome: "cached", ...described };
+
+        if (command.kind === "awk" || command.kind === "jq") {
+            const [executable, ...baseArgs] = filterFormatterCommand(command);
+            if (executable === undefined)
+                return { output: undefined, outcome: "missing-executable", ...described };
+
+            const result = await formatFilterProgram(
+                input.code,
+                command,
+                { width: targetWidth ?? 88, firstLineOffset: input.firstLineOffset ?? 0 },
+                async (args, stdin): Promise<FormatterRun> => {
+                    const slot = await acquireFormatterSlot(effectiveOptions);
+                    if (slot === undefined) {
+                        if (effectiveOptions.signal?.aborted === true)
+                            return { output: undefined, outcome: "cancelled" };
+
+                        return { output: undefined, outcome: "queue-full" };
+                    }
+
+                    return runFormatterCommand(
+                        executable,
+                        [...baseArgs, ...args],
+                        stdin,
+                        effectiveOptions,
+                        slot,
+                        undefined,
+                        (reason) => {
+                            // Both formatters exit 1 for programs they cannot parse,
+                            // such as mawk-only syntax; that is a declined preview.
+                            if (reason !== "exited with status 1")
+                                reportFailure(input.language, reason);
+                        },
+                    );
+                },
+            );
+
+            if (effectiveOptions.signal?.aborted === true)
+                return { ...result.run, ...described, output: undefined, outcome: "cancelled" };
+
+            if (result.kind === "formatted") {
+                remember(cacheKey, result.output);
+                return { ...result.run, ...described, output: result.output, outcome: "formatted" };
+            }
+
+            if (result.kind === "unchanged") {
+                return {
+                    ...result.run,
+                    ...described,
+                    output: undefined,
+                    outcome: "unchanged",
+                    ...(result.detail !== undefined && { detail: result.detail }),
+                };
+            }
+
+            if (result.kind === "declined")
+                return {
+                    ...result.run,
+                    ...described,
+                    output: undefined,
+                    outcome: "declined",
+                    detail: result.detail,
+                };
+
+            if (result.run.outcome === "failed" && result.run.exitCode === 1)
+                return {
+                    ...result.run,
+                    ...described,
+                    outcome: "declined",
+                    detail: "formatter-rejected",
+                };
+
+            return { ...result.run, ...described };
+        }
 
         const release = await acquireFormatterSlot(effectiveOptions);
         if (release === undefined) {

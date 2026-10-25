@@ -1,14 +1,13 @@
 import { parentPort } from "node:worker_threads";
 import type {
-    BundledLanguage,
-    BundledTheme,
     CodeToTokensBaseOptions,
-    Highlighter,
+    HighlighterGeneric,
     ThemedToken,
     ThemeRegistration,
 } from "shiki";
 import { tokensToAnsiLines } from "./ansi.ts";
 import { configureBracketPairColoring } from "./brackets.ts";
+import { syntaxLanguageInput, type SyntaxLanguage } from "./language.ts";
 import { compactPythonStructuralBlankRows } from "../../tools/built-in/bash/python-blank-rows.ts";
 
 export type TokenizeRequest =
@@ -16,7 +15,7 @@ export type TokenizeRequest =
           readonly operation: "highlight";
           readonly id: number;
           readonly code: string;
-          readonly language: BundledLanguage;
+          readonly language: SyntaxLanguage;
           readonly theme: ThemeRegistration;
           readonly brackets: boolean;
       }
@@ -28,7 +27,7 @@ export type TokenizeRequest =
 
 export type TokenizeInitialization = {
     readonly type: "initialize";
-    readonly language: BundledLanguage;
+    readonly language: SyntaxLanguage;
     readonly theme: ThemeRegistration | undefined;
 };
 
@@ -41,14 +40,24 @@ const INPUT_END_ERROR_SCOPE = "invalid.illegal.newline";
 const port = parentPort;
 if (port === null) throw new Error("Syntax worker requires a parent port");
 
-const { createHighlighter } = await import("shiki");
+const { createBundledHighlighter, bundledLanguages, bundledThemes, createOnigurumaEngine } =
+    await import("shiki");
+// String-keyed like the main highlighter, so vendored grammars such as jq can register.
+const createHighlighter = createBundledHighlighter<string, string>({
+    langs: bundledLanguages,
+    themes: bundledThemes,
+    engine: async () => createOnigurumaEngine(import("shiki/wasm")),
+});
 let highlighter: Awaited<ReturnType<typeof createHighlighter>> | undefined;
 
 async function initialize(request: TokenizeInitialization): Promise<void> {
     const themes: ThemeRegistration[] = [];
     if (request.theme !== undefined) themes.push(request.theme);
 
-    highlighter = await createHighlighter({ themes, langs: [request.language] });
+    highlighter = await createHighlighter({
+        themes,
+        langs: [syntaxLanguageInput(request.language)],
+    });
 }
 
 async function tokenize(request: TokenizeRequest): Promise<TokenizeResponse> {
@@ -67,7 +76,7 @@ async function tokenize(request: TokenizeRequest): Promise<TokenizeResponse> {
             };
         }
 
-        await syntax.loadLanguage(request.language);
+        await syntax.loadLanguage(syntaxLanguageInput(request.language));
         configureBracketPairColoring(request.brackets);
 
         const tokens = tokenizeCode(syntax, request.code, request.language, request.theme);
@@ -84,18 +93,18 @@ async function tokenize(request: TokenizeRequest): Promise<TokenizeResponse> {
 // character as an illegal newline, which themes paint as an error. Only the last line can end
 // without a newline, so only it is tokenized with scopes, continuing the preceding grammar state.
 function tokenizeCode(
-    syntax: Highlighter,
+    syntax: HighlighterGeneric<string, string>,
     code: string,
-    language: BundledLanguage,
+    language: SyntaxLanguage,
     theme: ThemeRegistration,
 ): ThemedToken[][] {
-    const options: CodeToTokensBaseOptions<BundledLanguage, BundledTheme> = {
+    const options: CodeToTokensBaseOptions = {
         lang: language,
         theme,
         tokenizeMaxLineLength: 0,
         tokenizeTimeLimit: 0,
     };
-    const tailOptions: CodeToTokensBaseOptions<BundledLanguage, BundledTheme> = {
+    const tailOptions: CodeToTokensBaseOptions = {
         ...options,
         includeExplanation: "scopeName",
     };

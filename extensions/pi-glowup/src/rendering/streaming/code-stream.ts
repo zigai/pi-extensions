@@ -6,6 +6,7 @@ import type {
     ScriptBlockFormatterOptions,
 } from "../../tools/built-in/bash/formatter.ts";
 import { formatEmbeddedHeredocs } from "./embedded-heredocs.ts";
+import { formatEmbeddedFilterPrograms, hasFormattableFilterProgram } from "./embedded-filters.ts";
 import { formatCodeUnit } from "./code-unit.ts";
 import { MAX_SCRIPT_PREVIEW_ENTRIES } from "../../tools/built-in/bash/preview-store.ts";
 import { createStatementService } from "./statement-service.ts";
@@ -84,12 +85,19 @@ export function createCodeStreamStore(): CodeStreamStore {
         formatter: ScriptBlockFormatter | undefined,
         options: ScriptBlockFormatterOptions = {},
     ): Promise<string> {
-        if (disposed || formatter === undefined || !input.code.includes("<<")) return input.code;
+        if (disposed || formatter === undefined) return input.code;
+        if (!input.code.includes("<<") && !hasFormattableFilterProgram(input.code, formatter))
+            return input.code;
 
         let signal = externalController.signal;
         if (options.signal !== undefined) signal = AbortSignal.any([signal, options.signal]);
 
-        const operation = formatEmbeddedHeredocs(input, formatter, parser, { ...options, signal });
+        const operation = formatEmbeddedHeredocs(input, formatter, parser, {
+            ...options,
+            signal,
+        }).then(async (code) =>
+            formatEmbeddedFilterPrograms({ ...input, code }, formatter, { ...options, signal }),
+        );
         const job = operation.then(
             () => {},
             () => {},

@@ -28,6 +28,7 @@ import {
     highlightSyntaxCodeAsync,
     settleSyntaxHighlights,
     initializeSyntaxHighlighting,
+    loadSyntaxLanguageIfReady,
 } from "../../../src/rendering/syntax/highlighter.ts";
 import { normalizeSyntaxLanguage } from "../../../src/rendering/syntax/language.ts";
 import { configureMarkdownSyntaxPatch } from "../../../src/pi/patches/markdown-syntax.ts";
@@ -682,6 +683,34 @@ describe("central syntax highlighting", () => {
         expect(rendered).toContain(`${TYPE_RGB_CODE}msys`);
         expect(rendered).not.toContain(`${STRING_RGB_CODE}mimport sys`);
         expect(rendered).toContain("| sort -nr | head -n 2");
+    });
+
+    it("highlights literal awk and jq programs inside a composed Bash pipeline", async () => {
+        const jq = ".items[] | select(.enabled) | {name, total: (.prices | add)}";
+        const awk = '{ n += $2 } END { printf "%d\\n", n }';
+        expect(await loadSyntaxLanguageIfReady("jq")).toBe(true);
+        expect(await loadSyntaxLanguageIfReady("awk")).toBe(true);
+        const [jqRow] = await highlightSyntaxCodeAsync(jq, "jq");
+        const [awkRow] = await highlightSyntaxCodeAsync(awk, "awk");
+        const [expandingRow] = await highlightSyntaxCodeAsync(".totals.$key", "jq");
+        const command = `jq -c '${jq}' a.json | awk -F, '${awk}' | jq ".totals.$key"`;
+
+        const rendered = renderScriptCall(
+            plainTheme,
+            { label: "Bash", language: "bash", code: command },
+            { state: "success", expanded: true },
+        )
+            .render(200)
+            .join("\n");
+
+        expect(stripVTControlCharacters(jqRow ?? "")).toBe(jq);
+        expect(jqRow).not.toBe(jq);
+        expect(rendered).toContain(jqRow);
+        expect(rendered).toContain(awkRow);
+
+        // The shell expands $key before jq runs; that text is not the jq program.
+        expect(rendered).not.toContain(expandingRow);
+        expect(stripVTControlCharacters(rendered)).toBe(`$ ${command}`);
     });
 
     it("places truncated JSON omission at the cut without invalid-syntax red", () => {

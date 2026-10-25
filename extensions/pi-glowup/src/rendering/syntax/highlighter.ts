@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { stripVTControlCharacters } from "node:util";
-import type { BundledLanguage, CreateHighlighterFactory, HighlighterGeneric } from "shiki";
+import type { CreateHighlighterFactory, HighlighterGeneric } from "shiki";
 import { normalizedCodeLines } from "../../text-boundaries.ts";
 import type { DiffSection } from "../diff/text-diff.ts";
 import { createSyntaxTokenizer, type TokenizeUnavailableReason } from "./tokenizer.ts";
@@ -14,8 +14,10 @@ import {
 } from "../../diagnostics/render-events.ts";
 import { configureBracketPairColoring } from "./brackets.ts";
 import {
-    isBundledSyntaxLanguage,
+    isLoadableSyntaxLanguage,
     normalizeSyntaxLanguage,
+    syntaxLanguageInput,
+    type SyntaxLanguage,
     PRELOADED_SYNTAX_LANGUAGES,
 } from "./language.ts";
 import {
@@ -79,14 +81,14 @@ type SyntaxProjectLanguageDetectionDiagnostics = {
 
 type SyntaxPreloadDiagnostics = {
     readonly configuredLanguages: readonly string[];
-    readonly preloadLanguages: readonly BundledLanguage[];
+    readonly preloadLanguages: readonly SyntaxLanguage[];
     readonly ignoredConfiguredLanguages: readonly string[];
     readonly projectDetectionEnabled: boolean;
     readonly projectDetection?: SyntaxProjectLanguageDetectionDiagnostics;
 };
 
 type SyntaxPreloadSelection = {
-    readonly languages: readonly BundledLanguage[];
+    readonly languages: readonly SyntaxLanguage[];
     readonly diagnostics: SyntaxPreloadDiagnostics;
 };
 
@@ -603,7 +605,7 @@ export async function highlightSyntaxCodeAsync(
 export type LoadedSyntaxHighlighter = {
     readonly highlighter: HighlighterGeneric<string, string>;
     readonly themeName: string;
-    readonly language: BundledLanguage | "text";
+    readonly language: SyntaxLanguage | "text";
 };
 
 /** Returns the initialized Shiki highlighter only when the language is already loaded. */
@@ -644,12 +646,12 @@ export async function getSyntaxHighlighterForLanguage(
 
     const normalizedLanguage = normalizeSyntaxLanguage(language) ?? "text";
     if (normalizedLanguage !== "text" && !state.loadedLanguages.has(normalizedLanguage)) {
-        if (!isBundledSyntaxLanguage(normalizedLanguage)) {
+        if (!isLoadableSyntaxLanguage(normalizedLanguage)) {
             return undefined;
         }
 
         try {
-            await state.highlighter.loadLanguage(normalizedLanguage);
+            await state.highlighter.loadLanguage(syntaxLanguageInput(normalizedLanguage));
         } catch (cause: unknown) {
             if (generation !== syntaxGeneration) return undefined;
 
@@ -689,12 +691,12 @@ export async function loadSyntaxLanguageIfReady(language: string | undefined): P
         return true;
     }
 
-    if (!isBundledSyntaxLanguage(normalizedLanguage)) {
+    if (!isLoadableSyntaxLanguage(normalizedLanguage)) {
         return false;
     }
 
     try {
-        await state.highlighter.loadLanguage(normalizedLanguage);
+        await state.highlighter.loadLanguage(syntaxLanguageInput(normalizedLanguage));
     } catch (cause: unknown) {
         if (generation !== syntaxGeneration || syntaxState !== state) return false;
 
@@ -898,7 +900,7 @@ async function initializeSyntaxHighlightingOnce(
         const factory = options.createHighlighter ?? createSyntaxHighlighter;
         const highlighter = await factory({
             themes: [theme.registration],
-            langs: [...preloadSelection.languages],
+            langs: preloadSelection.languages.map(syntaxLanguageInput),
         });
 
         return {
@@ -931,7 +933,7 @@ function selectSyntaxPreloadLanguages(
 ): SyntaxPreloadSelection {
     const configuredLanguages = [...(options.preloadLanguages ?? PRELOADED_SYNTAX_LANGUAGES)];
     const ignoredConfiguredLanguages: string[] = [];
-    const preloadLanguages = new Set<BundledLanguage>();
+    const preloadLanguages = new Set<SyntaxLanguage>();
     for (const configuredLanguage of configuredLanguages) {
         const normalizedLanguage = normalizeSyntaxLanguage(configuredLanguage);
         if (normalizedLanguage === undefined || normalizedLanguage === "text") {

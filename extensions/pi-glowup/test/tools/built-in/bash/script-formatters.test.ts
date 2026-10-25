@@ -758,3 +758,277 @@ describe("script formatter settings", () => {
         ).resolves.toEqual({ label: "Python", language: "python", code: "print(1)" });
     });
 });
+
+// gawk and jqfmt are not test dependencies. These stand-ins reproduce the behaviours the
+// display pipeline must survive: gawk's canonical layout (tabs, added print parentheses, an
+// implicit `{ print }`) and both tools' rewriting of string escapes.
+describe("awk and jq display formatters", () => {
+    const fakeGawk = String.raw`
+const { appendFileSync, readFileSync } = require("node:fs");
+appendFileSync(process.env.FAKE_LOG, JSON.stringify(process.argv.slice(2)) + "\n");
+const input = readFileSync(0, "utf8");
+if (!input.startsWith("BEGIN")) process.exit(1);
+// gawk prints string values, not their source: \x41 becomes A.
+const literals = input.match(/"(?:[^"\\]|\\.)*"/g).map((text) => text.replace(/\\x41/g, "A"));
+process.stdout.write([
+    "BEGIN {", "\tFS = <0>", "\tlabel = <1>", "}", "",
+    "$3 >= 1000 {", "\tprint($1) > <2>", "\tn++", "}", "",
+    "NR > 1 {", "\tprint", "}", "",
+    "END {", "\tprint n", "}", "",
+].join("\n").replace(/<(\d)>/g, (_match, index) => literals[Number(index)]));
+`;
+
+    const fakeJqfmt = String.raw`
+const { appendFileSync, readFileSync } = require("node:fs");
+const args = process.argv.slice(2);
+appendFileSync(process.env.FAKE_LOG, JSON.stringify(args) + "\n");
+// gojq prints decoded strings: \u00e9 becomes é.
+let source = readFileSync(0, "utf8").replace(/\\u00e9/g, "é");
+if (process.env.FAKE_DROP_DEFS === "1") source = source.replace(/^def [^;]*;\s*/, "");
+const objects = args.includes("-ob");
+const arrays = args.includes("-ar");
+const stack = [];
+const indent = () => "    ".repeat(1 + stack.length);
+let out = "";
+for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    const skipSpaces = () => { while (source[index + 1] === " ") index += 1; };
+    if (char === '"') {
+        const end = source.indexOf('"', index + 1);
+        out += source.slice(index, end + 1);
+        index = end;
+    } else if (char === "|" && source[index + 1] !== "=") {
+        out += "| \n" + indent();
+        skipSpaces();
+    } else if ((char === "{" && objects) || (char === "[" && arrays)) {
+        stack.push(char);
+        out += char + "\n" + indent();
+        skipSpaces();
+    } else if ("{[(".includes(char)) {
+        stack.push("inline");
+        out += char;
+    } else if ((char === "}" && stack.at(-1) === "{") || (char === "]" && stack.at(-1) === "[")) {
+        stack.pop();
+        out = out.trimEnd() + "\n" + indent() + char;
+    } else if ("}])".includes(char)) {
+        stack.pop();
+        out += char;
+    } else if (char === "," && (stack.at(-1) === "{" || stack.at(-1) === "[")) {
+        out += ",\n" + indent();
+        skipSpaces();
+    } else {
+        out += char;
+    }
+}
+process.stdout.write(out + "\n");
+`;
+
+    function setup(env: Record<string, string> = {}) {
+        const dir = mkdtempSync(join(tmpdir(), "pi-glowup-filter-formatters-"));
+        const log = join(dir, "calls.log");
+        writeFileSync(log, "");
+        const gawk = join(dir, "gawk.cjs");
+        const jqfmt = join(dir, "jqfmt.cjs");
+        writeFileSync(gawk, fakeGawk);
+        writeFileSync(jqfmt, fakeJqfmt);
+        const previous = { ...process.env };
+        Object.assign(process.env, { FAKE_LOG: log, ...env });
+        const warnings: string[] = [];
+        const formatter = createCommandScriptFormatter(
+            parseScriptFormatterCommandsValue({
+                awk: { kind: "awk", command: [process.execPath, gawk] },
+                jq: { kind: "jq", command: [process.execPath, jqfmt] },
+            }),
+            (message) => {
+                warnings.push(message);
+            },
+        );
+        if (formatter === undefined) throw new Error("formatter profiles were rejected");
+
+        return {
+            formatter,
+            warnings,
+            calls: () =>
+                readFileSync(log, "utf8")
+                    .split("\n")
+                    .filter((line) => line.length > 0)
+                    .map((line) => {
+                        const args: unknown = JSON.parse(line);
+                        if (!Array.isArray(args)) throw new Error("unexpected fake log entry");
+                        return args.map(String);
+                    }),
+            [Symbol.dispose]() {
+                process.env = previous;
+                rmSync(dir, { recursive: true, force: true });
+            },
+        };
+    }
+
+    const awkProgram = [
+        String.raw`BEGIN{FS=":"; label="caf\303\251\x41"} $3>=1000{print $1 > "/dev/stderr"; n++}`,
+        "NR>1",
+        "END{print n}",
+    ].join("\n");
+
+    it.each([
+        [
+            40,
+            [
+                "BEGIN {",
+                '  FS = ":"',
+                String.raw`  label = "caf\303\251\x41"`,
+                "}",
+                "$3 >= 1000 {",
+                '  print $1 > "/dev/stderr"',
+                "  n++",
+                "}",
+                "NR > 1",
+                "END { print n }",
+            ],
+        ],
+        [
+            70,
+            [
+                String.raw`BEGIN { FS = ":"; label = "caf\303\251\x41" }`,
+                '$3 >= 1000 { print $1 > "/dev/stderr"; n++ }',
+                "NR > 1",
+                "END { print n }",
+            ],
+        ],
+    ])("restores gawk's awk layout to the submitted tokens at %i columns", async (width, rows) => {
+        using fake = setup();
+        const formatted = await fake.formatter(
+            {
+                label: "awk",
+                language: "awk",
+                code: awkProgram,
+                targetWidth: width,
+                firstLineOffset: 10,
+            },
+            {},
+        );
+
+        expect(formatted).toBe(rows.join("\n"));
+        expect(fake.calls()).toEqual([["--sandbox", "-o-", "-f", "-"]]);
+    });
+
+    it("never sends a program that fits, or one that would load gawk extensions", async () => {
+        using fake = setup();
+        const fits = await fake.formatter(
+            { label: "awk", language: "awk", code: "{ print $1 }", targetWidth: 80 },
+            {},
+        );
+        const loads = await fake.formatter(
+            {
+                label: "awk",
+                language: "awk",
+                code: '@load "filefuncs"; BEGIN { stat("/", data); print data["type"] }',
+                targetWidth: 20,
+            },
+            {},
+        );
+
+        expect([fits, loads]).toEqual([undefined, undefined]);
+        expect(fake.calls()).toEqual([]);
+    });
+
+    const jqProgram = String.raw`.items[] | select(.name | test("^caf\u00e9")) | { name: .name, tags: [.tags[] | ascii_downcase], n: ($x | tonumber) } | "\(.name): \(.n)"`;
+
+    it.each([
+        [
+            100,
+            [["-op", "pipe"]],
+            [
+                ".items[] |",
+                String.raw`  select(.name | test("^caf\u00e9")) |`,
+                "  { name: .name, tags: [.tags[] | ascii_downcase], n: ($x | tonumber) } |",
+                String.raw`  "\(.name): \(.n)"`,
+            ],
+        ],
+        [
+            50,
+            [
+                ["-op", "pipe"],
+                ["-op", "pipe", "-ob"],
+            ],
+            [
+                ".items[] |",
+                String.raw`  select(.name | test("^caf\u00e9")) |`,
+                "  {",
+                "    name: .name,",
+                "    tags: [.tags[] | ascii_downcase],",
+                "    n: ($x | tonumber)",
+                "  } |",
+                String.raw`  "\(.name): \(.n)"`,
+            ],
+        ],
+    ])(
+        "adds jq breaks only until the program fits %i columns",
+        async (targetWidth, calls, rows) => {
+            using fake = setup();
+            const formatted = await fake.formatter(
+                { label: "jq", language: "jq", code: jqProgram, targetWidth, firstLineOffset: 8 },
+                {},
+            );
+
+            expect(formatted).toBe(rows.join("\n"));
+            expect(fake.calls()).toEqual(calls);
+        },
+    );
+
+    it("keeps jq programs whose formatting would lose comments or definitions", async () => {
+        using fake = setup({ FAKE_DROP_DEFS: "1" });
+        const commented = await fake.formatter(
+            {
+                label: "jq",
+                language: "jq",
+                code: ".items[] # each item\n| select(.enabled) | .name | ascii_downcase",
+                targetWidth: 20,
+            },
+            {},
+        );
+        expect(fake.calls()).toEqual([]);
+
+        const defined = await fake.formatter(
+            {
+                label: "jq",
+                language: "jq",
+                code: 'def label: .name // "#none"; .items[] | label | ascii_downcase',
+                targetWidth: 20,
+            },
+            {},
+        );
+
+        expect([commented, defined]).toEqual([undefined, undefined]);
+        // jqfmt drops definitions, so the program is never handed to it.
+        expect(fake.calls()).toEqual([]);
+    });
+
+    it("treats unparseable programs as declined and reports a missing executable once", async () => {
+        using fake = setup();
+        const rejected = await fake.formatter(
+            {
+                label: "awk",
+                language: "awk",
+                code: `{ print $1 } ${"x".repeat(80)}`,
+                targetWidth: 40,
+            },
+            {},
+        );
+        expect(rejected).toBeUndefined();
+        expect(fake.warnings).toEqual([]);
+
+        const missing = createCommandScriptFormatter(
+            parseScriptFormatterCommandsValue({
+                jq: { kind: "jq", command: [join(tmpdir(), "pi-glowup-missing-jqfmt")] },
+            }),
+            (message) => {
+                fake.warnings.push(message);
+            },
+        );
+        for (const code of [".a | .b | .c | .d | .e", ".f | .g | .h | .i | .j"])
+            await missing?.({ label: "jq", language: "jq", code, targetWidth: 10 }, {});
+
+        expect(fake.warnings).toEqual(["[pi-glowup] jq display formatter executable not found"]);
+    });
+});

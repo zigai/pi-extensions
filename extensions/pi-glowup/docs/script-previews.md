@@ -47,6 +47,22 @@ program, non-stdin descriptors, unquoted bodies with active shell expansions, an
 are not reformatted. If formatting would create a premature delimiter line, the original body stays.
 Multiline strings inside formatted source (such as Rust embedded in a Python string) remain verbatim.
 
+### Inline awk and jq Programs
+
+awk/gawk/mawk/nawk and jq programs inside Bash commands are highlighted as awk and jq, also
+in pipelines and behind supported wrappers such as `env`. Option values (`-F :`, `-v k=v`,
+`--arg k v`) are never mistaken for the program; `awk -f file` and `jq -f file` have no inline
+program. Double-quoted programs are highlighted only when they contain no expansions or escapes.
+
+With `awk` or `jq` formatter profiles, single-quoted programs are formatted in place. A program
+that already fits the available width is never reflowed. Otherwise awk uses gawk's pretty printer
+(`gawk -o-`, which parses without running the program), keeps the submitted tokens (gawk's added
+`print(...)` parentheses and implicit `{ print }` are removed), and puts blocks of simple
+statements back on one row when they fit (`END { print n }`, `{ a[$1] += $2; n++ }`). jq uses jqfmt, breaking pipes, then objects, then arrays, and stops
+at the first layout that fits; pipes inside brackets stay joined. Continuation rows hang from the
+row where the program starts, and the command stays valid shell. Programs with jq comments or
+anything a formatter would rewrite beyond layout keep their original text.
+
 ## Preview Length
 
 Collapsed script previews show up to `scriptPreview.maxCodePreviewLines` lines before adding a
@@ -66,7 +82,9 @@ Formatting is off by default. `scriptPreview.formatters` maps language ids to ex
   "javascript": { "kind": "javascript", "command": ["oxfmt"], "objectWrap": "collapse" },
   "typescript": { "kind": "typescript", "command": ["oxfmt"], "tabWidth": 2 },
   "python": { "kind": "python", "command": ["tuff"], "collections": "ruff-default" },
-  "bash": { "kind": "bash", "command": ["shfmt"], "indentWidth": 2 }
+  "bash": { "kind": "bash", "command": ["shfmt"], "indentWidth": 2 },
+  "awk": { "kind": "awk", "command": ["gawk"], "indentWidth": 2 },
+  "jq": { "kind": "jq", "command": ["jqfmt"], "indentWidth": 2 }
 }
 ```
 

@@ -3,7 +3,12 @@ import type { DebugLogFields } from "./logger.ts";
 
 /** Receives render diagnostics; field suppliers run only inside an enabled sink. */
 export type RenderDiagnosticSink = (event: string, fields: () => DebugLogFields) => void;
-export type ScriptFormatStage = "preview" | "embedded-heredoc" | "statement" | "block";
+export type ScriptFormatStage =
+    | "preview"
+    | "embedded-heredoc"
+    | "embedded-filter"
+    | "statement"
+    | "block";
 export type ScriptSegmentOrigin = "standalone" | "heredoc" | "file-heredoc" | "inline";
 
 export type ScriptSegmentDiagnostic = {

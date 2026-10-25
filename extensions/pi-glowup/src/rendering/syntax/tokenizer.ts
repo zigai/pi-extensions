@@ -1,5 +1,6 @@
 import { Worker } from "node:worker_threads";
-import type { BundledLanguage, ThemeRegistration } from "shiki";
+import type { ThemeRegistration } from "shiki";
+import type { SyntaxLanguage } from "./language.ts";
 import type {
     TokenizeInitialization,
     TokenizeRequest,
@@ -171,7 +172,7 @@ export function createSyntaxTokenizer(
                 }
             });
 
-            let language: BundledLanguage = "python";
+            let language: SyntaxLanguage = "python";
             if (initial.request.operation === "highlight") language = initial.request.language;
 
             const initialization: TokenizeInitialization = {
@@ -300,7 +301,7 @@ export function createSyntaxTokenizer(
 
     async function tokenize(
         code: string,
-        language: BundledLanguage,
+        language: SyntaxLanguage,
         brackets: boolean,
         cancellation: TokenizeCancellation = {},
     ): Promise<string[] | undefined> {
