@@ -1,6 +1,7 @@
 import { stripVTControlCharacters } from "node:util";
 import {
     initTheme,
+    getMarkdownTheme,
     AssistantMessageComponent,
     ToolExecutionComponent,
 } from "@earendil-works/pi-coding-agent";
@@ -134,6 +135,45 @@ function createPrototypeWithContentUpdates(): FakeAssistantPrototype {
 }
 
 describe("assistant separator patch", () => {
+    it.each(["dark", "light"])(
+        "uses a dimmed, non-bold theme rule color (%s)",
+        async (themeName) => {
+            initTheme(themeName);
+            const prototype = createPrototype();
+            const terminal = new VirtualTerminal(20, 10);
+            installAssistantSeparatorPatch(prototype);
+            try {
+                const separator = prototype.render.call(
+                    { [ASSISTANT_SEPARATOR_RENDER_KEY]: true },
+                    6,
+                )[1];
+                expect(separator).toBeDefined();
+                terminal.write(
+                    `\u001b[1;35m${separator}\r\n${getMarkdownTheme().hr("reference")}\r\nafter`,
+                );
+                await terminal.settle(0);
+                const rule = terminal.requireRowContaining("──────");
+                const reference = terminal.requireRowContaining("reference").cells[0];
+                expect(reference).toBeDefined();
+
+                for (const cell of rule.cells.slice(0, 6)) {
+                    expect(cell.foreground).toBe(reference?.foreground);
+                    expect(cell.isForegroundDefault).toBe(false);
+                    expect(cell.isDim).toBe(true);
+                    expect(cell.isBold).toBe(false);
+                }
+
+                const after = terminal.requireRowContaining("after").cells[0];
+                expect(after?.isBold).toBe(false);
+                expect(after?.isDim).toBe(false);
+                expect(after?.isForegroundDefault).toBe(true);
+            } finally {
+                configureAssistantSeparatorPatch(false, prototype);
+                terminal.dispose();
+            }
+        },
+    );
+
     it("separates restored tool history constructed before activation", () => {
         initTheme("dark");
         configureAssistantSeparatorPatch(false);
@@ -271,7 +311,7 @@ describe("assistant separator patch", () => {
 
         expect(prototype.render.call({ [ASSISTANT_SEPARATOR_RENDER_KEY]: true }, 6)).toEqual([
             "",
-            "\u001b[2m──────\u001b[0m",
+            `\u001b[22m\u001b[2m${getMarkdownTheme().hr("──────")}\u001b[0m`,
             "",
             "assistant text",
         ]);
@@ -283,7 +323,7 @@ describe("assistant separator patch", () => {
 
         expect(prototype.render.call({ [ASSISTANT_SEPARATOR_RENDER_KEY]: true }, 6)).toEqual([
             "",
-            "\u001b[2m──────\u001b[0m",
+            `\u001b[22m\u001b[2m${getMarkdownTheme().hr("──────")}\u001b[0m`,
             "",
             "assistant text",
         ]);
@@ -294,7 +334,7 @@ describe("assistant separator patch", () => {
         installAssistantSeparatorPatch(prototype);
 
         expect(prototype.render.call({ [ASSISTANT_SEPARATOR_RENDER_KEY]: true }, 6)[1]).toBe(
-            "\u001b[2m──────\u001b[0m",
+            `\u001b[22m\u001b[2m${getMarkdownTheme().hr("──────")}\u001b[0m`,
         );
     });
 
@@ -478,7 +518,7 @@ describe("assistant separator patch", () => {
 
         expect(prototype.render.call({ [ASSISTANT_SEPARATOR_RENDER_KEY]: true }, 6)).toEqual([
             "",
-            "\u001b[2m──────\u001b[0m",
+            `\u001b[22m\u001b[2m${getMarkdownTheme().hr("──────")}\u001b[0m`,
             "",
             "assistant text",
         ]);

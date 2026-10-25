@@ -5,6 +5,7 @@ import {
     SkillInvocationMessageComponent,
     ToolExecutionComponent,
     UserMessageComponent,
+    getMarkdownTheme,
 } from "@earendil-works/pi-coding-agent";
 import { Container, Spacer, visibleWidth, type Component } from "@earendil-works/pi-tui";
 import ansiStyles from "ansi-styles";
@@ -70,7 +71,8 @@ type AssistantPrototypeOwner =
 type ChatContainerPrototypeOwner = typeof Container.prototype | ChatContainerPrototype;
 
 function renderSeparator(width: number): string {
-    return `${ansiStyles.modifier.dim.open}${"─".repeat(Math.max(1, Math.floor(width)))}${ansiStyles.modifier.reset.open}`;
+    const rule = getMarkdownTheme().hr("─".repeat(Math.max(1, Math.floor(width))));
+    return `${ansiStyles.modifier.bold.close}${ansiStyles.modifier.dim.open}${rule}${ansiStyles.modifier.reset.open}`;
 }
 
 function startsWithBlankLine(lines: readonly string[]): boolean {
