@@ -20,6 +20,11 @@ type Work = {
     readonly cancel: () => void;
 };
 
+type TokenizeCancellation = {
+    readonly signal?: AbortSignal;
+    readonly retryWhenCapacityAvailable?: (() => void) | undefined;
+};
+
 export function createSyntaxTokenizer(
     theme: ThemeRegistration | undefined,
     options: {
@@ -30,6 +35,33 @@ export function createSyntaxTokenizer(
     },
 ) {
     const queue: Work[] = [];
+    // Backpressure retains weak renderer handles, never over-budget source jobs.
+    const capacityRetries = new Set<WeakRef<() => void>>();
+    const registeredRetries = new WeakSet<() => void>();
+    let capacityNotificationScheduled = false;
+
+    function scheduleCapacityNotification(): void {
+        if (disposed || failed || capacityRetries.size === 0 || capacityNotificationScheduled)
+            return;
+        capacityNotificationScheduled = true;
+        queueMicrotask(() => {
+            capacityNotificationScheduled = false;
+            if (disposed || failed) return;
+            const retries = [...capacityRetries];
+            capacityRetries.clear();
+            for (const reference of retries) {
+                const retry = reference.deref();
+                if (retry === undefined) continue;
+                registeredRetries.delete(retry);
+                try {
+                    retry();
+                } catch {
+                    // A renderer invalidation must not stop the worker or other owners.
+                    continue;
+                }
+            }
+        });
+    }
     const terminations = new Set<Promise<number>>();
     let active: Work | undefined;
     let worker: Worker | undefined;
@@ -44,6 +76,7 @@ export function createSyntaxTokenizer(
         bytes -= work.bytes;
         work.signal?.removeEventListener("abort", work.cancel);
         work.resolve(lines);
+        scheduleCapacityNotification();
     }
 
     function stopWorker(): void {
@@ -70,6 +103,7 @@ export function createSyntaxTokenizer(
         if (failed || disposed) return;
 
         failed = true;
+        capacityRetries.clear();
 
         if (active !== undefined) finish(active, undefined);
         active = undefined;
@@ -188,17 +222,21 @@ export function createSyntaxTokenizer(
 
     async function enqueue(
         request: TokenizeRequest,
-        cancellation: { readonly signal?: AbortSignal },
+        cancellation: TokenizeCancellation,
     ): Promise<string[] | undefined> {
         const size = Buffer.byteLength(request.code, "utf8");
+        if (disposed || failed || cancellation.signal?.aborted === true) return undefined;
         if (
-            disposed ||
-            failed ||
-            cancellation.signal?.aborted === true ||
             queue.length + Number(active !== undefined) >= options.maxJobs ||
             bytes + size > options.maxBytes
-        )
+        ) {
+            const retry = cancellation.retryWhenCapacityAvailable;
+            if (retry !== undefined && !registeredRetries.has(retry)) {
+                registeredRetries.add(retry);
+                capacityRetries.add(new WeakRef(retry));
+            }
             return undefined;
+        }
 
         return new Promise((resolve) => {
             const work: Work = {
@@ -234,7 +272,7 @@ export function createSyntaxTokenizer(
         code: string,
         language: BundledLanguage,
         brackets: boolean,
-        cancellation: { readonly signal?: AbortSignal } = {},
+        cancellation: TokenizeCancellation = {},
     ): Promise<string[] | undefined> {
         if (theme === undefined) return undefined;
         return enqueue(
@@ -245,13 +283,14 @@ export function createSyntaxTokenizer(
 
     async function compactPython(
         code: string,
-        cancellation: { readonly signal?: AbortSignal } = {},
+        cancellation: TokenizeCancellation = {},
     ): Promise<string[] | undefined> {
         return enqueue({ operation: "compact-python", id: nextId++, code }, cancellation);
     }
 
     async function dispose(): Promise<void> {
         disposed = true;
+        capacityRetries.clear();
 
         if (active !== undefined) finish(active, undefined);
         active = undefined;

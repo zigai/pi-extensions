@@ -126,6 +126,7 @@ type HighlightOwner = {
     readonly controller: AbortController;
     readonly results: Map<string, HighlightedSource>;
     readonly previousResults: ReadonlyMap<string, HighlightedSource>;
+    readonly retryWhenCapacityAvailable: () => void;
     readonly pending: Map<string, Promise<string[]>>;
 };
 
@@ -391,6 +392,11 @@ export function observeSyntaxHighlightSource(
         controller: new AbortController(),
         results: new Map(),
         previousResults,
+        retryWhenCapacityAvailable: () => {
+            if (highlightOwners.get(invalidate) !== owner || owner.controller.signal.aborted)
+                return;
+            invalidate();
+        },
         pending: new Map(),
     };
     highlightOwners.set(invalidate, owner);
@@ -485,6 +491,7 @@ export async function highlightSyntaxCodeAsync(
         pending = state.tokenizer
             .tokenize(plainLines.join("\n"), normalizedLanguage, bracketPairColoringEnabled, {
                 signal,
+                retryWhenCapacityAvailable: owner?.retryWhenCapacityAvailable,
             })
             .then((lines) => {
                 if (
