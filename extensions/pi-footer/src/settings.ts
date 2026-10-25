@@ -61,6 +61,7 @@ const BUILTIN_FOOTER_SLOT_IDS = new Set([
     "model",
     "thinking",
     "mcp",
+    "cost",
     "context",
 ]);
 

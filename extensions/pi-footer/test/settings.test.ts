@@ -29,7 +29,7 @@ test("loadFooterSettings scaffolds missing global config and schema", async () =
             showGitAheadBehind: false,
             layout: {
                 left: ["path", "branch", "provider", "model", "thinking"],
-                right: ["context"],
+                right: ["cost", "context"],
                 hidden: [],
             },
         });
@@ -59,7 +59,7 @@ test("resolveFooterConfig defaults to middle-dot separator", () => {
     assert.equal(loaded.config.showGitAheadBehind, false);
     assert.deepEqual(loaded.config.layout, {
         left: ["path", "branch", "provider", "model", "thinking"],
-        right: ["context"],
+        right: ["cost", "context"],
         hidden: [],
     });
     assert.deepEqual(loaded.errors, []);
@@ -156,7 +156,7 @@ test("resolveFooterConfig merges partial layout overrides", () => {
 
     assert.deepEqual(loaded.config.layout, {
         left: ["model", "provider"],
-        right: ["context"],
+        right: ["cost", "context"],
         hidden: ["provider"],
     });
     assert.deepEqual(loaded.errors, []);
@@ -232,7 +232,7 @@ test("resolveFooterConfig rejects slots placed on both sides", () => {
 
     assert.deepEqual(loaded.config.layout, {
         left: ["path", "branch", "provider", "model", "thinking"],
-        right: ["context"],
+        right: ["cost", "context"],
         hidden: [],
     });
     assert.deepEqual(loaded.errors, [
@@ -254,7 +254,7 @@ test("resolveFooterConfig rejects partial layout overrides that conflict with de
 
     assert.deepEqual(loaded.config.layout, {
         left: ["path", "branch", "provider", "model", "thinking"],
-        right: ["context"],
+        right: ["cost", "context"],
         hidden: [],
     });
     assert.deepEqual(loaded.errors, ['footer layout cannot place "model" on both left and right.']);

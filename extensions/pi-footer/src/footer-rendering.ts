@@ -280,6 +280,15 @@ function buildFooterItems(
         });
     }
 
+    const apiSessionCost = ctx.getApiSessionCost?.();
+    if (apiSessionCost !== undefined && apiSessionCost > 0) {
+        items.set("cost", {
+            key: "cost",
+            text: `$${apiSessionCost.toFixed(2)}`,
+            colors: { bg: "", fg: "" },
+        });
+    }
+
     if (mcpText !== null && mcpText.length > 0) {
         items.set("mcp", {
             key: "mcp",

@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 import { SessionManager, type ToolInfo } from "@earendil-works/pi-coding-agent";
 
-import { getFooterRoute, getNativeMcpServerCount } from "../src/footer-session-status.ts";
+import {
+    getFooterRoute,
+    getNativeMcpServerCount,
+    isApiKeyBilled,
+    sumSessionCost,
+} from "../src/footer-session-status.ts";
 import type { FooterContext } from "../src/footer-model.ts";
 import { createFooterComponent } from "../src/footer-rendering.ts";
 import { DEFAULT_FOOTER_CONFIG } from "../src/settings.ts";
@@ -113,4 +118,75 @@ test("renders native MCP inventory and the dispatched physical model", () => {
     assert.match(component.render(120).join(""), /auto → gpt-5 • high.*MCP: 2 servers/);
     tools = [];
     assert.doesNotMatch(component.render(120).join(""), /MCP:/);
+});
+
+function usageCosting(total: number) {
+    return {
+        input: 1,
+        output: 1,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 2,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total },
+    };
+}
+
+test("sums session cost across responses, usage records, and summaries", () => {
+    const session = SessionManager.inMemory("/workspace");
+    const first = session.appendMessage({
+        role: "assistant",
+        api: "openai-responses",
+        provider: "openai",
+        model: "gpt-5",
+        content: [{ type: "text", text: "response" }],
+        usage: usageCosting(0.25),
+        stopReason: "stop",
+        timestamp: 1,
+    });
+    session.appendUsage("cache_warm", "openai", "gpt-5", usageCosting(0.5));
+    session.branchWithSummary(first, "summary", undefined, false, usageCosting(1));
+    assert.equal(sumSessionCost(session.getEntries()), 1.75);
+});
+
+test("treats only API-key authenticated models as API billed", () => {
+    const apiModel = { provider: "openai", id: "gpt-5" };
+    const oauthModel = { provider: "openai-codex", id: "gpt-5.2-codex" };
+    const modelRegistry = {
+        find: (provider: string, id: string) =>
+            [apiModel, oauthModel].find((model) => model.provider === provider && model.id === id),
+        isUsingOAuth: (model: { provider: string }) => model.provider === "openai-codex",
+    };
+
+    assert.equal(isApiKeyBilled({ model: apiModel, modelRegistry }, undefined), true);
+    assert.equal(isApiKeyBilled({ model: oauthModel, modelRegistry }, undefined), false);
+    assert.equal(isApiKeyBilled({ model: undefined, modelRegistry }, undefined), false);
+    assert.equal(
+        isApiKeyBilled(
+            { model: apiModel, modelRegistry },
+            { provider: "openai-codex", id: "gpt-5.2-codex" },
+        ),
+        false,
+    );
+});
+
+test("renders session cost on the right only when it is reported", () => {
+    let cost: number | undefined = 1.25;
+    const component = createFooterComponent(
+        {
+            cwd: "/workspace",
+            model: { provider: "openai", id: "gpt-5" },
+            getContextUsage: () => ({ tokens: 10, percent: 5, contextWindow: 200 }),
+            getApiSessionCost: () => cost,
+        },
+        {
+            getGitBranch: () => null,
+            getExtensionStatuses: () => new Map(),
+            onBranchChange: () => () => undefined,
+        },
+        () => "medium",
+        () => undefined,
+    );
+    assert.match(component.render(120).join(""), /\$1\.25 · 5\.0%\/200 $/);
+    cost = undefined;
+    assert.doesNotMatch(component.render(120).join(""), /\$/);
 });

@@ -13,6 +13,7 @@ Footer contents:
 - provider and model
 - thinking level
 - MCP status
+- session cost, when the model is billed through an API key
 - context usage
 
 ## Install
@@ -48,6 +49,7 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-footer.json`.
       "thinking"
     ],
     "right": [
+      "cost",
       "context"
     ],
     "hidden": []

@@ -2,7 +2,15 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 export type FooterVariant = "blocks" | "plain";
 export type FooterSide = "left" | "right";
-export type FooterKey = "path" | "branch" | "provider" | "model" | "thinking" | "mcp" | "context";
+export type FooterKey =
+    | "path"
+    | "branch"
+    | "provider"
+    | "model"
+    | "thinking"
+    | "mcp"
+    | "cost"
+    | "context";
 export type FooterCustomSlotId = `${string}.${string}`;
 export type FooterSlotId = FooterKey | FooterCustomSlotId;
 export type Rgb = [number, number, number];
@@ -43,6 +51,7 @@ export type FooterContext = {
     routedModel?: FooterRoute;
     sessionManager?: Pick<ExtensionContext["sessionManager"], "buildSessionProjection">;
     getContextUsage(): ContextUsage;
+    getApiSessionCost?(): number | undefined;
 };
 
 export type FooterData = {

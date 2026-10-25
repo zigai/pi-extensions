@@ -143,6 +143,7 @@ function createFooterSnapshot(
     config: FooterConfig,
 ): FooterSnapshot {
     const usage = cloneContextUsage(ctx.getContextUsage());
+    const apiSessionCost = ctx.getApiSessionCost?.();
 
     return {
         context: {
@@ -152,6 +153,9 @@ function createFooterSnapshot(
             routedModel: getFooterRoute(ctx),
             getContextUsage() {
                 return usage;
+            },
+            getApiSessionCost() {
+                return apiSessionCost;
             },
         },
         thinkingLevel,
