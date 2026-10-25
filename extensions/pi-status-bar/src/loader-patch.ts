@@ -1,5 +1,5 @@
 import { installLinkedMethodPatch } from "@zigai/pi-extension-internals";
-import { Loader, visibleWidth } from "@earendil-works/pi-tui";
+import { Loader, sliceByColumn, visibleWidth } from "@earendil-works/pi-tui";
 
 import { getRightMessageMinGap, renderRightMessage } from "./right-message.ts";
 import {
@@ -11,7 +11,7 @@ import {
 const LOADER_TIME_PATCH_CONTROLLER_KEY = Symbol.for(
     "zigai.pi-status-bar.loader-time-patch-controller",
 );
-const LOADER_TIME_PATCH_VERSION = 6;
+const LOADER_TIME_PATCH_VERSION = 7;
 const MIN_VISIBLE_RIGHT_MESSAGE_WIDTH = 4;
 const STATIC_LOADER_REFRESH_INTERVAL_MS = 1_000;
 
@@ -251,25 +251,28 @@ function renderDisplay(
     paddingX = Math.min(paddingX, Math.max(0, Math.floor((width - 1) / 2)));
 
     const contentWidth = Math.max(1, width - paddingX * 2);
-    const leftWidth = visibleWidth(display.leftText);
+    // Indicators can contain multiline dashboards (for example pi-subagents).
+    // Let Text render and wrap those rows, then compose only the final working
+    // row. Embedded newlines in one returned row break TUI layout and diffing.
+    const lines = predecessor.call(loader, width);
+    const leftText = (display.leftText.split(/\r\n|\r|\n/u).at(-1) ?? "").replaceAll("\t", "   ");
+    const leftWidth = visibleWidth(leftText);
     const minGap = getRightMessageMinGap();
     const availableRightWidth = contentWidth - leftWidth - minGap;
-    if (availableRightWidth < MIN_VISIBLE_RIGHT_MESSAGE_WIDTH) {
-        return predecessor.call(loader, width);
-    }
+    if (availableRightWidth < MIN_VISIBLE_RIGHT_MESSAGE_WIDTH) return lines;
 
     const right = renderRightMessage(
         Math.max(0, Date.now() - display.startedAt),
         availableRightWidth,
         display.messageColorFn,
     );
-    if (right === undefined) return predecessor.call(loader, width);
+    if (right === undefined) return lines;
 
     const gapWidth = Math.max(minGap, contentWidth - leftWidth - right.width);
-    const content = `${display.leftText}${" ".repeat(gapWidth)}${right.text}`;
-    const lineWithPadding = `${" ".repeat(paddingX)}${content}`;
+    const left = sliceByColumn(lines.at(-1) ?? "", 0, paddingX + leftWidth);
+    const lineWithPadding = `${left}${" ".repeat(gapWidth)}${right.text}`;
     return [
-        "",
+        ...lines.slice(0, -1),
         `${lineWithPadding}${" ".repeat(Math.max(0, width - visibleWidth(lineWithPadding)))}`,
     ];
 }

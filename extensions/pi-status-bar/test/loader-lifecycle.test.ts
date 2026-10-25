@@ -197,6 +197,79 @@ describe("status loader lifecycle", () => {
         loader.stop();
     });
 
+    test("keeps multiline subagent indicators as physical rows with shell status on Working", () => {
+        const segment = registerStatusBarSegment({
+            id: "pi-background.shells",
+            text: "1 shell running",
+        });
+        const agents = [
+            "● glowup-render-events · Claude Opus 5.5 medium · 29m 28s",
+            "● glowup-awk-jq        · Claude Opus 5.5 medium · 29m 28s",
+        ];
+        const { loader } = createLoader([`${agents.join("\n")}\n⠙`]);
+
+        try {
+            const lines = loader.render(200);
+            assert.equal(lines.length, 4);
+            assert.ok(lines.every((line) => !line.includes("\n")));
+            assert.deepEqual(
+                lines.slice(1, 3).map((line) => line.trim()),
+                agents,
+            );
+            assert.match(lines[3] ?? "", /⠙ Working\.\.\. \(0s\).*1 shell running/);
+            assert.ok(lines.every((line) => visibleWidth(line) <= 200));
+
+            vi.advanceTimersByTime(10_100);
+            const updated = loader.render(200);
+            assert.deepEqual(updated.slice(1, 3), lines.slice(1, 3));
+            assert.match(updated[3] ?? "", /Working\.\.\. \(10s\).*1 shell running/);
+            loader.setIndicator({ frames: ["■"] });
+            const cleared = loader.render(200);
+            assert.equal(cleared.length, 2);
+            assert.match(cleared[1] ?? "", /■ Working\.\.\. \(10s\).*1 shell running/);
+            assert.ok(cleared.every((line) => !line.includes("glowup")));
+        } finally {
+            segment.dispose();
+            loader.stop();
+        }
+    });
+
+    test.each(["\n", "\r\n", "\r"])(
+        "preserves native wrapping and styling of multiline indicators using %j",
+        (newline) => {
+            const { loader } = createLoader([
+                `\u001b[36m● worker-🧪 ${"long-model ".repeat(12)}${newline}● second\tworker${newline}⠙\u001b[39m`,
+            ]);
+            try {
+                for (const width of [200, 80, 48, 16, 2]) {
+                    const nativeLines = loader.render(width);
+                    const segment = registerStatusBarSegment({
+                        id: "pi-background.shells",
+                        text: "2 shells running",
+                    });
+                    try {
+                        const lines = loader.render(width);
+                        assert.equal(lines.length, nativeLines.length);
+                        assert.deepEqual(lines.slice(0, -1), nativeLines.slice(0, -1));
+                        assert.ok(lines.every((line) => !/[\r\n]/u.test(line)));
+                        assert.ok(lines.every((line) => visibleWidth(line) <= width));
+                        if (width >= 48) {
+                            assert.match(lines.at(-1) ?? "", /2 shells running/);
+                            assert.match(lines.at(-1) ?? "", /\u001b\[36m/u);
+                        } else {
+                            assert.deepEqual(lines, nativeLines);
+                        }
+                    } finally {
+                        segment.dispose();
+                    }
+                    assert.deepEqual(loader.render(width), nativeLines);
+                }
+            } finally {
+                loader.stop();
+            }
+        },
+    );
+
     test("renders active composition and resize truncation onto a real terminal screen", () => {
         configureStatusBar({ active: { text: "Coordinating" } });
         const segment = registerStatusBarSegment({
