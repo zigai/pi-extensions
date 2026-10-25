@@ -5,8 +5,13 @@ import type {
 } from "../../tools/built-in/bash/formatter.ts";
 import type { CodeStreamInput } from "./code-stream.ts";
 import type { StatementUnit } from "./statement-worker.ts";
+import { maskStatementLiterals } from "./literal-formatting.ts";
 
-export type FormattedCodeUnit = { readonly text: string; readonly bodyIndent?: string };
+export type FormattedCodeUnit = {
+    readonly text: string;
+    readonly bodyIndent?: string;
+    readonly applied?: true;
+};
 
 function dedent(code: string, indent: string): string {
     return code
@@ -94,8 +99,16 @@ export async function formatCodeUnit(
     const raw = input.source.slice(unit.start, unit.end);
     if (!unit.format || input.formatter === undefined) return { text: raw };
 
-    let code = dedent(raw, unit.indent);
     const marker = markerFor(input.source);
+    const literals = maskStatementLiterals(
+        input.source,
+        unit.start,
+        unit.end,
+        language,
+        unit.literals ?? [],
+        marker,
+    );
+    let code = dedent(literals.code, unit.indent);
     let comment = "//!";
     if (language === "python" || language === "bash") comment = "#";
 
@@ -144,12 +157,9 @@ export async function formatCodeUnit(
     let formatted: string | undefined;
 
     try {
-        let formatterLanguage = language;
-        if (language === "tsx") formatterLanguage = "typescript";
-
         let formatterInput: ScriptBlockFormatterInput = {
-            label: input.path ?? formatterLanguage,
-            language: formatterLanguage,
+            label: input.path ?? language,
+            language,
             code,
         };
         let formatterOptions: ScriptBlockFormatterOptions = { signal };
@@ -184,15 +194,23 @@ export async function formatCodeUnit(
 
     if (result.text.trim().length === 0) return { text: raw };
 
-    const text = result.text
+    const indented = result.text
         .split("\n")
         .map((line, index) => {
             if (index === 0) return line;
             return targetIndent + line;
         })
         .join("\n");
-    if (result.bodyIndent !== undefined)
-        return { text, bodyIndent: targetIndent + result.bodyIndent };
+    const text = literals.restore(indented);
+    if (text === undefined) {
+        reportExtensionDiagnostic(
+            "[pi-glowup] Display formatter did not preserve private literal markers; preserving this unit's original text.",
+        );
+        return { text: raw };
+    }
 
-    return { text };
+    if (result.bodyIndent !== undefined)
+        return { text, bodyIndent: targetIndent + result.bodyIndent, applied: true };
+
+    return { text, applied: true };
 }

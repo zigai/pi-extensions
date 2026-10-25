@@ -1,11 +1,7 @@
 import { visibleWidth, type Component } from "@earendil-works/pi-tui";
 import { makeComponent } from "../../../rendering/component.ts";
 import { createSyntaxComponent } from "../../../rendering/syntax/component-owner.ts";
-import {
-    renderScriptCall,
-    type ScriptCallRenderOptions,
-    type ScriptPreviewHeaderLayout,
-} from "./script-renderer.ts";
+import { renderScriptCall, type ScriptCallRenderOptions } from "./script-renderer.ts";
 import { type GlowupCallState, type GlowupRenderTheme } from "../../../rendering/theme.ts";
 import { type ScriptInvocation } from "./invocation.ts";
 import {
@@ -35,16 +31,13 @@ function truncatePlainTextToWidth(text: string, maxWidth: number): string {
     return `${content}${suffix}`;
 }
 
-function scriptCallRenderOptions(
-    options: BashCommandRenderOptions,
-    headerLayout: ScriptPreviewHeaderLayout,
-): ScriptCallRenderOptions {
+function scriptCallRenderOptions(options: BashCommandRenderOptions): ScriptCallRenderOptions {
     let renderOptions: ScriptCallRenderOptions = {
         state: options.state,
         expanded: options.expanded,
         maxCodePreviewLines: options.maxCodePreviewLines,
         showPrologueOmission: options.showPrologueOmission,
-        headerLayout,
+        durationMs: options.durationMs,
         lastComponent: options.lastComponent,
     };
     if (options.invalidate !== undefined) {
@@ -71,6 +64,7 @@ const shellRenderStates = new WeakMap<Component, ShellRenderState>();
 function renderFullShellCommand(
     theme: GlowupRenderTheme,
     command: string,
+    launcher: string | undefined,
     analysis: BashCommandAnalysis,
     { lastComponent, ...options }: BashCommandRenderOptions,
 ): Component {
@@ -79,23 +73,21 @@ function renderFullShellCommand(
         if (previous !== undefined) state = shellRenderStates.get(previous) ?? state;
 
         const renderOptions = { ...options, invalidate };
-        const headerLayout =
-            options.headerLayout === "auto" && analysis.structurallyComplex
-                ? "block"
-                : options.headerLayout;
         const renderInvocation = (code: string, previous: Component | undefined): Component =>
             renderScriptCall(
                 theme,
-                { label: "Bash", language: "bash", code },
                 {
-                    ...scriptCallRenderOptions(renderOptions, headerLayout),
-                    lastComponent: previous,
+                    label: "Bash",
+                    language: "bash",
+                    code,
+                    ...(launcher !== undefined && { launcher }),
                 },
+                { ...scriptCallRenderOptions(renderOptions), lastComponent: previous },
             );
         const unsplit = renderInvocation(command, state.unsplit);
         state.unsplit = unsplit;
 
-        const unsplitBaselineLines = headerLayout === "block" ? 2 : 1;
+        const unsplitBaselineLines = launcher === undefined ? 1 : 2;
         let splitWidth: number | undefined;
         const component = makeComponent((width) => {
             const unsplitLines = unsplit.render(width);
@@ -146,7 +138,6 @@ export type BashCommandRenderOptions = {
     readonly expanded: boolean;
     readonly maxCodePreviewLines: number;
     readonly showPrologueOmission: boolean;
-    readonly headerLayout: ScriptPreviewHeaderLayout;
     readonly shellLayout: ShellLayout;
     readonly shellOperatorPosition: ShellOperatorPosition;
     readonly pureScriptOverride?: ScriptInvocation;
@@ -154,6 +145,7 @@ export type BashCommandRenderOptions = {
     readonly invalidate?: () => void;
     readonly onContentWidth?: (contentWidth: number, renderWidth: number) => void;
     readonly profile?: ScriptCallRenderOptions["profile"];
+    readonly durationMs?: number | undefined;
 };
 
 function renderScriptInvocation(
@@ -165,19 +157,16 @@ function renderScriptInvocation(
         return renderFullShellCommand(
             theme,
             pureScript.code,
+            pureScript.launcher,
             analyzeBashCommand(pureScript.code, options.shellOperatorPosition),
             options,
         );
     }
 
-    return renderScriptCall(
-        theme,
-        pureScript,
-        scriptCallRenderOptions(options, options.headerLayout),
-    );
+    return renderScriptCall(theme, pureScript, scriptCallRenderOptions(options));
 }
 
-/** Renders a clean standalone interpreter call or a losslessly reflowed Bash command. */
+/** Renders a standalone interpreter call or a losslessly reflowed Bash command as a `$` prompt. */
 export function renderBashCommandCall(
     theme: GlowupRenderTheme,
     command: string,
@@ -192,5 +181,5 @@ export function renderBashCommandCall(
         return renderScriptInvocation(theme, analysis.pureScript, options);
     }
 
-    return renderFullShellCommand(theme, command, analysis, options);
+    return renderFullShellCommand(theme, command, undefined, analysis, options);
 }

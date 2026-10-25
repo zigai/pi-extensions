@@ -533,6 +533,7 @@ function completedCallSignature(
         context.expanded,
         context.showImages,
         context.isError,
+        context.durationMs,
         context.cwd,
         context.result?.content,
         context.result?.details,

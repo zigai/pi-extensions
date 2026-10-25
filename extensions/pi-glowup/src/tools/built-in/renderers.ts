@@ -22,9 +22,8 @@ import {
     readActionArgs,
     textOutput,
 } from "./arguments.ts";
-import type { ShellLayout, ShellOperatorPosition } from "./bash/command.ts";
+import type { ShellLayout, ShellOperatorPosition, ShellOutputStyle } from "./bash/command.ts";
 import { createNativeBashFeature } from "./bash/preview.ts";
-import { type ScriptPreviewHeaderLayout } from "./bash/script-renderer.ts";
 import { type BuiltInToolRendererOptions, type BuiltInRenderContext } from "./context.ts";
 import { createNativeDeleteFeature } from "./delete.ts";
 import { createNativeEditFeature } from "./edit.ts";
@@ -48,7 +47,6 @@ export function createNativeToolRenderers(features: {
     const { renderExplorationCall, renderExplorationResult } = features.exploration;
 
     function renderBuiltInToolCall(options: {
-        readonly headerLayout: () => ScriptPreviewHeaderLayout;
         readonly maxCodePreviewLines: () => number;
         readonly showPrologueOmission: () => boolean;
         readonly shellLayout: () => ShellLayout;
@@ -100,7 +98,6 @@ export function createNativeToolRenderers(features: {
                         jsonValueParser.parse(args),
                         theme,
                         context,
-                        options.headerLayout,
                         options.maxCodePreviewLines,
                         options.showPrologueOmission,
                         options.shellLayout,
@@ -141,7 +138,7 @@ export function createNativeToolRenderers(features: {
     }
 
     function renderBuiltInToolResult(settings: {
-        readonly headerLayout: () => ScriptPreviewHeaderLayout;
+        readonly shellOutputStyle: () => ShellOutputStyle;
         readonly mutationSettings: MutationSettings;
         readonly recordRender: (kind: "result", toolName: BuiltInToolName) => void;
     }): BuiltInToolRendererOptions["renderResult"] {
@@ -161,7 +158,13 @@ export function createNativeToolRenderers(features: {
                 case "ls":
                     return renderExplorationResult(result, options.expanded, theme);
                 case "bash":
-                    return renderBashResult(result, options, theme, context, settings.headerLayout);
+                    return renderBashResult(
+                        result,
+                        options,
+                        theme,
+                        context,
+                        settings.shellOutputStyle,
+                    );
                 case "write":
                     return renderWriteResult(
                         result,

@@ -22,6 +22,7 @@ describe("streaming script identity", () => {
             label: "Node",
             language: "javascript",
             code: "import { value } from './value.js';",
+            launcher: "node --input-type=module <<'EOF'",
         });
 
         expect(

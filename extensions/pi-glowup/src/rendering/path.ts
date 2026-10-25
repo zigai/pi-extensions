@@ -16,7 +16,7 @@ export function collapseHome(path: string): string {
 export function isInstructionFilePath(path: string | undefined): boolean {
     const normalized = (path ?? "").replace(/\\/g, "/");
     const segments = normalized.split("/").filter((segment) => segment.length > 0);
-    if (segments[segments.length - 1] === "AGENTS.md") {
+    if (["AGENTS.md", "SKILL.md"].includes(segments.at(-1) ?? "")) {
         return true;
     }
 
@@ -28,13 +28,20 @@ export function isInstructionFilePath(path: string | undefined): boolean {
 export function isPartialInstructionFilePath(path: string | undefined): boolean {
     const normalized = (path ?? "").replace(/\\/g, "/");
     const basename = normalized.split("/").at(-1) ?? "";
-    if (basename === "AGENTS" || basename.startsWith("AGENTS.")) {
+
+    if (["AGENTS", "SKILL"].some((name) => basename === name || basename.startsWith(`${name}.`))) {
         return true;
     }
 
     return /(?:^|\/|~\/)\.pi\/agent\/(?:skills(?:\/|$)|(?:git|npm\/node_modules)\/.+\/skills(?:\/|$))/u.test(
         normalized,
     );
+}
+
+/** Colors a path without rewriting it (shell previews must preserve submitted source). */
+export function filePathText(theme: GlowupRenderTheme, path: string): string {
+    if (isInstructionFilePath(path)) return instructionPathText(theme, path);
+    return pathText(theme, path);
 }
 
 export function formatPathTarget(

@@ -1,10 +1,12 @@
-import type { ShellLayout, ShellOperatorPosition } from "./command.ts";
+import type { Component } from "@earendil-works/pi-tui";
+import { createSyntaxComponent } from "../../../rendering/syntax/component-owner.ts";
+import type { ShellLayout, ShellOperatorPosition, ShellOutputStyle } from "./command.ts";
 import { type JsonValue } from "../../../json-value.ts";
 import { emptyComponent, makeComponent } from "../../../rendering/component.ts";
 import type { CodePreview } from "../../../rendering/streaming/presentation.ts";
 import { parseScriptInvocation, type ScriptInvocation } from "./invocation.ts";
 import { renderGlowupOutput, type GlowupOutputRenderOptions } from "../../../rendering/output.ts";
-import { renderScriptCall, type ScriptPreviewHeaderLayout } from "./script-renderer.ts";
+import { renderScriptCall } from "./script-renderer.ts";
 import { shouldDeferSimpleToolCall } from "../../../rendering/status-labels.ts";
 import { detectStructuredOutputLanguage } from "../../../rendering/syntax/code-component.ts";
 import { commandField, textOutput } from "../arguments.ts";
@@ -20,7 +22,11 @@ import {
     rememberRawScriptPreview,
     scriptForPreview,
 } from "./format-preview.ts";
-import type { ScriptBlockFormatter } from "./formatter.ts";
+import type {
+    ScriptBlockFormatter,
+    ScriptBlockFormatterInput,
+    ScriptBlockFormatterOptions,
+} from "./formatter.ts";
 import {
     boundedScriptPreview,
     createScriptPreviewStore,
@@ -48,7 +54,15 @@ type ScheduledPreview = {
     completion: Promise<void>;
     completed: boolean;
     ready: boolean;
+    expandedScript: ScriptInvocation | undefined;
 };
+
+type StreamingScriptRenderState = {
+    readonly toolCallId: string;
+    preview: Component | undefined;
+};
+
+const streamingScriptRenderStates = new WeakMap<Component, StreamingScriptRenderState>();
 
 function renderStreamingScriptCall(
     invocation: ScriptInvocation,
@@ -58,34 +72,62 @@ function renderStreamingScriptCall(
     options: Omit<BashCommandRenderOptions, "expanded">,
 ) {
     const { toolCallId, argsComplete, isError } = context;
-    let previous: BashCommandRenderOptions["lastComponent"];
+    let current = context.lastComponent;
 
-    return renderExpandableSection(context, "call", (expanded) =>
-        makeComponent((width) => {
-            const code = streamCode({
-                key: `tool:${toolCallId}:script:${invocation.language}`,
-                source: invocation.code,
-                language: invocation.language,
-                complete: argsComplete || isError,
-                targetWidth: Math.max(1, width - 6),
-                ...(options.invalidate !== undefined && { invalidate: options.invalidate }),
-            });
+    return renderExpandableSection(context, "call", (expanded) => {
+        const rendered = createSyntaxComponent(
+            current,
+            options.invalidate,
+            (invalidate, previous) => {
+                let renderState: StreamingScriptRenderState = { toolCallId, preview: undefined };
+                if (previous !== undefined) {
+                    const retained = streamingScriptRenderStates.get(previous);
+                    if (retained?.toolCallId === toolCallId) renderState = retained;
+                }
 
-            // Statement publication and shell layout are independent: lay out only
-            // the published snapshot, never expose the unfinished source tail.
-            const component = renderBashCommandCall(theme, code, {
-                ...options,
-                expanded,
-                pureScriptOverride: { ...invocation, code },
-                lastComponent: previous,
-            });
-            previous = component;
-            return component.render(width);
-        }),
-    );
+                const component = makeComponent((width) => {
+                    const code = streamCode({
+                        key: `tool:${toolCallId}:script:${invocation.language}`,
+                        source: invocation.code,
+                        language: invocation.language,
+                        complete: argsComplete || isError,
+                        targetWidth: Math.max(1, width - 6),
+                        invalidate,
+                    });
+
+                    // Statement publication and shell layout are independent: lay out only
+                    // the published snapshot, never expose the unfinished source tail.
+                    const preview = renderBashCommandCall(theme, code, {
+                        ...options,
+                        expanded,
+                        invalidate,
+                        pureScriptOverride: { ...invocation, code },
+                        lastComponent: renderState.preview,
+                    });
+                    renderState.preview = preview;
+                    return preview.render(width);
+                });
+                // Host invalidations rebuild this wrapper. Retain the child syntax owner
+                // instead of flashing plain text and tokenizing the same script again.
+                streamingScriptRenderStates.set(component, renderState);
+                return component;
+            },
+        );
+        // Expansion callbacks outlive this render. Replace their previous component
+        // reference instead of retaining every historical host row through a closure.
+        current = rendered;
+        return rendered;
+    });
 }
 
-export function createNativeBashFeature() {
+export function createNativeBashFeature(
+    formatterAccessor?: () => ScriptBlockFormatter | undefined,
+    formatEmbedded?: (
+        input: ScriptBlockFormatterInput,
+        formatter: ScriptBlockFormatter,
+        options: ScriptBlockFormatterOptions,
+    ) => Promise<string>,
+) {
     const scriptPreviews = createScriptPreviewStore();
     const scheduledCommands = new Map<string, ScheduledPreview>();
     const renderWidths = new Map<string, { contentWidth: number; renderWidth: number }>();
@@ -117,7 +159,6 @@ export function createNativeBashFeature() {
         args: JsonValue | undefined,
         theme: BuiltInRenderTheme,
         context: BuiltInRenderContext,
-        headerLayout: () => ScriptPreviewHeaderLayout,
         maxCodePreviewLines: () => number,
         showPrologueOmission: () => boolean,
         shellLayout: () => ShellLayout,
@@ -138,14 +179,17 @@ export function createNativeBashFeature() {
             }
 
             const invocation = script ?? { label: "Bash", language: "bash", code: command };
+            const profile = formatterAccessor?.()?.profileFor?.(invocation.language);
+
             return renderStreamingScriptCall(invocation, theme, context, streamCode, {
                 state,
                 maxCodePreviewLines: maxCodePreviewLines(),
                 showPrologueOmission: showPrologueOmission(),
-                headerLayout: headerLayout(),
                 shellLayout: shellLayout(),
                 shellOperatorPosition: shellOperatorPosition(),
                 invalidate: context.invalidate,
+                durationMs: context.durationMs,
+                ...(profile !== undefined && { profile }),
             });
         }
 
@@ -166,8 +210,8 @@ export function createNativeBashFeature() {
                 expanded: false,
                 maxCodePreviewLines: maxCodePreviewLines(),
                 showPrologueOmission: showPrologueOmission(),
-                headerLayout: headerLayout(),
                 invalidate: context.invalidate,
+                durationMs: context.durationMs,
                 lastComponent: context.lastComponent,
             });
         }
@@ -177,9 +221,17 @@ export function createNativeBashFeature() {
 
         if (context.result !== undefined && !context.isPartial) completePreview(context.toolCallId);
 
-        const parsedScript = scriptForPreview(displayCommand, scheduled?.options.formatter);
+        const parsedScript = scriptForPreview(
+            displayCommand,
+            scheduled?.options.formatter,
+            formatEmbedded !== undefined,
+        );
         const profile = scheduled?.options.formatter?.profileFor?.(parsedScript?.language ?? "");
-        const profiled = profile !== undefined;
+        const profiled =
+            profile !== undefined ||
+            (formatEmbedded !== undefined &&
+                parsedScript?.language === "bash" &&
+                displayCommand.includes("<<"));
         let script = scriptPreviews.get(context.toolCallId);
         if (profiled && scheduled?.completed !== true) script = undefined;
 
@@ -196,10 +248,10 @@ export function createNativeBashFeature() {
             expanded: context.expanded,
             maxCodePreviewLines: maxCodePreviewLines(),
             showPrologueOmission: showPrologueOmission(),
-            headerLayout: headerLayout(),
             shellLayout: shellLayout(),
             shellOperatorPosition: shellOperatorPosition(),
             invalidate: context.invalidate,
+            durationMs: context.durationMs,
         };
         if (stableScript !== undefined && context.argsComplete) {
             const { toolCallId } = context;
@@ -226,7 +278,18 @@ export function createNativeBashFeature() {
         return renderExpandableSection(context, "call", (expanded) => {
             let options = { ...bashOptions, expanded, lastComponent: previous };
             if (expanded && profiled && parsedScript !== undefined) {
-                options = { ...options, pureScriptOverride: parsedScript, shellLayout: "preserve" };
+                let expandedScript = parsedScript;
+                if (
+                    scheduled?.completed === true &&
+                    scheduled.ready &&
+                    scheduled.expandedScript !== undefined
+                )
+                    expandedScript = scheduled.expandedScript;
+                options = {
+                    ...options,
+                    pureScriptOverride: expandedScript,
+                    shellLayout: "preserve",
+                };
             }
 
             const component = renderBashCommandCall(theme, displayCommand, options);
@@ -240,26 +303,23 @@ export function createNativeBashFeature() {
         options: BuiltInResultOptions,
         theme: BuiltInRenderTheme,
         context: BuiltInRenderContext,
-        headerLayout: () => ScriptPreviewHeaderLayout,
+        shellOutputStyle: () => ShellOutputStyle,
     ) {
         if (!options.isPartial) completePreview(context.toolCallId);
 
         const output = textOutput(result);
         const language = detectStructuredOutputLanguage(output);
-        const script = parseScriptInvocation(commandField(context.args));
+        let prefix = "";
+        if (shellOutputStyle() === "gutter") prefix = theme.fg("dim", "│ ");
+
         let outputOptions: GlowupOutputRenderOptions = {
             expanded: options.expanded,
             mode: "headTail",
             maxPreviewLines: 5,
             invalidate: context.invalidate,
+            prefixFirst: prefix,
+            prefixRest: prefix,
         };
-        if (script !== undefined && headerLayout() === "block") {
-            outputOptions = {
-                ...outputOptions,
-                prefixFirst: theme.fg("dim", "  → "),
-                prefixRest: "    ",
-            };
-        }
 
         if (language !== undefined) {
             outputOptions = { ...outputOptions, syntax: { language } };
@@ -283,7 +343,13 @@ export function createNativeBashFeature() {
     }
 
     function remember(toolCallId: string, command: string, formatter?: ScriptBlockFormatter): void {
-        rememberRawScriptPreview(scriptPreviews, toolCallId, command, formatter);
+        rememberRawScriptPreview(
+            scriptPreviews,
+            toolCallId,
+            command,
+            formatter,
+            formatEmbedded !== undefined,
+        );
     }
 
     function invalidatePreview(scheduled: ScheduledPreview): void {
@@ -315,11 +381,41 @@ export function createNativeBashFeature() {
         let signal = controller.signal;
         if (options.signal !== undefined) signal = AbortSignal.any([signal, options.signal]);
 
+        let previewFormatter = options.formatter;
+        let expandedScript: ScriptInvocation | undefined;
+        const backend = options.formatter;
+        if (backend !== undefined && formatEmbedded !== undefined) {
+            previewFormatter = Object.assign(
+                async (
+                    input: ScriptBlockFormatterInput,
+                    formatterOptions: ScriptBlockFormatterOptions = {},
+                ) => {
+                    let code = input.code;
+                    if (input.language === "bash") {
+                        code = await formatEmbedded(input, backend, formatterOptions);
+                        if (code !== input.code) {
+                            const candidate = { label: "Bash", language: "bash", code };
+                            // Large expanded calls can still use their original
+                            // input; do not retain another unbounded source copy.
+                            if (boundedScriptPreview(candidate) === candidate)
+                                expandedScript = candidate;
+                        }
+                    }
+                    const formatted = await backend({ ...input, code }, formatterOptions);
+                    if (formatted !== undefined) return formatted;
+                    if (code !== input.code) return code;
+                    return undefined;
+                },
+                { ...(backend.profileFor !== undefined && { profileFor: backend.profileFor }) },
+            );
+        }
+
         const formatted = await formatAndStoreScriptPreview({
             sink: scriptPreviews,
             toolCallId: options.toolCallId,
             command: options.command,
-            formatter: options.formatter,
+            formatter: previewFormatter,
+            embeddedHeredocs: formatEmbedded !== undefined,
             signal,
             ...(targetWidth !== undefined && { targetWidth }),
             isCurrent: () =>
@@ -340,10 +436,11 @@ export function createNativeBashFeature() {
         if (!formatted) return;
 
         scheduled.ready = true;
+        scheduled.expandedScript = expandedScript;
 
         const script = scriptPreviews.get(options.toolCallId);
         const profile = options.formatter?.profileFor?.(script?.language ?? "");
-        if (profile !== undefined && !scheduled.completed) return;
+        if ((profile !== undefined || expandedScript !== undefined) && !scheduled.completed) return;
 
         invalidatePreview(scheduled);
     }
@@ -397,6 +494,7 @@ export function createNativeBashFeature() {
             completion: Promise.resolve(),
             completed: options.completed ?? false,
             ready: false,
+            expandedScript: undefined,
         };
 
         scheduledCommands.set(options.toolCallId, scheduled);
@@ -425,7 +523,11 @@ export function createNativeBashFeature() {
         let restored = 0;
         for (const call of options.calls) {
             if (options.signal.aborted || !options.isCurrent()) return;
-            if (scriptForPreview(call.command, options.formatter) === undefined) continue;
+            if (
+                scriptForPreview(call.command, options.formatter, formatEmbedded !== undefined) ===
+                undefined
+            )
+                continue;
             if (restored >= MAX_SCRIPT_PREVIEW_ENTRIES) return;
 
             restored += 1;

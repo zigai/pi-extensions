@@ -828,8 +828,8 @@ describe("extension lifecycle", () => {
         row.updateResult({ content: [], isError: false });
         await vi.waitFor(() => {
             const rendered = stripAnsi(row.render(100).join("\n"));
-            expect(rendered).toContain("│ const item");
-            expect(rendered).toContain("│ console.log(item)");
+            expect(rendered).toContain("$ node -e\n  const item");
+            expect(rendered).toContain("\n  console.log(item)");
         });
         await pi.shutdownSession();
     });
@@ -920,13 +920,11 @@ describe("extension lifecycle", () => {
 
         expect(completedArgs.render(100)).toEqual([]);
         completedArgs.setArgsComplete();
-        expect(stripAnsi(completedArgs.render(100).join("\n"))).toContain(
-            "Bash cd /tmp && sleep 300",
-        );
+        expect(stripAnsi(completedArgs.render(100).join("\n"))).toContain("$ cd /tmp && sleep 300");
 
         startedExecution.markExecutionStarted();
         expect(stripAnsi(startedExecution.render(100).join("\n"))).toContain(
-            "Bash cd /tmp && sleep 300",
+            "$ cd /tmp && sleep 300",
         );
 
         await pi.shutdownSession();

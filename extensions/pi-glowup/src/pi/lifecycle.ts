@@ -33,7 +33,6 @@ import {
 import { jsonObjectParser, jsonValueParser } from "../json-value.ts";
 import { getString } from "../tools/tool-values.ts";
 import { configureRenderingAppearance, configureToolCallIndicator } from "../rendering/theme.ts";
-import { type ScriptPreviewHeaderLayout } from "../tools/built-in/bash/script-renderer.ts";
 import { clearQueuedDiffHighlights } from "../rendering/diff/pierre-renderer.ts";
 import { type PierreDiffPayload } from "../rendering/diff/types.ts";
 import {
@@ -47,7 +46,6 @@ import {
     type ScriptBlockFormatter,
     type ScriptFormatterCommands,
 } from "../tools/built-in/bash/formatter.ts";
-import { parseScriptPreviewHeaderLayout } from "../tools/built-in/bash/settings.ts";
 import { createNativeBashFeature } from "../tools/built-in/bash/preview.ts";
 import { createCodemodePreview } from "../tools/external/codemode.ts";
 import { createNativeDeleteFeature } from "../tools/built-in/delete.ts";
@@ -102,7 +100,6 @@ const opaqueObjectParser = {
 const EXTENSION_LOADED_KEY = Symbol.for("zigai.pi-glowup.extension-loaded");
 const PRESERVE_TOOLS_ENV = "PI_GLOWUP_PRESERVE_TOOLS";
 const SCRIPT_FORMATTERS_ENV = "PI_GLOWUP_SCRIPT_FORMATTERS";
-const SCRIPT_HEADER_LAYOUT_ENV = "PI_GLOWUP_SCRIPT_HEADER_LAYOUT";
 
 function thirdPartyToolRenderingOptions(
     config: GlowupConfig,
@@ -147,13 +144,6 @@ function scriptBlockFormatter(
     );
 }
 
-function scriptPreviewHeaderLayout(config: GlowupConfig): ScriptPreviewHeaderLayout {
-    const headerLayoutFromEnv = process.env[SCRIPT_HEADER_LAYOUT_ENV];
-    return headerLayoutFromEnv === undefined
-        ? config.scriptHeaderLayout
-        : parseScriptPreviewHeaderLayout(headerLayoutFromEnv);
-}
-
 export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
     // SAFETY: The symbol property is extension-private metadata on the concrete
     // ExtensionAPI object. It does not alter Pi's public API or handler semantics.
@@ -179,7 +169,10 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
     const streamCode: CodePreview = (input) => presentGlowupContent({ ...input, kind: "code" });
 
     const edit = createNativeEditFeature();
-    const bash = createNativeBashFeature();
+    const bash = createNativeBashFeature(
+        () => formatter,
+        (input, backend, options) => codeStreams.formatEmbedded(input, backend, options),
+    );
     const codemode = createCodemodePreview(() => formatter);
     const deletion = createNativeDeleteFeature();
     const exploration = createExplorationFeature();
@@ -243,7 +236,6 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
     configureDebugLog(config);
 
     let formatter = scriptBlockFormatter(config, reportWarning);
-    let headerLayout = scriptPreviewHeaderLayout(config);
     let sessionGeneration = 0;
     let extensionLoadedRecorded = false;
 
@@ -270,7 +262,6 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
             });
         });
         formatter = scriptBlockFormatter(config, reportWarning);
-        headerLayout = scriptPreviewHeaderLayout(config);
 
         configureAssistantSeparatorPatch(config.patches.assistantSeparator);
         configureWorkingWidgetSpacingPatch(config.patches.workingWidgetSpacing);
@@ -287,7 +278,6 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         );
 
         const nativeCall = renderBuiltInToolCall({
-            headerLayout: () => headerLayout,
             maxCodePreviewLines: () => config.scriptMaxCodePreviewLines,
             showPrologueOmission: () => config.scriptShowPrologueOmission,
             shellLayout: () => config.shellLayout,
@@ -299,7 +289,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
             ...(config.streaming.code !== "token" && { streamCode }),
         });
         const nativeResult = renderBuiltInToolResult({
-            headerLayout: () => headerLayout,
+            shellOutputStyle: () => config.shellOutputStyle,
             mutationSettings: config.mutations,
             recordRender: recordBuiltInRender,
         });

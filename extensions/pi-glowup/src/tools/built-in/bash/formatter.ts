@@ -222,7 +222,10 @@ async function runFormatterCommand(
             resolve(value);
         };
 
-        const fail = (): void => {
+        const fail = (reason?: string): void => {
+            if (reason !== undefined && options.signal?.aborted !== true && !settled)
+                reportFailure(reason);
+
             finish(undefined);
 
             if (terminating) return;
@@ -237,7 +240,10 @@ async function runFormatterCommand(
             escalation.unref();
         };
 
-        const timeout = setTimeout(fail, FORMATTER_TIMEOUT_MS);
+        const timeout = setTimeout(
+            () => fail(`timed out after ${FORMATTER_TIMEOUT_MS} ms`),
+            FORMATTER_TIMEOUT_MS,
+        );
         timeout.unref();
 
         child.stdout.setEncoding("utf8");
@@ -246,14 +252,14 @@ async function runFormatterCommand(
 
             stdoutBytes += Buffer.byteLength(chunk, "utf8");
             if (stdoutBytes > FORMATTER_MAX_BUFFER) {
-                fail();
+                fail(`output exceeded ${FORMATTER_MAX_BUFFER} bytes`);
                 return;
             }
 
             stdout += chunk;
         });
 
-        child.stdin.on("error", fail);
+        child.stdin.on("error", () => fail());
         child.on("error", (cause: unknown) => {
             if (options.signal?.aborted !== true) {
                 let reason = "failed";
@@ -267,13 +273,19 @@ async function runFormatterCommand(
             fail();
         });
 
-        options.signal?.addEventListener("abort", fail, { once: true });
+        const abort = (): void => fail();
+        options.signal?.addEventListener("abort", abort, { once: true });
 
-        child.once("close", (code) => {
-            options.signal?.removeEventListener("abort", fail);
+        child.once("close", (code, signal) => {
+            options.signal?.removeEventListener("abort", abort);
             clearTimeout(escalation);
 
-            if (code !== 0 && options.signal?.aborted !== true) reportFailure("failed");
+            if (code !== 0 && options.signal?.aborted !== true) {
+                if (code !== null) reportFailure(`exited with status ${code}`);
+                else if (signal !== null) reportFailure(`terminated by ${signal}`);
+                else reportFailure("failed");
+            }
+
             finish(code === 0 ? stdout : undefined);
             release();
         });
@@ -390,10 +402,18 @@ export function createCommandScriptFormatter(
         }
     };
 
+    const profileFor = (language: string): ScriptFormatterProfile | undefined => {
+        const configured = commands.get(language);
+        if (configured !== undefined) return configured;
+        if (language === "tsx") return commands.get("typescript");
+        if (language === "jsx") return commands.get("javascript");
+        return undefined;
+    };
+
     const formatter: ScriptBlockFormatter = async (input, options = {}) => {
         if (options.signal?.aborted === true) return undefined;
 
-        const command = commands.get(input.language);
+        const command = profileFor(input.language);
         if (command === undefined) {
             return undefined;
         }
@@ -432,7 +452,7 @@ export function createCommandScriptFormatter(
 
         let prepared: PreparedFormatterCommand;
         try {
-            prepared = await prepareFormatterCommand(command, effectiveOptions);
+            prepared = await prepareFormatterCommand(command, effectiveOptions, input.language);
         } catch {
             release();
 
@@ -492,7 +512,7 @@ export function createCommandScriptFormatter(
         return formatted;
     };
 
-    return Object.assign(formatter, { profileFor: (language: string) => commands.get(language) });
+    return Object.assign(formatter, { profileFor });
 }
 
 export async function formatScriptInvocation(

@@ -453,23 +453,6 @@
     "scriptPreview": {
       "type": "object",
       "properties": {
-        "headerLayout": {
-          "anyOf": [
-            {
-              "type": "string",
-              "const": "auto"
-            },
-            {
-              "type": "string",
-              "const": "inline"
-            },
-            {
-              "type": "string",
-              "const": "block"
-            }
-          ],
-          "description": "Choose auto, inline, or block script headers."
-        },
         "maxCodePreviewLines": {
           "type": "integer",
           "minimum": 4,
@@ -508,6 +491,19 @@
             }
           ],
           "description": "Place Bash chain operators before or after reflowed line breaks."
+        },
+        "shellOutputStyle": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "terminal"
+            },
+            {
+              "type": "string",
+              "const": "gutter"
+            }
+          ],
+          "description": "Show Bash command output flush left like a terminal, or behind a dim │ gutter."
         },
         "formatters": {
           "type": "object",
@@ -780,11 +776,11 @@
       },
       "additionalProperties": false,
       "default": {
-        "headerLayout": "auto",
         "maxCodePreviewLines": 8,
         "showPrologueOmission": false,
         "shellLayout": "auto",
         "shellOperatorPosition": "trailing",
+        "shellOutputStyle": "terminal",
         "formatters": {}
       }
     },

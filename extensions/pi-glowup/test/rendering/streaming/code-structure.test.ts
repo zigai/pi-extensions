@@ -72,6 +72,35 @@ it("formats JS/TS function, arrow, if and else headers once, before progressive 
     expect(journal().slice(before.length)).not.toContain("return y+1");
 });
 
+it("formats a streaming try header before its real handler without leaking the private handler", async () => {
+    const { store, formatter, journal } = setup("typescript");
+    const input = {
+        key: "try",
+        source: "try{\n const x=1;\n",
+        language: "typescript",
+        mode: "statement" as const,
+        complete: false,
+        formatter,
+    };
+    store.get(input);
+    await store.settled();
+    expect(store.get(input)).toBe("try {\n  const x = 1;");
+    const before = journal();
+    const final = {
+        ...input,
+        source: input.source + "}catch(error){\n report( error );\n}\n",
+        complete: true,
+    };
+    store.get(final);
+    await store.settled();
+    expect(store.get(final)).toBe(
+        "try {\n  const x = 1;\n} catch (error) {\n  report(error);\n}\n",
+    );
+
+    expect(journal().startsWith(before)).toBe(true);
+    expect(journal().slice(before.length)).not.toContain("const x=1");
+});
+
 it("formats class/method and unbraced conditional headers independently", async () => {
     const { store, formatter } = setup("typescript");
     const input = {

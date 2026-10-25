@@ -11,6 +11,7 @@ import { renderScriptCall } from "../../../src/tools/built-in/bash/script-render
 import { renderBashCommandCall } from "../../../src/tools/built-in/bash/renderer.ts";
 import { renderGlowupOutput } from "../../../src/rendering/output.ts";
 import { createPlainTheme } from "../../support/plain-theme.ts";
+import { renderShellPrompt } from "../../../src/rendering/theme.ts";
 import { renderWriteCallPreview } from "../../../src/tools/built-in/write-preview.ts";
 import { scheduleCodeOutputSyntaxLoad } from "../../../src/rendering/syntax/code-component.ts";
 import {
@@ -35,6 +36,10 @@ import {
 } from "../../../src/rendering/syntax/highlighter.ts";
 
 const plainTheme = createPlainTheme();
+
+function codeText(lines: readonly string[]): string {
+    return lines.join("\n").replaceAll(renderShellPrompt(plainTheme), "$");
+}
 
 type FakeHighlighterOptions = {
     readonly loadedLanguages?: readonly string[];
@@ -115,7 +120,6 @@ describe("syntax highlighter lifecycle", () => {
                         expanded: false,
                         maxCodePreviewLines: 8,
                         showPrologueOmission: false,
-                        headerLayout: "auto",
                         shellLayout,
                         shellOperatorPosition: "trailing",
                         invalidate,
@@ -811,7 +815,7 @@ describe("syntax highlighter lifecycle", () => {
             },
         );
 
-        expect(component.render(120).join("\n")).not.toContain("\u001b[");
+        expect(codeText(component.render(120))).not.toContain("\u001b[");
         await waitForCondition(() => invalidations > 0);
 
         component = renderScriptCall(
@@ -826,7 +830,7 @@ describe("syntax highlighter lifecycle", () => {
             },
         );
 
-        const rendered = component.render(120).join("\n");
+        const rendered = codeText(component.render(120));
 
         expect(rendered).toContain("\u001b[");
         expect(rendered).toContain("const");
@@ -897,11 +901,11 @@ describe("syntax highlighter lifecycle", () => {
             },
         );
 
-        expect(component.render(120).join("\n")).not.toContain("\u001b[");
+        expect(codeText(component.render(120))).not.toContain("\u001b[");
         await waitForCondition(() => invalidations > 0);
         component.render(120);
         await settleSyntaxHighlights();
-        const rendered = component.render(120).join("\n");
+        const rendered = codeText(component.render(120));
 
         expect(rendered).toContain("\u001b[");
         expect(rendered).toContain("const");

@@ -69,7 +69,6 @@ it("colors the last real script preview after a restored history burst", async (
                 {
                     state: "success",
                     expanded: false,
-                    headerLayout: "block",
                     invalidate: redraw,
                     lastComponent: components[index],
                 },

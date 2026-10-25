@@ -238,6 +238,31 @@ describe("code stream store", () => {
         expect(subject.get(input)).toBe("");
     });
 
+    it.each([
+        ["python", 'if True: print("inline")'],
+        ["python", 'def read(): return "inline"\nprint(read())'],
+        ["python", "def read():\n # first comment\n value=1\n return value\n"],
+        ["bash", "if true; then echo one; else echo two; fi"],
+        ["javascript", "function f(){ if(true) return 1; else return 2; }"],
+    ])(
+        "preserves original %s layout when a formatter declines the language",
+        async (language, source) => {
+            const subject = store();
+            const input = {
+                key: "unformatted-language",
+                source,
+                language,
+                complete: true,
+                mode: "statement" as const,
+                formatter: async () => undefined,
+            };
+            subject.get(input);
+            await subject.settled();
+            expect(subject.get(input)).toBe(source);
+            expect(subject.ready(input.key)).toBe(true);
+        },
+    );
+
     it("never mistakes explicit unknown languages for a path alias", async () => {
         const subject = store();
         const input = {

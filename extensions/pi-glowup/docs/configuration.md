@@ -93,11 +93,11 @@ For compatibility with the previous appearance, `addedRowBackground` and
 | `patches.autocompleteCleanup`             | `true`           | Redraw after slash autocomplete closes.                         |
 | `patches.markdownSyntax`                  | `true`           | Highlight Markdown code fences.                                 |
 | `patches.thirdPartyToolRenderers`         | `true`           | Apply compact renderers to compatible third-party tools.        |
-| `scriptPreview.headerLayout`              | `"auto"`         | Choose `auto`, `inline`, or `block` script headers.             |
 | `scriptPreview.maxCodePreviewLines`       | `8`              | Collapsed script content rows before a separate omission row.   |
 | `scriptPreview.showPrologueOmission`      | `false`          | Show a count row for omitted leading setup imports.             |
 | `scriptPreview.shellLayout`               | `"auto"`         | Choose when composed Bash commands are safely reflowed.         |
 | `scriptPreview.shellOperatorPosition`     | `"trailing"`     | Place Bash chain operators before or after reflowed breaks.     |
+| `scriptPreview.shellOutputStyle`          | `"terminal"`     | Show Bash output flush left, or behind a dim `│` gutter.        |
 | `scriptPreview.formatters`                | `{}`             | Commands that format script previews through stdin/stdout.      |
 
 ## Full default configuration
@@ -168,11 +168,11 @@ For compatibility with the previous appearance, `addedRowBackground` and
     "thirdPartyToolRenderers": true
   },
   "scriptPreview": {
-    "headerLayout": "auto",
     "maxCodePreviewLines": 8,
     "showPrologueOmission": false,
     "shellLayout": "auto",
     "shellOperatorPosition": "trailing",
+    "shellOutputStyle": "terminal",
     "formatters": {}
   }
 }

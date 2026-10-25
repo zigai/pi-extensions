@@ -41,11 +41,11 @@ export function configDiagnostics(config: GlowupConfig): DebugLogFields {
         },
         renderCache: config.renderCache,
         scriptPreview: {
-            headerLayout: config.scriptHeaderLayout,
             maxCodePreviewLines: config.scriptMaxCodePreviewLines,
             showPrologueOmission: config.scriptShowPrologueOmission,
             shellLayout: config.shellLayout,
             shellOperatorPosition: config.shellOperatorPosition,
+            shellOutputStyle: config.shellOutputStyle,
             formatterCount: config.scriptFormatters.size,
         },
         toolLabels: {

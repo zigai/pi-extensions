@@ -16,6 +16,7 @@ export type FormatScriptPreviewOptions = {
     readonly toolCallId: string;
     readonly command: string;
     readonly formatter: ScriptBlockFormatter | undefined;
+    readonly embeddedHeredocs?: boolean;
     readonly signal?: AbortSignal;
     readonly targetWidth?: number;
     readonly isCurrent?: () => boolean;
@@ -25,10 +26,16 @@ export type FormatScriptPreviewOptions = {
 export function scriptForPreview(
     command: string,
     formatter: ScriptBlockFormatter | undefined,
+    embeddedHeredocs = false,
 ): ScriptInvocation | undefined {
     const script = parseScriptInvocation(command);
     if (script !== undefined) return script;
-    if (formatter?.profileFor?.("bash") === undefined) return undefined;
+
+    if (
+        formatter?.profileFor?.("bash") === undefined &&
+        !(embeddedHeredocs && formatter !== undefined && command.includes("<<"))
+    )
+        return undefined;
 
     return { label: "Bash", language: "bash", code: command };
 }
@@ -39,8 +46,9 @@ export function rememberRawScriptPreview(
     toolCallId: string,
     command: string,
     formatter?: ScriptBlockFormatter,
+    embeddedHeredocs = false,
 ): void {
-    const script = scriptForPreview(command, formatter);
+    const script = scriptForPreview(command, formatter, embeddedHeredocs);
     if (script === undefined) {
         return;
     }
@@ -52,7 +60,7 @@ export function rememberRawScriptPreview(
 export async function formatAndStoreScriptPreview(
     options: FormatScriptPreviewOptions,
 ): Promise<boolean> {
-    const script = scriptForPreview(options.command, options.formatter);
+    const script = scriptForPreview(options.command, options.formatter, options.embeddedHeredocs);
     if (options.formatter === undefined || script === undefined) return false;
 
     const formatterOptions: ScriptBlockFormatterOptions = {

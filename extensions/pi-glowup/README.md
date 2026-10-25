@@ -71,11 +71,11 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-glowup.json`.
 | `patches.autocompleteCleanup` | boolean | `true` | Redraw after slash autocomplete closes. |
 | `patches.markdownSyntax` | boolean | `true` | Highlight Markdown code fences. |
 | `patches.thirdPartyToolRenderers` | boolean | `true` | Apply compact renderers to compatible third-party tools. |
-| `scriptPreview.headerLayout` | `auto` \| `inline` \| `block` | `"auto"` | Choose auto, inline, or block script headers. |
 | `scriptPreview.maxCodePreviewLines` | integer | `8` | Collapsed script content rows before a separate omission row. |
 | `scriptPreview.showPrologueOmission` | boolean | `false` | Show a count row when collapsed previews omit leading setup imports. |
 | `scriptPreview.shellLayout` | `preserve` \| `auto` \| `always` | `"auto"` | Choose when composed Bash commands are reflowed at safe syntax boundaries. |
 | `scriptPreview.shellOperatorPosition` | `trailing` \| `leading` | `"trailing"` | Place Bash chain operators before or after reflowed line breaks. |
+| `scriptPreview.shellOutputStyle` | `terminal` \| `gutter` | `"terminal"` | Show Bash command output flush left like a terminal, or behind a dim │ gutter. |
 | `scriptPreview.formatters` | Record<string, [CommandFormatter](#settings-type-CommandFormatter) \| [PythonFormatter](#settings-type-PythonFormatter) \| [JavaScriptFormatter](#settings-type-JavaScriptFormatter) \| [TypeScriptFormatter](#settings-type-TypeScriptFormatter) \| [BashFormatter](#settings-type-BashFormatter)> | `{}` | Display-only profiles keyed by language id; statement mode formats each unit in both views, otherwise expansion shows original source. |
 | `streaming.prose` | `token` \| `sentence` \| `paragraph` | `"token"` | Reveal assistant/thinking prose and declared generated tool previews as tokens, completed sentences, or Markdown paragraphs and list items. Completed content blocks always reveal their remaining tail. |
 | `streaming.code` | `token` \| `statement` \| `block` | `"token"` | Reveal generated code in assistant/thinking Markdown, writes, and script/protocol previews as tokens, completed statements, or whole blocks. Statement mode supports JavaScript, TypeScript, Python, and Bash; unknown languages and indented code wait for completion. Configured formatters format each statement separately in both views. Diffs, ordinary tool output, and the user shell are unchanged. |
@@ -151,11 +151,11 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-glowup.json`.
     "thirdPartyToolRenderers": true
   },
   "scriptPreview": {
-    "headerLayout": "auto",
     "maxCodePreviewLines": 8,
     "showPrologueOmission": false,
     "shellLayout": "auto",
     "shellOperatorPosition": "trailing",
+    "shellOutputStyle": "terminal",
     "formatters": {}
   },
   "streaming": {

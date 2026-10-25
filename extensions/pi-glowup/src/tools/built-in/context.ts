@@ -38,6 +38,7 @@ export type PiToolRenderContext = {
     readonly expanded: boolean;
     readonly showImages: boolean;
     readonly isError: boolean;
+    readonly durationMs?: number | undefined;
     readonly cwd?: string;
     readonly invalidate?: (() => void) | undefined;
     readonly lastComponent?: Component | undefined;

@@ -2,17 +2,20 @@ import {
     type GlowupRenderTheme,
     dim,
     type GlowupCallState,
-    renderBullet,
-    actionText,
+    renderShellPrompt,
     muted,
+    red,
 } from "../../../rendering/theme.ts";
+import { formatCallDuration } from "./duration.ts";
 import {
     detectHeredocInterpreter,
     detectScriptInterpreter,
+    heredocScriptInterpreter,
     embeddedInlineScripts,
     type ScriptInvocation,
 } from "./invocation.ts";
 import { highlightSyntaxCode } from "../../../rendering/syntax/highlighter.ts";
+import { filePathText } from "../../../rendering/path.ts";
 import { createSyntaxComponent } from "../../../rendering/syntax/component-owner.ts";
 import {
     isPreviewMetaLine,
@@ -28,15 +31,12 @@ import {
     wrapSinglePhysicalLineWithContinuation,
     toolExpandHint,
     makeComponent,
-    wrapPrefixedLine,
 } from "../../../rendering/component.ts";
 import { type Component, visibleWidth } from "@earendil-works/pi-tui";
 import { parse, type WordPart } from "unbash";
 import { shellWords } from "./shell-words.ts";
 import { highlightDoubleQuotedSource } from "./quoted-source.ts";
 import type { ScriptFormatterProfile } from "../../../settings-input.ts";
-
-export type ScriptPreviewHeaderLayout = "auto" | "inline" | "block";
 
 type ScriptPreview = {
     readonly code: string;
@@ -207,6 +207,7 @@ function bashHeredocHighlightFromLine(line: string): BashHeredocHighlight | unde
         interpreter = detectScriptInterpreter(pipeMatch.groups.pipedCmd);
     }
     interpreter ??= detectHeredocInterpreter(line.slice(0, match.index));
+    interpreter ??= heredocScriptInterpreter(line.slice(0, match.index) + suffix);
     if (interpreter === undefined) {
         return undefined;
     }
@@ -474,8 +475,7 @@ function retainedScriptInvocation(
     }
 
     return {
-        label: invocation.label,
-        language: invocation.language,
+        ...invocation,
         code: detachedScriptPreviewCode(
             collapsedScriptPreview(invocation, maxCodePreviewLines, showPrologueOmission, profile)
                 .code,
@@ -496,47 +496,28 @@ function detachedScriptPreviewCode(code: string): string {
     return detachString(`${truncateUtf8ByGrapheme(code, budget)}${suffix}`);
 }
 
-function wrapScriptLine(
-    theme: GlowupRenderTheme,
-    line: string,
-    width: number,
-    firstPrefix: string,
-): string[] {
-    return wrapSinglePhysicalLineWithContinuation(line, width, firstPrefix, dim(theme, "  │   "));
-}
-
-function renderScriptHeader(
+function promptDuration(
     theme: GlowupRenderTheme,
     state: GlowupCallState,
-    label: string,
-): string {
-    return `${renderBullet(theme, state)} ${actionText(theme, label, { bold: true })}`;
+    durationMs: number | undefined,
+): string | undefined {
+    if (state === "running") return undefined;
+
+    const duration = formatCallDuration(durationMs);
+    if (duration === undefined) return undefined;
+    if (state === "error") return red(theme, duration);
+
+    return muted(theme, duration);
 }
 
-function scriptHasMultiplePhysicalLines(code: string): boolean {
-    const normalized = code.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-    return trimEdgeBlankLines(normalized.split("\n")).length > 1;
-}
+function appendRightAligned(rows: string[], text: string | undefined, width: number): string[] {
+    const first = rows[0];
+    if (text === undefined || first === undefined) return rows;
 
-function resolveScriptHeaderLayout(
-    layout: ScriptPreviewHeaderLayout,
-    invocation: ScriptInvocation,
-    codeLines: ReadonlyArray<string>,
-): Exclude<ScriptPreviewHeaderLayout, "auto"> {
-    if (layout !== "auto") {
-        return layout;
-    }
+    const padding = width - visibleWidth(first) - visibleWidth(text);
+    if (padding < 1) return rows;
 
-    if (scriptHasMultiplePhysicalLines(invocation.code)) {
-        return "block";
-    }
-
-    const firstCodeLine = codeLines[0];
-    if (firstCodeLine === undefined) {
-        return "block";
-    }
-
-    return "inline";
+    return [`${first}${" ".repeat(padding)}${text}`, ...rows.slice(1)];
 }
 
 export type ScriptCallRenderOptions = {
@@ -545,13 +526,14 @@ export type ScriptCallRenderOptions = {
     readonly maxCodePreviewLines?: number;
     readonly showPrologueOmission?: boolean;
     readonly omittedHint?: string;
-    readonly headerLayout?: ScriptPreviewHeaderLayout;
     readonly invalidate?: () => void;
     readonly lastComponent?: Component | undefined;
     readonly onContentWidth?: (contentWidth: number, renderWidth: number) => void;
     readonly profile?: ScriptFormatterProfile;
+    readonly durationMs?: number | undefined;
 };
 
+/** Renders a Bash call as a `$` prompt: the launcher (or first code line) beside `$`, code below. */
 export function renderScriptCall(
     theme: GlowupRenderTheme,
     invocation: ScriptInvocation,
@@ -563,6 +545,10 @@ export function renderScriptCall(
         createScriptCallComponent(theme, invocation, { ...renderOptions, invalidate }),
     );
 }
+
+const PROMPT_LINE_PREFIX = "  ";
+const PROMPT_CONTINUATION_PREFIX = "    ";
+const MINIMUM_PROMPT_CODE_WIDTH = 12;
 
 function createScriptCallComponent(
     theme: GlowupRenderTheme,
@@ -581,12 +567,33 @@ function createScriptCallComponent(
         options.profile,
     );
     const omittedHint = options.omittedHint ?? toolExpandHint();
-    const headerLayoutOption = options.headerLayout ?? "auto";
 
     scheduleScriptPreviewSyntaxLoads(retained, options.invalidate);
 
     return makeComponent((width) => {
-        const header = renderScriptHeader(theme, state, retained.label);
+        const promptPrefix = `${renderShellPrompt(theme)} `;
+        let duration = promptDuration(theme, state, options.durationMs);
+        let durationReserve = 0;
+        if (duration !== undefined) durationReserve = visibleWidth(duration) + 1;
+
+        if (width - durationReserve < MINIMUM_PROMPT_CODE_WIDTH) {
+            duration = undefined;
+            durationReserve = 0;
+        }
+
+        const rendered: string[] = [];
+        if (retained.launcher !== undefined) {
+            rendered.push(
+                ...wrapSinglePhysicalLineWithContinuation(
+                    highlightShellLine(theme, retained.launcher),
+                    width - durationReserve,
+                    promptPrefix,
+                    PROMPT_CONTINUATION_PREFIX,
+                ),
+            );
+        }
+
+        const codeStartsOnPromptRow = retained.launcher === undefined;
         const preview = scriptPreviewForRender(
             retained,
             expanded,
@@ -596,7 +603,9 @@ function createScriptCallComponent(
         );
 
         if (preview.code.length === 0) {
-            return wrapPrefixedLine("", width, header, "  ");
+            if (codeStartsOnPromptRow) rendered.push(promptPrefix.trimEnd());
+
+            return appendRightAligned(rendered, duration, width);
         }
 
         let fullLines = preview.code.split("\n");
@@ -624,22 +633,25 @@ function createScriptCallComponent(
                 : collapsedPreview === undefined
                   ? fullHighlighted
                   : collapsedPreview.lines;
-        const rendered: string[] = [];
-        const headerLayout = resolveScriptHeaderLayout(headerLayoutOption, retained, highlighted);
-        let prefixWidth = 4;
-        if (headerLayout === "inline") prefixWidth = visibleWidth(`${header} `);
-        options.onContentWidth?.(Math.max(1, width - Math.max(prefixWidth, 6)), width);
 
-        if (headerLayout === "block") {
-            rendered.push(...wrapPrefixedLine("", width, header, "  "));
-        }
+        options.onContentWidth?.(
+            Math.max(1, width - visibleWidth(PROMPT_CONTINUATION_PREFIX)),
+            width,
+        );
 
         const wrappedLines = highlighted.map((line, index) => {
             const meta = isPreviewMetaLine(line);
             const styled = meta ? muted(theme, line) : line;
-            const firstPrefix =
-                headerLayout === "inline" && index === 0 ? `${header} ` : dim(theme, "  │ ");
-            return { meta, wrapped: wrapScriptLine(theme, styled, width, firstPrefix) };
+            const onPromptRow = codeStartsOnPromptRow && index === 0;
+            return {
+                meta,
+                wrapped: wrapSinglePhysicalLineWithContinuation(
+                    styled,
+                    onPromptRow ? width - durationReserve : width,
+                    onPromptRow ? promptPrefix : PROMPT_LINE_PREFIX,
+                    PROMPT_CONTINUATION_PREFIX,
+                ),
+            };
         });
         const hasTailOmission = highlighted.some(
             (line) => isPreviewMetaLine(line) && !line.includes("import/setup lines omitted"),
@@ -648,7 +660,11 @@ function createScriptCallComponent(
             .filter((line) => !line.meta)
             .reduce((rows, line) => rows + line.wrapped.length, 0);
         if (expanded || (!hasTailOmission && totalContentRows <= maxCodePreviewLines + 1)) {
-            return [...rendered, ...wrappedLines.flatMap((line) => line.wrapped)];
+            return appendRightAligned(
+                [...rendered, ...wrappedLines.flatMap((line) => line.wrapped)],
+                duration,
+                width,
+            );
         }
 
         let contentRows = 0;
@@ -673,16 +689,16 @@ function createScriptCallComponent(
 
         if (softWrapTruncated) {
             rendered.push(
-                ...wrapScriptLine(
-                    theme,
+                ...wrapSinglePhysicalLineWithContinuation(
                     muted(theme, "… preview truncated"),
                     width,
-                    dim(theme, "  │ "),
+                    PROMPT_LINE_PREFIX,
+                    PROMPT_CONTINUATION_PREFIX,
                 ),
             );
         }
 
-        return rendered;
+        return appendRightAligned(rendered, duration, width);
     });
 }
 
@@ -783,6 +799,8 @@ function isScriptLikeShellWord(token: string): boolean {
 }
 
 function isPathLikeShellWord(token: string): boolean {
+    if (/^[a-z][a-z\d+.-]*:\/\//iu.test(token) || /[\r\n]/u.test(token)) return false;
+
     return (
         token === "." ||
         token === ".." ||
@@ -814,7 +832,15 @@ function styleShellFlagToken(theme: GlowupRenderTheme, token: string): string {
 
 function shellPart(theme: GlowupRenderTheme, part: WordPart, quoted: boolean): string {
     switch (part.type) {
-        case "SingleQuoted":
+        case "SingleQuoted": {
+            if (!part.text.endsWith("'")) return shellString(theme, part.text);
+
+            const value = part.text.slice(1, -1);
+            if (isPathLikeShellWord(value))
+                return `${shellString(theme, "'")}${filePathText(theme, value)}${shellString(theme, "'")}`;
+
+            return shellString(theme, part.text);
+        }
         case "AnsiCQuoted":
             return shellString(theme, part.text);
         case "DoubleQuoted":
@@ -841,11 +867,17 @@ function shellPart(theme: GlowupRenderTheme, part: WordPart, quoted: boolean): s
             break;
     }
 
+    if (part.type === "Literal" && isPathLikeShellWord(part.text))
+        return filePathText(theme, part.text);
+
     if (quoted) return shellString(theme, part.text);
     return shellText(theme, part.text);
 }
 
 function shellValue(theme: GlowupRenderTheme, token: string): string {
+    // Plain words have no parsed parts; keep the same path styling as operands.
+    if (!/["'`$\\]/u.test(token) && isPathLikeShellWord(token)) return filePathText(theme, token);
+
     try {
         const command = parse(`: ${token}`).commands[0]?.command;
         if (command?.type === "Command") {
@@ -970,8 +1002,11 @@ function styleShellToken(
             return { styled: shellCommand(theme, token), state: initialShellHighlightState };
         }
 
+        let styled = shellCommand(theme, token);
+        if (isPathLikeShellWord(token)) styled = filePathText(theme, token);
+
         return {
-            styled: shellCommand(theme, token),
+            styled,
             state: {
                 expectsCommand: false,
                 expectsRedirectTarget: false,
@@ -991,7 +1026,7 @@ function styleShellToken(
     }
 
     if (isPathLikeShellWord(token)) {
-        return { styled: shellText(theme, token), state: shellStateAfterOperand(state) };
+        return { styled: filePathText(theme, token), state: shellStateAfterOperand(state) };
     }
 
     return { styled: shellText(theme, token), state: shellStateAfterOperand(state) };

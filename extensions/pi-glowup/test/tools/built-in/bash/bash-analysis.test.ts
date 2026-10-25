@@ -31,6 +31,7 @@ describe("bash command analysis", () => {
             label: "Python",
             language: "python",
             code: "print('check')",
+            launcher: "python -c",
         });
 
         const composed = analyzeBashCommand(`cd app && python -c "print('check')" && just test`);
@@ -46,12 +47,14 @@ describe("bash command analysis", () => {
             label: "Python",
             language: "python",
             code: "import sys; print(sys.argv)",
+            launcher: "python -c … -- --help",
         });
 
         expect(analyzeBashCommand(`node -e "console.log('ok')" 2>/dev/null`).pureScript).toEqual({
             label: "Node",
             language: "javascript",
             code: "console.log('ok')",
+            launcher: "node -e … 2>/dev/null",
         });
 
         expect(analyzeBashCommand("one && two").structurallyComplex).toBe(false);
@@ -62,6 +65,7 @@ describe("bash command analysis", () => {
             label: "Python",
             language: "python",
             code: "import os; print(os.getcwd())",
+            launcher: "python3 -c",
         });
 
         expect(
@@ -70,6 +74,7 @@ describe("bash command analysis", () => {
             label: "Python",
             language: "python",
             code: 'print("hello")',
+            launcher: "python3 -c … > output.log 2>&1",
         });
 
         expect(
@@ -78,36 +83,42 @@ describe("bash command analysis", () => {
             label: "Python",
             language: "python",
             code: 'print("piped")',
+            launcher: "cat << 'EOF' | python3",
         });
 
         expect(analyzeBashCommand(`pypy3 -c "print(1)"`).pureScript).toEqual({
             label: "Python",
             language: "python",
             code: "print(1)",
+            launcher: "pypy3 -c",
         });
 
         expect(analyzeBashCommand(`ruby -e "puts 1"`).pureScript).toEqual({
             label: "Ruby",
             language: "ruby",
             code: "puts 1",
+            launcher: "ruby -e",
         });
 
         expect(analyzeBashCommand(`perl -e "print 1"`).pureScript).toEqual({
             label: "Perl",
             language: "perl",
             code: "print 1",
+            launcher: "perl -e",
         });
 
         expect(analyzeBashCommand(`php -r "echo 1;"`).pureScript).toEqual({
             label: "PHP",
             language: "php",
             code: "echo 1;",
+            launcher: "php -r",
         });
 
         expect(analyzeBashCommand(`python -c "print(1)" >> log.txt`).pureScript).toEqual({
             label: "Python",
             language: "python",
             code: "print(1)",
+            launcher: "python -c … >> log.txt",
         });
 
         expect(
@@ -116,6 +127,7 @@ describe("bash command analysis", () => {
             label: "Python",
             language: "python",
             code: "print(1)",
+            launcher: 'python << "EOF" > /tmp/out.txt',
         });
 
         expect(
@@ -124,18 +136,21 @@ describe("bash command analysis", () => {
             label: "Python",
             language: "python",
             code: "print(1)",
+            launcher: "uv run --with requests python -c",
         });
 
         expect(analyzeBashCommand(`npx tsx -e "console.log(1)"`).pureScript).toEqual({
             label: "TypeScript",
             language: "typescript",
             code: "console.log(1)",
+            launcher: "npx tsx -e",
         });
 
         expect(analyzeBashCommand(`node --no-warnings -e "console.log(1)"`).pureScript).toEqual({
             label: "Node",
             language: "javascript",
             code: "console.log(1)",
+            launcher: "node --no-warnings -e",
         });
     });
 

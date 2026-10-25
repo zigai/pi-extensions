@@ -2,6 +2,7 @@ import { existsSync, readFileSync, writeFileSync, mkdtempSync, rmSync } from "no
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createRequire } from "node:module";
+import { stripVTControlCharacters } from "node:util";
 import type { ScriptFormatterProfile } from "../../../../src/settings-input.ts";
 import { describe, expect, it, vi } from "vitest";
 import { renderScriptCall } from "../../../../src/tools/built-in/bash/script-renderer.ts";
@@ -38,18 +39,20 @@ describe("script formatter settings", () => {
         );
 
         const expected = [
-            "• Python",
-            "  │ import math",
-            "  │ class Sample:",
-            "  │     pass",
-            "  │ def read():",
-            "  │     return 1",
-            "  │ assert read() == 1",
+            "$ import math",
+            "  class Sample:",
+            "      pass",
+            "  def read():",
+            "      return 1",
+            "  assert read() == 1",
         ];
 
-        expect(component.render(80)).toEqual(expected);
-        expect(component.render(24)).toEqual(expected);
-        expect(component.render(80)).toEqual(expected);
+        const rows = (width: number) =>
+            component.render(width).map((line) => stripVTControlCharacters(line));
+
+        expect(rows(80)).toEqual(expected);
+        expect(rows(24)).toEqual(expected);
+        expect(rows(80)).toEqual(expected);
         expect(invocation.code).toBe(code);
     });
 
@@ -132,6 +135,39 @@ describe("script formatter settings", () => {
         expect(formatted.code).toBe("const entries: number[] = [1, 2, 3];");
     });
 
+    it("uses the TypeScript profile with the TSX parser and a separate syntax cache key", async () => {
+        const executable = join(
+            dirname(createRequire(import.meta.url).resolve("oxfmt/package.json")),
+            "bin",
+            "oxfmt",
+        );
+        const warnings: string[] = [];
+        const formatter = createCommandScriptFormatter(
+            parseScriptFormatterCommandsValue({
+                typescript: { kind: "typescript", command: [executable] },
+            }),
+            (message) => {
+                warnings.push(message);
+            },
+        );
+        const invocation = {
+            label: "TSX",
+            language: "tsx",
+            code: 'const view=<div title="ready">hello</div>;',
+        };
+        const formatted = await formatScriptInvocation(invocation, formatter);
+        expect(formatted.code).toBe('const view = <div title="ready">hello</div>;');
+        expect(formatter?.profileFor?.("tsx")).toEqual(formatter?.profileFor?.("typescript"));
+        expect(warnings).toEqual([]);
+
+        // The same bytes are invalid as a TypeScript type assertion; a cached
+        // TSX success must not bypass the actual .ts parser.
+        await expect(
+            formatScriptInvocation({ ...invocation, language: "typescript" }, formatter),
+        ).resolves.toEqual({ ...invocation, language: "typescript" });
+        expect(warnings).toEqual(["[pi-glowup] typescript display formatter exited with status 2"]);
+    });
+
     it("reports an unavailable configured formatter once without exposing source", async () => {
         const warnings: string[] = [];
         const formatter = createCommandScriptFormatter(
@@ -154,6 +190,32 @@ describe("script formatter settings", () => {
             formatScriptInvocation(invocation, formatter, { targetWidth: 40 }),
         ).resolves.toEqual(invocation);
         expect(warnings).toEqual(["[pi-glowup] javascript display formatter executable not found"]);
+    });
+
+    it("reports a formatter exit status once without exposing its input or stderr", async () => {
+        const warnings: string[] = [];
+        const formatter = createCommandScriptFormatter(
+            parseScriptFormatterCommandsValue({
+                bash: {
+                    kind: "command",
+                    command: [
+                        process.execPath,
+                        "-e",
+                        "process.stdin.resume();process.stdin.on('end',()=>{process.stderr.write('private formatter detail');process.exitCode=7;})",
+                    ],
+                },
+            }),
+            (message) => {
+                warnings.push(message);
+            },
+        );
+        const invocation = { label: "Bash", language: "bash", code: "echo private-input" };
+        for (const targetWidth of [80, 40])
+            await expect(
+                formatScriptInvocation(invocation, formatter, { targetWidth }),
+            ).resolves.toEqual(invocation);
+
+        expect(warnings).toEqual(["[pi-glowup] bash display formatter exited with status 7"]);
     });
 
     it("leaves formatter commands empty by default", () => {
@@ -527,10 +589,14 @@ describe("script formatter settings", () => {
             "process.stdin.resume();",
             failure === "overflow" ? "process.stdout.write('x'.repeat(1024 * 1024 + 1));" : "",
         ].join("\n");
+        const warnings: string[] = [];
         const formatter = createCommandScriptFormatter(
             new Map<string, ScriptFormatterProfile>([
                 ["python", { kind: "command", command: [process.execPath, "-e", script] }],
             ]),
+            (message) => {
+                warnings.push(message);
+            },
         );
         const controller = new AbortController();
         const invocation = { label: "Python", language: "python", code: failure };
@@ -545,6 +611,9 @@ describe("script formatter settings", () => {
             process.kill(pid, 0); // Fallback happened while the real child still existed.
             await vi.waitUntil(() => getScriptFormatterWorkload().active === 0);
             expect(() => process.kill(pid, 0)).toThrow("ESRCH");
+            let reason = "timed out after 1000 ms";
+            if (failure === "overflow") reason = "output exceeded 1048576 bytes";
+            expect(warnings).toEqual([`[pi-glowup] python display formatter ${reason}`]);
         } finally {
             controller.abort();
             await pending;

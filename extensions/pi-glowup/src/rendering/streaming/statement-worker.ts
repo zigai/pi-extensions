@@ -2,6 +2,11 @@ import { createRequire } from "node:module";
 import { parentPort } from "node:worker_threads";
 import { Language, Parser, type Node } from "web-tree-sitter";
 import { structuralUnits, type HeaderScaffold } from "./statement-structure.ts";
+import {
+    isStatementLiteral,
+    statementLiterals,
+    type StatementLiteral,
+} from "./statement-literals.ts";
 
 export type StatementUnit = {
     readonly start: number;
@@ -14,6 +19,7 @@ export type StatementUnit = {
     readonly scaffold?: HeaderScaffold;
     readonly branch?: boolean;
     readonly context?: HeaderScaffold;
+    readonly literals?: readonly StatementLiteral[];
 };
 
 export type StatementRequest = {
@@ -210,6 +216,7 @@ function unitsFor(
     language: string,
     complete: boolean,
     root: Node,
+    literalInfo: ReturnType<typeof statementLiterals>,
 ): StatementUnit[] {
     let statements = javascriptStatements;
     if (language === "python") statements = pythonStatements;
@@ -218,6 +225,8 @@ function unitsFor(
     const units: StatementUnit[] = [];
 
     function blocksWithin(node: Node): Node[] {
+        if (isStatementLiteral(node, language)) return [];
+
         const blocks: Node[] = [];
         for (const child of node.namedChildren) {
             if (child.type === "statement_block" || child.type === "block") blocks.push(child);
@@ -292,6 +301,12 @@ function unitsFor(
                 !node.hasError &&
                 isSettled(node, source, language, complete)
             ) {
+                // Python's recovery tree accepts a colon followed only by a
+                // comment as a compound with no missing/error nodes. It is not
+                // formatter-ready, and consuming it would prevent the later
+                // structural header from establishing its body indentation.
+                if (language === "python" && !complete) return;
+
                 units.push({
                     start: node.startIndex,
                     end: node.endIndex,
@@ -338,7 +353,29 @@ function unitsFor(
         });
     }
 
-    return ordered;
+    const start = literalInfo.unsafeHeredocStart;
+    let result = ordered;
+
+    if (start !== undefined) {
+        result = ordered.filter((unit) => unit.end <= start);
+        if (complete)
+            result.push({
+                start,
+                end: source.length,
+                format: !literalInfo.unterminatedHeredoc,
+                indent: "",
+                kind: "heredoc-fallback",
+            });
+    }
+
+    return result.map((unit) => {
+        const literals = literalInfo.literals.filter(
+            (literal) => literal.start >= unit.start && literal.end <= unit.end,
+        );
+        if (literals.length === 0) return unit;
+
+        return { ...unit, literals };
+    });
 }
 
 async function parse(request: StatementRequest): Promise<StatementResponse> {
@@ -364,7 +401,13 @@ async function parse(request: StatementRequest): Promise<StatementResponse> {
         try {
             return {
                 id: request.id,
-                units: unitsFor(request.source, request.language, request.complete, tree.rootNode),
+                units: unitsFor(
+                    request.source,
+                    request.language,
+                    request.complete,
+                    tree.rootNode,
+                    statementLiterals(request.source, request.language, tree.rootNode),
+                ),
                 malformed: tree.rootNode.hasError,
             };
         } finally {

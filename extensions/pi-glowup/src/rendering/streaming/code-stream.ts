@@ -1,6 +1,11 @@
 import { extname } from "node:path";
 import { reportExtensionDiagnostic } from "@zigai/pi-extension-internals";
-import type { ScriptBlockFormatter } from "../../tools/built-in/bash/formatter.ts";
+import type {
+    ScriptBlockFormatter,
+    ScriptBlockFormatterInput,
+    ScriptBlockFormatterOptions,
+} from "../../tools/built-in/bash/formatter.ts";
+import { formatEmbeddedHeredocs } from "./embedded-heredocs.ts";
 import { formatCodeUnit } from "./code-unit.ts";
 import { MAX_SCRIPT_PREVIEW_ENTRIES } from "../../tools/built-in/bash/preview-store.ts";
 import { createStatementService } from "./statement-service.ts";
@@ -26,6 +31,12 @@ export type CodeStreamStore = {
     clear(): void;
     dispose(): Promise<void>;
     settled(): Promise<void>;
+
+    formatEmbedded(
+        input: ScriptBlockFormatterInput,
+        formatter: ScriptBlockFormatter | undefined,
+        options?: ScriptBlockFormatterOptions,
+    ): Promise<string>;
 };
 
 type Entry = {
@@ -61,6 +72,28 @@ export function createCodeStreamStore(): CodeStreamStore {
     const parser = createStatementService();
     let disposed = false;
     let disposal: Promise<void> | undefined;
+    let externalController = new AbortController();
+
+    async function formatEmbedded(
+        input: ScriptBlockFormatterInput,
+        formatter: ScriptBlockFormatter | undefined,
+        options: ScriptBlockFormatterOptions = {},
+    ): Promise<string> {
+        if (disposed || formatter === undefined || !input.code.includes("<<")) return input.code;
+
+        let signal = externalController.signal;
+        if (options.signal !== undefined) signal = AbortSignal.any([signal, options.signal]);
+
+        const operation = formatEmbeddedHeredocs(input, formatter, parser, { ...options, signal });
+        const job = operation.then(
+            () => {},
+            () => {},
+        );
+        jobs.add(job);
+        void job.then(() => jobs.delete(job));
+
+        return operation;
+    }
 
     function current(entry: Entry): boolean {
         return (
@@ -99,7 +132,24 @@ export function createCodeStreamStore(): CodeStreamStore {
                 indent: "",
                 kind: "block",
             };
-            const formatted = await formatCodeUnit(input, entry.language, unit, signal, "");
+            let formatted = await formatCodeUnit(input, entry.language, unit, signal, "");
+            if (entry.language === "bash")
+                formatted = {
+                    ...formatted,
+                    text: await formatEmbedded(
+                        {
+                            label: "Bash",
+                            language: "bash",
+                            code: formatted.text,
+                            ...(input.targetWidth !== undefined && {
+                                targetWidth: input.targetWidth,
+                            }),
+                        },
+                        input.formatter,
+                        { signal },
+                    ),
+                };
+
             publish(entry, formatted.text, input.source.length, true);
 
             return;
@@ -116,11 +166,9 @@ export function createCodeStreamStore(): CodeStreamStore {
             return;
         }
 
-        if (input.complete && response.malformed) {
-            reportExtensionDiagnostic(
-                "[pi-glowup] Completed code contains an incomplete or invalid syntax tail; preserving that tail verbatim.",
-            );
-        }
+        // Syntax recovery is a content fallback, not an extension failure. A
+        // partial example or grammar mismatch must not raise session warnings
+        // (again on every resize); the parser retains unformatted source spans.
 
         let display = initialDisplay;
         let consumed = entry.consumed;
@@ -129,14 +177,33 @@ export function createCodeStreamStore(): CodeStreamStore {
             if (unit.end <= consumed) continue;
             if (!current(entry)) return;
 
-            let indent = unit.indent;
-            if (unit.container !== undefined) indent = entry.indents.get(unit.container) ?? indent;
-            else if (unit.kind === "header" || unit.kind === "close") indent = "";
+            let containerIndent: string | undefined;
+            if (unit.container !== undefined) containerIndent = entry.indents.get(unit.container);
+
+            let indent = containerIndent ?? unit.indent;
+            if (unit.container === undefined && (unit.kind === "header" || unit.kind === "close"))
+                indent = "";
 
             if (unit.start < consumed) {
                 display += input.source.slice(consumed, unit.end);
             } else {
-                const formatted = await formatCodeUnit(input, entry.language, unit, signal, indent);
+                let formatted = await formatCodeUnit(input, entry.language, unit, signal, indent);
+                if (entry.language === "bash")
+                    formatted = {
+                        ...formatted,
+                        text: await formatEmbedded(
+                            {
+                                label: "Bash",
+                                language: "bash",
+                                code: formatted.text,
+                                ...(input.targetWidth !== undefined && {
+                                    targetWidth: input.targetWidth,
+                                }),
+                            },
+                            input.formatter,
+                            { signal },
+                        ),
+                    };
 
                 if (!current(entry)) return;
 
@@ -144,7 +211,17 @@ export function createCodeStreamStore(): CodeStreamStore {
                     entry.indents.set(unit.body, formatted.bodyIndent);
 
                 let gap = input.source.slice(consumed, unit.start);
-                if (input.formatter !== undefined && unit.kind !== "structure") {
+                const formattedLayout =
+                    formatted.applied === true ||
+                    containerIndent !== undefined ||
+                    (unit.kind === "close" &&
+                        unit.body !== undefined &&
+                        entry.indents.has(unit.body));
+
+                // An installed formatter may not support this language, or may
+                // decline a unit. In that case preserve its lexical gaps rather
+                // than turning an unformatted inline Python suite into invalid code.
+                if (formattedLayout && unit.kind !== "structure") {
                     if (
                         unit.branch === true &&
                         ["javascript", "typescript", "tsx"].includes(entry.language) &&
@@ -153,7 +230,9 @@ export function createCodeStreamStore(): CodeStreamStore {
                         gap = " ";
                     else if (
                         /^[\t \r\n]*$/u.test(gap) &&
-                        (gap.includes("\n") || lastKind === "header" || unit.kind === "close")
+                        (gap.includes("\n") ||
+                            (lastKind === "header" && containerIndent !== undefined) ||
+                            unit.kind === "close")
                     ) {
                         let newlines = gap.replace(/[^\n]/gu, "");
                         if (newlines.length === 0) newlines = "\n";
@@ -210,6 +289,9 @@ export function createCodeStreamStore(): CodeStreamStore {
     }
 
     function clear(): void {
+        externalController.abort();
+        externalController = new AbortController();
+
         for (const entry of entries.values()) entry.controller.abort();
         entries.clear();
     }
@@ -305,6 +387,7 @@ export function createCodeStreamStore(): CodeStreamStore {
 
             return entry.display;
         },
+        formatEmbedded,
         ready(key): boolean {
             const entry = entries.get(key);
             return (

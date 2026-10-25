@@ -84,7 +84,6 @@ describe("script preview events", () => {
                         { command },
                         theme,
                         { ...context, expanded },
-                        () => "block",
                         () => 30,
                         () => false,
                         () => "preserve",
@@ -94,7 +93,7 @@ describe("script preview events", () => {
                     .join("\n"),
             );
 
-        const raw = "│ import math\n  │ \n  │ \n  │ class Sample:";
+        const raw = "  import math\n  \n  \n  class Sample:";
         try {
             bash.schedule({
                 toolCallId: context.toolCallId,
@@ -112,19 +111,19 @@ describe("script preview events", () => {
                 { expanded: false, isPartial: false },
                 theme,
                 context,
-                () => "block",
+                () => "terminal",
             );
 
             expect(render()).toContain(raw);
             release();
-            await vi.waitUntil(() => render().includes("│ import math\n  │ class Sample:"));
+            await vi.waitUntil(() => render().includes("  import math\n  class Sample:"));
             expect(render()).toContain(
-                '│     text = """first\n  │ \n  │ last"""\n  │ assert Sample.text',
+                '      text = """first\n  \n  last"""\n  assert Sample.text',
             );
 
             expect(render(true)).toContain(raw);
-            expect(render(false, 24)).toContain("│ assert Sample.text");
-            expect(render()).toContain("│ import math\n  │ class Sample:");
+            expect(render(false, 24)).toContain("  assert Sample.text");
+            expect(render()).toContain("  import math\n  class Sample:");
             expect(context.args).toEqual({ command });
         } finally {
             release();
@@ -185,7 +184,6 @@ describe("script preview events", () => {
                         { command },
                         theme,
                         { ...context, expanded },
-                        () => "block",
                         () => 30,
                         () => false,
                         () => "preserve",
@@ -208,8 +206,8 @@ describe("script preview events", () => {
             await vi.waitUntil(
                 () => formatterCompleted && getScriptFormatterWorkload().active === 0,
             );
-            expect(render()).toContain('│ import fs from "node:fs";');
-            expect(render()).toContain("│ const entry = {\n");
+            expect(render()).toContain('  import fs from "node:fs";');
+            expect(render()).toContain("  const entry = {\n");
             const result = { content: [{ type: "text" as const, text: "SAFE_RESULT" }] };
             context = { ...context, isPartial: false };
             bash.renderBashResult(
@@ -217,12 +215,12 @@ describe("script preview events", () => {
                 { expanded: false, isPartial: false },
                 theme,
                 context,
-                () => "block",
+                () => "terminal",
             );
             await vi.waitUntil(() => render().includes("const entry = { alpha: 1, beta: 2 };"));
             expect(render()).not.toContain("import fs");
-            expect(render(true)).toContain('│ import fs from "node:fs";');
-            expect(render(true)).toContain("│ const entry = {\n");
+            expect(render(true)).toContain('  import fs from "node:fs";');
+            expect(render(true)).toContain("  const entry = {\n");
             expect(context.args).toEqual({ command });
         } finally {
             bash.clear();
@@ -265,7 +263,6 @@ describe("script preview events", () => {
                         { command },
                         theme,
                         { ...context, expanded },
-                        () => "block",
                         () => 8,
                         () => false,
                         () => "preserve",
@@ -285,8 +282,8 @@ describe("script preview events", () => {
                 isCurrent: () => true,
                 invalidate: context.invalidate,
             });
-            await vi.waitUntil(() => render().includes("│ echo formatted\n"));
-            expect(render()).toContain("│ printf done");
+            await vi.waitUntil(() => render().includes("$ echo formatted\n"));
+            expect(render()).toContain("\n  printf done");
             expect(render(true)).toContain(command);
             expect(context.args).toEqual({ command });
         } finally {
@@ -335,7 +332,6 @@ describe("script preview events", () => {
                         { command },
                         theme,
                         context,
-                        () => "auto",
                         () => 8,
                         () => false,
                         () => "auto",
@@ -357,15 +353,15 @@ describe("script preview events", () => {
         });
         render(44);
         await narrowed;
-        expect(render(44)).toContain("│ console.log([\n");
-        expect(render(44)).toContain('│   "a moderately long sample value",');
+        expect(render(44)).toContain("  console.log([\n");
+        expect(render(44)).toContain('    "a moderately long sample value",');
         const widened = new Promise<void>((resolve) => {
             finishInvalidation = resolve;
         });
         render(100);
         await widened;
         expect(render(100)).toContain(code);
-        expect(render(100)).not.toContain("│ console.log([\n");
+        expect(render(100)).not.toContain("  console.log([\n");
         bash.clear();
     });
 
@@ -431,6 +427,7 @@ describe("script preview events", () => {
             label: "Python",
             language: "python",
             code: "print('actual')",
+            launcher: "python - <<'PY'",
         });
     });
 

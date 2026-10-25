@@ -187,7 +187,6 @@ describe("central syntax highlighting", () => {
             args,
             piTheme,
             { ...context, args, invalidate: () => current?.invalidate() },
-            () => "block",
             () => 8,
             () => false,
             () => "auto",
@@ -210,7 +209,6 @@ describe("central syntax highlighting", () => {
                     lastComponent: first,
                     invalidate: () => current?.invalidate(),
                 },
-                () => "block",
                 () => 8,
                 () => false,
                 () => "auto",
@@ -379,8 +377,8 @@ describe("central syntax highlighting", () => {
         expect(rendered).toContain("38;2;156;220;254m$?");
         expect(rendered).toContain("38;2;156;220;254m$result");
         expect(rendered).toContain(`${STRING_RGB_CODE}m'%s\\n'`);
-        expect(rendered).toContain("38;2;255;255;255m/dev/null");
-        expect(rendered).toContain("38;2;255;255;255mbefore.log");
+        expect(rendered).toContain(piTheme.fg("accent", "/dev/null"));
+        expect(rendered).toContain(piTheme.fg("accent", "before.log"));
         expect(rendered).toContain("38;2;220;220;170mgit");
         const command = `NAME="literal $value" printf 'literal $value' "\\$value" "\${value:-fallback}" 3>log.txt 4>&1`;
         const mixed = renderScriptCall(
@@ -390,7 +388,7 @@ describe("central syntax highlighting", () => {
         )
             .render(240)
             .join("\n");
-        expect(stripVTControlCharacters(mixed)).toBe(`• Bash ${command}`);
+        expect(stripVTControlCharacters(mixed)).toBe(`$ ${command}`);
         expect(mixed).toContain(`${STRING_RGB_CODE}m'literal $value'`);
         expect(mixed).toContain("38;2;156;220;254m$\u007bvalue:-fallback}");
     });
@@ -582,9 +580,23 @@ describe("central syntax highlighting", () => {
         ).render(180);
         const renderedCommentLine = rendered.find((line) => line.includes("Expands the collapsed"));
 
-        expect(rendered[0]).toContain("Bash");
+        expect(stripVTControlCharacters(rendered[0] ?? "")).toBe("$ pkg=/tmp/node_modules");
         expect(expectedCommentLine).toBeDefined();
         expect(renderedCommentLine).toContain(expectedCommentLine);
+    });
+
+    it("highlights a file-writing TypeScript heredoc from its destination extension", async () => {
+        const code = "const value: { readonly ok: boolean } = { ok: true };";
+        const expected = (await highlightSyntaxCodeAsync(code, "typescript"))[0];
+        const command = `cat > /tmp/sample.mts <<'EOF'\n${code}\nEOF\nnode /tmp/sample.mts`;
+        const rendered = renderScriptCall(
+            plainTheme,
+            { label: "Bash", language: "bash", code: command },
+            { state: "success", expanded: true },
+        ).render(180);
+        expect(expected).toBeDefined();
+        expect(rendered.find((line) => line.includes("const"))).toContain(expected);
+        expect(stripVTControlCharacters(rendered[0] ?? "")).toBe("$ cat > /tmp/sample.mts <<'EOF'");
     });
 
     it("highlights embedded Python heredocs inside bash previews as Python", async () => {
@@ -636,7 +648,7 @@ describe("central syntax highlighting", () => {
             .render(180)
             .join("\n");
 
-        expect(rendered).toContain("• Bash");
+        expect(stripVTControlCharacters(rendered)).toMatch(/^\$ printf/u);
         expect(rendered).toContain(`${TYPE_RGB_CODE}msys`);
         expect(rendered).not.toContain(`${STRING_RGB_CODE}mimport sys`);
         expect(rendered).toContain("| sort -nr | head -n 2");

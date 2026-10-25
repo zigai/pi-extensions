@@ -165,6 +165,12 @@ function success(theme: GlowupRenderTheme, text: string): string {
     return theme.fg("success", text);
 }
 
+const SHELL_PROMPT_COLOR = "#F5C542";
+
+export function renderShellPrompt(theme: GlowupRenderTheme): string {
+    return `${trueColorOpen(SHELL_PROMPT_COLOR, false)}${theme.bold("$")}${ansiStyles.color.close}`;
+}
+
 export function renderBullet(theme: GlowupRenderTheme, state: GlowupCallState): string {
     const indicator = toolCallIndicator.bold
         ? theme.bold(toolCallIndicator.symbol)

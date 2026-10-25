@@ -77,7 +77,6 @@ describe("glowup config", () => {
         });
 
         expect(config.scriptFormatters.size).toBe(0);
-        expect(config.scriptHeaderLayout).toBe("auto");
         expect(config.scriptMaxCodePreviewLines).toBe(8);
         expect(config.scriptShowPrologueOmission).toBe(false);
         expect(config.shellLayout).toBe("auto");
@@ -249,7 +248,6 @@ describe("glowup config", () => {
         expect(config.preserveTools).toEqual([]);
         expect(config.debugLog.enabled).toBe(false);
         expect(config.scriptFormatters.size).toBe(0);
-        expect(config.scriptHeaderLayout).toBe("auto");
         expect(config.scriptMaxCodePreviewLines).toBe(8);
         expect(config.toolCallIndicator).toEqual({ symbol: "•", bold: true });
         expect(config.toolLabels.mode).toBe("static");
@@ -282,7 +280,6 @@ describe("glowup config", () => {
         expect(config.preserveTools).toEqual([]);
         expect(config.debugLog.path).toBe("debug.log");
         expect(config.scriptFormatters.size).toBe(0);
-        expect(config.scriptHeaderLayout).toBe("auto");
         expect(config.scriptMaxCodePreviewLines).toBe(8);
         expect(config.toolCallIndicator).toEqual({ symbol: "•", bold: true });
         expect(config.toolLabels.mode).toBe("static");
@@ -454,7 +451,7 @@ describe("glowup config", () => {
                     projectLanguageDetection: { enabled: false },
                 },
                 patches: { workingWidgetSpacing: true },
-                scriptPreview: { headerLayout: "block", maxCodePreviewLines: 12 },
+                scriptPreview: { maxCodePreviewLines: 12 },
             }),
         );
 
@@ -496,7 +493,6 @@ describe("glowup config", () => {
             memorySampleIntervalMs: 0,
         });
 
-        expect(config.scriptHeaderLayout).toBe("block");
         expect(config.scriptMaxCodePreviewLines).toBe(12);
         expect(config.scriptFormatters.get("python")).toBeUndefined();
         expect(config.toolCallIndicator).toEqual({ symbol: "·", bold: false });
@@ -536,7 +532,7 @@ describe("glowup config", () => {
                     projectLanguageDetection: { enabled: false },
                 },
                 patches: { workingWidgetSpacing: true },
-                scriptPreview: { headerLayout: "block", maxCodePreviewLines: 12 },
+                scriptPreview: { maxCodePreviewLines: 12 },
             }),
         );
 
@@ -578,7 +574,6 @@ describe("glowup config", () => {
             memorySampleIntervalMs: 0,
         });
 
-        expect(config.scriptHeaderLayout).toBe("block");
         expect(config.scriptMaxCodePreviewLines).toBe(4);
         expect(config.scriptFormatters.get("python")).toEqual({
             kind: "command",

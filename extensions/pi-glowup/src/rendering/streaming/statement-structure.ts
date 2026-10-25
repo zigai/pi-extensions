@@ -1,5 +1,6 @@
 import type { Node } from "web-tree-sitter";
 import type { StatementUnit } from "./statement-worker.ts";
+import { isStatementLiteral } from "./statement-literals.ts";
 
 export type HeaderScaffold = {
     readonly before: string;
@@ -106,6 +107,8 @@ export function structuralUnits(
     }
 
     function collect(node: Node): void {
+        if (isStatementLiteral(node, language)) return;
+
         if (
             (language === "javascript" || language === "typescript" || language === "tsx") &&
             (node.type === "statement_block" ||
@@ -124,6 +127,7 @@ export function structuralUnits(
             if (enclosing.type === "method_definition") before = "class __glowup_context__ {\n";
 
             let after = "\n" + closeForHeader(enclosing.startIndex, node.startIndex + 1);
+            if (/^try\b/u.test(header)) after += " finally {}";
             if (enclosing.type === "method_definition") after += "\n}";
 
             let body: string | undefined;
@@ -163,8 +167,14 @@ export function structuralUnits(
             const colon = source.lastIndexOf(":", node.startIndex);
             const header = source.slice(enclosing.startIndex, colon + 1).trimStart();
             let before = "";
+            let after = "";
+
             if (/^(?:else|elif)\b/u.test(header)) before = "if True:\n    pass\n";
             if (/^(?:except|finally)\b/u.test(header)) before = "try:\n    pass\n";
+
+            // A try suite alone is invalid formatter input, even while its real
+            // handler is still streaming. Keep the private handler outside markers.
+            if (/^try\b/u.test(header)) after = "\nfinally:\n    pass";
 
             let contextIndent: string | undefined;
             if (/^case\b/u.test(header)) {
@@ -181,7 +191,7 @@ export function structuralUnits(
                 node.endIndex,
                 node.endIndex,
                 before,
-                "",
+                after,
                 false,
                 body,
                 contextIndent,
@@ -308,6 +318,8 @@ export function structuralUnits(
     // Tree-sitter ERROR nodes retain real anonymous delimiters even when several
     // missing closings cause it to discard the enclosing block nodes entirely.
     function recover(node: Node): void {
+        if (isStatementLiteral(node, language)) return;
+
         if (node.isError) {
             let segmentStart = node.startIndex;
             for (const child of node.children) {

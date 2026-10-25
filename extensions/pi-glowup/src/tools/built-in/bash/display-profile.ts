@@ -14,6 +14,7 @@ export type PreparedFormatterCommand = {
 export async function prepareFormatterCommand(
     profile: ScriptFormatterProfile,
     options: ScriptBlockFormatterOptions,
+    language?: string,
 ): Promise<PreparedFormatterCommand> {
     const signal = options.signal;
     const [command, ...args] = profile.command;
@@ -71,6 +72,8 @@ export async function prepareFormatterCommand(
 
                 let filename = "script.js";
                 if (profile.kind === "typescript") filename = "script.ts";
+                if (language === "tsx") filename = "script.tsx";
+                if (language === "jsx") filename = "script.jsx";
                 args.push("--config", config, "--stdin-filepath", filename);
                 break;
             }

@@ -57,11 +57,11 @@ const DEFAULT_PATCHES = {
 } as const;
 
 const DEFAULT_SCRIPT_PREVIEW = {
-    headerLayout: "auto",
     maxCodePreviewLines: 8,
     showPrologueOmission: false,
     shellLayout: "auto",
     shellOperatorPosition: "trailing",
+    shellOutputStyle: "terminal",
     formatters: {},
 } as const;
 
@@ -423,12 +423,6 @@ export type ScriptFormatterProfile = StaticDecode<typeof scriptFormatterProfileS
 
 const scriptPreviewSchema = Type.Object(
     {
-        headerLayout: Type.Union(
-            [Type.Literal("auto"), Type.Literal("inline"), Type.Literal("block")],
-            {
-                description: "Choose auto, inline, or block script headers.",
-            },
-        ),
         maxCodePreviewLines: Type.Integer({
             minimum: 4,
             description: "Collapsed script content rows before a separate omission row.",
@@ -445,6 +439,10 @@ const scriptPreviewSchema = Type.Object(
         ),
         shellOperatorPosition: Type.Union([Type.Literal("trailing"), Type.Literal("leading")], {
             description: "Place Bash chain operators before or after reflowed line breaks.",
+        }),
+        shellOutputStyle: Type.Union([Type.Literal("terminal"), Type.Literal("gutter")], {
+            description:
+                "Show Bash command output flush left like a terminal, or behind a dim │ gutter.",
         }),
         formatters: Type.Record(Type.String(), scriptFormatterProfileSchema, {
             description:

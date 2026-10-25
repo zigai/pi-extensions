@@ -66,6 +66,8 @@ function createFixtureWorkspace(workspaceName = "workspace"): FixtureWorkspace {
     return { root, cwd, agentDir, sessionPath };
 }
 
+const UV_PYTHON_LAUNCHER = "$ uv run --offline --no-project python -c … -- demo --verbose";
+
 function launchOptions(
     fixture: FixtureWorkspace,
     options: Partial<
@@ -394,13 +396,11 @@ describe("actual Pi CLI in a real PTY", () => {
                 const wide = await pi.waitForFrame(
                     (frame) =>
                         frame.text.includes("STREAM_COMPLETE") &&
-                        frame.rows.some(
-                            (row) => row.text.includes("Bash") && row.text.includes("CHAIN_ALPHA"),
-                        ),
+                        frame.rows.some((row) => row.text.includes("$ printf 'CHAIN_ALPHA")),
                     PTY_TIMEOUT_MS,
                 );
-                const wideCallRows = wide.rows.filter(
-                    (row) => row.text.includes("Bash") && row.text.includes("CHAIN_ALPHA"),
+                const wideCallRows = wide.rows.filter((row) =>
+                    row.text.includes("$ printf 'CHAIN_ALPHA"),
                 );
                 expect(wideCallRows).toHaveLength(1);
                 expect(wideCallRows[0]?.text).toContain("&& printf");
@@ -413,8 +413,8 @@ describe("actual Pi CLI in a real PTY", () => {
                         frame.columns === 44 &&
                         frame.rows.some(
                             (row) =>
-                                row.text.includes("CHAIN_ALPHA") &&
-                                row.text.trimEnd().endsWith("&&"),
+                                row.text.includes("$ printf 'CHAIN_ALPHA\\n' &&") &&
+                                !row.text.includes("CHAIN_BETA"),
                         ),
                     PTY_TIMEOUT_MS,
                     narrowSequence,
@@ -437,16 +437,12 @@ describe("actual Pi CLI in a real PTY", () => {
                 const restored = await pi.waitForFrame(
                     (frame) =>
                         frame.columns === 160 &&
-                        frame.rows.some(
-                            (row) => row.text.includes("Bash") && row.text.includes("CHAIN_ALPHA"),
-                        ),
+                        frame.rows.some((row) => row.text.includes("$ printf 'CHAIN_ALPHA")),
                     PTY_TIMEOUT_MS,
                     restoredSequence,
                 );
                 expect(
-                    restored.rows.filter(
-                        (row) => row.text.includes("Bash") && row.text.includes("CHAIN_ALPHA"),
-                    ),
+                    restored.rows.filter((row) => row.text.includes("$ printf 'CHAIN_ALPHA")),
                 ).toHaveLength(1);
 
                 expectTerminalInvariants(restored, [
@@ -481,16 +477,15 @@ describe("actual Pi CLI in a real PTY", () => {
                 const completed = await pi.waitForFrame(
                     (frame) =>
                         frame.text.includes("STREAM_COMPLETE") &&
-                        frame.rows.some((row) => row.text.trim() === "• Bash") &&
                         frame.rows.some((row) =>
-                            row.text.includes("│ for item in alpha beta gamma delta; do"),
+                            row.text.includes("$ for item in alpha beta gamma delta; do"),
                         ) &&
-                        frame.rows.some((row) => row.text.includes("│   if test")) &&
-                        frame.rows.some((row) => row.text.includes("│ done | sort")),
+                        frame.rows.some((row) => row.text.includes("    if test")) &&
+                        frame.rows.some((row) => row.text.includes("  done | sort")),
                     PTY_TIMEOUT_MS,
                 );
 
-                expect(completed.text).not.toContain("• Bash for item");
+                expect(completed.text).not.toContain("• Bash");
                 expectTerminalInvariants(completed, [
                     resolve("test/pty/fixtures/offline-provider.ts"),
                 ]);
@@ -576,12 +571,12 @@ describe("actual Pi CLI in a real PTY", () => {
         try {
             const formatted = await pi.waitForFrame(
                 (frame) =>
-                    frame.rows.some((row) => row.text.includes("│ const value")) &&
-                    frame.rows.some((row) => row.text.includes("│ console.log(value)")),
+                    frame.rows.some((row) => row.text.startsWith("  const value")) &&
+                    frame.rows.some((row) => row.text.startsWith("  console.log(value)")),
                 PTY_TIMEOUT_MS,
             );
 
-            expect(formatted.text).toContain("Node");
+            expect(formatted.text).toMatch(/^\$ node -e\b/mu);
             expect(formatted.text).toContain("RESTORED_NODE_SOURCE");
             expectTerminalInvariants(formatted, [resolve("test/pty/fixtures/offline-provider.ts")]);
         } catch (cause: unknown) {
@@ -735,7 +730,7 @@ describe("actual Pi CLI in a real PTY", () => {
             launchOptions(fixture, { initialPrompt: "run the deterministic formatter failure" }),
         );
         try {
-            const warning = "[pi-glowup] javascript display formatter failed";
+            const warning = "[pi-glowup] javascript display formatter exited with status 2";
             const frame = await pi.waitForFrame(
                 (candidate) =>
                     candidate.text.includes("STREAM_COMPLETE") &&
@@ -795,16 +790,16 @@ describe("actual Pi CLI in a real PTY", () => {
                 PTY_TIMEOUT_MS,
             );
 
-            expect(running.text).toContain("Node");
+            expect(running.text).toMatch(/^\$ node --input-type=module -e\b/mu);
             expect(running.text).not.toContain("STREAM_COMPLETE");
             expect(running.text).toContain('console.log("NODE_BEGIN");');
-            expect(running.rows.some((row) => row.text.includes("│ await new Promise"))).toBe(
+            expect(running.rows.some((row) => row.text.startsWith("  await new Promise"))).toBe(
                 false,
             );
             const completed = await pi.waitForFrame(
                 (frame) =>
                     frame.text.includes("STREAM_COMPLETE") &&
-                    frame.rows.some((row) => row.text.includes("│ await new Promise")),
+                    frame.rows.some((row) => row.text.startsWith("  await new Promise")),
                 PTY_TIMEOUT_MS,
             );
             expectTerminalInvariants(completed, [resolve("test/pty/fixtures/offline-provider.ts")]);
@@ -844,12 +839,12 @@ describe("actual Pi CLI in a real PTY", () => {
             const formatted = await pi.waitForFrame(
                 (frame) =>
                     frame.text.includes("STREAM_COMPLETE") &&
-                    frame.rows.some((row) => row.text.includes("│ const value")) &&
-                    frame.rows.some((row) => row.text.includes("│ console.log(value)")),
+                    frame.rows.some((row) => row.text.startsWith("  const value")) &&
+                    frame.rows.some((row) => row.text.startsWith("  console.log(value)")),
                 PTY_TIMEOUT_MS,
             );
 
-            expect(formatted.text).toContain("Node");
+            expect(formatted.text).toMatch(/^\$ node -e\b/mu);
             expect(formatted.text).toContain("FAST_NODE_SOURCE");
             expectTerminalInvariants(formatted, [resolve("test/pty/fixtures/offline-provider.ts")]);
         } catch (cause: unknown) {
@@ -887,14 +882,14 @@ describe("actual Pi CLI in a real PTY", () => {
             const formatted = await pi.waitForFrame(
                 (frame) =>
                     frame.text.includes("STREAM_COMPLETE") &&
-                    frame.rows.some((row) => row.text.includes("│ import os")) &&
-                    frame.rows.some((row) => row.text.includes("│ print(os.getcwd())")),
+                    frame.rows.some((row) => row.text.startsWith("  import os")) &&
+                    frame.rows.some((row) => row.text.startsWith("  print(os.getcwd())")),
                 PTY_TIMEOUT_MS,
             );
 
-            expect(formatted.text).toContain("Python");
+            expect(formatted.text).toMatch(/^\$ python -c\b/mu);
             expect(formatted.text).not.toContain("one Bash execution");
-            expect(formatted.text).not.toContain("Python import os; print(os.getcwd())");
+            expect(formatted.text).not.toContain("import os; print(os.getcwd())");
             expectTerminalInvariants(formatted, [resolve("test/pty/fixtures/offline-provider.ts")]);
         } catch (cause: unknown) {
             await pi.writeFailureArtifacts("standalone-script-formatter-redraw", cause);
@@ -919,12 +914,11 @@ describe("actual Pi CLI in a real PTY", () => {
                 const collapsed = await pi.waitForFrame(
                     (frame) =>
                         frame.text.includes("STREAM_COMPLETE") &&
-                        frame.text.includes("• Python") &&
+                        frame.text.includes(UV_PYTHON_LAUNCHER) &&
                         frame.rows.some((row) => row.text.includes('"argv"')) &&
                         frame.rows.some((row) => row.text.includes('"median_ms"')),
                     PTY_TIMEOUT_MS,
                 );
-                expect(collapsed.text).not.toContain("uv run");
                 expect(collapsed.text).not.toContain("import json");
                 expect(collapsed.text).not.toContain("import/setup lines omitted");
                 expect(collapsed.text).toMatch(/… \+6 lines[^\n]*\bctrl\+o\b/u);
@@ -946,14 +940,13 @@ describe("actual Pi CLI in a real PTY", () => {
                 pi.sendKey(CTRL_O);
                 const expanded = await pi.waitForFrame(
                     (frame) =>
-                        frame.text.includes("• Python") &&
+                        frame.text.includes(UV_PYTHON_LAUNCHER) &&
                         frame.text.includes("import json") &&
                         frame.text.includes("from collections import Counter"),
                     PTY_TIMEOUT_MS,
                     nextSequence,
                 );
 
-                expect(expanded.text).not.toContain("uv run");
                 expectTerminalInvariants(expanded, [
                     resolve("test/pty/fixtures/offline-provider.ts"),
                 ]);
@@ -979,7 +972,7 @@ describe("actual Pi CLI in a real PTY", () => {
             const completed = await pi.waitForFrame(
                 (frame) =>
                     frame.text.includes("STREAM_COMPLETE") &&
-                    frame.text.includes("• Bash") &&
+                    frame.text.includes("$ printf '%s\\n' '8 read'") &&
                     frame.text.includes("python3 -c 'import sys") &&
                     frame.text.includes("0013 patch"),
                 PTY_TIMEOUT_MS,
@@ -1010,7 +1003,7 @@ describe("actual Pi CLI in a real PTY", () => {
                 PTY_TIMEOUT_MS,
             );
 
-            expect(completed.text).toContain("• Bash");
+            expect(completed.text).toContain("$ printf 'FINAL_BASH_PREFIX\\n' || true");
             expect(completed.text).toContain("node --input-type=module");
             expect(completed.text).not.toContain("• Python");
             expect(completed.text).not.toContain("SPECULATIVE_PYTHON");

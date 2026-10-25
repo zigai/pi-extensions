@@ -40,6 +40,7 @@ import {
 } from "../../src/rendering/syntax/highlighter.ts";
 import type { ExtensionSettings } from "../../src/settings-input.ts";
 import { getScriptFormatterWorkload } from "../../src/tools/built-in/bash/formatter.ts";
+import { presentGlowupSnapshot } from "../../src/tools/protocol/streaming.ts";
 import { configureAutocompleteCleanupPatch } from "../../src/pi/patches/autocomplete-cleanup.ts";
 import { GlowupExtensionHarness } from "./extension-harness.ts";
 import { applyPatchOwnerToolDefinition } from "../support/apply-patch-owner-fixture.ts";
@@ -459,6 +460,7 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
         {
             language: "python",
             label: "Python",
+            header: "$ python - <<'PY'",
             firstLine: 'large_native_marker = "ready"',
             comment: "#",
             command: (source: string) => `python - <<'PY'\n${source}\nPY`,
@@ -466,13 +468,14 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
         {
             language: "javascript",
             label: "Node",
+            header: "$ node - <<'JS'",
             firstLine: 'const largeNativeMarker = "ready";',
             comment: "//",
             command: (source: string) => `node - <<'JS'\n${source}\nJS`,
         },
     ])(
         "retains completed native $label worker colors above the shared-cache source budget",
-        async ({ language, label, firstLine, comment, command }) => {
+        async ({ language, header, firstLine, comment, command }) => {
             await initializeSyntaxHighlighting({}, { preloadLanguages: [language] });
             const source = [
                 firstLine,
@@ -504,7 +507,7 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
             tool.updateArgs({ command: command(source) });
             const initial = tool.render(100).join("\n");
             expect(initial).toContain(firstLine);
-            expect(stripVTControlCharacters(initial)).toContain(`• ${label}`);
+            expect(stripVTControlCharacters(initial)).toContain(header);
 
             let completions = 0;
             const stopCounting = onSyntaxHighlightComplete(() => {
@@ -542,7 +545,7 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
                 }
 
                 pendingTerminal.assertUniqueTranscriptMarkers(
-                    `• ${label}`,
+                    header,
                     "BEFORE_NATIVE_SYNTAX",
                     "AFTER_NATIVE_SYNTAX",
                 );
@@ -553,6 +556,84 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
             }
         },
     );
+
+    it("keeps statement-streamed tool colors through native row rebuilds without retokenizing", async () => {
+        await installExtension({ streaming: { prose: "sentence", code: "statement" } });
+        await initializeSyntaxHighlighting({}, { preloadLanguages: ["python"] });
+        const firstLine = 'statement_native_marker = "ready"';
+        const source = [
+            firstLine,
+            ...Array.from(
+                { length: 140 },
+                (_, index) => `# statement native row ${index} ${"padding ".repeat(7)}`,
+            ),
+        ].join("\n");
+        expect(Buffer.byteLength(source)).toBeGreaterThan(8 * 1024);
+        const pendingTerminal = new VirtualTerminal(100, 24);
+        const activeTui = createTui(pendingTerminal);
+        const toolCallId = "statement-native-syntax";
+        const tool = new ToolExecutionComponent(
+            "bash",
+            toolCallId,
+            { command: `python - <<'PY'\n${source}\nPY` },
+            undefined,
+            createBashToolDefinition(cwd),
+            activeTui,
+            cwd,
+        );
+        tool.setArgsComplete();
+        tool.updateResult({ content: [], isError: false });
+        tool.render(100);
+        // Settle the real statement worker separately from the real syntax worker.
+        await presentGlowupSnapshot({
+            key: "xterm:statement-worker-barrier",
+            kind: "prose",
+            source: "",
+            complete: true,
+        });
+        tool.invalidate();
+        tool.render(100);
+        await settleSyntaxHighlights();
+        tool.invalidate();
+        const settled = tool.render(100);
+        expect(stripVTControlCharacters(settled.join("\n"))).toContain(firstLine);
+        expect(
+            settled.find((line) => stripVTControlCharacters(line).includes(firstLine)),
+        ).toContain("\u001b[");
+        const completions = vi.fn<() => void>();
+        const stopCounting = onSyntaxHighlightComplete(completions);
+        try {
+            terminal = pendingTerminal;
+            tui = activeTui;
+            activeTui.addChild(new LinesComponent(["BEFORE_STATEMENT_SYNTAX"]));
+            activeTui.addChild(tool);
+            activeTui.addChild(new LinesComponent(["AFTER_STATEMENT_SYNTAX"]));
+            activeTui.start();
+            await pendingTerminal.settle();
+            for (let repaint = 0; repaint < 3; repaint += 1) {
+                tool.invalidate();
+                expect(tool.render(100)).toEqual(settled);
+                activeTui.requestRender();
+                await pendingTerminal.settle();
+                await settleSyntaxHighlights();
+                expect(
+                    codeForegrounds(pendingTerminal.requireRowContaining(firstLine), firstLine)
+                        .size,
+                ).toBeGreaterThan(1);
+                expect(completions).not.toHaveBeenCalled();
+            }
+
+            pendingTerminal.assertUniqueTranscriptMarkers(
+                "$ python - <<'PY'",
+                "BEFORE_STATEMENT_SYNTAX",
+                "AFTER_STATEMENT_SYNTAX",
+            );
+            pendingTerminal.assertNoWrappedRows();
+            pendingTerminal.assertRowsFitWidth();
+        } finally {
+            stopCounting();
+        }
+    });
 
     it("retains native script prefix colors as streamed arguments complete and the result arrives", async () => {
         await initializeSyntaxHighlighting({}, { preloadLanguages: ["python"] });
@@ -615,11 +696,149 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
         pendingTerminal.assertRowsFitWidth();
     });
 
+    it("renders independently formatted Python try suites through completion, expansion and resize", async () => {
+        await installExtension({
+            streaming: { prose: "paragraph", code: "statement" },
+            scriptPreview: {
+                formatters: {
+                    python: {
+                        kind: "command",
+                        command: [
+                            process.execPath,
+                            "-e",
+                            "let code='';process.stdin.on('data',chunk=>code+=chunk);process.stdin.on('end',()=>{if(/begin\\ntry:/u.test(code)&&!code.includes('finally:\\n    pass')){process.exitCode=2;return;}process.stdout.write(code.replaceAll('value=','value = '));})",
+                        ],
+                    },
+                },
+            },
+        });
+        const pendingTerminal = new VirtualTerminal(80, 24);
+        const activeTui = createTui(pendingTerminal);
+        const command = "python - <<'PY'\ntry:\n value=1\nexcept ValueError:\n value=2\nPY";
+        const tool = new ToolExecutionComponent(
+            "bash",
+            "python-try-format",
+            { command },
+            undefined,
+            createBashToolDefinition(cwd),
+            activeTui,
+            cwd,
+        );
+        tool.setArgsComplete();
+        activeTui.addChild(new LinesComponent(["BEFORE_PYTHON_TRY"]));
+        activeTui.addChild(tool);
+        activeTui.addChild(new LinesComponent(["AFTER_PYTHON_TRY"]));
+        terminal = pendingTerminal;
+        tui = activeTui;
+        activeTui.start();
+
+        for (const columns of [80, 40, 100]) {
+            pendingTerminal.resize(columns, 24);
+            await pendingTerminal.settle();
+            await presentGlowupSnapshot({
+                key: "xterm:python-try-barrier",
+                kind: "prose",
+                source: "",
+                complete: true,
+            });
+            tool.invalidate();
+            activeTui.requestRender();
+            await pendingTerminal.settle();
+            const screen = pendingTerminal.screenText();
+            expect(screen).toContain(
+                "\n  try:\n      value = 1\n  except ValueError:\n      value = 2",
+            );
+            expect(screen).not.toContain("finally:");
+            expect(screen).not.toContain("__glowup_");
+            expect(screen).not.toContain("display formatter");
+            pendingTerminal.assertUniqueTranscriptMarkers(
+                "$ python - <<'PY'",
+                "BEFORE_PYTHON_TRY",
+                "AFTER_PYTHON_TRY",
+            );
+            pendingTerminal.assertNoWrappedRows();
+            pendingTerminal.assertRowsFitWidth();
+            tool.updateResult({ content: [], isError: false });
+            tool.setExpanded(true);
+        }
+    });
+
+    it("preserves nested heredoc payload and delimiter rows through statement rendering and resize", async () => {
+        await installExtension({
+            streaming: { prose: "paragraph", code: "statement" },
+            scriptPreview: {
+                formatters: {
+                    bash: {
+                        kind: "command",
+                        command: [
+                            process.execPath,
+                            "-e",
+                            "let code='';process.stdin.on('data',chunk=>code+=chunk);process.stdin.on('end',()=>process.stdout.write(code.replace(/^(# __glowup_unit_\\d+__end|:)$/gm,'  $1')));",
+                        ],
+                    },
+                },
+            },
+        });
+        const pendingTerminal = new VirtualTerminal(80, 24);
+        const activeTui = createTui(pendingTerminal);
+        const command = "if true; then\n cat <<EOF\nHEREDOC_LITERAL_ROW\nEOF\nfi";
+        const tool = new ToolExecutionComponent(
+            "bash",
+            "heredoc-literal-format",
+            { command },
+            undefined,
+            createBashToolDefinition(cwd),
+            activeTui,
+            cwd,
+        );
+        tool.setArgsComplete();
+        tool.updateResult({ content: [], isError: false });
+        activeTui.addChild(new LinesComponent(["BEFORE_HEREDOC_LITERAL"]));
+        activeTui.addChild(tool);
+        activeTui.addChild(new LinesComponent(["AFTER_HEREDOC_LITERAL"]));
+        terminal = pendingTerminal;
+        tui = activeTui;
+        activeTui.start();
+
+        for (const columns of [80, 40, 100]) {
+            pendingTerminal.resize(columns, 24);
+            await pendingTerminal.settle();
+            await presentGlowupSnapshot({
+                key: "xterm:heredoc-literal-barrier",
+                kind: "prose",
+                source: "",
+                complete: true,
+            });
+            tool.invalidate();
+            activeTui.requestRender();
+            await pendingTerminal.settle();
+            expect(pendingTerminal.requireRowContaining("HEREDOC_LITERAL_ROW").text.trimEnd()).toBe(
+                "  HEREDOC_LITERAL_ROW",
+            );
+
+            expect(
+                pendingTerminal
+                    .screenText()
+                    .split("\n")
+                    .map((line) => line.trimEnd()),
+            ).toContain("  EOF");
+
+            expect(pendingTerminal.screenText()).not.toContain("__glowup_");
+            pendingTerminal.assertUniqueTranscriptMarkers(
+                "$ if true; then",
+                "BEFORE_HEREDOC_LITERAL",
+                "AFTER_HEREDOC_LITERAL",
+            );
+            pendingTerminal.assertNoWrappedRows();
+            pendingTerminal.assertRowsFitWidth();
+            tool.setExpanded(true);
+        }
+    });
+
     it("publishes whole-shell formatter output at the rendered width without changing execution or expanded source", async () => {
         const formatterOutput = join(cwd, "shell-formatter-output.txt");
         await installExtension({
             scriptPreview: {
-                headerLayout: "block",
                 shellLayout: "preserve",
                 formatters: {
                     bash: {
@@ -686,27 +905,29 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
         // Prove the real subprocess produced valid display code even if the renderer drops it.
         expect(readFileSync(formatterOutput, "utf8")).toMatch(/^# FORMAT_WIDTH_\d+\n/u);
 
-        // The block renderer reserves six columns for code and continuation prefixes.
-        expect(pendingTerminal.screenText()).toContain("│ # FORMAT_WIDTH_74");
-        expect(readFileSync(formatterOutput, "utf8")).toBe(`# FORMAT_WIDTH_74\n${command}`);
+        // The prompt renderer reserves four columns for soft-wrap continuation prefixes.
+        expect(pendingTerminal.screenText()).toContain("$ # FORMAT_WIDTH_76");
+        expect(readFileSync(formatterOutput, "utf8")).toBe(`# FORMAT_WIDTH_76\n${command}`);
         pendingTerminal.assertRowsFitWidth();
         pendingTerminal.resize(50, 24);
         await pendingTerminal.settle();
         await vi.waitUntil(() => getScriptFormatterWorkload().active === 0);
         await pendingTerminal.settle();
-        expect(pendingTerminal.screenText()).toContain("│ # FORMAT_WIDTH_44");
-        expect(readFileSync(formatterOutput, "utf8")).toBe(`# FORMAT_WIDTH_44\n${command}`);
-        expect(pendingTerminal.screenText()).not.toContain("# FORMAT_WIDTH_74");
+        expect(pendingTerminal.screenText()).toContain("$ # FORMAT_WIDTH_46");
+        expect(readFileSync(formatterOutput, "utf8")).toBe(`# FORMAT_WIDTH_46\n${command}`);
+        expect(pendingTerminal.screenText()).not.toContain("# FORMAT_WIDTH_76");
         pendingTerminal.assertNoWrappedRows();
         pendingTerminal.assertRowsFitWidth();
 
         tool.setExpanded(true);
         activeTui.requestRender();
         await pendingTerminal.settle();
-        const expandedCode = stripVTControlCharacters(tool.render(50).join("\n"))
-            .split("\n")
-            .filter((line) => line.startsWith("  │ "))
-            .map((line) => line.slice(4))
+        const expandedRows = stripVTControlCharacters(tool.render(50).join("\n")).split("\n");
+        const callStart = expandedRows.findIndex((line) => line.startsWith("$ "));
+        const resultStart = expandedRows.findIndex((line) => line.startsWith("  └"));
+        const expandedCode = expandedRows
+            .slice(callStart, resultStart)
+            .map((line) => line.slice(2))
             .join("\n");
         expect(expandedCode).toBe(command);
         expect(pendingTerminal.screenText()).not.toContain("FORMAT_WIDTH_");
@@ -1935,7 +2156,7 @@ export const grownWriteTwelve = 12;
                     .concat("echo BASH_CALL_TAIL")
                     .join("\n"),
             },
-            callStart: "• Bash",
+            callStart: "$ echo step1",
             callTail: "BASH_CALL_TAIL",
         },
         {
@@ -1967,7 +2188,9 @@ export const grownWriteTwelve = 12;
                 );
                 tool.setArgsComplete();
                 const output = Array.from({ length: 12 }, (_, index) =>
-                    index === 6 ? "RESULT_MIDDLE_MARKER" : `output row ${index + 1}`,
+                    index === 6
+                        ? "RESULT_MIDDLE_MARKER"
+                        : `output row ${String(index + 1).padStart(2, "0")}`,
                 ).join("\n");
                 tool.updateResult({ content: [{ type: "text", text: output }], isError: false });
                 activeTui.addChild(tool);
@@ -1989,7 +2212,7 @@ export const grownWriteTwelve = 12;
                 await click(scenario.callStart);
                 expect(pendingTerminal.screenText()).toContain(scenario.callTail);
                 expect(pendingTerminal.screenText()).not.toContain("RESULT_MIDDLE_MARKER");
-                await click("└ output row 1");
+                await click("output row 01");
                 expect(pendingTerminal.screenText()).toContain(scenario.callTail);
                 expect(pendingTerminal.screenText()).toContain("RESULT_MIDDLE_MARKER");
                 await click(scenario.callStart);

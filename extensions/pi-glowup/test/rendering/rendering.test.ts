@@ -28,6 +28,10 @@ import { createPlainTheme } from "../support/plain-theme.ts";
 
 const plainTheme = createPlainTheme();
 
+function plainLines(lines: readonly string[]): string[] {
+    return lines.map((line) => stripVTControlCharacters(line));
+}
+
 const tokenTheme: GlowupRenderTheme = {
     fg(token: string, text: string): string {
         return `<${token}>${text}</${token}>`;
@@ -731,7 +735,7 @@ describe("Glowup rendering helpers", () => {
         expect(rendered).not.toContain("rows (hint)");
     });
 
-    it("renders bash previews with lightweight syntax without red or accent floods", () => {
+    it("renders bash previews with lightweight syntax and semantic path accents", () => {
         const command =
             'set -euo pipefail\nsource /tmp/sample-session/env.sh\n# Ensure a clean input before demo 1.\ntmux send-keys -t "$target" C-u\nfind . -maxdepth 3 -name package.json | head -80';
         const rendered = renderScriptCall(
@@ -745,7 +749,7 @@ describe("Glowup rendering helpers", () => {
         expect(rendered).toContain("<syntaxFunction>set</syntaxFunction>");
         expect(rendered).toContain("<syntaxFunction>find</syntaxFunction>");
         expect(rendered).toContain("<toolTitle>pipefail</toolTitle>");
-        expect(rendered).toContain("<toolTitle>/tmp/sample-session/env.sh</toolTitle>");
+        expect(rendered).toContain("<accent>/tmp/sample-session/env.sh</accent>");
 
         expect(rendered).toContain("<dim># Ensure a clean input before demo 1.</dim>");
         expect(rendered).toContain(
@@ -757,8 +761,8 @@ describe("Glowup rendering helpers", () => {
         expect(rendered).toContain("<syntaxKeyword>-name</syntaxKeyword>");
         expect(rendered).toContain("<syntaxKeyword>-80</syntaxKeyword>");
         expect(rendered).toContain("<toolTitle>3</toolTitle>");
-        expect(rendered).toContain("<toolTitle>package.json</toolTitle>");
-        expect(rendered).not.toContain("<accent>");
+        expect(rendered).toContain("<accent>package.json</accent>");
+        expect(rendered).not.toContain("<accent>pipefail</accent>");
         expect(rendered).not.toContain("<toolOutput></toolOutput>");
         expect(rendered).not.toContain("<toolDiffRemoved>-maxdepth</toolDiffRemoved>");
         expect(rendered).not.toContain("<toolDiffRemoved>-name</toolDiffRemoved>");
@@ -776,16 +780,14 @@ describe("Glowup rendering helpers", () => {
             .join("\n");
 
         expect(rendered).toContain("<syntaxFunction>python3</syntaxFunction>");
-        expect(rendered).toContain("<toolTitle>manage.py</toolTitle>");
+        expect(rendered).toContain("<accent>manage.py</accent>");
         expect(rendered).toContain("<syntaxFunction>validate</syntaxFunction>");
         expect(rendered).toContain("<syntaxKeyword>--os</syntaxKeyword>");
         expect(rendered).toContain("<toolTitle>sample</toolTitle>");
         expect(rendered).toContain("<syntaxFunction>rsync</syntaxFunction>");
         expect(rendered).toContain("<syntaxKeyword>-az</syntaxKeyword>");
-        expect(rendered).toContain("<toolTitle>config/services/sample.toml</toolTitle>");
-        expect(rendered).toContain(
-            "<toolTitle>sample-host:~/config/services/sample.toml</toolTitle>",
-        );
+        expect(rendered).toContain("<accent>config/services/sample.toml</accent>");
+        expect(rendered).toContain("<accent>sample-host:~/config/services/sample.toml</accent>");
 
         expect(rendered).not.toContain("<dim>--</dim>");
         expect(rendered).not.toContain("<dim>-</dim><syntaxOperator>az</syntaxOperator>");
@@ -828,6 +830,7 @@ describe("Glowup rendering helpers", () => {
             label: "Python",
             language: "python",
             code: "print('hi')",
+            launcher: "python - <<'PY'",
         });
     });
 
@@ -840,6 +843,7 @@ describe("Glowup rendering helpers", () => {
             label: "Python",
             language: "python",
             code: "import sys\nprint(sys.argv[1])",
+            launcher: "python - <<'PY' \"$target\"",
         });
     });
 
@@ -873,6 +877,7 @@ describe("Glowup rendering helpers", () => {
             label: "Python",
             language: "python",
             code: "print('hi')\n  PY",
+            launcher: "python - <<'PY'",
         });
     });
 
@@ -881,12 +886,14 @@ describe("Glowup rendering helpers", () => {
             label: "Python",
             language: "python",
             code: "print('hi')",
+            launcher: "python - <<-'PY'",
         });
 
         expect(parseScriptInvocation("python - <<-'PY'\nprint('hi')\n  PY")).toEqual({
             label: "Python",
             language: "python",
             code: "print('hi')\n  PY",
+            launcher: "python - <<-'PY'",
         });
     });
 
@@ -899,6 +906,7 @@ describe("Glowup rendering helpers", () => {
             label: "Node",
             language: "javascript",
             code: "console.log(require.resolve('@earendil-works/pi-coding-agent'))",
+            launcher: "node -e",
         });
     });
 
@@ -907,6 +915,7 @@ describe("Glowup rendering helpers", () => {
             label: "Node",
             language: "javascript",
             code: "require.resolve('tsx')",
+            launcher: "node --print",
         });
     });
 
@@ -915,24 +924,28 @@ describe("Glowup rendering helpers", () => {
             label: "TypeScript",
             language: "typescript",
             code: "console.log('typed')",
+            launcher: "npx tsx -e",
         });
 
         expect(parseScriptInvocation(`bun --eval "console.log('bun')"`)).toEqual({
             label: "Bun",
             language: "typescript",
             code: "console.log('bun')",
+            launcher: "bun --eval",
         });
 
         expect(parseScriptInvocation(`deno eval "console.log('deno')"`)).toEqual({
             label: "Deno",
             language: "typescript",
             code: "console.log('deno')",
+            launcher: "deno eval",
         });
 
         expect(parseScriptInvocation(`deno eval --ext=ts "const value: number = 1"`)).toEqual({
             label: "Deno",
             language: "typescript",
             code: "const value: number = 1",
+            launcher: "deno eval --ext=ts",
         });
     });
 
@@ -943,12 +956,14 @@ describe("Glowup rendering helpers", () => {
             label: "Python",
             language: "python",
             code: "print('ok')",
+            launcher: "MODE=test uv run --with rich python -c",
         });
 
         expect(parseScriptInvocation(`pnpm exec tsx -e "console.log('ok')"`)).toEqual({
             label: "TypeScript",
             language: "typescript",
             code: "console.log('ok')",
+            launcher: "pnpm exec tsx -e",
         });
 
         expect(
@@ -959,6 +974,7 @@ describe("Glowup rendering helpers", () => {
             label: "Node",
             language: "javascript",
             code: "console.log('ok')",
+            launcher: "uv run env NODE_PATH=./node_modules node --input-type=module -e",
         });
 
         expect(
@@ -969,6 +985,7 @@ describe("Glowup rendering helpers", () => {
             label: "Python",
             language: "python",
             code: "import sys\nprint(sys.argv)",
+            launcher: "uv run --offline --no-project python -c … -- demo --verbose",
         });
 
         expect(parseScriptInvocation(`xargs node -e "console.log('nested')"`)).toBeUndefined();
@@ -982,6 +999,7 @@ describe("Glowup rendering helpers", () => {
             label: "Node",
             language: "javascript",
             code: "console.log(1)",
+            launcher: "node --eval",
         });
     });
 
@@ -996,6 +1014,7 @@ describe("Glowup rendering helpers", () => {
             label: "Python",
             language: "python",
             code: "print('hi')",
+            launcher: "python -c",
         });
     });
 
@@ -1018,6 +1037,7 @@ describe("Glowup rendering helpers", () => {
             label: "Python",
             language: "python",
             code: "print('hi')",
+            launcher: "python - <<'PY'",
         });
 
         if (!invocation) {
@@ -1028,88 +1048,40 @@ describe("Glowup rendering helpers", () => {
             state: "success",
             expanded: false,
         });
-        const text = component.render(80).join("\n");
 
-        expect(text).toContain("Python");
-        expect(text).toContain("print");
-        expect(text).not.toContain("<<'PY'");
+        expect(plainLines(component.render(80))).toEqual(["$ python - <<'PY'", "  print('hi')"]);
     });
 
-    it("renders single-line script previews inline by default", () => {
+    it("starts launcher-less code beside the prompt and indents later rows", () => {
         const component = renderScriptCall(
             plainTheme,
-            { label: "Python", language: "python", code: "print('hi')" },
-            { state: "success", expanded: false },
-        );
-
-        const lines = component.render(100);
-
-        expect(lines[0]).toContain("• Python print('hi')");
-        expect(lines.length).toBe(1);
-    });
-
-    it("renders multiline script previews with block headers by default", () => {
-        const scripts = [
             { label: "Bash", language: "bash", code: "sleep 300\necho done" },
-            { label: "Python", language: "python", code: "print('hi')\nprint('bye')" },
-        ];
+            { state: "success", expanded: false },
+        );
 
-        for (const script of scripts) {
-            const component = renderScriptCall(plainTheme, script, {
-                state: "success",
-                expanded: false,
-            });
-
-            const lines = component.render(100);
-
-            expect(lines[0]).toBe(`• ${script.label}`);
-            expect(lines[1]).toContain(`  │ ${script.code.split("\n")[0]}`);
-        }
+        expect(plainLines(component.render(100))).toEqual(["$ sleep 300", "  echo done"]);
     });
 
-    it("renders non-bash multiline script previews with block headers", () => {
+    it("puts the launcher beside the prompt and every code row below it", () => {
         const component = renderScriptCall(
             plainTheme,
             {
                 label: "Python",
                 language: "python",
-                code: "root=Path.home()/'sample-data/session-with-a-long-name'\nrows=[]",
+                code: "print('hi')\nprint('bye')",
+                launcher: "python3 -c",
             },
             { state: "success", expanded: false },
         );
 
-        const lines = component.render(48);
-
-        expect(lines[0]).toBe("• Python");
-        expect(lines[1]).toContain("  │ root=Path.home()");
-        expect(lines.some((line) => line.includes("  │ rows=[]"))).toBe(true);
+        expect(plainLines(component.render(100))).toEqual([
+            "$ python3 -c",
+            "  print('hi')",
+            "  print('bye')",
+        ]);
     });
 
-    it("renders long non-bash auto script previews as blocks", () => {
-        const component = renderScriptCall(
-            plainTheme,
-            {
-                label: "Python",
-                language: "python",
-                code: [
-                    "p=Path('data/sample-bookmarks.json')",
-                    "data=json.loads(p.read_text())",
-                    "for key in ['version','checksum']:",
-                    "    print(key, data.get(key))",
-                    "print(data.keys())",
-                ].join("\n"),
-            },
-            { state: "success", expanded: false },
-        );
-
-        const lines = component.render(120);
-
-        expect(lines[0]).toBe("• Python");
-        expect(lines[1]).toContain("  │ p=Path");
-        expect(lines[1]).not.toContain("• Python p=Path");
-    });
-
-    it("keeps single-line bash script previews inline by default", () => {
+    it("wraps a long launcher-less first row with the continuation indent", () => {
         const component = renderScriptCall(
             plainTheme,
             {
@@ -1120,11 +1092,10 @@ describe("Glowup rendering helpers", () => {
             { state: "success", expanded: false },
         );
 
-        const lines = component.render(48);
+        const lines = plainLines(component.render(48));
 
-        expect(lines[0]).toContain("• Bash printf");
-        expect(lines[1]).toContain("  │   ");
-        expect(lines[1]).not.toContain("↳");
+        expect(lines[0]).toMatch(/^\$ printf/u);
+        expect(lines[1]).toMatch(/^ {4}\S/u);
     });
 
     it("does not truncate four-line collapsed script previews", () => {
@@ -1145,23 +1116,6 @@ describe("Glowup rendering helpers", () => {
         expect(rendered).not.toContain("…");
     });
 
-    it("renders inline script previews when configured", () => {
-        const component = renderScriptCall(
-            plainTheme,
-            {
-                label: "Node",
-                language: "javascript",
-                code: "const first = 1;\nconsole.log(first);",
-            },
-            { state: "success", expanded: false, headerLayout: "inline" },
-        );
-
-        const lines = component.render(100);
-
-        expect(lines[0]).toContain("• Node const first = 1;");
-        expect(lines[1]).toContain("  │ console.log(first);");
-    });
-
     it("indents wrapped script preview continuations without a glyph marker", () => {
         const code =
             "markers = {'pyproject.toml','setup.py','setup.cfg','requirements.txt','Pipfile','poetry.lock','uv.lock','tox.ini'}";
@@ -1174,10 +1128,14 @@ describe("Glowup rendering helpers", () => {
         const lines = component.render(48);
 
         expectLinesWithinWidth(lines, 48);
-        expect(lines.some((line) => line.includes("markers ="))).toBe(true);
-        expect(lines.some((line) => line.includes("│ ↳"))).toBe(false);
-        expect(lines.some((line) => line.includes("│   {'pyproject"))).toBe(true);
-        expect(lines.some((line) => line.includes("│ {'pyproject"))).toBe(false);
+        expect(plainLines(lines)[0]).toMatch(/^\$ markers =/u);
+        expect(
+            plainLines(lines)
+                .slice(1)
+                .every((line) => line.startsWith("    ")),
+        ).toBe(true);
+
+        expect(lines.some((line) => line.includes("↳") || line.includes("│"))).toBe(false);
     });
 
     it("renders already-formatted script previews without render-time formatting", () => {

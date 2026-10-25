@@ -1,24 +1,20 @@
 # Script Previews
 
-Script previews use adaptive headers by default. Configure them with `scriptPreview` settings in `~/.pi/agent/extension-settings/pi-glowup.json`.
+Bash calls render as a `$` prompt with the finished duration at the right edge. Configure them with `scriptPreview` settings in `~/.pi/agent/extension-settings/pi-glowup.json`.
 
-## Header Layout
+## Prompt Layout
 
-`auto` keeps single-line previews inline:
-
-```text
-• Bash sleep 300
-```
-
-Multiline previews move code below the header for every language:
+Shell commands start beside the `$`. Standalone interpreter calls put the launcher beside the `$` and the highlighted source below it:
 
 ```text
-• Python
-  │ print('hi')
-  │ print('bye')
+$ python3 - <<'PY'                                    0.31s
+  print('hi')
+  print('bye')
+hi
+bye
 ```
 
-Set `scriptPreview.headerLayout` to `"inline"` or `"block"` to force one layout globally.
+`scriptPreview.shellOutputStyle` shows output flush left (`"terminal"`) or behind a dim `│` gutter (`"gutter"`).
 
 ## Shell Layout
 
@@ -31,11 +27,25 @@ Reflowed chain and case operators stay at the end of the preceding row by defaul
 `scriptPreview.shellOperatorPosition` to `"leading"` to place them at the start of the next row.
 
 Reflow uses the Bash syntax tree to place logical operators, pipelines, statements, and compound
-shell bodies on readable rows. It retains the original shell tokens, never extracts language
-blocks from a composed command, and preserves existing newlines, quoted text, and heredoc bodies.
+shell bodies on readable rows. It keeps language blocks inside the composed Bash preview rather
+than extracting them into separate tool calls. Ordinary quoted text and data heredocs stay intact.
 Only clean standalone interpreter calls render as Python, Node, TypeScript, Bun, or Deno previews.
 Single-quoted inline source inside a composed command remains in the Bash block but receives its
 language's syntax highlighting when the interpreter can be identified safely.
+
+### Embedded Heredoc Source
+
+Configured language formatters also format complete source heredocs **in place** inside a Bash
+block, including multiple Python/Node invocations followed by other shell commands. A standalone
+Bash formatter is not required. `cat > example.py <<'PY'` and `cat > example.mts <<'EOF'` use the
+static destination extension to select Python or JavaScript/TypeScript formatting. The Bash label,
+command order, redirects, delimiters, and following commands remain visible.
+
+Detection requires a source-reading interpreter invocation or a supported static code-file target;
+a marker named `PY`/`JS` alone does not identify code. Data passed to a script filename or `-c`/`-e`
+program, non-stdin descriptors, unquoted bodies with active shell expansions, and incomplete bodies
+are not reformatted. If formatting would create a premature delimiter line, the original body stays.
+Multiline strings inside formatted source (such as Rust embedded in a Python string) remain verbatim.
 
 ## Preview Length
 
@@ -62,7 +72,8 @@ Formatting is off by default. `scriptPreview.formatters` maps language ids to ex
 
 Python collapses collections that fit, ignores magic trailing commas by default, and retains
 comments and literal contents. Explicit `collections: "fill"` keeps multiline brackets and packs rows. JavaScript/TypeScript use Oxfmt object collapse and two-space
-indentation. Bash uses two-space shfmt without simplification or minification; only a Bash profile
+indentation. TSX reuses the TypeScript profile with the TSX parser rather than treating JSX as a
+TypeScript type assertion. Bash uses two-space shfmt without simplification or minification; only a Bash profile
 formats whole shell commands. Executables must already be installed and reachable, or use an
 explicit executable path. `kind: "command"` accepts arbitrary formatter argv through `command`.
 
@@ -73,16 +84,28 @@ before unindented code. The syntax worker's Python tokenizer protects strings, e
 continuations; comment-adjacent and suite-internal gaps remain. This applies to Python command
 profiles too.
 Python/JS/TS profiles omit complete leading imports by default; `imports: "show"` retains them.
-Bash keeps setup statements and heredocs. Expanded Bash-tool and Codemode previews show original source
-unless `streaming.code` is `"statement"`, which retains independently formatted statements in both views.
+This import policy applies in statement and block streaming modes too.
+Bash keeps setup statements and heredocs. Expanded Bash-tool and Codemode previews normally show
+original source unless `streaming.code` is `"statement"`. Recognized embedded heredoc source stays
+formatted in expanded Bash previews too; token mode retains the original surrounding shell layout.
 
 Token-mode previews keep raw source until execution completes, then publish prepared decoration.
 Statement mode formats each completed statement separately before revealing it; block mode waits for
-complete code. Supported statement languages are JavaScript, TypeScript, Python, and Bash; other
-languages wait for completion. Formatting never delays execution or changes submitted arguments.
+complete code. Python headers followed only by comments wait for a real suite statement before
+formatting. If a formatter declines a language or unit, original lexical spacing is retained rather
+than reflowing an unformatted inline suite. Multiline Python/JavaScript/Bash literals and ordinary
+heredoc payloads are protected during independent unit formatting and restored verbatim after
+indentation. Recognized source heredocs use their own language formatter as described above. Script extraction retains tabs;
+`<<-` strips leading tabs as the shell does, without changing interior tabs. Shell heredocs that the
+parser cannot safely split hold their enclosing statement until completion. Supported statement
+languages are JavaScript, TypeScript, Python, and Bash; other languages wait for completion.
+Formatting never delays execution or changes submitted arguments. Incomplete examples and syntax
+unsupported by the parser retain unformatted source spans without raising session warnings.
 Successful output is cached by language, width, and source. Command profiles also accept
 `{width}`, `{line_length}`, and `{cols}` argv placeholders.
-Missing or failed executables produce a content-free warning; undecorated source remains visible.
+Missing or failed executables produce a content-free warning once per language. Failures identify
+an exit status, termination signal, timeout, or output limit without exposing code or formatter stderr;
+undecorated source remains visible.
 
 ## Highlighting
 

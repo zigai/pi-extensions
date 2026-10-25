@@ -36,6 +36,7 @@ function scriptPreviewBytes(preview: ScriptInvocation): number {
     return (
         Buffer.byteLength(preview.label, "utf8") +
         Buffer.byteLength(preview.language, "utf8") +
-        Buffer.byteLength(preview.code, "utf8")
+        Buffer.byteLength(preview.code, "utf8") +
+        Buffer.byteLength(preview.launcher ?? "", "utf8")
     );
 }

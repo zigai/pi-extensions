@@ -11,6 +11,7 @@ import { parseScriptInvocation, type ScriptInvocation } from "./invocation.ts";
 
 export type ShellLayout = "preserve" | "auto" | "always";
 export type ShellOperatorPosition = "trailing" | "leading";
+export type ShellOutputStyle = "terminal" | "gutter";
 
 export type BashCommandAnalysis = {
     readonly command: string;

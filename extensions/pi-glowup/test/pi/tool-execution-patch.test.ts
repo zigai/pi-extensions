@@ -1235,14 +1235,13 @@ describe("tool execution patches", () => {
                         jsonValueParser.parse(args),
                         theme,
                         context,
-                        () => "auto",
                         () => 8,
                         () => false,
                         () => "auto",
                         () => "trailing",
                     ),
                 renderResult: (_toolName, result, options, theme, context) =>
-                    bash.renderBashResult(result, options, theme, context, () => "auto"),
+                    bash.renderBashResult(result, options, theme, context, () => "terminal"),
             },
             prototype,
         );

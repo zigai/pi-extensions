@@ -1,6 +1,9 @@
 import type { RenderingAppearance, ToolCallIndicator } from "../rendering/theme.ts";
-import type { ScriptPreviewHeaderLayout } from "../tools/built-in/bash/script-renderer.ts";
-import type { ShellLayout, ShellOperatorPosition } from "../tools/built-in/bash/command.ts";
+import type {
+    ShellLayout,
+    ShellOperatorPosition,
+    ShellOutputStyle,
+} from "../tools/built-in/bash/command.ts";
 import {
     parseScriptFormatterCommandsValue,
     type ScriptFormatterCommands,
@@ -29,11 +32,11 @@ export type GlowupConfig = {
     };
 
     readonly scriptFormatters: ScriptFormatterCommands;
-    readonly scriptHeaderLayout: ScriptPreviewHeaderLayout;
     readonly scriptMaxCodePreviewLines: number;
     readonly scriptShowPrologueOmission: boolean;
     readonly shellLayout: ShellLayout;
     readonly shellOperatorPosition: ShellOperatorPosition;
+    readonly shellOutputStyle: ShellOutputStyle;
     readonly toolCallIndicator: ToolCallIndicator;
 
     readonly toolLabels: {
@@ -80,11 +83,11 @@ export function normalizeGlowupConfig(
                 ? { source: "settings.scriptPreview.formatters" }
                 : { source: "settings.scriptPreview.formatters", reportWarning },
         ),
-        scriptHeaderLayout: settings.scriptPreview.headerLayout,
         scriptMaxCodePreviewLines: settings.scriptPreview.maxCodePreviewLines,
         scriptShowPrologueOmission: settings.scriptPreview.showPrologueOmission,
         shellLayout: settings.scriptPreview.shellLayout,
         shellOperatorPosition: settings.scriptPreview.shellOperatorPosition,
+        shellOutputStyle: settings.scriptPreview.shellOutputStyle,
         toolCallIndicator: settings.toolCallIndicator,
         toolLabels: settings.toolLabels,
         writePreview: settings.writePreview,

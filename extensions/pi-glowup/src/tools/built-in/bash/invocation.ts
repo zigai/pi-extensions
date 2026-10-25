@@ -4,6 +4,9 @@ export type ScriptInvocation = {
     readonly label: string;
     readonly language: string;
     readonly code: string;
+
+    /** Shell text that runs `code`, with `…` where an inline code argument sat; absent when `code` is the whole command. */
+    readonly launcher?: string;
 };
 
 const heredocOpenPattern =
@@ -188,11 +191,126 @@ export function detectScriptInterpreter(prefix: string): ScriptInterpreter | und
     return directScriptInterpreter(tokenizeShellWords(prefix))?.interpreter;
 }
 
+const pythonStdinOptions = new Set([
+    "-u",
+    "-B",
+    "-E",
+    "-I",
+    "-O",
+    "-OO",
+    "-P",
+    "-q",
+    "-s",
+    "-S",
+    "-v",
+    "-b",
+    "-bb",
+    "-d",
+    "-i",
+]);
+
+const pythonOptionsWithValues = new Set(["-W", "-X", "--check-hash-based-pycs"]);
+
+const nodeStdinOptions = new Set([
+    "--no-warnings",
+    "--enable-source-maps",
+    "--check",
+    "-c",
+    "--trace-warnings",
+]);
+
+const nodeOptionsWithValues = new Set(["--input-type", "--import", "--loader", "--require", "-r"]);
+
+/** Identify source actually read from stdin, not data fed to a script filename,
+ * -c/-e program, unrelated command, or a dynamically selected interpreter. */
+export function heredocScriptInterpreter(command: string): ScriptInterpreter | undefined {
+    if (hasComposedShellSyntax(command) || command.includes("<<")) return undefined;
+
+    const words = tokenizeShellWords(command);
+    const direct = directScriptInterpreter(words);
+    if (direct === undefined) {
+        // A file-writing cat heredoc is source only when the static destination
+        // declares a supported language. A marker such as PY/JS alone is not evidence.
+        if (
+            commandBasename(words[0] ?? "") !== "cat" ||
+            !words.slice(1).every((word) => ["-", "--"].includes(decodeShellWord(word)))
+        )
+            return undefined;
+
+        const lexemes = tokenizeShellLexemes(command);
+        let target: string | undefined;
+        for (const [position, lexeme] of lexemes.entries()) {
+            if (lexeme.kind !== "redirection") continue;
+            if (lexeme.source.startsWith("<")) return undefined;
+            if (lexeme.source === ">") target = lexemes[position + 1]?.source;
+        }
+
+        if (target === undefined) return undefined;
+
+        const path = decodeShellWord(target);
+        if (/\.(?:py|pyw)$/iu.test(path)) return { displayName: "Python", language: "python" };
+        if (/\.tsx$/iu.test(path)) return { displayName: "TypeScript", language: "tsx" };
+        if (/\.(?:ts|mts|cts)$/iu.test(path))
+            return { displayName: "TypeScript", language: "typescript" };
+        if (/\.(?:js|mjs|cjs|jsx)$/iu.test(path))
+            return { displayName: "Node", language: "javascript" };
+
+        return undefined;
+    }
+
+    if (
+        tokenizeShellLexemes(command).some(
+            (lexeme) => lexeme.kind === "redirection" && lexeme.source.startsWith("<"),
+        )
+    )
+        return undefined;
+
+    const { interpreter, index } = direct;
+    if (interpreter.language !== "python" && interpreter.displayName !== "Node") return undefined;
+
+    let options = pythonStdinOptions;
+    let withValues = pythonOptionsWithValues;
+
+    if (interpreter.displayName === "Node") {
+        options = nodeStdinOptions;
+        withValues = nodeOptionsWithValues;
+    }
+
+    for (let position = index + 1; position < words.length; position += 1) {
+        const word = decodeShellWord(words[position] ?? "");
+        if (word === "-") return interpreter;
+
+        if (word === "--") {
+            const operand = words[position + 1];
+            if (operand === undefined || decodeShellWord(operand) === "-") return interpreter;
+            return undefined;
+        }
+
+        if (options.has(word)) continue;
+
+        if (withValues.has(word)) {
+            if (words[position + 1] === undefined) return undefined;
+
+            position += 1;
+            continue;
+        }
+
+        if ([...withValues].some((option) => word.startsWith(option + "="))) continue;
+        if (interpreter.language === "python" && /^-[WX].+/u.test(word)) continue;
+        return undefined;
+    }
+
+    return interpreter;
+}
+
 function normalizeCodeForDisplay(code: string): string {
-    return code.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\t/g, "  ");
+    // Tabs remain source characters here, including inside string literals.
+    // Terminal-cell expansion belongs to the final presentation boundary.
+    return code.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 }
 
 type HeredocOpening = {
+    readonly firstLine: string;
     readonly prefix: string;
     readonly suffix: string;
     readonly marker: string;
@@ -221,7 +339,10 @@ function parseHeredocScriptInvocation(displayCommand: string): ScriptInvocation 
         return undefined;
     }
 
-    return buildScriptInvocationForHeredoc(opening.prefix, opening.suffix, closing?.code ?? body);
+    let code = closing?.code ?? body;
+    if (opening.stripLeadingTabs) code = code.replace(/^\t+/gmu, "");
+
+    return buildScriptInvocationForHeredoc(opening, code);
 }
 
 function parseHeredocOpening(displayCommand: string): HeredocOpening | undefined {
@@ -233,13 +354,17 @@ function parseHeredocOpening(displayCommand: string): HeredocOpening | undefined
         return undefined;
     }
 
+    const prefix = firstLine.slice(0, match.index);
     const suffix = firstLine.slice(match.index + match[0].length);
-    if (hasShellControlOperator(suffix)) {
+    // The heredoc may belong to a later command on this line. Never borrow the
+    // first interpreter's identity or hide the surrounding shell operations.
+    if (hasComposedShellSyntax(prefix) || hasShellControlOperator(suffix)) {
         return undefined;
     }
 
     return {
-        prefix: firstLine.slice(0, match.index),
+        firstLine,
+        prefix,
         suffix,
         marker: groups.doubleMarker ?? groups.singleMarker ?? groups.bareMarker ?? "",
         bodyStart: nextLineStartIndex(displayCommand, firstLineEnd),
@@ -410,30 +535,31 @@ function heredocDelimiterMatches(
 function buildScriptInvocationForInterpreter(
     interpreter: ScriptInterpreter,
     code: string,
+    launcher: string,
 ): ScriptInvocation {
     return {
         label: interpreter.displayName,
         language: interpreter.language,
         code: normalizeCodeForDisplay(code),
+        launcher: launcher.replace(/\\\r?\n\s*/gu, " ").trim(),
     };
 }
 
 function buildScriptInvocationForHeredoc(
-    prefix: string,
-    suffix: string,
+    opening: HeredocOpening,
     code: string,
 ): ScriptInvocation | undefined {
-    const pipeMatch = /^\s*\|\s*(?<pipedCmd>.+)$/u.exec(suffix);
+    const pipeMatch = /^\s*\|\s*(?<pipedCmd>.+)$/u.exec(opening.suffix);
     if (pipeMatch?.groups?.pipedCmd !== undefined) {
         const interpreter = detectScriptInterpreter(pipeMatch.groups.pipedCmd);
         if (interpreter !== undefined) {
-            return buildScriptInvocationForInterpreter(interpreter, code);
+            return buildScriptInvocationForInterpreter(interpreter, code, opening.firstLine);
         }
     }
 
-    const interpreter = detectScriptInterpreter(prefix);
+    const interpreter = detectScriptInterpreter(opening.prefix);
     if (interpreter !== undefined) {
-        return buildScriptInvocationForInterpreter(interpreter, code);
+        return buildScriptInvocationForInterpreter(interpreter, code, opening.firstLine);
     }
 
     return undefined;
@@ -765,6 +891,7 @@ function isUnquotedFlagLikeScriptCode(word: string, code: string): boolean {
 type InlineScriptCode = {
     readonly code: string;
     readonly wordIndex: number;
+    readonly attachedFlag?: string;
 };
 
 function inlineScriptCodeForInterpreter(
@@ -821,7 +948,9 @@ function inlineScriptCodeForInterpreter(
             const assignmentPrefix = `${flag}=`;
             if (value.startsWith(assignmentPrefix)) {
                 const code = value.slice(assignmentPrefix.length);
-                return /^-[A-Za-z-]/u.test(code) ? undefined : { code, wordIndex: index };
+                return /^-[A-Za-z-]/u.test(code)
+                    ? undefined
+                    : { code, wordIndex: index, attachedFlag: flag };
             }
 
             if (rawWord.startsWith(flag) && rawWord.length > flag.length) {
@@ -835,7 +964,9 @@ function inlineScriptCodeForInterpreter(
                 ) {
                     const payload = rest.startsWith("=") ? rest.slice(1) : rest;
                     const code = decodeShellWord(payload);
-                    return /^-[A-Za-z-]/u.test(code) ? undefined : { code, wordIndex: index };
+                    return /^-[A-Za-z-]/u.test(code)
+                        ? undefined
+                        : { code, wordIndex: index, attachedFlag: flag };
                 }
             }
         }
@@ -847,7 +978,10 @@ function inlineScriptCodeForInterpreter(
 function parseInlineScriptInvocation(displayCommand: string): ScriptInvocation | undefined {
     if (hasComposedShellSyntax(displayCommand)) return undefined;
 
-    const words = tokenizeShellWords(displayCommand);
+    const wordLexemes = tokenizeShellLexemes(displayCommand).filter(
+        (lexeme) => lexeme.kind === "word",
+    );
+    const words = wordLexemes.map((lexeme) => lexeme.source);
     const direct = directScriptInterpreter(words);
     if (direct === undefined) return undefined;
 
@@ -856,9 +990,18 @@ function parseInlineScriptInvocation(displayCommand: string): ScriptInvocation |
         words,
         direct.index + 1,
     );
-    return inlineScript === undefined
-        ? undefined
-        : buildScriptInvocationForInterpreter(direct.interpreter, inlineScript.code);
+    const codeLexeme = inlineScript === undefined ? undefined : wordLexemes[inlineScript.wordIndex];
+    if (inlineScript === undefined || codeLexeme === undefined) return undefined;
+
+    let launcher = displayCommand.slice(0, codeLexeme.start);
+    if (inlineScript.attachedFlag !== undefined) {
+        launcher = displayCommand.slice(0, codeLexeme.start + inlineScript.attachedFlag.length);
+    }
+
+    const trailing = displayCommand.slice(codeLexeme.end).trim();
+    if (trailing.length > 0) launcher = `${launcher.trimEnd()} … ${trailing}`;
+
+    return buildScriptInvocationForInterpreter(direct.interpreter, inlineScript.code, launcher);
 }
 
 function inlineShellScriptCode(

@@ -2,8 +2,13 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it } from "vitest";
 
+import { Theme } from "@earendil-works/pi-coding-agent";
 import { renderBashCommandCall } from "../../../../src/tools/built-in/bash/renderer.ts";
+import { createNativeBashFeature } from "../../../../src/tools/built-in/bash/preview.ts";
+import type { ShellOutputStyle } from "../../../../src/tools/built-in/bash/command.ts";
+import type { BuiltInRenderContext } from "../../../../src/tools/built-in/context.ts";
 import type { GlowupRenderTheme } from "../../../../src/rendering/theme.ts";
+import { TEST_THEME_BACKGROUND_COLORS, TEST_THEME_COLORS } from "../../../support/theme-colors.ts";
 
 const theme: GlowupRenderTheme = {
     fg(_token, text) {
@@ -14,16 +19,21 @@ const theme: GlowupRenderTheme = {
     },
 };
 
+function plain(lines: readonly string[]): string[] {
+    return lines.map((line) => stripVTControlCharacters(line).replace(/<\/?[A-Za-z]+>/gu, ""));
+}
+
 function render(command: string, options: { width: number; expanded?: boolean }) {
-    return renderBashCommandCall(theme, command, {
-        state: "success",
-        expanded: options.expanded ?? false,
-        maxCodePreviewLines: 8,
-        showPrologueOmission: false,
-        headerLayout: "auto",
-        shellLayout: "auto",
-        shellOperatorPosition: "trailing",
-    }).render(options.width);
+    return plain(
+        renderBashCommandCall(theme, command, {
+            state: "success",
+            expanded: options.expanded ?? false,
+            maxCodePreviewLines: 8,
+            showPrologueOmission: false,
+            shellLayout: "auto",
+            shellOperatorPosition: "trailing",
+        }).render(options.width),
+    );
 }
 
 describe("bash command rendering", () => {
@@ -47,7 +57,6 @@ describe("bash command rendering", () => {
             expanded: true,
             maxCodePreviewLines: 8,
             showPrologueOmission: false,
-            headerLayout: "inline",
             shellLayout: "preserve",
             shellOperatorPosition: "trailing",
         }).render(2000);
@@ -56,7 +65,7 @@ describe("bash command rendering", () => {
         expect(rendered).toContain("<syntaxFunction>git</syntaxFunction>");
         expect(rendered).toContain("<syntaxFunction>status</syntaxFunction>");
         expect(rendered).toContain("<syntaxKeyword>--short</syntaxKeyword>");
-        expect(rendered.replace(/<\/?[A-Za-z]+>/gu, "")).toBe(`• Bash ${command}`);
+        expect(plain([rendered])[0]).toBe(`$ ${command}`);
     });
 
     it.each([
@@ -82,7 +91,6 @@ describe("bash command rendering", () => {
             expanded: true,
             maxCodePreviewLines: 8,
             showPrologueOmission: false,
-            headerLayout: "inline",
             shellLayout: "preserve",
             shellOperatorPosition: "trailing",
         })
@@ -91,7 +99,7 @@ describe("bash command rendering", () => {
 
         expect(rendered).toContain("\u001b[33mgit\u001b[0m");
         expect(rendered).toContain("\u001b[34m--short\u001b[0m");
-        expect(stripVTControlCharacters(rendered)).toBe(`• Bash ${command}`);
+        expect(stripVTControlCharacters(rendered)).toBe(`$ ${command}`);
     });
 
     it.each([
@@ -112,7 +120,6 @@ describe("bash command rendering", () => {
             expanded: true,
             maxCodePreviewLines: 8,
             showPrologueOmission: false,
-            headerLayout: "inline",
             shellLayout: "preserve",
             shellOperatorPosition: "trailing",
         })
@@ -121,7 +128,7 @@ describe("bash command rendering", () => {
 
         expect(rendered).toContain("<syntaxString>git status --short</syntaxString>");
         expect(rendered).not.toContain("<syntaxFunction>git</syntaxFunction>");
-        expect(rendered.replace(/<\/?[A-Za-z]+>/gu, "")).toBe(`• Bash ${command}`);
+        expect(plain([rendered])[0]).toBe(`$ ${command}`);
     });
 
     it("preserves multiline nested Bash and its ordinary string arguments", () => {
@@ -138,7 +145,6 @@ describe("bash command rendering", () => {
             expanded: true,
             maxCodePreviewLines: 8,
             showPrologueOmission: false,
-            headerLayout: "inline",
             shellLayout: "preserve",
             shellOperatorPosition: "trailing",
         }).render(2000);
@@ -147,14 +153,61 @@ describe("bash command rendering", () => {
         expect(rendered).toContain("<syntaxFunction>git</syntaxFunction>");
         expect(rendered).toContain("<syntaxFunction>printf</syntaxFunction>");
         expect(rendered).toContain("<syntaxString>sample text</syntaxString>");
-        expect(lines.map((line) => line.replace(/<\/?[A-Za-z]+>/gu, ""))).toEqual([
-            "• Bash bash -c 'git status --short",
-            '  │ printf "%s" "sample text"\'',
+        expect(plain(lines)).toEqual([
+            "$ bash -c 'git status --short",
+            '  printf "%s" "sample text"\'',
         ]);
     });
 
+    it.each(["success", "error"] as const)(
+        "right-aligns the finished duration on the prompt row (%s)",
+        (state) => {
+            const rows = renderBashCommandCall(theme, "first; second", {
+                state,
+                expanded: false,
+                maxCodePreviewLines: 8,
+                showPrologueOmission: false,
+                shellLayout: "always",
+                shellOperatorPosition: "trailing",
+                durationMs: 90_500,
+            }).render(40);
+
+            expect(plain(rows)).toEqual([`$ first;${" ".repeat(26)}1m 30s`, "  second"]);
+        },
+    );
+
+    it("leaves the duration slot empty while the command runs", () => {
+        const rows = renderBashCommandCall(theme, "sleep 5", {
+            state: "running",
+            expanded: false,
+            maxCodePreviewLines: 8,
+            showPrologueOmission: false,
+            shellLayout: "auto",
+            shellOperatorPosition: "trailing",
+            durationMs: 1200,
+        }).render(40);
+
+        expect(plain(rows)).toEqual(["$ sleep 5"]);
+    });
+
+    it("wraps a long first statement before the duration instead of overflowing", () => {
+        const rows = renderBashCommandCall(theme, "echo alpha beta gamma delta epsilon", {
+            state: "success",
+            expanded: false,
+            maxCodePreviewLines: 8,
+            showPrologueOmission: false,
+            shellLayout: "auto",
+            shellOperatorPosition: "trailing",
+            durationMs: 4270,
+        }).render(30);
+
+        expect(rows.every((row) => visibleWidth(row) <= 30)).toBe(true);
+        expect(plain(rows)[0]).toMatch(/^\$ echo .* 4\.27s$/u);
+        expect(plain(rows).join(" ")).toContain("epsilon");
+    });
+
     it("preserves short composed commands on one line", () => {
-        expect(render("one && two", { width: 80 })).toEqual(["• Bash one && two"]);
+        expect(render("one && two", { width: 80 })).toEqual(["$ one && two"]);
     });
 
     it("supports always-on structural Bash layout", () => {
@@ -163,16 +216,11 @@ describe("bash command rendering", () => {
             expanded: false,
             maxCodePreviewLines: 8,
             showPrologueOmission: false,
-            headerLayout: "auto",
             shellLayout: "always",
             shellOperatorPosition: "trailing",
-        })
-            .render(80)
-            .join("\n");
+        }).render(80);
 
-        expect(rendered).toContain("│ one | two &&");
-        expect(rendered).toContain("│ three");
-        expect(rendered).not.toContain("│ | two");
+        expect(plain(rendered)).toEqual(["$ one | two &&", "  three"]);
     });
 
     it("keeps leading operators selectable", () => {
@@ -181,14 +229,11 @@ describe("bash command rendering", () => {
             expanded: false,
             maxCodePreviewLines: 8,
             showPrologueOmission: false,
-            headerLayout: "auto",
             shellLayout: "always",
             shellOperatorPosition: "leading",
-        })
-            .render(80)
-            .join("\n");
+        }).render(80);
 
-        expect(rendered).toContain("│ && two");
+        expect(plain(rendered)).toEqual(["$ one", "  && two"]);
     });
 
     it.each(["auto", "always"] as const)("retains branch comments in %s layout", (shellLayout) => {
@@ -198,17 +243,15 @@ describe("bash command rendering", () => {
             expanded: true,
             maxCodePreviewLines: 8,
             showPrologueOmission: false,
-            headerLayout: "auto",
             shellLayout,
             shellOperatorPosition: "trailing",
         }).render(120);
-        expect(rows).toEqual([
-            "• Bash",
-            "  │ if check; then",
-            "  │   first;",
-            "  │ else # the else branch",
-            "  │ second;",
-            "  │ fi",
+        expect(plain(rows)).toEqual([
+            "$ if check; then",
+            "    first;",
+            "  else # the else branch",
+            "  second;",
+            "  fi",
         ]);
     });
 
@@ -218,11 +261,12 @@ describe("bash command rendering", () => {
             `&& ls -l /tmp/opencode || true && pnpm --version`;
         const rendered = render(command, { width: 100 }).join("\n");
 
-        expect(rendered).toContain("│ opencode debug --help | head -80 &&");
-        expect(rendered).toContain("│ ls -l /tmp/opencode || true &&");
-        expect(rendered).toContain("│ pnpm --version");
-        expect(rendered).not.toContain("│ | head -80");
-        expect(rendered).not.toContain("│ || true");
+        expect(rendered.split("\n")).toEqual([
+            "$ pwd &&",
+            "  opencode debug --help | head -80 &&",
+            "  ls -l /tmp/opencode || true &&",
+            "  pnpm --version",
+        ]);
     });
 
     it("allows long pipeline steps to wrap within their own row", () => {
@@ -231,8 +275,8 @@ describe("bash command rendering", () => {
             `&& git status --short`;
         const rendered = render(command, { width: 54 }).join("\n");
 
-        expect(rendered).toContain("│ cat records.json | python -c");
-        expect(rendered).toContain("│ git status --short");
+        expect(rendered).toContain("$ cat records.json | python -c");
+        expect(rendered).toContain("\n  git status --short");
         expect(rendered).not.toContain("• Python");
     });
 
@@ -240,9 +284,9 @@ describe("bash command rendering", () => {
         const command = `for file in *.json; do python -c "print('x')" "$file" | jq -r .; done`;
         const rendered = render(command, { width: 54 }).join("\n");
 
-        expect(rendered).toContain("│ for file in *.json; do");
-        expect(rendered).toContain(`│   python -c "print('x')" "$file" | jq -r .;`);
-        expect(rendered).toContain("│ done");
+        expect(rendered).toContain("$ for file in *.json; do");
+        expect(rendered).toContain(`\n    python -c "print('x')" "$file" | jq -r .;`);
+        expect(rendered).toContain("\n  done");
         expect(rendered).not.toContain("Pipeline");
         expect(rendered).not.toContain("Shell");
     });
@@ -263,7 +307,6 @@ describe("bash command rendering", () => {
             expanded: false,
             maxCodePreviewLines: 8,
             showPrologueOmission: false,
-            headerLayout: "auto",
             shellLayout: "auto",
             shellOperatorPosition: "trailing",
         });
@@ -281,18 +324,17 @@ describe("bash command rendering", () => {
             `&& case "$(uname -s)" in Linux) echo linux;; *) echo other;; esac`;
         const rendered = render(command, { width: 312, expanded: true });
 
-        expect(rendered[0]).toBe("• Bash");
-        expect(rendered.join("\n")).toContain("│ for item in alpha beta gamma delta; do");
-        expect(rendered.join("\n")).toContain("│   if test");
-        expect(rendered.join("\n")).toContain("│ case");
+        expect(rendered[0]).toBe("$ for item in alpha beta gamma delta; do");
+        expect(rendered.join("\n")).toContain("\n    if test");
+        expect(rendered.join("\n")).toContain("\n  case");
     });
 
     it("leaves code-writing heredocs as Bash without special body labels", () => {
         const command = `cat > check.py <<'PY'\nimport json\nprint(json)\nPY`;
         const rendered = render(command, { width: 80 }).join("\n");
 
-        expect(rendered).toContain("• Bash");
-        expect(rendered).toContain("│ import json");
+        expect(rendered).toContain("$ cat > check.py <<'PY'");
+        expect(rendered).toContain("\n  import json");
         expect(rendered).not.toContain("• Python");
     });
 
@@ -309,7 +351,7 @@ describe("bash command rendering", () => {
         ].join("\n");
         const rendered = render(command, { width: 120 }).join("\n");
 
-        expect(rendered).toContain("• Bash");
+        expect(rendered).toMatch(/^\$ rg -n/u);
         expect(rendered).toContain("node --import tsx --input-type=module");
         expect(rendered).not.toContain("• Python");
     });
@@ -321,38 +363,50 @@ describe("bash command rendering", () => {
             expanded: false,
             maxCodePreviewLines: 8,
             showPrologueOmission: false,
-            headerLayout: "block",
             shellLayout: "auto",
             shellOperatorPosition: "trailing",
         });
-        const fitting = component.render(18);
+        const fitting = component.render(16);
         expect(fitting).toHaveLength(10);
         expect(fitting.at(-1)).toContain("78)");
         expect(fitting.join("\n")).not.toContain("…");
-        const taller = component.render(12);
+        const taller = component.render(10);
         expect(taller.join("\n")).toContain("…");
         expect(taller.join("\n")).not.toContain("78)");
-        expect(taller.every((line) => visibleWidth(line) <= 12)).toBe(true);
-        expect(component.render(18)).toEqual(fitting);
+        expect(taller.every((line) => visibleWidth(line) <= 10)).toBe(true);
+        expect(component.render(16)).toEqual(fitting);
     });
 
-    it("renders clean standalone interpreter calls as language previews", () => {
-        const rendered = render(`python -c "import os; print(os.getcwd())"`, {
-            width: 80,
-        }).join("\n");
-
-        expect(rendered).toContain("• Python");
-        expect(rendered).not.toContain("python -c");
+    it("puts a standalone interpreter's launcher on the prompt row and its source below", () => {
+        expect(render(`python -c "import os; print(os.getcwd())"`, { width: 80 })).toEqual([
+            "$ python -c",
+            "  import os; print(os.getcwd())",
+        ]);
     });
 
-    it("renders wrapped Python with trailing argv as a Python preview", () => {
+    it("keeps wrapper words and trailing argv on the prompt row", () => {
         const command =
             "uv run --offline --no-project python -c 'import sys\nprint(sys.argv)' -- demo --verbose";
-        const rendered = render(command, { width: 100 }).join("\n");
 
-        expect(rendered).toContain("• Python");
-        expect(rendered).toContain("import sys");
-        expect(rendered).not.toContain("uv run");
+        expect(render(command, { width: 100 })).toEqual([
+            "$ uv run --offline --no-project python -c … -- demo --verbose",
+            "  import sys",
+            "  print(sys.argv)",
+        ]);
+    });
+
+    it("right-aligns the duration on the launcher row", () => {
+        const rows = renderBashCommandCall(theme, `python3 - <<'PY'\nprint(1)\nPY`, {
+            state: "success",
+            expanded: false,
+            maxCodePreviewLines: 8,
+            showPrologueOmission: false,
+            shellLayout: "auto",
+            shellOperatorPosition: "trailing",
+            durationMs: 310,
+        }).render(40);
+
+        expect(plain(rows)).toEqual([`$ python3 - <<'PY'${" ".repeat(17)}0.31s`, "  print(1)"]);
     });
 
     it("keeps every collapsed row within the terminal width", () => {
@@ -383,15 +437,13 @@ describe("bash command rendering", () => {
             expanded: false,
             maxCodePreviewLines: 6,
             showPrologueOmission: false,
-            headerLayout: "auto",
             shellLayout: "auto",
             shellOperatorPosition: "trailing",
         })
             .render(80)
             .join("\n");
 
-        expect(collapsed).toContain("• Bash");
-        expect(collapsed).toContain("node --input-type=module <<'JS'");
+        expect(stripVTControlCharacters(collapsed)).toContain("$ node --input-type=module <<'JS'");
         expect(collapsed).toContain("import assert from 'node:assert/strict';");
         expect(collapsed).toMatch(/… \+6 lines/u);
         expect(collapsed).not.toContain("git diff --check");
@@ -401,7 +453,6 @@ describe("bash command rendering", () => {
             expanded: true,
             maxCodePreviewLines: 6,
             showPrologueOmission: false,
-            headerLayout: "auto",
             shellLayout: "auto",
             shellOperatorPosition: "trailing",
         })
@@ -410,5 +461,65 @@ describe("bash command rendering", () => {
 
         expect(expanded).toContain("git diff --check");
         expect(expanded).not.toMatch(/… \+6 lines/u);
+    });
+});
+
+describe("bash result rendering", () => {
+    const resultTheme = new Theme(TEST_THEME_COLORS, TEST_THEME_BACKGROUND_COLORS, "truecolor");
+
+    function renderResult(
+        command: string,
+        output: string,
+        style: ShellOutputStyle,
+        width = 40,
+    ): string[] {
+        const context: BuiltInRenderContext = {
+            args: { command },
+            toolCallId: "bash-result",
+            cwd: "/work",
+            lastComponent: undefined,
+            state: {},
+            executionStarted: true,
+            argsComplete: true,
+            isPartial: false,
+            expanded: false,
+            showImages: false,
+            isError: false,
+            durationMs: 1000,
+            outputPad: 1,
+            invalidate: () => {},
+        };
+
+        return plain(
+            createNativeBashFeature()
+                .renderBashResult(
+                    { content: [{ type: "text", text: output }] },
+                    { expanded: false, isPartial: false },
+                    resultTheme,
+                    context,
+                    () => style,
+                )
+                .render(width),
+        );
+    }
+
+    it("starts terminal-style shell output at the left edge without a marker", () => {
+        expect(renderResult("ls", "alpha\n  beta", "terminal")).toEqual(["alpha", "  beta"]);
+        expect(renderResult("true", "", "terminal")).toEqual(["(no output)"]);
+    });
+
+    it("keeps every gutter-style row behind the gutter, including wrapped and omission rows", () => {
+        const output = ["x".repeat(50), "two", "three", "four", "five", "six", "seven"].join("\n");
+        const rows = renderResult("ls", output, "gutter");
+
+        expect(rows.length).toBeGreaterThan(2);
+        expect(rows.every((row) => row.startsWith("│ "))).toBe(true);
+        expect(rows.some((row) => row.includes("…"))).toBe(true);
+        expect(rows.every((row) => visibleWidth(row) <= 40)).toBe(true);
+    });
+
+    it("uses the shell output style for interpreter script calls", () => {
+        expect(renderResult(`python -c "print('hi')"`, "hi", "terminal")).toEqual(["hi"]);
+        expect(renderResult(`python -c "print('hi')"`, "hi", "gutter")).toEqual(["│ hi"]);
     });
 });
