@@ -548,7 +548,16 @@ const segmentSchema = Type.Object({
     formattable: Type.Boolean(),
     formatted: Type.Optional(Type.Boolean()),
     skipReason: Type.Optional(Type.String()),
+    displayHash: Type.Optional(Type.String()),
 });
+
+const statementEventSchema = Type.Object({
+    toolCallId: Type.Optional(Type.String()),
+    stage: Type.Optional(Type.String()),
+    codeHash: Type.String(),
+    segmentHash: Type.Optional(Type.String()),
+});
+
 const analysisSchema = Type.Object({
     toolCallId: Type.String(),
     path: Type.String(),
@@ -584,7 +593,7 @@ describe("script render diagnostics", () => {
     beforeAll(async () => {
         await disposeSyntaxHighlighting();
         await initializeSyntaxHighlighting(process.env, {
-            preloadLanguages: ["bash", "python", "javascript"],
+            preloadLanguages: ["bash", "python", "javascript", "awk", "jq"],
         });
     });
 
@@ -593,16 +602,23 @@ describe("script render diagnostics", () => {
         await disposeSyntaxHighlighting();
     });
 
+    // Splits `a=1;b=2` statements so the heredoc body observably changes.
+    const splitStatements =
+        "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(s.replace(/;/g,'\\n')))";
+
+    // Breaks jq pipes onto continuation rows like jqfmt's `-op pipe`.
+    const breakPipes =
+        "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(s.replace(/ [|] /g,' |\\n    ')))";
+
     function setup() {
         const store = createCodeStreamStore();
         stores.push(store);
-        // Splits `a=1;b=2` statements so the heredoc body observably changes.
-        const splitStatements =
-            "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(s.replace(/;/g,'\\n')))";
         const formatter = createCommandScriptFormatter(
             parseScriptFormatterCommandsValue({
                 python: { kind: "command", command: [process.execPath, "-e", splitStatements] },
                 javascript: { kind: "command", command: [process.execPath, "-e", splitStatements] },
+                jq: { kind: "jq", command: [process.execPath, "-e", breakPipes, "--"] },
+                awk: { kind: "awk", command: [process.execPath, "-e", "process.exit(1)"] },
             }),
         );
         if (formatter === undefined) throw new Error("Expected a configured formatter");
@@ -613,7 +629,7 @@ describe("script render diagnostics", () => {
         );
         onTestFinished(() => bash.clear());
 
-        const show = async (toolCallId: string, command: string): Promise<void> => {
+        const show = async (toolCallId: string, command: string): Promise<() => void> => {
             bash.schedule({
                 toolCallId,
                 command,
@@ -657,9 +673,49 @@ describe("script render diagnostics", () => {
             render();
             await settleSyntaxHighlights();
             render();
+
+            return () => {
+                render();
+            };
         };
 
-        return { show };
+        const showStreamed = async (toolCallId: string, command: string): Promise<void> => {
+            const context: BuiltInRenderContext = {
+                args: { command },
+                toolCallId,
+                cwd: "/work",
+                lastComponent: undefined,
+                state: {},
+                executionStarted: true,
+                argsComplete: true,
+                isPartial: false,
+                expanded: false,
+                showImages: false,
+                isError: false,
+                durationMs: undefined,
+                outputPad: 1,
+                invalidate: () => {},
+            };
+            const render = () =>
+                bash
+                    .renderBashCall(
+                        { command },
+                        theme,
+                        context,
+                        () => 30,
+                        () => false,
+                        () => "preserve",
+                        () => "trailing",
+                        (input) => store.get({ ...input, mode: "statement", formatter }),
+                    )
+                    .render(120);
+            render();
+            await store.settled();
+            await vi.waitUntil(() => getScriptFormatterWorkload().active === 0);
+            render();
+        };
+
+        return { show, showStreamed };
     }
 
     it("joins extracted heredoc and inline programs to their format and highlight events", async () => {
@@ -765,5 +821,176 @@ describe("script render diagnostics", () => {
         expect(
             eventsNamed(events, "script_format").filter((event) => rejected.has(event.codeHash)),
         ).toEqual([]);
+    });
+
+    it("joins inline awk and jq programs to their embedded-filter format and highlight events", async () => {
+        const events = recordRenderEvents();
+        const { show } = setup();
+        const jq =
+            '.items[] | select(.enabled and .visible and .archived == false) | {name: .name, owner: .owner.login, team: .owner.team} | .name | ascii_downcase | ltrimstr("tmp-") | rtrimstr("-old")';
+        const awk = "{print $1}";
+        const command = `jq -r '${jq}' data.json &&\n    awk '${awk}' names.txt`;
+
+        const render = await show("filter-call", command);
+
+        await vi.waitUntil(() => events.some((entry) => entry.event === "script_analysis"));
+        const analysis = analysisFor(events, "filter-call");
+        const [jqSegment, awkSegment] = analysis.segments;
+        expect(analysis.segments).toHaveLength(2);
+        expect(jqSegment).toMatchObject({
+            language: "jq",
+            origin: "inline",
+            codeHash: sha16(jq),
+            formattable: true,
+            formatted: true,
+        });
+
+        expect(awkSegment).toMatchObject({
+            language: "awk",
+            origin: "inline",
+            codeHash: sha16(awk),
+            formattable: false,
+            skipReason: "fits-width",
+        });
+
+        for (const segment of analysis.segments) {
+            if (segment.start === undefined || segment.end === undefined)
+                throw new Error("Expected filter offsets");
+
+            expect(sha16(command.slice(segment.start, segment.end))).toBe(segment.codeHash);
+        }
+
+        const formats = eventsNamed(events, "script_format");
+        const jqFormat = formats.find((event) => event.codeHash === jqSegment?.codeHash);
+        expect(jqFormat).toMatchObject({
+            toolCallId: "filter-call",
+            stage: "embedded-filter",
+            language: "jq",
+            outcome: "formatted",
+        });
+
+        // The program starts its row, so the displayed text is exactly the formatter output.
+        expect(jqSegment?.displayHash).toBe(jqFormat?.outputHash);
+        expect(formats.filter((event) => event.codeHash === awkSegment?.codeHash)).toEqual([]);
+
+        // The formatted preview may publish after the first render; highlighting follows it.
+        await vi.waitUntil(async () => {
+            render();
+            await settleSyntaxHighlights();
+
+            return eventsNamed(events, "syntax_highlight").some(
+                (event) => event.codeHash === jqFormat?.outputHash,
+            );
+        });
+        const highlights = eventsNamed(events, "syntax_highlight");
+        expect(highlights).toContainEqual(
+            expect.objectContaining({ language: "jq", codeHash: jqFormat?.outputHash }),
+        );
+
+        expect(highlights).toContainEqual(
+            expect.objectContaining({ language: "awk", codeHash: awkSegment?.codeHash }),
+        );
+    });
+
+    it("keeps a commented jq program as submitted and records why it was not formatted", async () => {
+        const events = recordRenderEvents();
+        const { show } = setup();
+        const jq =
+            '.items[] # visible entries only\n| select(.enabled and .visible and .archived == false) | {name: .name, owner: .owner.login, team: .owner.team} | .name | ascii_downcase | ltrimstr("tmp-")';
+        const command = `jq -r '${jq}' data.json`;
+
+        await show("commented-call", command);
+
+        await vi.waitUntil(() => events.some((entry) => entry.event === "script_analysis"));
+        const analysis = analysisFor(events, "commented-call");
+        expect(analysis.segments).toEqual([
+            expect.objectContaining({
+                language: "jq",
+                codeHash: sha16(jq),
+                formattable: false,
+                skipReason: "comment",
+            }),
+        ]);
+
+        expect(analysis.segments[0]?.formatted).toBeUndefined();
+        expect(analysis.segments[0]?.displayHash).toBeUndefined();
+        expect(
+            eventsNamed(events, "script_format").filter((event) => event.language === "jq"),
+        ).toEqual([]);
+
+        expect(eventsNamed(events, "syntax_highlight")).toContainEqual(
+            expect.objectContaining({ language: "jq", codeHash: sha16(jq) }),
+        );
+    });
+
+    it("explains awk and jq programs in streamed shell commands by their width-independent rules", async () => {
+        const events = recordRenderEvents();
+        const { showStreamed } = setup();
+        const commented = ".items[] # visible only\n| .name";
+        const plain = ".items[] | .name";
+        const command = `jq '${commented}' a.json && jq "${plain}" b.json && jq '${plain}' c.json`;
+
+        await showStreamed("streamed-filters", command);
+
+        await vi.waitUntil(() => events.some((entry) => entry.event === "script_analysis"));
+        expect(
+            analysisFor(events, "streamed-filters").segments.map(
+                ({ language, codeHash, formattable, skipReason }) => ({
+                    language,
+                    codeHash,
+                    formattable,
+                    skipReason,
+                }),
+            ),
+        ).toEqual([
+            {
+                language: "jq",
+                codeHash: sha16(commented),
+                formattable: false,
+                skipReason: "comment",
+            },
+            {
+                language: "jq",
+                codeHash: sha16(plain),
+                formattable: false,
+                skipReason: "double-quoted",
+            },
+            {
+                language: "jq",
+                codeHash: sha16(plain),
+                formattable: false,
+                skipReason: "untracked-streaming",
+            },
+        ]);
+    });
+
+    it("attributes statement-mode format events to the tool call and its segment", async () => {
+        const events = recordRenderEvents();
+        const { showStreamed } = setup();
+        const code = "a = 1;b = 2\nprint(a + b)";
+        const command = `python3 -c '${code}'`;
+
+        await showStreamed("statement-call", command);
+
+        await vi.waitUntil(() =>
+            eventsNamed(events, "script_format").some((event) => event.stage === "statement"),
+        );
+        const [segment] = analysisFor(events, "statement-call").segments;
+        expect(segment).toMatchObject({ language: "python", origin: "standalone" });
+
+        const statements = events
+            .filter((entry) => entry.event === "script_format")
+            .map((entry) => Value.Parse(statementEventSchema, entry.fields))
+            .filter((event) => event.stage === "statement");
+        expect(statements.length).toBeGreaterThan(1);
+
+        for (const event of statements)
+            expect(event).toMatchObject({
+                toolCallId: "statement-call",
+                segmentHash: segment?.codeHash,
+            });
+
+        // Each statement is formatted on its own, so none is the whole segment.
+        expect(statements.map((event) => event.codeHash)).not.toContain(segment?.codeHash);
     });
 });

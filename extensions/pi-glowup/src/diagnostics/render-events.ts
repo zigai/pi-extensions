@@ -30,6 +30,12 @@ export type ScriptFormatDiagnostics = {
 
     /** Extracted source before private literal masking, when it differs from formatter input. */
     readonly sourceCode?: string;
+
+    /**
+     * Final code of the `script_analysis` segment, or of the whole command on the shell path,
+     * this call formats part of; recorded as `segmentHash`. Absent while the source streams.
+     */
+    readonly segmentCode?: string;
     readonly recordSegment?: (segment: ScriptSegmentDiagnostic) => void;
 };
 

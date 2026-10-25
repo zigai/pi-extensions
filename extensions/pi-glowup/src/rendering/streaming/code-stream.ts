@@ -28,6 +28,11 @@ export type CodeStreamInput = {
     readonly formatter?: ScriptBlockFormatter | undefined;
     readonly targetWidth?: number | undefined;
     readonly invalidate?: (() => void) | undefined;
+
+    /** Owning tool call for diagnostics; statement and block events carry it. */
+    readonly toolCallId?: string | undefined;
+
+    /** Overrides the diagnostics context derived from `toolCallId`. */
     readonly diagnostics?: ScriptFormatDiagnostics | undefined;
 };
 
@@ -69,6 +74,12 @@ function languageFor(input: CodeStreamInput): string {
     if (["py", "python", "python3", "pyw"].includes(value)) return "python";
     if (["sh", "bash", "shell", "shellscript"].includes(value)) return "bash";
     return value;
+}
+
+function embeddedOptions(input: CodeStreamInput, signal: AbortSignal): ScriptBlockFormatterOptions {
+    if (input.toolCallId === undefined) return { signal };
+
+    return { signal, diagnostics: { toolCallId: input.toolCallId } };
 }
 
 /** Display-only snapshots. No formatted text is written back to tool input or model history. */
@@ -129,7 +140,7 @@ export function createCodeStreamStore(): CodeStreamStore {
             entry.input.invalidate?.();
         } catch (cause: unknown) {
             // A renderer disappearing must not turn a completed unit into a failed job.
-            recordRenderError("code-stream.invalidate", cause);
+            recordRenderError("code-stream.invalidate", cause, entry.input.toolCallId);
         }
     }
 
@@ -160,7 +171,7 @@ export function createCodeStreamStore(): CodeStreamStore {
                             }),
                         },
                         input.formatter,
-                        { signal },
+                        embeddedOptions(input, signal),
                     ),
                 };
 
@@ -215,7 +226,7 @@ export function createCodeStreamStore(): CodeStreamStore {
                                 }),
                             },
                             input.formatter,
-                            { signal },
+                            embeddedOptions(input, signal),
                         ),
                     };
 
@@ -285,7 +296,7 @@ export function createCodeStreamStore(): CodeStreamStore {
             }
         })()
             .catch((cause: unknown) => {
-                recordRenderError("code-stream.run", cause);
+                recordRenderError("code-stream.run", cause, entry.input.toolCallId);
 
                 if (!current(entry)) return;
 

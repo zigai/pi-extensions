@@ -100,6 +100,7 @@ function renderStreamingScriptCall(
                         complete: argsComplete || isError,
                         targetWidth: Math.max(1, width - 6),
                         invalidate,
+                        toolCallId,
                     });
 
                     // Statement publication and shell layout are independent: lay out only

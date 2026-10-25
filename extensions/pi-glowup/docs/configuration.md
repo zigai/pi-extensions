@@ -108,10 +108,15 @@ characters of the SHA-256 of the exact code text, so the same code can be matche
 events. Offsets are UTF-16 indices into the original command.
 
 - `script_analysis`: one per completed `bash` or `codemode` call: the standalone or shell
-  path, plus each extracted heredoc or inline program with its offsets, whether it was sent
-  to the formatter, and why not (`skipReason`).
+  path, plus each extracted heredoc or inline program, including awk and jq programs, with
+  its offsets, whether it was sent to the formatter, and why not (`skipReason`, for example
+  `fits-width`, `double-quoted`, `comment`, `defs`, or `heredoc-present`). `displayHash`
+  is the shown text when formatting changed it.
 - `script_format`: one per formatter call, with `stage`, `outcome`, timing, exit status,
   and the start of stderr. `outputHash` matches the highlighted text when the output is shown.
+  `detail` names the rule that kept a `declined` program. Statement, block, and embedded
+  calls carry their `toolCallId`; once the source is complete, `segmentHash` is the
+  `codeHash` of the analysed segment (or the `commandHash` of a shell command) they belong to.
 - `syntax_highlight`: one per code, language, and outcome per session (`highlighted`,
   `cached`, `unsupported-language`, `unavailable`, `over-budget`, `failed`, `cancelled`,
   `backpressure`).

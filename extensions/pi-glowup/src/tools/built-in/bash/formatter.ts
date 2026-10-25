@@ -477,6 +477,10 @@ function recordScriptFormat(
         let outputHash: string | undefined;
         if (attempt.output !== undefined) outputHash = diagnosticCodeHash(attempt.output);
 
+        let segmentHash: string | undefined;
+        if (context?.segmentCode !== undefined)
+            segmentHash = diagnosticCodeHash(context.segmentCode);
+
         return {
             toolCallId: context?.toolCallId,
             stage: context?.stage,
@@ -484,6 +488,7 @@ function recordScriptFormat(
             profileKind: attempt.profileKind,
             codeHash: diagnosticCodeHash(input.code),
             sourceCodeHash,
+            segmentHash,
             outputHash,
             bytes: utf8Bytes(input.code),
             targetWidth,

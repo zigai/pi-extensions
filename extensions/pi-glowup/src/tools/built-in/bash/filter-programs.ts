@@ -157,6 +157,27 @@ function filterProgramIn(
 export function embeddedFilterPrograms(command: string): FilterProgram[] {
     if (!mayContainFilterProgram(command) || command.includes("<<")) return [];
 
+    return scanFilterPrograms(command);
+}
+
+/**
+ * Programs on the rows up to the first heredoc operator, for diagnostics only: heredoc bodies
+ * are not shell words, and programs after them are not located.
+ */
+export function filterProgramsBeforeHeredoc(command: string): FilterProgram[] {
+    const operator = command.indexOf("<<");
+    if (operator < 0) return embeddedFilterPrograms(command);
+
+    let end = command.indexOf("\n", operator);
+    if (end < 0) end = command.length;
+
+    const prefix = command.slice(0, end);
+    if (!mayContainFilterProgram(prefix)) return [];
+
+    return scanFilterPrograms(prefix);
+}
+
+function scanFilterPrograms(command: string): FilterProgram[] {
     const programs: FilterProgram[] = [];
     let words: { readonly source: string; readonly start: number; readonly end: number }[] = [];
 

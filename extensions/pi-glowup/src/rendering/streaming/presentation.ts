@@ -6,6 +6,9 @@ export type CodePreview = (input: {
     readonly complete: boolean;
     readonly targetWidth?: number;
     readonly invalidate?: () => void;
+
+    /** Owning tool call, used only to attribute render diagnostics. */
+    readonly toolCallId?: string;
 }) => string;
 
 export type CodeSource = Pick<Parameters<CodePreview>[0], "key" | "source" | "language" | "path">;

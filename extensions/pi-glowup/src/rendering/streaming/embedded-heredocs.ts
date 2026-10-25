@@ -162,6 +162,7 @@ export async function formatEmbeddedHeredocs(
                     ...(context?.toolCallId !== undefined && { toolCallId: context.toolCallId }),
                     stage: "embedded-heredoc",
                     sourceCode: code,
+                    segmentCode: code,
                 },
             },
             interpreter.language,

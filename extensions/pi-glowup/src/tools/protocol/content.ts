@@ -23,6 +23,7 @@ export function protocolContent(
         targetWidth,
         ...node.syntax,
         ...(context.invalidate !== undefined && { invalidate: context.invalidate }),
+        toolCallId: context.toolCallId,
     };
 
     if (declaration?.mode === "immediate") return source;

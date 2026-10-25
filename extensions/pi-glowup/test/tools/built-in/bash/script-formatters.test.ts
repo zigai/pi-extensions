@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createRequire } from "node:module";
 import { stripVTControlCharacters } from "node:util";
+import { createHash } from "node:crypto";
 import type { ScriptFormatterProfile } from "../../../../src/settings-input.ts";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { configureRenderDiagnostics } from "../../../../src/diagnostics/render-events.ts";
@@ -1004,6 +1005,95 @@ process.stdout.write(out + "\n");
         expect(fake.calls()).toEqual([]);
     });
 
+    it("records awk and jq outcomes with the rule or exit status that kept the original", async () => {
+        using fake = setup();
+        const events: { event: string; fields: DebugLogFields }[] = [];
+        configureRenderDiagnostics((event, fields) => {
+            events.push({ event, fields: fields() });
+        });
+
+        onTestFinished(() => configureRenderDiagnostics(undefined));
+        const diagnostics = { toolCallId: "filters", stage: "embedded-filter" } as const;
+        const jq = ".items[] | select(.enabled) | .name | ascii_downcase";
+        const commented = ".items[] # each item\n| select(.enabled) | .name | ascii_downcase";
+        const unparsable = `{ print $1 } ${"x".repeat(80)}`;
+
+        const formatted = await fake.formatter(
+            { label: "jq", language: "jq", code: jq, targetWidth: 20 },
+            { diagnostics },
+        );
+        await fake.formatter(
+            { label: "jq", language: "jq", code: commented, targetWidth: 20 },
+            { diagnostics },
+        );
+        await fake.formatter(
+            { label: "awk", language: "awk", code: unparsable, targetWidth: 40 },
+            { diagnostics },
+        );
+        await fake.formatter(
+            { label: "jq", language: "jq", code: ".a", targetWidth: 20 },
+            { diagnostics },
+        );
+
+        if (formatted === undefined) throw new Error("Expected formatted jq");
+
+        expect(
+            events
+                .filter((entry) => entry.event === "script_format")
+                .map(({ fields }) => ({
+                    toolCallId: fields.toolCallId,
+                    stage: fields.stage,
+                    language: fields.language,
+                    codeHash: fields.codeHash,
+                    outputHash: fields.outputHash,
+                    outcome: fields.outcome,
+                    detail: fields.detail,
+                    exitCode: fields.exitCode,
+                })),
+        ).toEqual([
+            {
+                toolCallId: "filters",
+                stage: "embedded-filter",
+                language: "jq",
+                codeHash: sha16(jq),
+                outputHash: sha16(formatted),
+                outcome: "formatted",
+                detail: undefined,
+                exitCode: 0,
+            },
+            {
+                toolCallId: "filters",
+                stage: "embedded-filter",
+                language: "jq",
+                codeHash: sha16(commented),
+                outputHash: undefined,
+                outcome: "declined",
+                detail: "comment",
+                exitCode: undefined,
+            },
+            {
+                toolCallId: "filters",
+                stage: "embedded-filter",
+                language: "awk",
+                codeHash: sha16(unparsable),
+                outputHash: undefined,
+                outcome: "declined",
+                detail: "formatter-rejected",
+                exitCode: 1,
+            },
+            {
+                toolCallId: "filters",
+                stage: "embedded-filter",
+                language: "jq",
+                codeHash: sha16(".a"),
+                outputHash: undefined,
+                outcome: "unchanged",
+                detail: "fits-width",
+                exitCode: undefined,
+            },
+        ]);
+    });
+
     it("treats unparseable programs as declined and reports a missing executable once", async () => {
         using fake = setup();
         const rejected = await fake.formatter(
@@ -1032,3 +1122,7 @@ process.stdout.write(out + "\n");
         expect(fake.warnings).toEqual(["[pi-glowup] jq display formatter executable not found"]);
     });
 });
+
+function sha16(text: string): string {
+    return createHash("sha256").update(text).digest("hex").slice(0, 16);
+}

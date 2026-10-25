@@ -23,6 +23,9 @@ export type GlowupContentInput = {
     readonly targetWidth?: number;
     readonly invalidate?: () => void;
     readonly mode?: "inherit" | "immediate";
+
+    /** Owning tool call, used only to attribute render diagnostics. */
+    readonly toolCallId?: string;
 };
 
 /** A replaceable presentation-only policy. It must never modify source/history or execute code. */

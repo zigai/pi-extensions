@@ -483,6 +483,7 @@ export function createCodemodeRenderer(
                                 complete: context.argsComplete || context.isError,
                                 targetWidth: Math.max(1, width - 4),
                                 ...(invalidate !== undefined && { invalidate }),
+                                toolCallId: context.toolCallId,
                             });
                         } else {
                             code =

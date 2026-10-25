@@ -771,6 +771,15 @@ export function filterProgramSkipReason(
 ): FilterSkipReason | undefined {
     if (code.trim().length === 0) return "empty";
     if (filterProgramFits(code, layout)) return "fits-width";
+    return filterProgramSafetyReason(code, kind);
+}
+
+/** The width-independent part of `filterProgramSkipReason`. */
+export function filterProgramSafetyReason(
+    code: string,
+    kind: FilterFormatterProfile["kind"],
+): FilterSkipReason | undefined {
+    if (code.trim().length === 0) return "empty";
     if (kind === "awk") return awkSkipReason(code);
     return jqSkipReason(code);
 }

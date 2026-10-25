@@ -3,7 +3,11 @@ import type {
     ScriptBlockFormatterInput,
     ScriptBlockFormatterOptions,
 } from "../../tools/built-in/bash/formatter.ts";
-import { recordRenderError, type ScriptFormatStage } from "../../diagnostics/render-events.ts";
+import {
+    recordRenderError,
+    type ScriptFormatDiagnostics,
+    type ScriptFormatStage,
+} from "../../diagnostics/render-events.ts";
 import type { CodeStreamInput } from "./code-stream.ts";
 import type { StatementUnit } from "./statement-worker.ts";
 import { maskStatementLiterals } from "./literal-formatting.ts";
@@ -166,9 +170,16 @@ export async function formatCodeUnit(
         let stage: ScriptFormatStage = "statement";
         if (input.mode === "block") stage = "block";
 
+        // A streaming source is not yet the analysed segment; only a complete one joins it.
+        let diagnostics: ScriptFormatDiagnostics = { stage };
+        if (input.toolCallId !== undefined) {
+            diagnostics = { ...diagnostics, toolCallId: input.toolCallId };
+            if (input.complete) diagnostics = { ...diagnostics, segmentCode: input.source };
+        }
+
         let formatterOptions: ScriptBlockFormatterOptions = {
             signal,
-            diagnostics: input.diagnostics ?? { stage },
+            diagnostics: input.diagnostics ?? diagnostics,
         };
         if (input.targetWidth !== undefined) {
             formatterInput = { ...formatterInput, targetWidth: input.targetWidth };
@@ -177,7 +188,12 @@ export async function formatCodeUnit(
 
         formatted = await abortable(input.formatter(formatterInput, formatterOptions), signal);
     } catch (cause: unknown) {
-        recordRenderError("statement.format", cause, input.diagnostics?.toolCallId);
+        recordRenderError(
+            "statement.format",
+            cause,
+            input.diagnostics?.toolCallId ?? input.toolCallId,
+        );
+
         reportExtensionDiagnostic(
             "[pi-glowup] Statement display formatter failed; preserving this unit's original text.",
         );

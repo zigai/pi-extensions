@@ -510,6 +510,7 @@ class StreamingWritePreviewComponent implements Component {
             complete: context.argsComplete === true || !context.isPartial || context.isError,
             targetWidth: Math.max(1, width - 10),
             invalidate,
+            ...(context.toolCallId !== undefined && { toolCallId: context.toolCallId }),
         });
 
         this.preview = renderWriteCallPreview({ ...args, content: display }, theme, {
