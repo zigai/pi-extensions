@@ -590,20 +590,16 @@ function currentToolResult(instance: ToolExecutionInstance): ThirdPartyToolResul
 function restoredCallRenderContext(
     context: BuiltInToolRenderContext,
     result: ThirdPartyToolResult | undefined,
-): BuiltInToolRenderContext;
-function restoredCallRenderContext(
-    context: BuiltInToolRenderContext,
-    result: ThirdPartyToolResult | undefined,
+    isStreamingCall: ((toolCallId: string) => boolean) | undefined,
 ): BuiltInToolRenderContext {
-    if (result === undefined) {
-        return context;
-    }
+    // Pi restores rows without setArgsComplete(), including calls that have no result.
+    // Only lifecycle knowledge can distinguish those rows from live partial arguments.
+    if (result !== undefined) return { ...context, argsComplete: true, result };
+    if (context.argsComplete || isStreamingCall?.(context.toolCallId) !== false) return context;
 
-    // Pi constructs restored ToolExecutionComponents with argsComplete=false, then replays the
-    // persisted result without calling setArgsComplete(). A persisted result proves that the call
-    // arguments are complete; preserve that fact for renderers that defer structured parsing while
-    // arguments are still streaming.
-    return { ...context, argsComplete: true, result };
+    // Argument completion is not execution completion: retain pending/error state and
+    // never manufacture a result for an interrupted historical call.
+    return { ...context, argsComplete: true };
 }
 
 export function thirdPartyRenderContext(
@@ -774,15 +770,30 @@ export function configureBuiltInToolRendererPatch(
     const originalGetRenderShell = prototype.getRenderShell;
     const originalHasRendererDefinition = prototype.hasRendererDefinition;
     const initializedRows = new WeakSet<ToolExecutionInstance>();
+
+    // Native renderers may require their own concrete component (for example Text).
+    // The host retains our outer wrapper, not the component returned by the fallback.
+    const originalComponents = new WeakMap<
+        ToolExecutionInstance,
+        Partial<Record<RenderSlot, Component>>
+    >();
+    const renderOriginal = (
+        row: ToolExecutionInstance,
+        slot: RenderSlot,
+        render: (previous: Component | undefined) => Component | undefined,
+    ): Component | undefined => {
+        const slots = originalComponents.get(row) ?? {};
+        const component = render(slots[slot]);
+        if (component !== undefined) {
+            slots[slot] = component;
+            originalComponents.set(row, slots);
+        }
+
+        return component;
+    };
     let state: BuiltInRendererPatchState;
     const observeRow = (row: ToolExecutionInstance): void => {
-        // Constructors run ahead of argument completion. Observing boundaries there
-        // would precede deferred exploration renders and merge runs across a boundary.
-        // Pi completes live arguments in source order; restored rows become ready when
-        // their persisted result is replayed (without ever setting argsComplete).
-        const ready =
-            row.argsComplete === true || row.executionStarted === true || row.result !== undefined;
-        if (state.enabled && ready && row.toolCallId !== undefined && row.toolName !== undefined) {
+        if (state.enabled && row.toolCallId !== undefined && row.toolName !== undefined) {
             state.renderingOptions.observeRow?.(row, row.toolCallId, row.toolName);
         }
     };
@@ -800,7 +811,11 @@ export function configureBuiltInToolRendererPatch(
 
             const result = currentToolResult(this);
             return (args: ToolCallArguments, theme: Theme, context: BuiltInToolRenderContext) => {
-                const restoredContext = restoredCallRenderContext(context, result);
+                const restoredContext = restoredCallRenderContext(
+                    context,
+                    result,
+                    state.renderingOptions.isStreamingCall,
+                );
 
                 return renderCompletedSlot({
                     cache: state.completedRenders,
@@ -809,7 +824,7 @@ export function configureBuiltInToolRendererPatch(
                     signature: completedCallSignature(args, theme, restoredContext),
                     invalidate: context.invalidate,
                     cacheLines: shouldCacheCompletedLines(toolName),
-                    render(invalidate) {
+                    render: (invalidate) => {
                         const glowupContext = { ...restoredContext, invalidate };
                         const rendered = state.renderingOptions.renderCall(
                             toolName,
@@ -817,10 +832,16 @@ export function configureBuiltInToolRendererPatch(
                             theme,
                             glowupContext,
                         );
-                        const originalContext = { ...context, invalidate };
+
                         return (
                             rendered ??
-                            originalRenderer?.(args, theme, originalContext) ??
+                            renderOriginal(this, "call", (lastComponent) =>
+                                originalRenderer?.(args, theme, {
+                                    ...context,
+                                    invalidate,
+                                    lastComponent,
+                                }),
+                            ) ??
                             emptyComponent()
                         );
                     },
@@ -849,8 +870,9 @@ export function configureBuiltInToolRendererPatch(
                     signature: completedResultSignature(result, renderOptions, theme, context),
                     invalidate: context.invalidate,
                     cacheLines: shouldCacheCompletedLines(toolName),
-                    render(invalidate) {
+                    render: (invalidate) => {
                         const renderContext = { ...context, invalidate };
+
                         return (
                             state.renderingOptions.renderResult(
                                 toolName,
@@ -859,7 +881,12 @@ export function configureBuiltInToolRendererPatch(
                                 theme,
                                 renderContext,
                             ) ??
-                            originalRenderer?.(result, renderOptions, theme, renderContext) ??
+                            renderOriginal(this, "result", (lastComponent) =>
+                                originalRenderer?.(result, renderOptions, theme, {
+                                    ...renderContext,
+                                    lastComponent,
+                                }),
+                            ) ??
                             emptyComponent()
                         );
                     },
@@ -1077,7 +1104,11 @@ export function configureThirdPartyToolRendererPatch(
                         theme: Theme,
                         context: BuiltInToolRenderContext,
                     ) => {
-                        const restoredContext = restoredCallRenderContext(context, result);
+                        const restoredContext = restoredCallRenderContext(
+                            context,
+                            result,
+                            state.renderingOptions?.isStreamingCall,
+                        );
 
                         return renderCompletedSlot({
                             cache: state.completedRenders,
