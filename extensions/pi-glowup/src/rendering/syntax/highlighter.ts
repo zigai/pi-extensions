@@ -138,6 +138,14 @@ type HighlightOwner = {
     readonly retryWhenCapacityAvailable: () => void;
     readonly retryWhenReady: (language: SyntaxLanguage) => void;
     readonly readyRequests: Map<SyntaxLanguage, Map<string | undefined, SyntaxHighlightOptions>>;
+    readonly capacityRequests: Map<
+        string,
+        {
+            readonly code: string;
+            readonly language: string | undefined;
+            readonly options: SyntaxHighlightOptions;
+        }
+    >;
     readonly pending: Map<string, Promise<string[]>>;
 };
 
@@ -469,6 +477,7 @@ function currentHighlightOwner(invalidate: (() => void) | undefined): HighlightO
         owner.results.clear();
         owner.previousResults = new Map();
         owner.pending.clear();
+        owner.capacityRequests.clear();
         owner.version = syntaxRenderingVersion;
     }
     return owner;
@@ -511,13 +520,21 @@ export function observeSyntaxHighlightSource(
                         owner.controller.signal.aborted
                     )
                         return;
-                    notifySyntaxInvalidation(invalidate);
+                    const requests = [...owner.capacityRequests.values()];
+                    owner.capacityRequests.clear();
+                    for (const request of requests)
+                        void highlightSyntaxCodeAsync(
+                            request.code,
+                            request.language,
+                            request.options,
+                        );
                 })
                 .finally(() => {
                     activeHighlights.delete(retry);
                 });
             activeHighlights.add(retry);
         },
+        capacityRequests: new Map(),
         readyRequests: new Map(),
         retryWhenReady: (language) => {
             if (highlightOwners.get(invalidate) !== owner || owner.controller.signal.aborted)
@@ -638,6 +655,8 @@ export async function highlightSyntaxCodeAsync(
         const onUnavailable = (reason: TokenizeUnavailableReason, error?: string): void => {
             unavailable = { reason };
             if (error !== undefined) unavailable.error = error;
+            if (reason === "backpressure")
+                owner?.capacityRequests.set(key, { code, language, options });
         };
 
         const record = (outcome: SyntaxHighlightOutcome, error?: string): void =>
@@ -647,7 +666,7 @@ export async function highlightSyntaxCodeAsync(
             .tokenize(plainLines.join("\n"), normalizedLanguage, bracketPairColoringEnabled, {
                 signal,
                 retryWhenCapacityAvailable: owner?.retryWhenCapacityAvailable,
-                ...(renderDiagnosticsEnabled() && { onUnavailable }),
+                onUnavailable,
             })
             .then((lines) => {
                 if (
