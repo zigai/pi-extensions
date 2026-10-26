@@ -375,6 +375,7 @@ describe("extension lifecycle", () => {
             await rm(root, { recursive: true, force: true });
         });
         const command = "python - <<'PY'\nprint('hi')\nPY";
+
         const renderEvents = (): Static<typeof renderLogEntrySchema>[] =>
             readFileSync(log, "utf8")
                 .trim()
@@ -437,7 +438,7 @@ describe("extension lifecycle", () => {
         );
         expect(format?.fields).toMatchObject({
             toolCallId: "call-1",
-            stage: "preview",
+            stage: "block",
             outcome: "unchanged",
         });
     });

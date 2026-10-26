@@ -4,7 +4,7 @@ import type { ShellLayout, ShellOperatorPosition, ShellOutputStyle } from "./com
 import { type JsonValue } from "../../../json-value.ts";
 import { emptyComponent, makeComponent } from "../../../rendering/component.ts";
 import type { CodePreview } from "../../../rendering/streaming/presentation.ts";
-import { type ScriptInvocation } from "./invocation.ts";
+import { parseScriptInvocation, type ScriptInvocation } from "./invocation.ts";
 import { renderGlowupOutput, type GlowupOutputRenderOptions } from "../../../rendering/output.ts";
 import { renderScriptCall } from "./script-renderer.ts";
 import { shouldDeferSimpleToolCall } from "../../../rendering/status-labels.ts";
@@ -199,8 +199,17 @@ export function createNativeBashFeature(
             }
         }
 
-        if (streamCode !== undefined && !context.argsComplete && !context.isError) {
-            const script = streamingScriptIdentities.resolve(context.toolCallId, command);
+        if (
+            streamCode !== undefined &&
+            ((!context.argsComplete && !context.isError) || formatterAccessor?.() === undefined)
+        ) {
+            let script = streamingScriptIdentities.resolve(context.toolCallId, command);
+            if (context.argsComplete)
+                script = streamingScriptIdentities.finalize(
+                    context.toolCallId,
+                    parseScriptInvocation(command),
+                );
+
             const invocation = script ?? { label: "Bash", language: "bash", code: command };
             const profile = formatterAccessor?.()?.profileFor?.(invocation.language);
 

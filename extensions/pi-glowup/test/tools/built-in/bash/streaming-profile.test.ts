@@ -1,14 +1,14 @@
 import { Theme } from "@earendil-works/pi-coding-agent";
 import { stripVTControlCharacters } from "node:util";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { createNativeBashFeature } from "../../../../src/tools/built-in/bash/preview.ts";
 import { parseScriptFormatterCommandsValue } from "../../../../src/tools/built-in/bash/formatter.ts";
 import type { BuiltInRenderContext } from "../../../../src/tools/built-in/context.ts";
 import { TEST_THEME_COLORS, TEST_THEME_BACKGROUND_COLORS } from "../../../support/theme-colors.ts";
 
 it.each(["show", "omit"] as const)(
-    "respects imports: %s in independently streamed Bash scripts",
-    (imports) => {
+    "respects imports: %s in completed Bash scripts",
+    async (imports) => {
         const theme = new Theme(TEST_THEME_COLORS, TEST_THEME_BACKGROUND_COLORS, "truecolor");
         const profiles = parseScriptFormatterCommandsValue({
             python: { kind: "python", command: ["unused-formatter"], imports },
@@ -58,6 +58,11 @@ it.each(["show", "omit"] as const)(
             );
         try {
             for (const width of [80, 40, 120]) {
+                await vi.waitUntil(() => {
+                    const text = render(false, width);
+                    if (imports === "show") return !text.includes("import/setup lines omitted");
+                    return text.includes("import/setup lines omitted");
+                });
                 const collapsed = render(false, width);
                 if (imports === "show") {
                     expect(collapsed).toContain("import math");

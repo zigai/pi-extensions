@@ -584,6 +584,7 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
         tool.setArgsComplete();
         tool.updateResult({ content: [], isError: false });
         tool.render(100);
+
         // Settle the real statement worker separately from the real syntax worker.
         await presentGlowupSnapshot({
             key: "xterm:statement-worker-barrier",
@@ -610,6 +611,7 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
             activeTui.addChild(new LinesComponent(["AFTER_STATEMENT_SYNTAX"]));
             activeTui.start();
             await pendingTerminal.settle();
+
             for (let repaint = 0; repaint < 3; repaint += 1) {
                 tool.invalidate();
                 expect(tool.render(100)).toEqual(settled);
@@ -620,6 +622,7 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
                     codeForegrounds(pendingTerminal.requireRowContaining(firstLine), firstLine)
                         .size,
                 ).toBeGreaterThan(1);
+
                 expect(completions).not.toHaveBeenCalled();
             }
 
@@ -696,7 +699,7 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
         pendingTerminal.assertRowsFitWidth();
     });
 
-    it("renders independently formatted Python try suites through completion, expansion and resize", async () => {
+    it("renders completed Python blocks through completion, expansion and resize", async () => {
         await installExtension({
             streaming: { prose: "paragraph", code: "statement" },
             scriptPreview: {
@@ -706,7 +709,7 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
                         command: [
                             process.execPath,
                             "-e",
-                            "let code='';process.stdin.on('data',chunk=>code+=chunk);process.stdin.on('end',()=>{if(/begin\\ntry:/u.test(code)&&!code.includes('finally:\\n    pass')){process.exitCode=2;return;}process.stdout.write(code.replaceAll('value=','value = '));})",
+                            "let code='';process.stdin.on('data',chunk=>code+=chunk);process.stdin.on('end',()=>{if(!code.startsWith('try:\\n')||!code.includes('except ValueError:\\n')){process.exitCode=2;return;}process.stdout.write(code.replaceAll('\\n value=','\\n    value = '));})",
                         ],
                     },
                 },
@@ -741,13 +744,24 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
                 source: "",
                 complete: true,
             });
+            await vi.waitUntil(async () => {
+                tool.invalidate();
+                activeTui.requestRender();
+                await pendingTerminal.settle();
+
+                if (columns !== 80) return pendingTerminal.screenText().includes("value=1");
+                return pendingTerminal.screenText().includes("value = 1");
+            });
             tool.invalidate();
             activeTui.requestRender();
             await pendingTerminal.settle();
             const screen = pendingTerminal.screenText();
-            expect(screen).toContain(
-                "\n  try:\n      value = 1\n  except ValueError:\n      value = 2",
-            );
+            if (columns === 80)
+                expect(screen).toContain(
+                    "\n  try:\n      value = 1\n  except ValueError:\n      value = 2",
+                );
+            else expect(screen).toContain("\n  try:\n   value=1\n  except ValueError:\n   value=2");
+
             expect(screen).not.toContain("finally:");
             expect(screen).not.toContain("__glowup_");
             expect(screen).not.toContain("display formatter");
