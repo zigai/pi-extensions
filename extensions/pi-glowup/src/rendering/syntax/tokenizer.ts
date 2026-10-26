@@ -47,6 +47,12 @@ export function createSyntaxTokenizer(
     // Backpressure retains weak renderer handles, never over-budget source jobs.
     const capacityRetries = new Set<WeakRef<() => void>>();
     const registeredRetries = new WeakSet<() => void>();
+    const capacityWaiters = new Set<() => void>();
+
+    function wakeCapacityWaiters(): void {
+        for (const wake of capacityWaiters) wake();
+        capacityWaiters.clear();
+    }
     let capacityNotificationScheduled = false;
 
     function scheduleCapacityNotification(): void {
@@ -92,6 +98,7 @@ export function createSyntaxTokenizer(
         bytes -= work.bytes;
         work.signal?.removeEventListener("abort", work.cancel);
         work.resolve(lines);
+        wakeCapacityWaiters();
         scheduleCapacityNotification();
     }
 
@@ -120,6 +127,7 @@ export function createSyntaxTokenizer(
 
         failed = true;
         capacityRetries.clear();
+        wakeCapacityWaiters();
 
         if (active !== undefined) finish(active, undefined);
         active = undefined;
@@ -254,18 +262,34 @@ export function createSyntaxTokenizer(
             return undefined;
         }
 
+        // The byte budget bounds concurrent work, not the size of an individual source.
+        // An oversized source runs alone rather than waiting for impossible capacity.
         if (
             queue.length + Number(active !== undefined) >= options.maxJobs ||
-            bytes + size > options.maxBytes
+            (bytes > 0 && bytes + size > options.maxBytes)
         ) {
             cancellation.onUnavailable?.("backpressure");
 
             const retry = cancellation.retryWhenCapacityAvailable;
-            if (retry !== undefined && !registeredRetries.has(retry)) {
-                registeredRetries.add(retry);
-                capacityRetries.add(new WeakRef(retry));
+            if (retry !== undefined) {
+                if (!registeredRetries.has(retry)) {
+                    registeredRetries.add(retry);
+                    capacityRetries.add(new WeakRef(retry));
+                }
+                return undefined;
             }
-            return undefined;
+
+            // Explicit async callers have no renderer to redraw when capacity returns.
+            await new Promise<void>((resolve) => {
+                const wake = (): void => {
+                    cancellation.signal?.removeEventListener("abort", wake);
+                    capacityWaiters.delete(wake);
+                    resolve();
+                };
+                capacityWaiters.add(wake);
+                cancellation.signal?.addEventListener("abort", wake, { once: true });
+            });
+            return enqueue(request, cancellation);
         }
 
         return new Promise((resolve) => {
@@ -326,6 +350,7 @@ export function createSyntaxTokenizer(
     async function dispose(): Promise<void> {
         disposed = true;
         capacityRetries.clear();
+        wakeCapacityWaiters();
 
         if (active !== undefined) finish(active, undefined, "cancelled");
         active = undefined;

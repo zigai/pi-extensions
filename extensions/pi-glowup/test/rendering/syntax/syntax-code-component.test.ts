@@ -61,6 +61,32 @@ describe("syntax code component helpers", () => {
         }
     });
 
+    it.each([45 * 1024, 520 * 1024])(
+        "highlights %i-byte sources off-thread without retaining them in the shared cache",
+        async (size) => {
+            await initializeSyntaxHighlighting({}, { preloadLanguages: ["python"] });
+            const code = `# ${"x".repeat(size)}\nprint("complete")`;
+            let invalidations = 0;
+            const invalidate = () => {
+                invalidations += 1;
+            };
+            try {
+                expect(highlightSyntaxCode(code, "python", { invalidate })).toEqual(
+                    code.split("\n"),
+                );
+                await settleSyntaxHighlights();
+                const colored = highlightSyntaxCode(code, "python", { invalidate });
+                expect(colored.join("\n")).toContain("\u001b[");
+                expect(colored.map(stripVTControlCharacters)).toEqual(code.split("\n"));
+                await settleSyntaxHighlights();
+                expect(invalidations).toBe(1);
+                expect(syntaxHighlightCacheStats()).toEqual({ entries: 0, bytes: 0 });
+            } finally {
+                await disposeSyntaxHighlighting();
+            }
+        },
+    );
+
     it("publishes oversized colors to reconstructed output without repeated completion", async () => {
         await initializeSyntaxHighlighting({}, { preloadLanguages: ["javascript"] });
         const code = `const entries=[${"1,".repeat(18_000)}1];`;
