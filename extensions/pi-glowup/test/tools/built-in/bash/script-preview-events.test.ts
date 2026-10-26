@@ -949,7 +949,7 @@ describe("script render diagnostics", () => {
         );
     });
 
-    it("explains awk and jq programs in streamed shell commands by their width-independent rules", async () => {
+    it("records completed embedded decisions even with statement streaming enabled", async () => {
         const events = recordRenderEvents();
         const { showStreamed } = setup();
         const commented = ".items[] # visible only\n| .name";
@@ -973,7 +973,7 @@ describe("script render diagnostics", () => {
                 language: "jq",
                 codeHash: sha16(commented),
                 formattable: false,
-                skipReason: "comment",
+                skipReason: "fits-width",
             },
             {
                 language: "jq",
@@ -985,9 +985,51 @@ describe("script render diagnostics", () => {
                 language: "jq",
                 codeHash: sha16(plain),
                 formattable: false,
-                skipReason: "untracked-streaming",
+                skipReason: "fits-width",
             },
         ]);
+    });
+
+    it("joins completed embedded formatting to analysis with streaming configured", async () => {
+        const events = recordRenderEvents();
+        const { showStreamed } = setup();
+        const heredoc = "python3 - <<'PY'\na=1;b=2\nprint(a+b)\nPY\necho done";
+        const jq =
+            '.items[] | select(.enabled and .visible and .archived == false) | {name: .name, owner: .owner.login, team: .owner.team} | .name | ascii_downcase | ltrimstr("tmp-") | rtrimstr("-old")';
+        await showStreamed("complete-heredoc", heredoc);
+        await showStreamed("complete-filter", `jq '${jq}' data.json`);
+
+        for (const toolCallId of ["complete-heredoc", "complete-filter"]) {
+            await vi.waitUntil(() =>
+                events.some(
+                    (entry) =>
+                        entry.event === "script_analysis" && entry.fields.toolCallId === toolCallId,
+                ),
+            );
+            const analysis = analysisFor(events, toolCallId);
+            expect(analysis.segments).toHaveLength(1);
+            const [segment] = analysis.segments;
+            expect(segment).toMatchObject({ formattable: true, formatted: true });
+            const formats = events
+                .filter((entry) => entry.event === "script_format")
+                .map((entry) => Value.Parse(statementEventSchema, entry.fields));
+            let stage = "embedded-filter";
+            if (toolCallId === "complete-heredoc") stage = "embedded-heredoc";
+
+            expect(formats).toContainEqual(
+                expect.objectContaining({
+                    toolCallId,
+                    segmentHash: segment?.codeHash,
+                    stage,
+                }),
+            );
+
+            expect(
+                formats.filter(
+                    (event) => event.toolCallId === toolCallId && event.stage === "statement",
+                ),
+            ).toEqual([]);
+        }
     });
 
     it("attributes completed format events to the tool call and its segment", async () => {
@@ -1009,6 +1051,10 @@ describe("script render diagnostics", () => {
             .map((entry) => Value.Parse(statementEventSchema, entry.fields))
             .filter((event) => event.stage === "block");
         expect(statements.length).toBeGreaterThan(0);
+        expect(
+            eventsNamed(events, "script_format").every((event) => event.stage !== "statement"),
+        ).toBe(true);
+
         expect(new Set(statements.map((event) => event.codeHash))).toEqual(
             new Set([segment?.codeHash]),
         );

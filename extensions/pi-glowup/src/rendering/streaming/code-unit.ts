@@ -171,15 +171,16 @@ export async function formatCodeUnit(
         if (input.mode === "block") stage = "block";
 
         // A streaming source is not yet the analysed segment; only a complete one joins it.
-        let diagnostics: ScriptFormatDiagnostics = { stage };
-        if (input.toolCallId !== undefined) {
-            diagnostics = { ...diagnostics, toolCallId: input.toolCallId };
-            if (input.complete) diagnostics = { ...diagnostics, segmentCode: input.source };
-        }
+        const diagnostics: ScriptFormatDiagnostics = {
+            stage,
+            ...(input.toolCallId !== undefined && { toolCallId: input.toolCallId }),
+            ...(input.complete && { segmentCode: input.source }),
+            ...input.diagnostics,
+        };
 
         let formatterOptions: ScriptBlockFormatterOptions = {
             signal,
-            diagnostics: input.diagnostics ?? diagnostics,
+            diagnostics,
         };
         if (input.targetWidth !== undefined) {
             formatterInput = { ...formatterInput, targetWidth: input.targetWidth };

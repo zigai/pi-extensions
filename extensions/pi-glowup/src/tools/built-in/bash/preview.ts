@@ -182,24 +182,19 @@ export function createNativeBashFeature(
         const state = context.isError ? "error" : context.isPartial ? "running" : "success";
         const command = commandField(args) ?? "";
         if (context.argsComplete && renderDiagnosticsEnabled()) {
-            // The token preview records analysis after formatting whenever it formats.
+            // The completed preview records analysis after embedded decisions are known.
             const formatter =
                 formatterAccessor?.() ??
                 scheduledCommands.get(context.toolCallId)?.options.formatter;
             if (
-                streamCode !== undefined ||
                 formatter === undefined ||
                 scriptForPreview(command, formatter, formatEmbedded !== undefined) === undefined
             ) {
-                let heredocSkipReason: string | undefined;
-                if (streamCode !== undefined) heredocSkipReason = "untracked-streaming";
-
                 recordScriptAnalysis({
                     toolName: "bash",
                     toolCallId: context.toolCallId,
                     command,
                     formatter,
-                    ...(heredocSkipReason !== undefined && { heredocSkipReason }),
                 });
             }
         }

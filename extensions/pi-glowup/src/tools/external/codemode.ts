@@ -105,12 +105,17 @@ export function createCodemodePreview(formatterAccessor?: () => ScriptBlockForma
                 {
                     signal,
                     targetWidth: width,
-                    diagnostics: { toolCallId: options.toolCallId, stage: "preview" },
+                    diagnostics: {
+                        toolCallId: options.toolCallId,
+                        stage: "block",
+                        segmentCode: options.code,
+                    },
                 },
             )
             .catch((cause: unknown) => {
                 if (!signal.aborted)
                     recordRenderError("codemode.format", cause, options.toolCallId);
+
                 return undefined;
             });
         if (
