@@ -1,6 +1,6 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { installTableRendering, type TableStyle } from "./table-patch.ts";
-import { Markdown, type Component } from "@earendil-works/pi-tui";
+import { Markdown, MouseRegion, type Component } from "@earendil-works/pi-tui";
 import {
     installLinkedRenderPatch,
     installLinkedMethodPatch,
@@ -18,9 +18,11 @@ import {
     collapseAssistantBlankLines,
     getTableBoundaryLineTexts,
     isFenceLine,
+    invalidateThinkingMarkdown,
     markFencesHidden,
     resolveHeadingLineTexts,
     resolveHeadingPrefix,
+    resolveThinkingMarkdown,
     shouldHideFences,
     stripItalicAnsi,
 } from "./markdown-rendering.ts";
@@ -83,6 +85,15 @@ function hideForeignMarkdownFences(patch: MarkdownFencesPatchRecord, component: 
 }
 
 function hideAssistantMarkdownFences(patch: MarkdownFencesPatchRecord, component: Component): void {
+    if (component instanceof MouseRegion) {
+        const child: unknown = Object.getOwnPropertyDescriptor(component, "child")?.value;
+        if (child instanceof Markdown || child instanceof MouseRegion) {
+            hideAssistantMarkdownFences(patch, child);
+        }
+
+        return;
+    }
+
     if (component instanceof Markdown) {
         markFencesHidden(component);
         return;
@@ -100,6 +111,7 @@ type AssistantRenderPatchHandle = LinkedMethodPatchHandle<
 type MarkdownFencesPatchRecord = {
     readonly owners: Set<symbol>;
     markdownRenderPatch?: LinkedMethodPatchHandle<Markdown, [width: number], string[]>;
+    markdownInvalidatePatch?: LinkedMethodPatchHandle<Markdown, [], void>;
     foreignMarkdownPatches: ForeignMarkdownPatch[];
     assistantRenderPatch?: AssistantRenderPatchHandle;
 
@@ -121,6 +133,7 @@ function restoreMarkdownFencesPatch(patch: MarkdownFencesPatchRecord, owner: sym
     if (patch.owners.size > 0 || state[MARKDOWN_FENCES_PATCH_KEY] !== patch) return;
 
     patch.markdownRenderPatch?.dispose();
+    patch.markdownInvalidatePatch?.dispose();
 
     for (const foreignPatch of patch.foreignMarkdownPatches) foreignPatch.handle.dispose();
     patch.foreignMarkdownPatches.length = 0;
@@ -155,11 +168,21 @@ async function patchMarkdownFences(owner: symbol): Promise<MarkdownFencesPatchRe
     const markdownFrames = new WeakMap<Markdown, MarkdownFrame>();
     const assistantFrames = new WeakMap<AssistantMessageComponentInstance, RenderFrame>();
 
+    patch.markdownInvalidatePatch = installLinkedMethodPatch(
+        Markdown.prototype,
+        "invalidate",
+        (predecessor) =>
+            function (this: Markdown): void {
+                invalidateThinkingMarkdown(this);
+                predecessor.call(this);
+            },
+    );
     patch.markdownRenderPatch = installLinkedRenderPatch(
         Markdown.prototype,
         (predecessor) =>
             function (this: Markdown, width: number) {
-                const source = predecessor.call(this, width);
+                const thinking = resolveThinkingMarkdown(this);
+                const source = predecessor.call(thinking ?? this, width);
                 const fencesHidden = shouldHideFences(this);
                 const frame = markdownFrames.get(this);
                 if (

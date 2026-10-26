@@ -9,6 +9,7 @@ It applies a few small rendering tweaks:
 - hides the visible ``` fence lines around rendered Markdown code blocks in assistant messages
 - collapses paragraph gaps without squeezing tables or headings
 - removes italic ANSI styling from assistant message output
+- keeps thinking text monochrome, with bold inline code and no code-block syntax colors
 - renders tables with teal headers, open column gaps and segmented row rules
 
 ## Install

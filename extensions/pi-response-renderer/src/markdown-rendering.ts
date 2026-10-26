@@ -189,6 +189,93 @@ function getStyledMarkdownInstance(instance: Markdown): StyledMarkdownInstance {
     return styled;
 }
 
+function markdownPaddingX(markdownInstance: StyledMarkdownInstance): number {
+    const paddingX = markdownInstance.paddingX;
+    if (paddingX !== undefined && Number.isFinite(paddingX) && paddingX >= 0) {
+        return paddingX;
+    }
+
+    return 0;
+}
+
+type ThinkingMarkdownFrame = {
+    readonly text: string;
+    readonly paddingX: number;
+    readonly theme: MarkdownTheme;
+    readonly style: DefaultTextStyle;
+    readonly options: MarkdownOptions | undefined;
+    readonly colorSample: string;
+    readonly markdown: Markdown;
+};
+
+const thinkingMarkdownFrames = new WeakMap<Markdown, ThinkingMarkdownFrame>();
+
+export function invalidateThinkingMarkdown(instance: Markdown): void {
+    thinkingMarkdownFrames.get(instance)?.markdown.invalidate();
+}
+
+/** Pi gives thinking Markdown a default foreground and italic style. */
+export function resolveThinkingMarkdown(instance: Markdown): Markdown | undefined {
+    const source = getStyledMarkdownInstance(instance);
+    const { text, theme, defaultTextStyle: style, options } = source;
+    if (
+        text === undefined ||
+        theme === undefined ||
+        style?.italic !== true ||
+        style.color === undefined
+    ) {
+        return undefined;
+    }
+
+    const paddingX = markdownPaddingX(source);
+    const color = style.color;
+    const colorSample = color("\u0000");
+    const cached = thinkingMarkdownFrames.get(instance);
+    if (
+        cached?.text === text &&
+        cached.paddingX === paddingX &&
+        cached.theme === theme &&
+        cached.style === style &&
+        cached.options === options &&
+        cached.colorSample === colorSample
+    ) {
+        return cached.markdown;
+    }
+
+    const identity = (value: string): string => value;
+    const thinkingTheme: MarkdownTheme = {
+        heading: color,
+        link: color,
+        linkUrl: color,
+        code: (value) => theme.bold(color(value)),
+        codeBlock: color,
+        codeBlockBorder: color,
+        quote: color,
+        quoteBorder: color,
+        hr: color,
+        listBullet: color,
+        bold: theme.bold,
+        // Keep Pi's semantic thinking flag on the default style for other render patches,
+        // but suppress the visual italics here.
+        italic: identity,
+        strikethrough: theme.strikethrough,
+        underline: theme.underline,
+        codeBlockIndent: theme.codeBlockIndent,
+    };
+    const markdown = new Markdown(text, paddingX, 0, thinkingTheme, style, options);
+    thinkingMarkdownFrames.set(instance, {
+        text,
+        paddingX,
+        theme,
+        style,
+        options,
+        colorSample,
+        markdown,
+    });
+
+    return markdown;
+}
+
 type HeadingLineTextsCache = {
     readonly text: string;
     readonly width: number;
@@ -263,15 +350,6 @@ function getLevelOneOrTwoHeadingSources(markdown: string): string[] {
     }
 
     return headings;
-}
-
-function markdownPaddingX(markdownInstance: StyledMarkdownInstance): number {
-    const paddingX = markdownInstance.paddingX;
-    if (paddingX !== undefined && Number.isFinite(paddingX) && paddingX >= 0) {
-        return paddingX;
-    }
-
-    return 0;
 }
 
 function cacheMatchesHeadingRenderInputs(
