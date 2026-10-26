@@ -30,6 +30,7 @@ test("loadUiTweaksSettings scaffolds missing global config and schema", async ()
             bashExecPromptSpacing: true,
             anchorInputToBottom: false,
             compactModelSelector: true,
+            compactStartup: false,
             dimInputBorder: true,
             hideAutocompleteScrollInfo: true,
             hideModelChangeStatus: true,
@@ -75,6 +76,7 @@ test("ui tweaks settings default to enabled tweaks", () => {
     assert.equal(loaded.config.anchorInputToBottom, false);
     assert.equal(loaded.config.bashExecPromptSpacing, true);
     assert.equal(loaded.config.compactModelSelector, true);
+    assert.equal(loaded.config.compactStartup, false);
     assert.equal(loaded.config.hideAutocompleteScrollInfo, true);
     assert.equal(loaded.config.hideModelChangeStatus, true);
     assert.equal(loaded.config.hideModelProviderHint, true);
@@ -322,4 +324,13 @@ test("regular-mode synchronization can be disabled independently and by the mast
     ]);
     assert.deepEqual(disabled.errors, []);
     assert.equal(disabled.config.mainScreenSynchronizedOutput, false);
+});
+
+test("compact startup is opt-in and the master switch wins", () => {
+    const enabled = resolveUiTweaksConfig([{ label: "test", settings: { compactStartup: true } }]);
+    assert.equal(enabled.config.compactStartup, true);
+    const disabled = resolveUiTweaksConfig([
+        { label: "test", settings: { enabled: false, compactStartup: true } },
+    ]);
+    assert.equal(disabled.config.compactStartup, false);
 });

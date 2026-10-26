@@ -14,6 +14,7 @@ import { installAutocompleteScrollInfoPatch } from "./autocomplete-scroll-info.t
 import { installAnchorInputToBottomPatch } from "./anchor-input-to-bottom.ts";
 import { installBashExecSpacingEditor } from "./bash-exec-spacing.ts";
 import { installNeutralBorderColorPatch } from "./border-color.ts";
+import { installCompactStartupPatch } from "./compact-startup.ts";
 import { installInputBorderPatch } from "./input-border.ts";
 import { installInputPromptPrefixPatch } from "./input-prompt-prefix.ts";
 import { installModelSelectorHintPatch } from "./model-selector-hint.ts";
@@ -101,6 +102,7 @@ async function installUiTweaks(
         collect(installInputPromptPrefixPatch(config));
         collect(installModelSelectorHintPatch(config));
         collect(installModelStatusPatch(config));
+        if (ctx.hasUI) collect(installCompactStartupPatch(config));
         collect(installPasteCollapsePatch(config));
         collect(installPasteCollapseEditor(ctx, config));
         collect(installPreserveCompactionHistoryPatch(config));

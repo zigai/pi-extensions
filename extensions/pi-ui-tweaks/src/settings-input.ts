@@ -11,6 +11,7 @@ export type UiTweaksConfig = {
     readonly bashExecPromptSpacing: boolean;
     readonly anchorInputToBottom: boolean;
     readonly compactModelSelector: boolean;
+    readonly compactStartup: boolean;
     readonly dimInputBorder: boolean;
     readonly hideAutocompleteScrollInfo: boolean;
     readonly hideModelChangeStatus: boolean;
@@ -47,6 +48,7 @@ export type UiTweaksSettings = {
     bashExecPromptSpacing?: boolean;
     anchorInputToBottom?: boolean;
     compactModelSelector?: boolean;
+    compactStartup?: boolean;
     dimInputBorder?: boolean;
     enabled?: boolean;
     hideAutocompleteScrollInfo?: boolean;
@@ -100,6 +102,11 @@ export const extensionSettingsInput = {
             compactModelSelector: Type.Boolean({
                 default: true,
                 description: "Use compact model-selector rows.",
+            }),
+            compactStartup: Type.Boolean({
+                default: false,
+                description:
+                    "Show a compact startup header; expand tools to reveal native help and loaded resources.",
             }),
             dimInputBorder: Type.Boolean({
                 default: true,

@@ -24,6 +24,7 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-ui-tweaks.json`
 | `bashExecPromptSpacing` | boolean | `true` | Add spacing around bash execution prompts. |
 | `anchorInputToBottom` | boolean | `false` | Anchor the input editor to the terminal bottom. |
 | `compactModelSelector` | boolean | `true` | Use compact model-selector rows. |
+| `compactStartup` | boolean | `false` | Show a compact startup header; expand tools to reveal native help and loaded resources. |
 | `dimInputBorder` | boolean | `true` | Dim the input editor's horizontal border lines. |
 | `hideAutocompleteScrollInfo` | boolean | `true` | Hide autocomplete scroll-position text. |
 | `hideModelChangeStatus` | boolean | `true` | Hide model-change status messages. |
@@ -51,6 +52,7 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-ui-tweaks.json`
   "bashExecPromptSpacing": true,
   "anchorInputToBottom": false,
   "compactModelSelector": true,
+  "compactStartup": false,
   "dimInputBorder": true,
   "hideAutocompleteScrollInfo": true,
   "hideModelChangeStatus": true,

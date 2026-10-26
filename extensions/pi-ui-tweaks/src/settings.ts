@@ -35,6 +35,7 @@ const UiTweaksConfigSchema = Type.Object(
         bashExecPromptSpacing: Type.Optional(Type.Boolean()),
         anchorInputToBottom: Type.Optional(Type.Boolean()),
         compactModelSelector: Type.Optional(Type.Boolean()),
+        compactStartup: Type.Optional(Type.Boolean()),
         dimInputBorder: Type.Optional(Type.Boolean()),
         enabled: Type.Optional(Type.Boolean()),
         hideAutocompleteScrollInfo: Type.Optional(Type.Boolean()),
@@ -63,6 +64,7 @@ const DEFAULT_UI_TWEAKS_CONFIG: UiTweaksConfig = {
     bashExecPromptSpacing: true,
     anchorInputToBottom: false,
     compactModelSelector: true,
+    compactStartup: false,
     dimInputBorder: true,
     hideAutocompleteScrollInfo: true,
     hideModelChangeStatus: true,
@@ -134,6 +136,7 @@ function buildUiTweaksConfig(settings: UiTweaksSettings): UiTweaksConfig {
             bashExecPromptSpacing: false,
             anchorInputToBottom: false,
             compactModelSelector: false,
+            compactStartup: false,
             dimInputBorder: false,
             hideAutocompleteScrollInfo: false,
             hideModelChangeStatus: false,
@@ -164,6 +167,7 @@ function buildUiTweaksConfig(settings: UiTweaksSettings): UiTweaksConfig {
             settings.anchorInputToBottom ?? DEFAULT_UI_TWEAKS_CONFIG.anchorInputToBottom,
         compactModelSelector:
             settings.compactModelSelector ?? DEFAULT_UI_TWEAKS_CONFIG.compactModelSelector,
+        compactStartup: settings.compactStartup ?? DEFAULT_UI_TWEAKS_CONFIG.compactStartup,
         dimInputBorder: settings.dimInputBorder ?? DEFAULT_UI_TWEAKS_CONFIG.dimInputBorder,
         hideAutocompleteScrollInfo:
             settings.hideAutocompleteScrollInfo ??

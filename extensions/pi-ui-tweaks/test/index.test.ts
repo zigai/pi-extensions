@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
     CustomEditor,
+    InteractiveMode,
     discoverAndLoadExtensions,
     ExtensionRunner,
     initTheme,
@@ -318,4 +319,31 @@ test("registration alone never patches regular-mode rendering", () => {
         Object.getOwnPropertyDescriptor(TuiMainScreen.prototype, "doRender")?.value,
         original,
     );
+});
+
+test("compact startup never patches non-TUI sessions", async () => {
+    const configDirectory = path.join(process.env.PI_CODING_AGENT_DIR ?? "", "extension-settings");
+    await mkdir(configDirectory, { recursive: true });
+    await writeFile(
+        path.join(configDirectory, "pi-ui-tweaks.json"),
+        JSON.stringify({ compactStartup: true }),
+    );
+    const handlers = registerLifecycleHandlers();
+    const start = handlers.get("session_start");
+    const shutdown = handlers.get("session_shutdown");
+    assert.ok(start);
+    assert.ok(shutdown);
+    const original = Object.getOwnPropertyDescriptor(
+        InteractiveMode.prototype,
+        "showLoadedResources",
+    );
+    try {
+        await start(sessionStart, headlessContext());
+        assert.deepEqual(
+            Object.getOwnPropertyDescriptor(InteractiveMode.prototype, "showLoadedResources"),
+            original,
+        );
+    } finally {
+        await shutdown(sessionShutdown, headlessContext());
+    }
 });

@@ -36,6 +36,11 @@
       "default": true,
       "description": "Use compact model-selector rows."
     },
+    "compactStartup": {
+      "type": "boolean",
+      "default": false,
+      "description": "Show a compact startup header; expand tools to reveal native help and loaded resources."
+    },
     "dimInputBorder": {
       "type": "boolean",
       "default": true,
