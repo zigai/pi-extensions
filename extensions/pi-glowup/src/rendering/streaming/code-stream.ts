@@ -285,28 +285,31 @@ export function createCodeStreamStore(): CodeStreamStore {
         entry.running = true;
 
         const job = (async (): Promise<void> => {
-            let visible = display;
+            try {
+                let visible = display;
 
-            while (current(entry)) {
-                const input = entry.input;
-                await run(entry, visible);
+                while (current(entry)) {
+                    const input = entry.input;
+                    await run(entry, visible);
 
-                if (entry.input.targetWidth !== input.targetWidth) {
-                    entry.consumed = 0;
-                    entry.indents.clear();
-                    entry.lastKind = "";
-                    entry.atomic = true;
-                    visible = "";
-                    continue;
+                    if (entry.input.targetWidth !== input.targetWidth) {
+                        entry.consumed = 0;
+                        entry.indents.clear();
+                        entry.lastKind = "";
+                        entry.atomic = true;
+                        visible = "";
+                        continue;
+                    }
+
+                    if (
+                        entry.input.source === input.source &&
+                        entry.input.complete === input.complete
+                    )
+                        return;
+
+                    visible = entry.display;
                 }
-
-                if (entry.input.source === input.source && entry.input.complete === input.complete)
-                    return;
-
-                visible = entry.display;
-            }
-        })()
-            .catch((cause: unknown) => {
+            } catch (cause: unknown) {
                 if (!current(entry)) return;
 
                 recordRenderError("code-stream.run", cause, entry.input.toolCallId);
@@ -317,10 +320,12 @@ export function createCodeStreamStore(): CodeStreamStore {
 
                 if (entry.input.complete)
                     publish(entry, entry.input.source, entry.input.source.length, true);
-            })
-            .finally(() => {
+            } finally {
+                // Publish idle in the same continuation as the final input check.
+                // Otherwise a late update can see running=true after the loop exited.
                 entry.running = false;
-            });
+            }
+        })();
 
         jobs.add(job);
         void job.then(() => jobs.delete(job));
