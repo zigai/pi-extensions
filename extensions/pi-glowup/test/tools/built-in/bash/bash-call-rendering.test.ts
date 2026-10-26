@@ -172,7 +172,7 @@ describe("bash command rendering", () => {
                 durationMs: 90_500,
             }).render(40);
 
-            expect(plain(rows)).toEqual([`$ first;${" ".repeat(26)}1m 30s`, "  second"]);
+            expect(plain(rows)).toEqual([`$ first;${" ".repeat(25)}1m 30s `, "  second"]);
         },
     );
 
@@ -202,7 +202,7 @@ describe("bash command rendering", () => {
         }).render(30);
 
         expect(rows.every((row) => visibleWidth(row) <= 30)).toBe(true);
-        expect(plain(rows)[0]).toMatch(/^\$ echo .* 4\.27s$/u);
+        expect(plain(rows)[0]).toMatch(/^\$ echo .* 4\.27s $/u);
         expect(plain(rows).join(" ")).toContain("epsilon");
     });
 
@@ -406,7 +406,7 @@ describe("bash command rendering", () => {
             durationMs: 310,
         }).render(40);
 
-        expect(plain(rows)).toEqual([`$ python3 - <<'PY'${" ".repeat(17)}0.31s`, "  print(1)"]);
+        expect(plain(rows)).toEqual([`$ python3 - <<'PY'${" ".repeat(16)}0.31s `, "  print(1)"]);
     });
 
     it("keeps every collapsed row within the terminal width", () => {

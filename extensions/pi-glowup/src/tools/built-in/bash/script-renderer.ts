@@ -582,10 +582,10 @@ function appendRightAligned(rows: string[], text: string | undefined, width: num
     const first = rows[0];
     if (text === undefined || first === undefined) return rows;
 
-    const padding = width - visibleWidth(first) - visibleWidth(text);
+    const padding = width - visibleWidth(first) - visibleWidth(text) - 1;
     if (padding < 1) return rows;
 
-    return [`${first}${" ".repeat(padding)}${text}`, ...rows.slice(1)];
+    return [`${first}${" ".repeat(padding)}${text} `, ...rows.slice(1)];
 }
 
 export type ScriptCallRenderOptions = {
@@ -642,7 +642,7 @@ function createScriptCallComponent(
         const promptPrefix = `${renderShellPrompt(theme)} `;
         let duration = promptDuration(theme, state, options.durationMs);
         let durationReserve = 0;
-        if (duration !== undefined) durationReserve = visibleWidth(duration) + 1;
+        if (duration !== undefined) durationReserve = visibleWidth(duration) + 2;
 
         if (width - durationReserve < MINIMUM_PROMPT_CODE_WIDTH) {
             duration = undefined;
