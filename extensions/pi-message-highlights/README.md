@@ -5,6 +5,7 @@ Highlights URLs and file paths in Pi's interactive UI:
 - URLs render in a configurable blue foreground by default.
 - File paths render with Pi's accent/highlight color.
 - Applies to assistant responses, past user messages, and the prompt editor.
+- Thinking URLs and file paths use bold emphasis without changing the thinking foreground.
 
 ## Install
 

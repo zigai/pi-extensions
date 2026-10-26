@@ -1,4 +1,4 @@
-import { Editor } from "@earendil-works/pi-tui";
+import { Container, Editor, MouseRegion } from "@earendil-works/pi-tui";
 import {
     installLinkedRenderPatch,
     type LinkedMethodPatchHandle,
@@ -109,6 +109,43 @@ function patchRenderablePrototype(
     );
 }
 
+function patchAssistantPrototype(
+    prototype: RenderablePrototype,
+    getStyles: HighlightStylesProvider,
+): RenderPatchHandle {
+    return installLinkedRenderPatch(
+        prototype,
+        (predecessor) =>
+            function highlightedAssistantRender(this: RenderableInstance, width: number): string[] {
+                // Pi's clickable thinking runs are MouseRegions inside the content container.
+                // Decorate at that boundary rather than recoloring the flattened transcript.
+                if (
+                    !("contentContainer" in this) ||
+                    !(this.contentContainer instanceof Container)
+                ) {
+                    return highlightMessageLines(predecessor.call(this, width), getStyles());
+                }
+
+                const patches: RenderPatchHandle[] = [];
+
+                try {
+                    for (const child of this.contentContainer.children) {
+                        let styles = getStyles();
+                        if (child instanceof MouseRegion) {
+                            styles = { url: "\u001b[1m", filepath: "\u001b[1m" };
+                        }
+
+                        patches.push(patchRenderablePrototype(child, () => styles));
+                    }
+
+                    return predecessor.call(this, width);
+                } finally {
+                    for (const patch of patches) patch.dispose();
+                }
+            },
+    );
+}
+
 function patchEditorPrototype(
     prototype: RenderablePrototype,
     getStyles: HighlightStylesProvider,
@@ -152,7 +189,7 @@ export function installMessageHighlightPatch(
     const patches: RenderPatchHandle[] = [];
 
     try {
-        patches.push(patchRenderablePrototype(targets.assistantPrototype, getStyles));
+        patches.push(patchAssistantPrototype(targets.assistantPrototype, getStyles));
         patches.push(patchRenderablePrototype(targets.userPrototype, getStyles));
 
         const editorPatch = patchEditorPrototype(targets.editorPrototype, getStyles);
