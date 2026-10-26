@@ -4,7 +4,11 @@ import {
     type ResourceLoader,
 } from "@earendil-works/pi-coding-agent";
 import {
+    foregroundAnsi,
+    getTerminalColorMode,
+    rgbColor,
     sliceByColumn,
+    visibleWidth,
     stripTerminalSequences,
     truncateToWidth,
     wrapTextWithAnsi,
@@ -17,7 +21,7 @@ import type { LoadedUiTweaksConfig } from "./settings-input.ts";
 import { getCachedSkillTokens } from "./skill-token-cache.ts";
 import { enlargeStartupLogo } from "./startup-logo.ts";
 import { homedir } from "node:os";
-import { sep } from "node:path";
+import { resolve, sep } from "node:path";
 
 const COMPACT_STARTUP_PATCH = Symbol.for("zigai.pi-ui-tweaks.compact-startup-patch");
 
@@ -36,6 +40,7 @@ type StartupResources = Pick<
 >;
 
 type StartupMode = {
+    sessionManager: { getCwd(): string };
     builtInHeader: Renderable;
     customHeader?: Renderable | null;
     version: string;
@@ -82,6 +87,7 @@ function isStartupMode(value: unknown): value is StartupMode {
 
     return (
         isRenderable(view.builtInHeader) &&
+        typeof view.sessionManager?.getCwd === "function" &&
         typeof view.version === "string" &&
         typeof view.toolOutputExpanded === "boolean" &&
         isObject(view.options) &&
@@ -131,11 +137,18 @@ function collectSummary(mode: StartupMode): SummaryRow[] {
     if (system !== undefined) paths.unshift(system.path);
     paths.push(...loader.getAgentsFiles().agentsFiles.map((file) => file.path));
 
+    const cwd = mode.sessionManager.getCwd();
+    const rootInstructions = resolve(cwd, "AGENTS.md");
+    const isRoot = (path: string): boolean => resolve(cwd, path) === rootInstructions;
+    const ordered = [...paths.filter(isRoot), ...paths.filter((path) => !isRoot(path))];
     const rows: SummaryRow[] = [];
-    for (const path of paths) {
+    for (const path of ordered) {
         let label = "";
         if (rows.length === 0) label = "Context";
-        rows.push({ label, value: displayContextPath(path) });
+
+        let value = displayContextPath(path);
+        if (isRoot(path)) value = "AGENTS.md";
+        rows.push({ label, value });
     }
 
     if (paths.length === 0) rows.push({ label: "Context", value: "0 files" });
@@ -154,6 +167,17 @@ function collectSummary(mode: StartupMode): SummaryRow[] {
     });
 
     return rows;
+}
+
+function inlineSummary(rows: readonly SummaryRow[]): SummaryRow[] {
+    const paths = rows
+        .filter((row) => row.label === "Context" || row.label === "")
+        .map((row) => row.value);
+
+    return [
+        { label: "Context", value: paths.join("  ") },
+        ...rows.filter((row) => row.label !== "Context" && row.label !== ""),
+    ];
 }
 
 function renderSummary(rows: readonly SummaryRow[], width: number, indentWidth: number): string[] {
@@ -230,26 +254,44 @@ function installInstance(mode: StartupMode, enabled: () => boolean): Handle {
 
                     const native = predecessor.call(this, Math.max(width, 80));
                     const muted = getSelectListTheme().description;
-                    let title = muted(` Pi v${mode.version}`);
+                    const versionColor = foregroundAnsi(
+                        rgbColor(255, 255, 255),
+                        getTerminalColorMode(),
+                    );
+                    const version = `${versionColor}Pi v${mode.version}\u001b[0m`;
+                    let title = ` ${version}`;
                     let logoBottom = "";
                     let indentWidth = 6;
                     let logoRows: string[] | undefined;
                     if ("onLogoClick" in header && typeof header.onLogoClick === "function") {
                         logoRows = enlargeStartupLogo(native);
-                        title = `${sliceByColumn(native[0] ?? "", 0, 5)}\u001b[0m${muted(` Pi v${mode.version}`)}`;
+                        title = `${sliceByColumn(native[0] ?? "", 0, 5)}\u001b[0m ${version}`;
                         logoBottom = `${sliceByColumn(native[1] ?? "", 0, 5)}\u001b[0m`;
                     } else {
-                        title = native[0] ?? title;
+                        title = `${sliceByColumn(native[0] ?? "", 0, 3)}${versionColor} v${mode.version}\u001b[0m`;
                     }
 
                     enlargedLogo = logoRows !== undefined;
 
                     let heading = [title, logoBottom];
                     if (logoRows !== undefined) {
+                        const beside = [
+                            version,
+                            ...inlineSummary(resources).map((row) =>
+                                muted(`${row.label.padEnd(12)}${row.value}`),
+                            ),
+                        ];
+                        if (
+                            beside.length === 4 &&
+                            beside.every((line) => visibleWidth(line) <= width - 12)
+                        ) {
+                            return logoRows.map((row, index) => ` ${row}   ${beside[index]}`);
+                        }
+
                         indentWidth = 10;
                         heading = logoRows.map((row, index) => {
                             let line = ` ${row}`;
-                            if (index === 0) line += muted(` Pi v${mode.version}`);
+                            if (index === 0) line += ` ${version}`;
 
                             return line;
                         });

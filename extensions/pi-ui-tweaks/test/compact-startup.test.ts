@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { getSelectListTheme, initTheme } from "@earendil-works/pi-coding-agent";
 import {
     Container,
+    foregroundAnsi,
+    getTerminalColorMode,
+    rgbColor,
     Spacer,
     Text,
     stripTerminalSequences,
@@ -61,6 +64,7 @@ function startup(customHeader?: Text) {
     ];
 
     const mode = {
+        sessionManager: { getCwd: () => "/project" },
         customHeader,
         builtInHeader: header,
         version: "1.0",
@@ -425,7 +429,7 @@ test("context paths wrap without losing characters and shortcut legend stays abs
 });
 
 test("enlarged native logo keeps click geometry, text alignment and bounded-width rendering", () => {
-    const { mode, header } = startup();
+    const { mode, header, setAgents } = startup();
     const reset = "\u001b[0m";
     header.setText(
         ` \u001b[38;2;228;138;122m\u001b[48;2;79;142;179m▀${reset}\u001b[38;2;228;138;122m▀█${reset}  v1.0\n \u001b[38;2;79;142;179m█▀${reset} \u001b[38;2;234;182;93m█${reset} old help`,
@@ -453,20 +457,45 @@ test("enlarged native logo keeps click geometry, text alignment and bounded-widt
         ctrl: false,
     };
     try {
+        setAgents([
+            { path: "/shared/AGENTS.md", content: "" },
+            { path: "/project/AGENTS.md", content: "" },
+        ]);
         mode.showLoadedResources();
         const lines = header.render(100);
         assert.deepEqual(text(lines).split("\n").slice(0, 4), [
-            " ██████   Pi v1.0",
-            "     ██",
-            " ████  ██",
-            " ██    ██",
+            " ██████     Pi v1.0",
+            "     ██     Context     AGENTS.md  /shared/AGENTS.md",
+            " ████  ██   Skills      2 · ~16 tokens",
+            " ██    ██   Extensions  2",
         ]);
-        assert.match(text(lines), /\n          Context/);
+        assert.equal(lines.length, 4);
+        assert.ok(
+            lines[0].includes(foregroundAnsi(rgbColor(255, 255, 255), getTerminalColorMode())),
+        );
+        assert.ok(
+            lines[1].includes(
+                getSelectListTheme().description("Context     AGENTS.md  /shared/AGENTS.md"),
+            ),
+        );
         clickable.handleMouse(click);
         assert.equal(events[0].x, 4);
         assert.equal(events[0].y, 1);
         assert.equal(events[0].screenX - events[0].x, click.screenX - click.x);
         assert.equal(events[0].screenY - events[0].y, click.screenY - click.y);
+        const longPath = `/tmp/${"very-long-directory/".repeat(6)}AGENTS.md`;
+        setAgents([{ path: longPath, content: "" }]);
+        mode.showLoadedResources();
+        const narrow = text(header.render(64)).split("\n");
+        assert.ok(narrow.length > 4);
+        const skillIndex = narrow.findIndex((line) => line.includes("Skills"));
+        assert.equal(
+            narrow
+                .slice(5, skillIndex)
+                .map((line) => line.slice(22))
+                .join(""),
+            longPath,
+        );
 
         for (let width = 0; width <= 80; width += 1) {
             for (const line of header.render(width)) assert.ok(visibleWidth(line) <= width);
@@ -481,4 +510,27 @@ test("enlarged native logo keeps click geometry, text alignment and bounded-widt
     }
 
     assert.equal(clickable.handleMouse, original);
+});
+
+test("cwd root AGENTS.md comes first with a short name, without relabeling other roots", () => {
+    const { mode, header, setAgents } = startup();
+    setAgents([
+        { path: "/shared/AGENTS.md", content: "" },
+        { path: "/project/subdir/AGENTS.md", content: "" },
+        { path: "/project/AGENTS.md", content: "" },
+    ]);
+    const handle = installCompactStartupPatch({ compactStartup: true }, mode);
+    try {
+        mode.showLoadedResources();
+        assert.match(
+            text(header.render(100)),
+            /Context     AGENTS.md\n                  \/shared\/AGENTS.md\n                  \/project\/subdir\/AGENTS.md/,
+        );
+        setAgents([{ path: "./AGENTS.md", content: "" }]);
+        mode.showLoadedResources();
+        assert.match(text(header.render(100)), /Context     AGENTS.md/);
+        assert.doesNotMatch(text(header.render(100)), /\.\/AGENTS/);
+    } finally {
+        handle.dispose();
+    }
 });
