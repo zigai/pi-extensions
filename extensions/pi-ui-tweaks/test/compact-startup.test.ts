@@ -6,6 +6,7 @@ import {
     Text,
     stripTerminalSequences,
     visibleWidth,
+    type TuiMouseEvent,
 } from "@earendil-works/pi-tui";
 import { afterAll, beforeAll, test } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -421,4 +422,63 @@ test("context paths wrap without losing characters and shortcut legend stays abs
     } finally {
         handle.dispose();
     }
+});
+
+test("enlarged native logo keeps click geometry, text alignment and bounded-width rendering", () => {
+    const { mode, header } = startup();
+    const reset = "\u001b[0m";
+    header.setText(
+        ` \u001b[38;2;228;138;122m\u001b[48;2;79;142;179m▀${reset}\u001b[38;2;228;138;122m▀█${reset}  v1.0\n \u001b[38;2;79;142;179m█▀${reset} \u001b[38;2;234;182;93m█${reset} old help`,
+    );
+    const events: TuiMouseEvent[] = [];
+    const clickable = Object.assign(header, {
+        handleMouse(event: TuiMouseEvent) {
+            events.push(event);
+            return { handled: true };
+        },
+    });
+    const original = clickable.handleMouse;
+    const handle = installCompactStartupPatch({ compactStartup: true }, mode);
+    const click: TuiMouseEvent = {
+        type: "click",
+        button: "left",
+        x: 8,
+        y: 3,
+        screenX: 18,
+        screenY: 13,
+        width: 100,
+        height: 12,
+        shift: false,
+        alt: false,
+        ctrl: false,
+    };
+    try {
+        mode.showLoadedResources();
+        const lines = header.render(100);
+        assert.deepEqual(text(lines).split("\n").slice(0, 4), [
+            " ██████   Pi v1.0",
+            "     ██",
+            " ████  ██",
+            " ██    ██",
+        ]);
+        assert.match(text(lines), /\n          Context/);
+        clickable.handleMouse(click);
+        assert.equal(events[0].x, 4);
+        assert.equal(events[0].y, 1);
+        assert.equal(events[0].screenX - events[0].x, click.screenX - click.x);
+        assert.equal(events[0].screenY - events[0].y, click.screenY - click.y);
+
+        for (let width = 0; width <= 80; width += 1) {
+            for (const line of header.render(width)) assert.ok(visibleWidth(line) <= width);
+        }
+
+        header.setExpanded(true);
+        header.render(100);
+        clickable.handleMouse(click);
+        assert.deepEqual(events.at(-1), click);
+    } finally {
+        handle.dispose();
+    }
+
+    assert.equal(clickable.handleMouse, original);
 });

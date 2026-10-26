@@ -8,11 +8,14 @@ import {
     stripTerminalSequences,
     truncateToWidth,
     wrapTextWithAnsi,
+    type TuiMouseEvent,
+    type TuiMouseEventResult,
 } from "@earendil-works/pi-tui";
 import { installLinkedMethodPatch, reportExtensionDiagnostic } from "@zigai/pi-extension-internals";
 
 import type { LoadedUiTweaksConfig } from "./settings-input.ts";
 import { getCachedSkillTokens } from "./skill-token-cache.ts";
+import { enlargeStartupLogo } from "./startup-logo.ts";
 import { homedir } from "node:os";
 import { sep } from "node:path";
 
@@ -153,9 +156,9 @@ function collectSummary(mode: StartupMode): SummaryRow[] {
     return rows;
 }
 
-function renderSummary(rows: readonly SummaryRow[], width: number): string[] {
-    const indent = "      ";
-    const valueColumn = 18;
+function renderSummary(rows: readonly SummaryRow[], width: number, indentWidth: number): string[] {
+    const indent = " ".repeat(indentWidth);
+    const valueColumn = indentWidth + 12;
     const lines: string[] = [];
     for (const row of rows) {
         const prefix = `${indent}${row.label.padEnd(12)}`;
@@ -178,9 +181,19 @@ function renderSummary(rows: readonly SummaryRow[], width: number): string[] {
     return lines;
 }
 
+type MouseHeader = Renderable & {
+    handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined;
+};
+
+function hasMouseHandler(header: Renderable): header is MouseHeader {
+    return "handleMouse" in header && typeof header.handleMouse === "function";
+}
+
 function installInstance(mode: StartupMode, enabled: () => boolean): Handle {
     const patches: { dispose(): void }[] = [];
     let expanded = mode.options.verbose === true || mode.toolOutputExpanded;
+    let enlargedLogo = false;
+
     const active = (): boolean =>
         enabled() &&
         (mode.customHeader === undefined || mode.customHeader === null) &&
@@ -210,29 +223,81 @@ function installInstance(mode: StartupMode, enabled: () => boolean): Handle {
             "render",
             (predecessor) =>
                 function (width): string[] {
-                    if (!active() || expanded) return predecessor.call(this, width);
+                    if (!active() || expanded) {
+                        enlargedLogo = false;
+                        return predecessor.call(this, width);
+                    }
 
                     const native = predecessor.call(this, Math.max(width, 80));
                     const muted = getSelectListTheme().description;
                     let title = muted(` Pi v${mode.version}`);
                     let logoBottom = "";
-
+                    let indentWidth = 6;
+                    let logoRows: string[] | undefined;
                     if ("onLogoClick" in header && typeof header.onLogoClick === "function") {
+                        logoRows = enlargeStartupLogo(native);
                         title = `${sliceByColumn(native[0] ?? "", 0, 5)}\u001b[0m${muted(` Pi v${mode.version}`)}`;
                         logoBottom = `${sliceByColumn(native[1] ?? "", 0, 5)}\u001b[0m`;
                     } else {
                         title = native[0] ?? title;
                     }
 
+                    enlargedLogo = logoRows !== undefined;
+
+                    let heading = [title, logoBottom];
+                    if (logoRows !== undefined) {
+                        indentWidth = 10;
+                        heading = logoRows.map((row, index) => {
+                            let line = ` ${row}`;
+                            if (index === 0) line += muted(` Pi v${mode.version}`);
+
+                            return line;
+                        });
+                    }
+
                     return [
-                        title,
-                        logoBottom,
+                        ...heading,
                         "",
-                        ...renderSummary(resources, width).map(muted),
+                        ...renderSummary(resources, width, indentWidth).map(muted),
                     ].map((line) => truncateToWidth(line, Math.max(0, width), ""));
                 },
         ),
     );
+
+    if (hasMouseHandler(header)) {
+        patches.push(
+            installLinkedMethodPatch(
+                header,
+                "handleMouse",
+                (predecessor) =>
+                    function (event) {
+                        if (
+                            enlargedLogo &&
+                            active() &&
+                            !expanded &&
+                            event.type === "click" &&
+                            event.x >= 1 &&
+                            event.x <= 8 &&
+                            event.y >= 0 &&
+                            event.y < 4
+                        ) {
+                            const x = 1 + Math.floor((event.x - 1) / 2);
+                            const y = Math.floor(event.y / 2);
+
+                            return predecessor.call(this, {
+                                ...event,
+                                x,
+                                y,
+                                screenX: event.screenX - event.x + x,
+                                screenY: event.screenY - event.y + y,
+                            });
+                        }
+
+                        return predecessor.call(this, event);
+                    },
+            ),
+        );
+    }
 
     const children = mode.loadedResourcesContainer.children;
     for (let index = 0; index < children.length; index += 1) {
