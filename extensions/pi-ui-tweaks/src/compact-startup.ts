@@ -1,6 +1,12 @@
-import { InteractiveMode, type ResourceLoader } from "@earendil-works/pi-coding-agent";
+import {
+    getSelectListTheme,
+    InteractiveMode,
+    type ResourceLoader,
+} from "@earendil-works/pi-coding-agent";
 import { sliceByColumn, truncateToWidth } from "@earendil-works/pi-tui";
 import { installLinkedMethodPatch, reportExtensionDiagnostic } from "@zigai/pi-extension-internals";
+
+import type { LoadedUiTweaksConfig } from "./settings-input.ts";
 
 const COMPACT_STARTUP_PATCH = Symbol.for("zigai.pi-ui-tweaks.compact-startup-patch");
 
@@ -27,7 +33,7 @@ type StartupMode = {
     settingsManager: { getQuietStartup(): boolean | "header" };
     keybindings: { getKeys(action: "app.tools.expand"): string[] };
     session: { resourceLoader: StartupResources };
-    loadedResourcesContainer: { children: Renderable[] };
+    loadedResourcesContainer: Renderable & { children: Renderable[] };
     ui: { requestRender(): void };
 };
 
@@ -72,7 +78,8 @@ function isStartupMode(value: unknown): value is StartupMode {
         typeof view.settingsManager?.getQuietStartup === "function" &&
         typeof view.keybindings?.getKeys === "function" &&
         typeof view.ui?.requestRender === "function" &&
-        Array.isArray(view.loadedResourcesContainer?.children) &&
+        isRenderable(view.loadedResourcesContainer) &&
+        Array.isArray(view.loadedResourcesContainer.children) &&
         view.loadedResourcesContainer.children.every(isRenderable) &&
         typeof loader?.getSkills === "function" &&
         typeof loader.getExtensions === "function" &&
@@ -133,16 +140,17 @@ function installInstance(mode: StartupMode, enabled: () => boolean): Handle {
 
                     const native = predecessor.call(this, Math.max(width, 80));
                     const hints = `      / commands · ! shell · ${mode.keybindings.getKeys("app.tools.expand").join("/")} details`;
-                    let title = ` Pi v${mode.version}`;
-                    let ready = " Ready";
+                    const muted = getSelectListTheme().description;
+                    let title = muted(` Pi v${mode.version}`);
+                    let logoBottom = "";
                     if ("onLogoClick" in header && typeof header.onLogoClick === "function") {
-                        title = `${sliceByColumn(native[0] ?? "", 0, 5)}\u001b[0m Pi v${mode.version}`;
-                        ready = `${sliceByColumn(native[1] ?? "", 0, 5)}\u001b[0m Ready`;
+                        title = `${sliceByColumn(native[0] ?? "", 0, 5)}\u001b[0m${muted(` Pi v${mode.version}`)}`;
+                        logoBottom = `${sliceByColumn(native[1] ?? "", 0, 5)}\u001b[0m`;
                     } else {
                         title = native[0] ?? title;
                     }
 
-                    return [title, ready, "", summary, "", hints].map((line) =>
+                    return [title, logoBottom, "", muted(summary), "", muted(hints)].map((line) =>
                         truncateToWidth(line, Math.max(0, width), ""),
                     );
                 },
@@ -284,5 +292,180 @@ export function installCompactStartupPatch(
     };
 
     prototype[COMPACT_STARTUP_PATCH] = handle;
+    return handle;
+}
+
+const STARTUP_BOOTSTRAP_PATCH = Symbol.for("zigai.pi-ui-tweaks.startup-bootstrap-patch");
+
+type SettingsReader = (cwd: string, projectTrusted: boolean) => LoadedUiTweaksConfig;
+type BootstrapHandle = { readSettings: SettingsReader; dispose(): void };
+
+type BootstrapMode = {
+    sessionManager: { getCwd(): string };
+    settingsManager: { isProjectTrusted(): boolean };
+    headerContainer: { addChild(child: Renderable): void };
+};
+
+type InitView = { init?: (this: BootstrapMode) => Promise<void> };
+type InitTarget = Required<InitView> & { [STARTUP_BOOTSTRAP_PATCH]?: BootstrapHandle };
+
+function isBootstrapMode(value: unknown): value is BootstrapMode {
+    if (!isObject(value)) return false;
+
+    // SAFETY: Every startup member used below is validated before use.
+    const view = value as Partial<BootstrapMode>;
+    return (
+        typeof view.sessionManager?.getCwd === "function" &&
+        typeof view.settingsManager?.isProjectTrusted === "function" &&
+        typeof view.headerContainer?.addChild === "function"
+    );
+}
+
+function isInitTarget(value: InitView | null): value is InitTarget {
+    return value !== null && typeof value.init === "function";
+}
+
+type ReloadTarget = { handleReloadCommand(this: StartupMode): Promise<void> };
+
+function isReloadTarget(value: unknown): value is ReloadTarget {
+    return (
+        isObject(value) &&
+        "handleReloadCommand" in value &&
+        typeof value.handleReloadCommand === "function"
+    );
+}
+
+function holdFrame(component: Renderable): { dispose(): void } {
+    const lines = component.render(4096);
+
+    return installLinkedMethodPatch(
+        component,
+        "render",
+        () =>
+            (width): string[] =>
+                lines.map((line) => truncateToWidth(line, Math.max(0, width), "")),
+    );
+}
+
+/** Stage the compact header before its first mount, not after session_start. */
+export function installCompactStartupBootstrap(
+    loadSettings: SettingsReader,
+    target: InitView | null = InteractiveMode.prototype,
+): BootstrapHandle {
+    if (!isInitTarget(target)) {
+        reportExtensionDiagnostic(
+            "[pi-ui-tweaks] compact startup first-frame hook unavailable: missing init",
+        );
+
+        return { readSettings: loadSettings, dispose(): void {} };
+    }
+
+    const prototype = target;
+    const existing = prototype[STARTUP_BOOTSTRAP_PATCH];
+    if (existing !== undefined) return existing;
+
+    let compact = false;
+    let pending: { cwd: string; trusted: boolean; loaded: LoadedUiTweaksConfig } | undefined;
+    const patch = installLinkedMethodPatch(
+        prototype,
+        "init",
+        (predecessor) =>
+            async function (): Promise<void> {
+                if (!isBootstrapMode(this)) {
+                    reportExtensionDiagnostic(
+                        "[pi-ui-tweaks] compact startup first-frame hook unavailable: changed startup components",
+                    );
+                    return predecessor.call(this);
+                }
+
+                const cwd = this.sessionManager.getCwd();
+                const trusted = this.settingsManager.isProjectTrusted();
+                const loaded = loadSettings(cwd, trusted);
+                compact = loaded.config.compactStartup;
+                pending = { cwd, trusted, loaded };
+
+                let earlyHeader: Handle | undefined;
+                const mount = installLinkedMethodPatch(
+                    this.headerContainer,
+                    "addChild",
+                    (addChild) =>
+                        (child): void => {
+                            if (
+                                loaded.config.compactStartup &&
+                                isStartupMode(this) &&
+                                child === this.builtInHeader
+                            ) {
+                                earlyHeader?.dispose();
+                                earlyHeader = installInstance(this, () => true);
+                            }
+
+                            addChild.call(this.headerContainer, child);
+                        },
+                );
+
+                try {
+                    await predecessor.call(this);
+                } finally {
+                    mount.dispose();
+                    earlyHeader?.dispose();
+                    pending = undefined;
+                }
+            },
+    );
+    let reloadPatch: { dispose(): void } | undefined;
+    if (isReloadTarget(prototype)) {
+        reloadPatch = installLinkedMethodPatch(
+            prototype,
+            "handleReloadCommand",
+            (predecessor) =>
+                async function (): Promise<void> {
+                    if (
+                        !compact ||
+                        !isStartupMode(this) ||
+                        this.toolOutputExpanded ||
+                        this.customHeader !== undefined ||
+                        this.settingsManager.getQuietStartup() === true
+                    )
+                        return predecessor.call(this);
+
+                    const header = holdFrame(this.builtInHeader);
+                    const resources = holdFrame(this.loadedResourcesContainer);
+                    try {
+                        await predecessor.call(this);
+                    } finally {
+                        resources.dispose();
+                        header.dispose();
+                    }
+                },
+        );
+    }
+
+    let disposed = false;
+    const handle: BootstrapHandle = {
+        readSettings(cwd, projectTrusted): LoadedUiTweaksConfig {
+            const cached = pending;
+            pending = undefined;
+
+            let loaded: LoadedUiTweaksConfig;
+            if (cached?.cwd === cwd && cached.trusted === projectTrusted) loaded = cached.loaded;
+            else loaded = loadSettings(cwd, projectTrusted);
+
+            compact = loaded.config.compactStartup;
+            return loaded;
+        },
+        dispose(): void {
+            if (disposed) return;
+
+            disposed = true;
+            pending = undefined;
+            reloadPatch?.dispose();
+            patch.dispose();
+
+            if (prototype[STARTUP_BOOTSTRAP_PATCH] === handle)
+                delete prototype[STARTUP_BOOTSTRAP_PATCH];
+        },
+    };
+
+    prototype[STARTUP_BOOTSTRAP_PATCH] = handle;
     return handle;
 }

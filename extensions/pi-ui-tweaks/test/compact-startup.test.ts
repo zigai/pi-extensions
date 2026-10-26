@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { getSelectListTheme, initTheme } from "@earendil-works/pi-coding-agent";
 import {
     Container,
     Spacer,
@@ -7,8 +8,14 @@ import {
     visibleWidth,
 } from "@earendil-works/pi-tui";
 import { test } from "vitest";
-import { installCompactStartupPatch } from "../src/compact-startup.ts";
+import {
+    installCompactStartupBootstrap,
+    installCompactStartupPatch,
+} from "../src/compact-startup.ts";
+import { resolveUiTweaksConfig } from "../src/settings.ts";
 import { captureDiagnostics } from "./capture-diagnostics.ts";
+
+initTheme("dark");
 
 class ExpandableText extends Text {
     expanded = false;
@@ -90,10 +97,14 @@ test("compact startup keeps colored logo and configured hints, counts actual non
         const lines = header.render(100);
         assert.ok(lines[0].includes("\u001b[31m"));
         assert.ok(lines[1].includes("\u001b[34m"));
-        assert.ok(lines[1].includes("\u001b[0m Ready"));
+        assert.ok(!text(lines).includes("Ready"));
+        assert.equal(
+            lines[3],
+            getSelectListTheme().description("      Context 2 files · Skills 2 · Extensions 2"),
+        );
         assert.deepEqual(text(lines).split("\n"), [
             " ▀▄▀▄ Pi v1.0",
-            " ▄▀▄▀ Ready",
+            " ▄▀▄▀",
             "",
             "      Context 2 files · Skills 2 · Extensions 2",
             "",
@@ -167,7 +178,7 @@ test("disabled, quiet startup and custom headers retain native rendering", () =>
         mode.showLoadedResources();
         assert.deepEqual(header.render(100), native);
         handle.update({ compactStartup: true });
-        assert.match(text(header.render(100)), /Ready/);
+        assert.match(text(header.render(100)), /Context/);
         mode.settingsManager.getQuietStartup = () => true;
         mode.showLoadedResources();
         assert.deepEqual(header.render(100), native);
@@ -175,7 +186,7 @@ test("disabled, quiet startup and custom headers retain native rendering", () =>
         mode.customHeader = new Text("custom");
         assert.deepEqual(header.render(100), native);
         mode.customHeader = undefined;
-        assert.match(text(header.render(100)), /Ready/);
+        assert.match(text(header.render(100)), /Context/);
     } finally {
         handle.dispose();
     }
@@ -189,7 +200,7 @@ test("text wordmark stays intact without a graphical logo", () => {
     try {
         textMode.showLoadedResources();
         assert.equal(text(header.render(100)).split("\n")[0], " Pi v1.0");
-        assert.match(text(header.render(100)), /Ready/);
+        assert.match(text(header.render(100)), /Context/);
     } finally {
         handle.dispose();
     }
@@ -233,7 +244,7 @@ test("shared native prototype and every instance restore after repeated startup 
         for (const mode of modes) {
             mode.showLoadedResources();
             mode.showLoadedResources();
-            assert.match(text(mode.builtInHeader.render(100)), /Ready/);
+            assert.match(text(mode.builtInHeader.render(100)), /Context/);
         }
 
         first.mode.options.verbose = true;
@@ -250,4 +261,124 @@ test("shared native prototype and every instance restore after repeated startup 
         assert.match(text(mode.builtInHeader.render(100)), /Onboarding/);
         assert.equal(Object.hasOwn(mode.builtInHeader, "render"), false);
     }
+});
+
+test("first mounted frame is compact before session_start and settings are handed off once", async () => {
+    const { mode, header } = startup();
+    const frames: string[] = [];
+    let reads = 0;
+    const loaded = resolveUiTweaksConfig([{ label: "test", settings: { compactStartup: true } }]);
+    const container = {
+        addChild(child: Text): void {
+            frames.push(text(child.render(100)));
+        },
+    };
+    const originalAdd = container.addChild;
+    let late: ReturnType<typeof installCompactStartupPatch> | undefined;
+
+    type BootstrapOwner = { bootstrap?: ReturnType<typeof installCompactStartupBootstrap> };
+
+    const owner: BootstrapOwner = {};
+    const firstFrameMode = {
+        ...mode,
+        sessionManager: { getCwd: () => "/project" },
+        settingsManager: { ...mode.settingsManager, isProjectTrusted: () => true },
+        headerContainer: container,
+        async init(): Promise<void> {
+            this.headerContainer.addChild(header);
+            await Promise.resolve();
+            assert.ok(owner.bootstrap);
+            assert.equal(owner.bootstrap.readSettings("/project", true), loaded);
+            late = installCompactStartupPatch(loaded.config, this);
+            this.showLoadedResources();
+        },
+    };
+    const originalInit = firstFrameMode.init;
+    const bootstrap = installCompactStartupBootstrap(() => {
+        reads += 1;
+        return loaded;
+    }, firstFrameMode);
+    owner.bootstrap = bootstrap;
+    try {
+        await firstFrameMode.init();
+        assert.equal(reads, 1);
+        assert.match(frames[0], /Context 2 files/);
+        assert.doesNotMatch(frames[0], /Ready|Onboarding|old hints/);
+        assert.match(text(header.render(100)), /Context 2 files/);
+        assert.equal(container.addChild, originalAdd);
+    } finally {
+        late?.dispose();
+        bootstrap.dispose();
+    }
+
+    assert.equal(firstFrameMode.init, originalInit);
+    assert.equal(Object.hasOwn(header, "render"), false);
+});
+
+test("first-frame hook respects disabled config and restores failed initializations", async () => {
+    const { mode, header } = startup();
+    const loaded = resolveUiTweaksConfig([{ label: "test", settings: { compactStartup: false } }]);
+    let frame = "";
+    const container = {
+        addChild(child: Text): void {
+            frame = text(child.render(100));
+        },
+    };
+    const original = container.addChild;
+    const initMode = {
+        ...mode,
+        sessionManager: { getCwd: () => "/project" },
+        settingsManager: { ...mode.settingsManager, isProjectTrusted: () => false },
+        headerContainer: container,
+        async init(): Promise<void> {
+            this.headerContainer.addChild(header);
+            throw new Error("fixture init failure");
+        },
+    };
+    const bootstrap = installCompactStartupBootstrap(() => loaded, initMode);
+    try {
+        await assert.rejects(initMode.init(), /fixture init failure/);
+        assert.match(frame, /Onboarding/);
+        assert.equal(container.addChild, original);
+        assert.equal(Object.hasOwn(header, "render"), false);
+    } finally {
+        bootstrap.dispose();
+    }
+});
+
+test("reload holds the compact presentation across old runtime disposal and adopts new counts", async () => {
+    const { mode, header } = startup();
+    const loaded = resolveUiTweaksConfig([{ label: "test", settings: { compactStartup: true } }]);
+    let current: ReturnType<typeof installCompactStartupPatch> | undefined;
+    const reloader = {
+        ...mode,
+        async init(): Promise<void> {},
+        async handleReloadCommand(): Promise<void> {
+            assert.ok(current);
+            current.dispose();
+            assert.doesNotMatch(text(header.render(100)), /Onboarding|old hints/);
+            assert.doesNotMatch(
+                text(this.loadedResourcesContainer.render(100)),
+                /resource details/,
+            );
+            await Promise.resolve();
+            current = installCompactStartupPatch(loaded.config, this);
+            this.showLoadedResources();
+        },
+    };
+    current = installCompactStartupPatch(loaded.config, reloader);
+    reloader.showLoadedResources();
+    const bootstrap = installCompactStartupBootstrap(() => loaded, reloader);
+    try {
+        bootstrap.readSettings("/project", true);
+        await reloader.handleReloadCommand();
+        assert.match(text(header.render(100)), /Context 2 files/);
+        header.setExpanded(true);
+        assert.match(text(header.render(100)), /Onboarding/);
+    } finally {
+        current?.dispose();
+        bootstrap.dispose();
+    }
+
+    assert.equal(Object.hasOwn(header, "render"), false);
 });

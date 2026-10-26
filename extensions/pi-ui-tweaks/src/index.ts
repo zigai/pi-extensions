@@ -14,7 +14,7 @@ import { installAutocompleteScrollInfoPatch } from "./autocomplete-scroll-info.t
 import { installAnchorInputToBottomPatch } from "./anchor-input-to-bottom.ts";
 import { installBashExecSpacingEditor } from "./bash-exec-spacing.ts";
 import { installNeutralBorderColorPatch } from "./border-color.ts";
-import { installCompactStartupPatch } from "./compact-startup.ts";
+import { installCompactStartupBootstrap, installCompactStartupPatch } from "./compact-startup.ts";
 import { installInputBorderPatch } from "./input-border.ts";
 import { installInputPromptPrefixPatch } from "./input-prompt-prefix.ts";
 import { installModelSelectorHintPatch } from "./model-selector-hint.ts";
@@ -102,6 +102,7 @@ async function installUiTweaks(
         collect(installInputPromptPrefixPatch(config));
         collect(installModelSelectorHintPatch(config));
         collect(installModelStatusPatch(config));
+
         if (ctx.hasUI) collect(installCompactStartupPatch(config));
         collect(installPasteCollapsePatch(config));
         collect(installPasteCollapseEditor(ctx, config));
@@ -135,7 +136,10 @@ async function installUiTweaks(
     }
 }
 
-export function registerUiTweaksLifecycle(pi: UiTweaksExtensionApi): void {
+export function registerUiTweaksLifecycle(
+    pi: UiTweaksExtensionApi,
+    readSettings = loadUiTweaksSettings,
+): void {
     const reportedConfigErrors = new Set<string>();
     let handles: UiTweaksHandle[] = [];
     let generation = 0;
@@ -158,7 +162,7 @@ export function registerUiTweaksLifecycle(pi: UiTweaksExtensionApi): void {
             .then(async () => {
                 if (current !== generation) return;
 
-                const loaded = loadUiTweaksSettings(ctx.cwd, ctx.isProjectTrusted());
+                const loaded = readSettings(ctx.cwd, ctx.isProjectTrusted());
                 reportConfigErrors(ctx, loaded, reportedConfigErrors);
 
                 const installed = await installUiTweaks(ctx, loaded.config);
@@ -181,14 +185,20 @@ export function registerUiTweaksLifecycle(pi: UiTweaksExtensionApi): void {
 
 /** Installs small configurable Pi UI tweaks. */
 export default function uiTweaksExtension(pi: ExtensionAPI): void {
-    registerUiTweaksLifecycle({
-        onSessionStart(handler): void {
-            pi.on("session_start", handler);
+    const startup = installCompactStartupBootstrap(loadUiTweaksSettings);
+
+    pi.on("session_shutdown", () => startup.dispose());
+    registerUiTweaksLifecycle(
+        {
+            onSessionStart(handler): void {
+                pi.on("session_start", handler);
+            },
+            onSessionShutdown(handler): void {
+                pi.on("session_shutdown", handler);
+            },
         },
-        onSessionShutdown(handler): void {
-            pi.on("session_shutdown", handler);
-        },
-    });
+        startup.readSettings,
+    );
 
     registerExtensionDiagnostics(pi);
 }
