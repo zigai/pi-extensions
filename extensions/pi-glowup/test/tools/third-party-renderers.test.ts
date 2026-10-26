@@ -1231,6 +1231,51 @@ describe("third-party tool renderers", () => {
         expect(rendered).not.toContain("questions: 1 items");
     });
 
+    it("coalesces Codemode resize targets and retains the last ready preview", async () => {
+        const widths: Array<number | undefined> = [];
+        const signals: AbortSignal[] = [];
+        let release = () => {};
+        const gate = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        const previews = createCodemodePreview();
+        previews.schedule({
+            toolCallId: "resize-code",
+            code: "const value=1;",
+            completed: true,
+            isCurrent: () => true,
+            invalidate: () => {},
+            formatter: async (_input, options) => {
+                widths.push(options?.targetWidth);
+
+                if (options?.signal !== undefined) signals.push(options.signal);
+                if (widths.length === 1) await gate;
+                return `width${options?.targetWidth}`;
+            },
+        });
+        const read = (width: number) =>
+            previews.get("resize-code", "const value=1;", {
+                contentWidth: width,
+                completed: true,
+                expanded: false,
+            });
+        try {
+            read(80);
+            await vi.waitUntil(() => widths.length === 1);
+            read(40);
+            read(60);
+            expect(signals[0]?.aborted).toBe(false);
+            release();
+            await vi.waitUntil(() => read(60) === "width60");
+            expect(widths).toEqual([80, 60]);
+            expect(read(100)).toBe("width60");
+            await vi.waitUntil(() => read(100) === "width100");
+        } finally {
+            release();
+            previews.clear();
+        }
+    });
+
     it("publishes Codemode decoration only after completion, uses content width, and expands original source", async () => {
         const previews = createCodemodePreview();
         const executable = join(

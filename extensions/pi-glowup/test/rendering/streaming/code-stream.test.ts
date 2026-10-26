@@ -131,6 +131,44 @@ describe("code stream store", () => {
         expect(subject.ready(input.key)).toBe(true);
     });
 
+    it("coalesces resize targets without aborting in-flight completed formatting", async () => {
+        const subject = store();
+        const widths: Array<number | undefined> = [];
+        const signals: AbortSignal[] = [];
+        let release = () => {};
+        const gate = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        const input = {
+            key: "resizing",
+            toolCallId: "resize-call",
+            source: "const value=1;",
+            language: "javascript",
+            complete: true,
+            mode: "statement" as const,
+            targetWidth: 80,
+            formatter: async (
+                _value: { code: string },
+                options?: { targetWidth?: number; signal?: AbortSignal },
+            ) => {
+                widths.push(options?.targetWidth);
+
+                if (options?.signal !== undefined) signals.push(options.signal);
+                if (widths.length === 1) await gate;
+                return `width${options?.targetWidth}`;
+            },
+        };
+        subject.get(input);
+        subject.get({ ...input, targetWidth: 40 });
+        subject.get({ ...input, targetWidth: 60 });
+        expect(signals[0]?.aborted).toBe(false);
+        release();
+        await subject.settled();
+        expect(widths).toEqual([80, 60]);
+        expect(signals.every((signal) => !signal.aborted)).toBe(true);
+        expect(subject.get({ ...input, targetWidth: 60 })).toBe("width60");
+    });
+
     it("keeps formatting completed statements while later chunks append", async () => {
         const subject = store();
         const gate = new EventEmitter();

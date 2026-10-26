@@ -175,6 +175,8 @@ export function createCodeStreamStore(): CodeStreamStore {
                     ),
                 };
 
+            if (input.targetWidth !== entry.input.targetWidth) return;
+
             publish(entry, formatted.text, input.source.length, true);
 
             return;
@@ -230,7 +232,7 @@ export function createCodeStreamStore(): CodeStreamStore {
                         ),
                     };
 
-                if (!current(entry)) return;
+                if (!current(entry) || input.targetWidth !== entry.input.targetWidth) return;
 
                 if (unit.body !== undefined && formatted.bodyIndent !== undefined)
                     entry.indents.set(unit.body, formatted.bodyIndent);
@@ -289,6 +291,15 @@ export function createCodeStreamStore(): CodeStreamStore {
                 const input = entry.input;
                 await run(entry, visible);
 
+                if (entry.input.targetWidth !== input.targetWidth) {
+                    entry.consumed = 0;
+                    entry.indents.clear();
+                    entry.lastKind = "";
+                    entry.atomic = true;
+                    visible = "";
+                    continue;
+                }
+
                 if (entry.input.source === input.source && entry.input.complete === input.complete)
                     return;
 
@@ -296,9 +307,9 @@ export function createCodeStreamStore(): CodeStreamStore {
             }
         })()
             .catch((cause: unknown) => {
-                recordRenderError("code-stream.run", cause, entry.input.toolCallId);
-
                 if (!current(entry)) return;
+
+                recordRenderError("code-stream.run", cause, entry.input.toolCallId);
 
                 reportExtensionDiagnostic(
                     "[pi-glowup] Code stream processing failed; unfinished code is held until completion.",
@@ -331,6 +342,7 @@ export function createCodeStreamStore(): CodeStreamStore {
         get(input): string {
             if (input.toolCallId !== undefined && input.complete && input.mode === "statement")
                 input = { ...input, mode: "block" };
+
             if (disposed) return "";
 
             const previous = entries.get(input.key);
@@ -341,6 +353,22 @@ export function createCodeStreamStore(): CodeStreamStore {
             }
 
             const language = languageFor(input);
+            if (
+                previous !== undefined &&
+                previous.running &&
+                previous.input.mode === input.mode &&
+                previous.input.formatter === input.formatter &&
+                previous.language === language &&
+                previous.input.path === input.path &&
+                previous.input.source === input.source &&
+                previous.input.complete === input.complete
+            ) {
+                // Width updates replace the pending target, not the running formatter.
+                // Its last published display remains visible until the latest width settles.
+                previous.input = input;
+                return previous.display;
+            }
+
             const reusable =
                 previous !== undefined &&
                 previous.input.mode === input.mode &&

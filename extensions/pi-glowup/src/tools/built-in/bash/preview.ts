@@ -4,7 +4,7 @@ import type { ShellLayout, ShellOperatorPosition, ShellOutputStyle } from "./com
 import { type JsonValue } from "../../../json-value.ts";
 import { emptyComponent, makeComponent } from "../../../rendering/component.ts";
 import type { CodePreview } from "../../../rendering/streaming/presentation.ts";
-import { parseScriptInvocation, type ScriptInvocation } from "./invocation.ts";
+import { type ScriptInvocation } from "./invocation.ts";
 import { renderGlowupOutput, type GlowupOutputRenderOptions } from "../../../rendering/output.ts";
 import { renderScriptCall } from "./script-renderer.ts";
 import { shouldDeferSimpleToolCall } from "../../../rendering/status-labels.ts";
@@ -61,6 +61,7 @@ type ScheduledPreview = {
     completion: Promise<void>;
     completed: boolean;
     ready: boolean;
+    running: boolean;
     expandedScript: ScriptInvocation | undefined;
 };
 
@@ -115,12 +116,15 @@ function renderStreamingScriptCall(
                     renderState.preview = preview;
                     return preview.render(width);
                 });
+
                 // Host invalidations rebuild this wrapper. Retain the child syntax owner
                 // instead of flashing plain text and tokenizing the same script again.
                 streamingScriptRenderStates.set(component, renderState);
+
                 return component;
             },
         );
+
         // Expansion callbacks outlive this render. Replace their previous component
         // reference instead of retaining every historical host row through a closure.
         current = rendered;
@@ -201,14 +205,7 @@ export function createNativeBashFeature(
         }
 
         if (streamCode !== undefined && !context.argsComplete && !context.isError) {
-            let script = streamingScriptIdentities.resolve(context.toolCallId, command);
-            if (context.argsComplete) {
-                script = streamingScriptIdentities.finalize(
-                    context.toolCallId,
-                    parseScriptInvocation(command),
-                );
-            }
-
+            const script = streamingScriptIdentities.resolve(context.toolCallId, command);
             const invocation = script ?? { label: "Bash", language: "bash", code: command };
             const profile = formatterAccessor?.()?.profileFor?.(invocation.language);
 
@@ -257,7 +254,7 @@ export function createNativeBashFeature(
                     signal: undefined,
                     completed: true,
                     isCurrent: () => true,
-                    invalidate: context.invalidate ?? (() => {}),
+                    invalidate: context.invalidate,
                 });
         }
 
@@ -331,6 +328,7 @@ export function createNativeBashFeature(
                     scheduled.expandedScript !== undefined
                 )
                     expandedScript = scheduled.expandedScript;
+
                 options = {
                     ...options,
                     pureScriptOverride: expandedScript,
@@ -366,7 +364,6 @@ export function createNativeBashFeature(
             prefixFirst: prefix,
             prefixRest: prefix,
         };
-
         if (language !== undefined) {
             outputOptions = { ...outputOptions, syntax: { language } };
         }
@@ -418,8 +415,6 @@ export function createNativeBashFeature(
     }
 
     async function formatPreview(scheduled: ScheduledPreview): Promise<void> {
-        scheduled.controller.abort();
-
         const controller = new AbortController();
         scheduled.controller = controller;
 
@@ -441,12 +436,14 @@ export function createNativeBashFeature(
                         code = await formatEmbedded(input, backend, formatterOptions);
                         if (code !== input.code) {
                             const candidate = { label: "Bash", language: "bash", code };
+
                             // Large expanded calls can still use their original
                             // input; do not retain another unbounded source copy.
                             if (boundedScriptPreview(candidate) === candidate)
                                 expandedScript = candidate;
                         }
                     }
+
                     const formatted = await backend({ ...input, code }, formatterOptions);
                     if (formatted !== undefined) return formatted;
                     if (code !== input.code) return code;
@@ -480,9 +477,12 @@ export function createNativeBashFeature(
                 !signal.aborted &&
                 options.isCurrent() &&
                 scheduledCommands.get(options.toolCallId) === scheduled &&
-                scheduled.controller === controller,
+                scheduled.controller === controller &&
+                scheduled.targetWidth === targetWidth,
         }).catch((cause: unknown) => {
-            recordRenderError("bash.format-preview", cause, options.toolCallId);
+            if (!signal.aborted)
+                recordRenderError("bash.format-preview", cause, options.toolCallId);
+
             return false;
         });
 
@@ -490,7 +490,8 @@ export function createNativeBashFeature(
             signal.aborted ||
             !options.isCurrent() ||
             scheduledCommands.get(options.toolCallId) !== scheduled ||
-            scheduled.controller !== controller
+            scheduled.controller !== controller ||
+            scheduled.targetWidth !== targetWidth
         )
             return;
 
@@ -522,6 +523,26 @@ export function createNativeBashFeature(
         invalidatePreview(scheduled);
     }
 
+    function requestFormatting(scheduled: ScheduledPreview): void {
+        if (scheduled.running) return;
+
+        scheduled.running = true;
+        scheduled.completion = (async () => {
+            while (
+                scheduledCommands.get(scheduled.options.toolCallId) === scheduled &&
+                scheduled.options.isCurrent() &&
+                scheduled.options.signal?.aborted !== true
+            ) {
+                const width = scheduled.targetWidth;
+                await formatPreview(scheduled);
+
+                if (scheduled.targetWidth === width) return;
+            }
+        })().finally(() => {
+            scheduled.running = false;
+        });
+    }
+
     function rememberRenderWidth(
         toolCallId: string,
         contentWidth: number,
@@ -549,7 +570,7 @@ export function createNativeBashFeature(
             )
                 return;
 
-            scheduled.completion = formatPreview(scheduled);
+            requestFormatting(scheduled);
         });
     }
 
@@ -571,6 +592,7 @@ export function createNativeBashFeature(
             completion: Promise.resolve(),
             completed: options.completed ?? false,
             ready: false,
+            running: false,
             expandedScript: undefined,
         };
 
@@ -584,7 +606,8 @@ export function createNativeBashFeature(
             scheduledCommands.delete(oldest);
         }
 
-        scheduled.completion = formatPreview(scheduled);
+        requestFormatting(scheduled);
+
         return true;
     }
 
@@ -600,11 +623,13 @@ export function createNativeBashFeature(
         let restored = 0;
         for (const call of options.calls) {
             if (options.signal.aborted || !options.isCurrent()) return;
+
             if (
                 scriptForPreview(call.command, options.formatter, formatEmbedded !== undefined) ===
                 undefined
             )
                 continue;
+
             if (restored >= MAX_SCRIPT_PREVIEW_ENTRIES) return;
 
             restored += 1;

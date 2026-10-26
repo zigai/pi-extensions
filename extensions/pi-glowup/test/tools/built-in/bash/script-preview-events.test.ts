@@ -311,7 +311,18 @@ describe("script preview events", () => {
         const code =
             'console.log(["a moderately long sample value", "another moderately long sample value"]);';
         const command = `node -e '${code}'`;
+        const widths: Array<number | undefined> = [];
+        const signals: AbortSignal[] = [];
+        let release = () => {};
+        const gate = new Promise<void>((resolve) => {
+            release = resolve;
+        });
         const formatter: ScriptBlockFormatter = async (input, options) => {
+            widths.push(options?.targetWidth);
+
+            if (options?.signal !== undefined) signals.push(options.signal);
+            if (widths.length === 1) await gate;
+
             const formatOptions: FormatConfig = {};
             if (options?.targetWidth !== undefined) {
                 formatOptions.printWidth = options.targetWidth;
@@ -366,7 +377,13 @@ describe("script preview events", () => {
             finishInvalidation = resolve;
         });
         render(44);
+        render(60);
+        render(44);
+        expect(signals[0]?.aborted).toBe(false);
+        release();
         await narrowed;
+        expect(widths).toHaveLength(2);
+        expect(signals.every((signal) => !signal.aborted)).toBe(true);
         expect(render(44)).toContain("  console.log([\n");
         expect(render(44)).toContain('    "a moderately long sample value",');
         const widened = new Promise<void>((resolve) => {
@@ -528,6 +545,7 @@ function recordRenderEvents(): RecordedRenderEvent[] {
     const events: RecordedRenderEvent[] = [];
     configureRenderDiagnostics((event, fields) => events.push({ event, fields: fields() }));
     onTestFinished(() => configureRenderDiagnostics(undefined));
+
     return events;
 }
 
@@ -539,6 +557,7 @@ const renderedEventSchema = Type.Object({
     outputHash: Type.Optional(Type.String()),
     outcome: Type.String(),
 });
+
 const segmentSchema = Type.Object({
     language: Type.String(),
     origin: Type.String(),
@@ -731,6 +750,7 @@ describe("script render diagnostics", () => {
         await vi.waitUntil(() => events.some((entry) => entry.event === "script_analysis"));
         const heredocAnalysis = analysisFor(events, "heredoc-call");
         expect(heredocAnalysis.path).toBe("shell");
+
         // Glowup does not recognize inline programs in commands that open a heredoc.
         expect(heredocAnalysis.inlineSkipReason).toBe("heredoc-present");
         const [heredoc] = heredocAnalysis.segments;
@@ -741,8 +761,10 @@ describe("script render diagnostics", () => {
             formattable: true,
             formatted: true,
         });
+
         if (heredoc?.start === undefined || heredoc.end === undefined)
             throw new Error("Expected heredoc offsets");
+
         expect(sha16(heredocCommand.slice(heredoc.start, heredoc.end))).toBe(heredoc.codeHash);
 
         const heredocFormat = eventsNamed(events, "script_format").find(
@@ -754,6 +776,7 @@ describe("script render diagnostics", () => {
             language: "python",
             outcome: "formatted",
         });
+
         // The preview highlights the formatted body, so its hash is the formatter output.
         expect(eventsNamed(events, "syntax_highlight")).toContainEqual(
             expect.objectContaining({
@@ -772,8 +795,10 @@ describe("script render diagnostics", () => {
             formattable: false,
             codeHash: sha16('console.log("inline")'),
         });
+
         if (inline?.start === undefined || inline.end === undefined)
             throw new Error("Expected inline offsets");
+
         expect(inlineCommand.slice(inline.start, inline.end)).toBe('console.log("inline")');
         expect(eventsNamed(events, "syntax_highlight")).toContainEqual(
             expect.objectContaining({
@@ -815,6 +840,7 @@ describe("script render diagnostics", () => {
             { language: "python", formattable: false, skipReason: "unquoted-expansion" },
             { language: "text", formattable: false, skipReason: "data-heredoc" },
         ]);
+
         expect(analysis.segments[0]?.codeHash).toBe(sha16(invalid));
 
         const rejected = new Set(analysis.segments.map((segment) => segment.codeHash));

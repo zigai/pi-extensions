@@ -532,6 +532,42 @@ describe("script formatter settings", () => {
         expect(await formatter(input)).toBe(output);
     });
 
+    it("records cancellation rather than failure while preparing a display profile", async () => {
+        const events: Array<{ event: string; fields: DebugLogFields }> = [];
+        const warnings: string[] = [];
+        configureRenderDiagnostics((event, fields) => events.push({ event, fields: fields() }));
+        onTestFinished(() => configureRenderDiagnostics(undefined));
+        const formatter = createCommandScriptFormatter(
+            parseScriptFormatterCommandsValue({
+                javascript: { kind: "javascript", command: [process.execPath] },
+            }),
+            (message) => warnings.push(message),
+        );
+        if (formatter === undefined) throw new Error("Expected formatter");
+
+        const controller = new AbortController();
+        const result = formatter(
+            { label: "Node", language: "javascript", code: "const value=1;" },
+            {
+                signal: controller.signal,
+                diagnostics: { toolCallId: "cancelled-call", stage: "block" },
+            },
+        );
+
+        // Let permit acquisition enter asynchronous profile preparation first.
+        await Promise.resolve();
+        controller.abort();
+        expect(await result).toBeUndefined();
+        await vi.waitUntil(() => getScriptFormatterWorkload().active === 0);
+        expect(warnings).toEqual([]);
+        expect(events.filter((entry) => entry.event === "render_error")).toEqual([]);
+        expect(
+            events
+                .filter((entry) => entry.event === "script_format")
+                .map((entry) => entry.fields.outcome),
+        ).toEqual(["cancelled"]);
+    });
+
     it("does not start command formatters after cancellation", async () => {
         const testDir = mkdtempSync(join(tmpdir(), "pi-glowup-formatter-test-"));
         const markerFile = join(testDir, "start.marker");

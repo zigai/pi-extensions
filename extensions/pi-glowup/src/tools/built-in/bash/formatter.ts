@@ -100,6 +100,10 @@ type FormatterQueueEntry = {
 let activeFormatterCount = 0;
 const queuedFormatters: FormatterQueueEntry[] = [];
 
+function cancelled(cause: unknown, signal: AbortSignal | undefined): boolean {
+    return signal?.aborted === true || (cause instanceof Error && cause.name === "AbortError");
+}
+
 function reportFormatterWarning(options: ScriptFormatterParseOptions, message: string): void {
     options.reportWarning?.(`[pi-glowup] ${message}`);
 }
@@ -259,9 +263,13 @@ async function runFormatterCommand(
         } catch (cause: unknown) {
             release();
 
-            recordRenderError("formatter.spawn", cause, options.diagnostics?.toolCallId);
+            if (cancelled(cause, options.signal)) {
+                resolve({ output: undefined, outcome: "cancelled" });
+                return;
+            }
 
-            if (options.signal?.aborted !== true) reportFailure("could not start");
+            recordRenderError("formatter.spawn", cause, options.diagnostics?.toolCallId);
+            reportFailure("could not start");
             resolve({ output: undefined, outcome: "failed" });
 
             return;
@@ -689,10 +697,11 @@ export function createCommandScriptFormatter(
         } catch (cause: unknown) {
             release();
 
-            recordRenderError("formatter.prepare", cause, options.diagnostics?.toolCallId);
+            if (cancelled(cause, effectiveOptions.signal))
+                return { output: undefined, outcome: "cancelled", ...described };
 
-            if (effectiveOptions.signal?.aborted !== true)
-                reportFailure(input.language, "profile could not be prepared");
+            recordRenderError("formatter.prepare", cause, options.diagnostics?.toolCallId);
+            reportFailure(input.language, "profile could not be prepared");
 
             return { output: undefined, outcome: "failed", ...described };
         }
@@ -842,15 +851,22 @@ export function createCommandScriptFormatter(
     };
 
     const formatter: ScriptBlockFormatter = async (input, options = {}) => {
-        if (!renderDiagnosticsEnabled()) return (await formatScriptBlock(input, options)).output;
-
         const started = performance.now();
         let attempt: FormatAttempt;
         try {
             attempt = await formatScriptBlock(input, options);
         } catch (cause: unknown) {
-            recordScriptFormat(input, options, { output: undefined, outcome: "failed" }, started);
-            throw cause;
+            if (cancelled(cause, options.signal))
+                attempt = { output: undefined, outcome: "cancelled" };
+            else {
+                recordScriptFormat(
+                    input,
+                    options,
+                    { output: undefined, outcome: "failed" },
+                    started,
+                );
+                throw cause;
+            }
         }
 
         recordScriptFormat(input, options, attempt, started);
@@ -877,7 +893,10 @@ export async function formatScriptInvocation(
             options,
         );
     } catch (cause: unknown) {
+        if (cancelled(cause, options.signal)) return invocation;
+
         recordRenderError("formatter.invocation", cause, options.diagnostics?.toolCallId);
+
         return invocation;
     }
 

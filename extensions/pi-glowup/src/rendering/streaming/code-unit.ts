@@ -86,9 +86,9 @@ async function abortable(
                 signal.removeEventListener("abort", abort);
                 resolve(value);
             },
-            () => {
+            (cause: unknown) => {
                 signal.removeEventListener("abort", abort);
-                reject(new Error("Statement formatter rejected its input"));
+                reject(cause instanceof Error ? cause : new Error(String(cause)));
             },
         );
     });
@@ -188,6 +188,9 @@ export async function formatCodeUnit(
 
         formatted = await abortable(input.formatter(formatterInput, formatterOptions), signal);
     } catch (cause: unknown) {
+        if (signal.aborted || (cause instanceof Error && cause.name === "AbortError"))
+            return { text: raw };
+
         recordRenderError(
             "statement.format",
             cause,

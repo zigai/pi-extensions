@@ -54,6 +54,7 @@ type CodemodeWork = {
     controller: AbortController;
     completed: boolean;
     ready: boolean;
+    running: boolean;
 };
 
 export type CodemodePreviewReadOptions = {
@@ -91,8 +92,6 @@ export function createCodemodePreview(formatterAccessor?: () => ScriptBlockForma
     async function format(work: CodemodeWork): Promise<void> {
         if (work.width === undefined) return;
 
-        work.controller.abort();
-
         const controller = new AbortController();
         work.controller = controller;
 
@@ -110,7 +109,8 @@ export function createCodemodePreview(formatterAccessor?: () => ScriptBlockForma
                 },
             )
             .catch((cause: unknown) => {
-                recordRenderError("codemode.format", cause, options.toolCallId);
+                if (!signal.aborted)
+                    recordRenderError("codemode.format", cause, options.toolCallId);
                 return undefined;
             });
         if (
@@ -118,6 +118,7 @@ export function createCodemodePreview(formatterAccessor?: () => ScriptBlockForma
             signal.aborted ||
             scheduled.get(options.toolCallId) !== work ||
             work.controller !== controller ||
+            work.width !== width ||
             !work.options.isCurrent()
         )
             return;
@@ -125,6 +126,26 @@ export function createCodemodePreview(formatterAccessor?: () => ScriptBlockForma
         previews.set(options.toolCallId, { work, code });
         work.ready = true;
         if (work.completed) invalidate(work);
+    }
+
+    function requestFormatting(work: CodemodeWork): void {
+        if (work.running) return;
+
+        work.running = true;
+        void (async () => {
+            while (
+                scheduled.get(work.options.toolCallId) === work &&
+                work.options.isCurrent() &&
+                work.options.signal?.aborted !== true
+            ) {
+                const width = work.width;
+                await format(work);
+
+                if (work.width === width) return;
+            }
+        })().finally(() => {
+            work.running = false;
+        });
     }
 
     const feature = {
@@ -188,8 +209,6 @@ export function createCodemodePreview(formatterAccessor?: () => ScriptBlockForma
                 if (read.completed) complete(work);
 
                 if (work.width !== read.contentWidth) {
-                    work.controller.abort();
-                    work.ready = false;
                     work.width = read.contentWidth;
                     queueMicrotask(() => {
                         if (
@@ -197,7 +216,7 @@ export function createCodemodePreview(formatterAccessor?: () => ScriptBlockForma
                             work.options.isCurrent() &&
                             work.width === read.contentWidth
                         )
-                            void format(work);
+                            requestFormatting(work);
                     });
                 }
 
@@ -255,7 +274,9 @@ export function createCodemodePreview(formatterAccessor?: () => ScriptBlockForma
                 controller: new AbortController(),
                 completed: options.completed ?? false,
                 ready: false,
+                running: false,
             };
+
             scheduled.set(options.toolCallId, work);
 
             if (scheduled.size > 300) {
@@ -266,7 +287,7 @@ export function createCodemodePreview(formatterAccessor?: () => ScriptBlockForma
                 }
             }
 
-            void format(work);
+            requestFormatting(work);
         },
         clear(): void {
             generation += 1;
