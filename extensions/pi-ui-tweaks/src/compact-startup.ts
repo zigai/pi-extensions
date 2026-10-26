@@ -107,7 +107,7 @@ function installInstance(mode: StartupMode, enabled: () => boolean): Handle {
         loader.getAgentsFiles().agentsFiles.length +
         loader.getAppendSystemPromptSources().length +
         Number(loader.getSystemPromptSource() !== undefined);
-    const summary = ` Context ${contextCount} files · Skills ${loader.getSkills().skills.length} · Extensions ${loader.getExtensions().extensions.filter((extension) => extension.hidden !== true).length}`;
+    const summary = `      Context ${contextCount} files · Skills ${loader.getSkills().skills.length} · Extensions ${loader.getExtensions().extensions.filter((extension) => extension.hidden !== true).length}`;
     const header = mode.builtInHeader;
     if (isExpandable(header)) {
         patches.push(
@@ -132,7 +132,7 @@ function installInstance(mode: StartupMode, enabled: () => boolean): Handle {
                     if (!active() || expanded) return predecessor.call(this, width);
 
                     const native = predecessor.call(this, Math.max(width, 80));
-                    const hints = ` / commands · ! shell · ${mode.keybindings.getKeys("app.tools.expand").join("/")} details`;
+                    const hints = `      / commands · ! shell · ${mode.keybindings.getKeys("app.tools.expand").join("/")} details`;
                     let title = ` Pi v${mode.version}`;
                     let ready = " Ready";
                     if ("onLogoClick" in header && typeof header.onLogoClick === "function") {

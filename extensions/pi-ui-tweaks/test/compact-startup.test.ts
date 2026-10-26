@@ -90,14 +90,14 @@ test("compact startup keeps colored logo and configured hints, counts actual non
         const lines = header.render(100);
         assert.ok(lines[0].includes("\u001b[31m"));
         assert.ok(lines[1].includes("\u001b[34m"));
-        assert.match(lines[1], /\u001b\[0m Ready/);
+        assert.ok(lines[1].includes("\u001b[0m Ready"));
         assert.deepEqual(text(lines).split("\n"), [
             " ▀▄▀▄ Pi v1.0",
             " ▄▀▄▀ Ready",
             "",
-            " Context 2 files · Skills 2 · Extensions 2",
+            "      Context 2 files · Skills 2 · Extensions 2",
             "",
-            " / commands · ! shell · ctrl+u details",
+            "      / commands · ! shell · ctrl+u details",
         ]);
         mode.session.resourceLoader.getSystemPromptSource = () => ({ path: "system" });
         mode.session.resourceLoader.getAppendSystemPromptSources = () => [{ path: "append" }];
