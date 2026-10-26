@@ -84,7 +84,8 @@
     "@earendil-works/pi-coding-agent": "1.3.0",
     "@earendil-works/pi-mcp": "1.3.0",
     "@earendil-works/pi-telemetry": "1.3.0",
-    "@earendil-works/pi-tui": "1.3.0"
+    "@earendil-works/pi-tui": "1.3.0",
+    "undici": "8.12.2"
   },
   "allowScripts": {
     "node-pty@1.1.0": true,
