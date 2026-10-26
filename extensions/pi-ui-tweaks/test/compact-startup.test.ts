@@ -7,7 +7,10 @@ import {
     stripTerminalSequences,
     visibleWidth,
 } from "@earendil-works/pi-tui";
-import { test } from "vitest";
+import { afterAll, beforeAll, test } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
     installCompactStartupBootstrap,
     installCompactStartupPatch,
@@ -16,6 +19,20 @@ import { resolveUiTweaksConfig } from "../src/settings.ts";
 import { captureDiagnostics } from "./capture-diagnostics.ts";
 
 initTheme("dark");
+
+const previousCacheHome = process.env.XDG_CACHE_HOME;
+let cacheDirectory: string;
+beforeAll(() => {
+    cacheDirectory = mkdtempSync(join(tmpdir(), "pi-startup-cache-"));
+    process.env.XDG_CACHE_HOME = cacheDirectory;
+});
+
+afterAll(() => {
+    if (previousCacheHome === undefined) delete process.env.XDG_CACHE_HOME;
+    else process.env.XDG_CACHE_HOME = previousCacheHome;
+
+    rmSync(cacheDirectory, { recursive: true, force: true });
+});
 
 class ExpandableText extends Text {
     expanded = false;
@@ -51,6 +68,7 @@ function startup(customHeader?: Text) {
         settingsManager: { getQuietStartup: (): boolean => false },
         keybindings: { getKeys: (): string[] => ["ctrl+u"] },
         session: {
+            systemPrompt: "<skills>\n<available_skills>one two</available_skills>\n</skills>",
             resourceLoader: {
                 getAgentsFiles: () => ({ agentsFiles: agents }),
                 getSystemPromptSource: (): { path: string } | undefined => undefined,
@@ -87,7 +105,7 @@ function text(lines: string[]): string {
     return lines.map((line) => stripTerminalSequences(line).trimEnd()).join("\n");
 }
 
-test("compact startup keeps colored logo and configured hints, counts actual non-hidden resources", () => {
+test("compact startup keeps colored logo, context paths and cached skill token rows", () => {
     const { mode, header, setAgents } = startup();
     const click = header.onLogoClick;
     const handle = installCompactStartupPatch({ compactStartup: true }, mode);
@@ -98,23 +116,24 @@ test("compact startup keeps colored logo and configured hints, counts actual non
         assert.ok(lines[0].includes("\u001b[31m"));
         assert.ok(lines[1].includes("\u001b[34m"));
         assert.ok(!text(lines).includes("Ready"));
-        assert.equal(
-            lines[3],
-            getSelectListTheme().description("      Context 2 files · Skills 2 · Extensions 2"),
-        );
+        assert.equal(lines[3], getSelectListTheme().description("      Context     one"));
         assert.deepEqual(text(lines).split("\n"), [
             " ▀▄▀▄ Pi v1.0",
             " ▄▀▄▀",
             "",
-            "      Context 2 files · Skills 2 · Extensions 2",
-            "",
-            "      / commands · ! shell · ctrl+u details",
+            "      Context     one",
+            "                  two",
+            "      Skills      2 · ~16 tokens",
+            "      Extensions  2",
         ]);
         mode.session.resourceLoader.getSystemPromptSource = () => ({ path: "system" });
         mode.session.resourceLoader.getAppendSystemPromptSources = () => [{ path: "append" }];
         setAgents([{ path: "one", content: "" }]);
         mode.showLoadedResources();
-        assert.match(text(header.render(100)), /Context 3 files/);
+        assert.match(
+            text(header.render(100)),
+            /Context     system\n                  append\n                  one/,
+        );
 
         for (let width = 0; width <= 80; width += 1) {
             for (const line of header.render(width))
@@ -302,9 +321,9 @@ test("first mounted frame is compact before session_start and settings are hande
     try {
         await firstFrameMode.init();
         assert.equal(reads, 1);
-        assert.match(frames[0], /Context 2 files/);
+        assert.match(frames[0], /Context     one/g);
         assert.doesNotMatch(frames[0], /Ready|Onboarding|old hints/);
-        assert.match(text(header.render(100)), /Context 2 files/);
+        assert.match(text(header.render(100)), /Context     one/g);
         assert.equal(container.addChild, originalAdd);
     } finally {
         late?.dispose();
@@ -372,7 +391,7 @@ test("reload holds the compact presentation across old runtime disposal and adop
     try {
         bootstrap.readSettings("/project", true);
         await reloader.handleReloadCommand();
-        assert.match(text(header.render(100)), /Context 2 files/);
+        assert.match(text(header.render(100)), /Context     one/g);
         header.setExpanded(true);
         assert.match(text(header.render(100)), /Onboarding/);
     } finally {
@@ -381,4 +400,25 @@ test("reload holds the compact presentation across old runtime disposal and adop
     }
 
     assert.equal(Object.hasOwn(header, "render"), false);
+});
+
+test("context paths wrap without losing characters and shortcut legend stays absent", () => {
+    const { mode, header, setAgents } = startup();
+    const path = `/tmp/${"long-directory/".repeat(6)}AGENTS.md`;
+    setAgents([{ path, content: "" }]);
+    const handle = installCompactStartupPatch({ compactStartup: true }, mode);
+    try {
+        mode.showLoadedResources();
+        const lines = text(header.render(48)).split("\n");
+        const skillIndex = lines.findIndex((line) => line.includes("Skills"));
+        const pathParts = lines
+            .slice(3, skillIndex)
+            .map((line) => line.slice(18))
+            .join("");
+        assert.equal(pathParts, path);
+        assert.ok(lines.every((line) => visibleWidth(line) <= 48));
+        assert.doesNotMatch(lines.join("\n"), /commands|shell|details/);
+    } finally {
+        handle.dispose();
+    }
 });

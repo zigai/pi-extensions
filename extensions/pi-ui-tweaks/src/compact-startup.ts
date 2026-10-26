@@ -3,10 +3,18 @@ import {
     InteractiveMode,
     type ResourceLoader,
 } from "@earendil-works/pi-coding-agent";
-import { sliceByColumn, truncateToWidth } from "@earendil-works/pi-tui";
+import {
+    sliceByColumn,
+    stripTerminalSequences,
+    truncateToWidth,
+    wrapTextWithAnsi,
+} from "@earendil-works/pi-tui";
 import { installLinkedMethodPatch, reportExtensionDiagnostic } from "@zigai/pi-extension-internals";
 
 import type { LoadedUiTweaksConfig } from "./settings-input.ts";
+import { getCachedSkillTokens } from "./skill-token-cache.ts";
+import { homedir } from "node:os";
+import { sep } from "node:path";
 
 const COMPACT_STARTUP_PATCH = Symbol.for("zigai.pi-ui-tweaks.compact-startup-patch");
 
@@ -31,8 +39,7 @@ type StartupMode = {
     toolOutputExpanded: boolean;
     options: { verbose?: boolean };
     settingsManager: { getQuietStartup(): boolean | "header" };
-    keybindings: { getKeys(action: "app.tools.expand"): string[] };
-    session: { resourceLoader: StartupResources };
+    session: { resourceLoader: StartupResources; readonly systemPrompt: string };
     loadedResourcesContainer: Renderable & { children: Renderable[] };
     ui: { requestRender(): void };
 };
@@ -76,7 +83,7 @@ function isStartupMode(value: unknown): value is StartupMode {
         typeof view.toolOutputExpanded === "boolean" &&
         isObject(view.options) &&
         typeof view.settingsManager?.getQuietStartup === "function" &&
-        typeof view.keybindings?.getKeys === "function" &&
+        typeof view.session?.systemPrompt === "string" &&
         typeof view.ui?.requestRender === "function" &&
         isRenderable(view.loadedResourcesContainer) &&
         Array.isArray(view.loadedResourcesContainer.children) &&
@@ -101,6 +108,76 @@ function isSpacer(value: Renderable): boolean {
     return "setLines" in value && typeof value.setLines === "function";
 }
 
+type SummaryRow = { label: string; value: string };
+
+function displayContextPath(path: string): string {
+    const home = homedir();
+    let display = path;
+    if (path.startsWith(`${home}${sep}`)) display = `~${path.slice(home.length)}`;
+
+    return stripTerminalSequences(display)
+        .replaceAll("\n", "\\n")
+        .replaceAll("\r", "\\r")
+        .replaceAll("\t", "\\t");
+}
+
+function collectSummary(mode: StartupMode): SummaryRow[] {
+    const loader = mode.session.resourceLoader;
+    const system = loader.getSystemPromptSource();
+    const paths = loader.getAppendSystemPromptSources().map((file) => file.path);
+    if (system !== undefined) paths.unshift(system.path);
+    paths.push(...loader.getAgentsFiles().agentsFiles.map((file) => file.path));
+
+    const rows: SummaryRow[] = [];
+    for (const path of paths) {
+        let label = "";
+        if (rows.length === 0) label = "Context";
+        rows.push({ label, value: displayContextPath(path) });
+    }
+
+    if (paths.length === 0) rows.push({ label: "Context", value: "0 files" });
+
+    const tokens = getCachedSkillTokens(mode.session.systemPrompt);
+    rows.push({
+        label: "Skills",
+        value: `${loader.getSkills().skills.length} · ~${tokens.toLocaleString("en-US")} tokens`,
+    });
+    rows.push({
+        label: "Extensions",
+        value: String(
+            loader.getExtensions().extensions.filter((extension) => extension.hidden !== true)
+                .length,
+        ),
+    });
+
+    return rows;
+}
+
+function renderSummary(rows: readonly SummaryRow[], width: number): string[] {
+    const indent = "      ";
+    const valueColumn = 18;
+    const lines: string[] = [];
+    for (const row of rows) {
+        const prefix = `${indent}${row.label.padEnd(12)}`;
+
+        if (width <= valueColumn) {
+            lines.push(
+                truncateToWidth(`${indent}${row.label} ${row.value}`, Math.max(0, width), ""),
+            );
+            continue;
+        }
+
+        const wrapped = wrapTextWithAnsi(row.value, width - valueColumn);
+        for (const [index, part] of wrapped.entries()) {
+            let padding = " ".repeat(valueColumn);
+            if (index === 0) padding = prefix;
+            lines.push(`${padding}${part}`);
+        }
+    }
+
+    return lines;
+}
+
 function installInstance(mode: StartupMode, enabled: () => boolean): Handle {
     const patches: { dispose(): void }[] = [];
     let expanded = mode.options.verbose === true || mode.toolOutputExpanded;
@@ -109,12 +186,9 @@ function installInstance(mode: StartupMode, enabled: () => boolean): Handle {
         (mode.customHeader === undefined || mode.customHeader === null) &&
         mode.settingsManager.getQuietStartup() !== true;
 
-    const loader = mode.session.resourceLoader;
-    const contextCount =
-        loader.getAgentsFiles().agentsFiles.length +
-        loader.getAppendSystemPromptSources().length +
-        Number(loader.getSystemPromptSource() !== undefined);
-    const summary = `      Context ${contextCount} files · Skills ${loader.getSkills().skills.length} · Extensions ${loader.getExtensions().extensions.filter((extension) => extension.hidden !== true).length}`;
+    let resources: SummaryRow[] = [];
+    if (enabled()) resources = collectSummary(mode);
+
     const header = mode.builtInHeader;
     if (isExpandable(header)) {
         patches.push(
@@ -139,10 +213,10 @@ function installInstance(mode: StartupMode, enabled: () => boolean): Handle {
                     if (!active() || expanded) return predecessor.call(this, width);
 
                     const native = predecessor.call(this, Math.max(width, 80));
-                    const hints = `      / commands · ! shell · ${mode.keybindings.getKeys("app.tools.expand").join("/")} details`;
                     const muted = getSelectListTheme().description;
                     let title = muted(` Pi v${mode.version}`);
                     let logoBottom = "";
+
                     if ("onLogoClick" in header && typeof header.onLogoClick === "function") {
                         title = `${sliceByColumn(native[0] ?? "", 0, 5)}\u001b[0m${muted(` Pi v${mode.version}`)}`;
                         logoBottom = `${sliceByColumn(native[1] ?? "", 0, 5)}\u001b[0m`;
@@ -150,9 +224,12 @@ function installInstance(mode: StartupMode, enabled: () => boolean): Handle {
                         title = native[0] ?? title;
                     }
 
-                    return [title, logoBottom, "", muted(summary), "", muted(hints)].map((line) =>
-                        truncateToWidth(line, Math.max(0, width), ""),
-                    );
+                    return [
+                        title,
+                        logoBottom,
+                        "",
+                        ...renderSummary(resources, width).map(muted),
+                    ].map((line) => truncateToWidth(line, Math.max(0, width), ""));
                 },
         ),
     );
@@ -202,7 +279,9 @@ function installInstance(mode: StartupMode, enabled: () => boolean): Handle {
     }
 
     return {
-        update(): void {},
+        update(): void {
+            if (enabled()) resources = collectSummary(mode);
+        },
         dispose(): void {
             for (const patch of patches.reverse()) patch.dispose();
         },
@@ -277,7 +356,10 @@ export function installCompactStartupPatch(
 
             current = next;
 
-            for (const mode of instances.keys()) mode.ui.requestRender();
+            for (const [mode, instance] of instances) {
+                instance.update(next);
+                mode.ui.requestRender();
+            }
         },
         dispose(): void {
             if (disposed) return;

@@ -6,6 +6,14 @@ Small configurable UI tweaks for polishing Pi's interface.
 
 Regular-mode frames include content and final hardware-cursor updates in one synchronized-output transaction. This does not change full-screen rendering. Set `mainScreenSynchronizedOutput: false` (or `enabled: false`) to retain native regular-mode output; session shutdown removes the patch.
 
+## Compact startup
+
+With `compactStartup: true`, keep Pi's native logo and muted text, list each context file path, then show separate Skills and Extensions rows. The compact view has no shortcut legend; the existing expand-tools action still reveals native details. Long paths wrap rather than losing their filename.
+
+The Skills row reports the loaded count and **estimated tokens in the startup skills catalog** (names, descriptions, locations and catalog framing). It reads Pi's effective system prompt, so skills omitted from that prompt do not contribute tokens. It does not count full skill bodies loaded later into conversation messages, and `~` denotes Pi's model-independent chars/4 estimate, not a provider tokenizer or billing count.
+
+Counts are cached by the exact skill-section content, estimator revision and Pi version, in memory and across launches. The bounded 32-entry cache stores only hashes and counts at `$XDG_CACHE_HOME/pi-ui-tweaks/skill-tokens-v1.json` (normally `~/.cache/pi-ui-tweaks/skill-tokens-v1.json`). Cache hits do not estimate or rewrite the file. Changed descriptions/locations invalidate the relevant entry; unrelated context or skill-body-only changes do not. Cache corruption or unavailable storage falls back safely. No skill-file reads, tokenization, cache I/O or prompt construction occurs during header rendering.
+
 ## Install
 
 ```sh
