@@ -590,20 +590,16 @@ function currentToolResult(instance: ToolExecutionInstance): ThirdPartyToolResul
 function restoredCallRenderContext(
     context: BuiltInToolRenderContext,
     result: ThirdPartyToolResult | undefined,
-): BuiltInToolRenderContext;
-function restoredCallRenderContext(
-    context: BuiltInToolRenderContext,
-    result: ThirdPartyToolResult | undefined,
+    isStreamingCall: ((toolCallId: string) => boolean) | undefined,
 ): BuiltInToolRenderContext {
-    if (result === undefined) {
-        return context;
-    }
+    // Pi restores rows without setArgsComplete(), including calls that have no result.
+    // Only lifecycle knowledge can distinguish those rows from live partial arguments.
+    if (result !== undefined) return { ...context, argsComplete: true, result };
+    if (context.argsComplete || isStreamingCall?.(context.toolCallId) !== false) return context;
 
-    // Pi constructs restored ToolExecutionComponents with argsComplete=false, then replays the
-    // persisted result without calling setArgsComplete(). A persisted result proves that the call
-    // arguments are complete; preserve that fact for renderers that defer structured parsing while
-    // arguments are still streaming.
-    return { ...context, argsComplete: true, result };
+    // Argument completion is not execution completion: retain pending/error state and
+    // never manufacture a result for an interrupted historical call.
+    return { ...context, argsComplete: true };
 }
 
 export function thirdPartyRenderContext(
@@ -797,13 +793,7 @@ export function configureBuiltInToolRendererPatch(
     };
     let state: BuiltInRendererPatchState;
     const observeRow = (row: ToolExecutionInstance): void => {
-        // Constructors run ahead of argument completion. Observing boundaries there
-        // would precede deferred exploration renders and merge runs across a boundary.
-        // Pi completes live arguments in source order; restored rows become ready when
-        // their persisted result is replayed (without ever setting argsComplete).
-        const ready =
-            row.argsComplete === true || row.executionStarted === true || row.result !== undefined;
-        if (state.enabled && ready && row.toolCallId !== undefined && row.toolName !== undefined) {
+        if (state.enabled && row.toolCallId !== undefined && row.toolName !== undefined) {
             state.renderingOptions.observeRow?.(row, row.toolCallId, row.toolName);
         }
     };
@@ -821,7 +811,11 @@ export function configureBuiltInToolRendererPatch(
 
             const result = currentToolResult(this);
             return (args: ToolCallArguments, theme: Theme, context: BuiltInToolRenderContext) => {
-                const restoredContext = restoredCallRenderContext(context, result);
+                const restoredContext = restoredCallRenderContext(
+                    context,
+                    result,
+                    state.renderingOptions.isStreamingCall,
+                );
 
                 return renderCompletedSlot({
                     cache: state.completedRenders,
@@ -1110,7 +1104,11 @@ export function configureThirdPartyToolRendererPatch(
                         theme: Theme,
                         context: BuiltInToolRenderContext,
                     ) => {
-                        const restoredContext = restoredCallRenderContext(context, result);
+                        const restoredContext = restoredCallRenderContext(
+                            context,
+                            result,
+                            state.renderingOptions?.isStreamingCall,
+                        );
 
                         return renderCompletedSlot({
                             cache: state.completedRenders,

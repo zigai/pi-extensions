@@ -1078,6 +1078,7 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
     );
 
     it("interprets apply_patch streaming, shrinking, rewriting, and completion without stale cells", async () => {
+        await extension?.startAssistantToolCall("apply_patch", "call-xterm-stream");
         const pendingTerminal = new VirtualTerminal(100, 28);
         const activeTui = createTui(pendingTerminal);
         activeTui.setClearOnShrink(true);

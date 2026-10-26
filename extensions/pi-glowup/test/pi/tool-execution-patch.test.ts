@@ -273,7 +273,7 @@ describe("tool execution patches", () => {
         },
     );
 
-    it("observes ready generic rows before renderer selection without replacing their renderer", () => {
+    it("observes incomplete generic rows without replacing their renderer", () => {
         const prototype = createPrototype();
         const observed: object[] = [];
         installBuiltInToolRendererPatch(
@@ -292,17 +292,17 @@ describe("tool execution patches", () => {
             argsComplete: false,
         };
         expect(prototype.hasRendererDefinition.call(instance)).toBe(false);
-        expect(observed).toEqual([]);
+        expect(observed).toEqual([instance]);
         instance.argsComplete = true;
         expect(prototype.hasRendererDefinition.call(instance)).toBe(false);
-        expect(observed).toEqual([instance]);
+        expect(observed).toEqual([instance, instance]);
         expect(
             prototype.getCallRenderer.call(instance)?.({}, plainTheme, renderContext).render(80),
         ).toEqual(["existing renderer"]);
 
         configureBuiltInToolRendererPatch(false, undefined, prototype);
         prototype.hasRendererDefinition.call(instance);
-        expect(observed).toHaveLength(2);
+        expect(observed).toHaveLength(3);
     });
 
     it.each([
@@ -397,6 +397,76 @@ describe("tool execution patches", () => {
 
         expect(prototype.getRenderShell.call(customInstance)).toBe("default");
     });
+
+    it.each(["built-in", "third-party"])(
+        "distinguishes live and historical resultless %s calls without completing execution",
+        (kind) => {
+            const prototype = createPrototype();
+            let streaming = true;
+            const received: Array<{ complete: boolean; partial: boolean; result: unknown }> = [];
+            const component = { render: () => ["call"], invalidate: noop };
+            if (kind === "built-in") {
+                installBuiltInToolRendererPatch(
+                    {
+                        isStreamingCall: () => streaming,
+                        renderCall: (_name, _args, _theme, context) => {
+                            received.push({
+                                complete: context.argsComplete,
+                                partial: context.isPartial,
+                                result: context.result,
+                            });
+                            return component;
+                        },
+                        renderResult: () => undefined,
+                    },
+                    prototype,
+                );
+            } else {
+                installThirdPartyToolRendererPatch(
+                    {
+                        isStreamingCall: () => streaming,
+                        renderers: [
+                            {
+                                name: "argument-state",
+                                matches: () => true,
+                                createRenderer: () => ({
+                                    renderCall: (_args, _theme, context) => {
+                                        received.push({
+                                            complete: context.argsComplete,
+                                            partial: context.isPartial,
+                                            result: context.result,
+                                        });
+                                        return component;
+                                    },
+                                    renderResult: () => component,
+                                }),
+                            },
+                        ],
+                    },
+                    prototype,
+                );
+            }
+            let toolName = "custom_tool";
+            if (kind === "built-in") toolName = "bash";
+            const instance = { toolName };
+            const context = {
+                ...renderContext,
+                argsComplete: false,
+                isPartial: true,
+                executionStarted: false,
+                state: {},
+                invalidate: noop,
+            };
+            const renderer = prototype.getCallRenderer.call(instance);
+            renderer?.({}, plainTheme, context);
+            streaming = false;
+            renderer?.({}, plainTheme, context);
+            expect(received).toEqual([
+                { complete: false, partial: true, result: undefined },
+                { complete: true, partial: true, result: undefined },
+            ]);
+        },
+    );
 
     it("passes persisted results to restored built-in call renderers", () => {
         const prototype = createPrototype();

@@ -1,3 +1,4 @@
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
     SessionManager,
     type SessionEntry,
@@ -35,6 +36,34 @@ export class GlowupExtensionHarness {
                 await registration[1](
                     { type: "session_shutdown", reason },
                     createExtensionContext(this.cwd),
+                );
+            }
+        }
+    }
+
+    async startAssistantToolCall(toolName: string, toolCallId: string): Promise<void> {
+        const message: AssistantMessage = {
+            role: "assistant",
+            content: [{ type: "toolCall", id: toolCallId, name: toolName, arguments: {} }],
+            api: "openai-completions",
+            provider: "openai",
+            model: "fixture",
+            stopReason: "toolUse",
+            timestamp: 0,
+            usage: {
+                input: 0,
+                output: 0,
+                cacheRead: 0,
+                cacheWrite: 0,
+                totalTokens: 0,
+                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+            },
+        };
+        for (const registration of this.api.registrations) {
+            if (registration[0] === "message_start") {
+                await registration[1](
+                    { type: "message_start", message },
+                    createExtensionContext(this.cwd, { mode: "tui" }),
                 );
             }
         }
