@@ -31,7 +31,6 @@ import {
     type SyntaxConfig,
 } from "./theme-loader.ts";
 
-const MAX_CODE_BYTES = 40 * 1024;
 const MAX_CACHEABLE_CODE_BYTES = 8 * 1024;
 const MAX_CACHE_BYTES = 512 * 1024;
 const CACHE_LIMIT = 100;
@@ -356,10 +355,6 @@ export function highlightSyntaxCode(
     }
 
     const codeByteLength = Buffer.byteLength(code, "utf8");
-    if (codeByteLength > MAX_CODE_BYTES) {
-        recordSyntaxHighlight(code, language, normalizedLanguage, "over-budget");
-        return normalizedCodeLines(code);
-    }
     const key = highlightedCodeCacheKey(state.theme.name, normalizedLanguage, code, codeByteLength);
     const owned = currentHighlightOwner(invalidate);
     const completed = owned?.results.get(key) ?? owned?.previousResults.get(key);
@@ -594,11 +589,6 @@ export async function highlightSyntaxCodeAsync(
         recordUnhighlightedRequest(code, language, normalizedLanguage);
         if (code.length > 0 && options.signal?.aborted !== true)
             scheduleSyntaxLanguageLoad(language, invalidate, code, options);
-        return plainLines;
-    }
-
-    if (size > MAX_CODE_BYTES) {
-        recordSyntaxHighlight(code, language, normalizedLanguage, "over-budget");
         return plainLines;
     }
 
@@ -1122,7 +1112,6 @@ type SyntaxHighlightOutcome =
     | "unsupported-language"
     | "not-ready"
     | "unavailable"
-    | "over-budget"
     | "failed"
     | "cancelled"
     | "backpressure";

@@ -262,9 +262,11 @@ export function createSyntaxTokenizer(
             return undefined;
         }
 
+        // The byte budget bounds concurrent work, not the size of an individual source.
+        // An oversized source runs alone rather than waiting for impossible capacity.
         if (
             queue.length + Number(active !== undefined) >= options.maxJobs ||
-            bytes + size > options.maxBytes
+            (bytes > 0 && bytes + size > options.maxBytes)
         ) {
             cancellation.onUnavailable?.("backpressure");
 
