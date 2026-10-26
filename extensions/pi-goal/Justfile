@@ -59,7 +59,4 @@ clean:
     rm -rf coverage dist
 
 alias cov := coverage
-alias verify := check
-alias verification := platform-verification
 alias fmt := format
-alias tsc := typecheck

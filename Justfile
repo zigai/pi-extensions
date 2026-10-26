@@ -65,4 +65,3 @@ clean:
 
 alias cov := coverage
 alias fmt := format
-alias tsc := typecheck

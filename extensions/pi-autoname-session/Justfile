@@ -10,7 +10,7 @@ setup:
     just --justfile ../../Justfile setup
 
 # Format code
-fmt:
+format:
     npm run format
 
 # Generate config schema and README settings documentation
@@ -43,3 +43,5 @@ fix:
     npm run format
 
 alias cov := coverage
+
+alias fmt := format
