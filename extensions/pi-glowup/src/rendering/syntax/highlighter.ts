@@ -148,7 +148,7 @@ const pendingHighlights = new Map<string, Promise<string[]>>();
 const highlightControllers = new Set<AbortController>();
 const tokenizerDisposals = new Set<Promise<void>>();
 const highlightCompletionListeners = new Set<() => void>();
-const activeHighlights = new Set<Promise<string[]>>();
+const activeHighlights = new Set<Promise<unknown>>();
 const completedUnownedHighlights = new Map<string, WeakRef<string[]>>();
 const readinessRetries = new Map<
     SyntaxLanguage,
@@ -507,9 +507,21 @@ export function observeSyntaxHighlightSource(
         previousResults,
         version: syntaxRenderingVersion,
         retryWhenCapacityAvailable: () => {
-            if (highlightOwners.get(invalidate) !== owner || owner.controller.signal.aborted)
-                return;
-            notifySyntaxInvalidation(invalidate);
+            // Capacity can return before the rejected request's promise has unwound.
+            // Redrawing earlier would just reuse that doomed pending entry.
+            const retry = Promise.allSettled(owner.pending.values())
+                .then(() => {
+                    if (
+                        highlightOwners.get(invalidate) !== owner ||
+                        owner.controller.signal.aborted
+                    )
+                        return;
+                    notifySyntaxInvalidation(invalidate);
+                })
+                .finally(() => {
+                    activeHighlights.delete(retry);
+                });
+            activeHighlights.add(retry);
         },
         readyRequests: new Map(),
         retryWhenReady: (language) => {

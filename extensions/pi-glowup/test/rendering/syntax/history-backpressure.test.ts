@@ -37,6 +37,23 @@ it.each([
     },
 );
 
+it("retries a rejected request even when capacity returns before its pending entry settles", async () => {
+    await initializeSyntaxHighlighting({}, { preloadLanguages: ["python"] });
+    const controller = new AbortController();
+    highlightSyntaxCode('print("cancelled")', "python", { signal: controller.signal });
+    for (let index = 1; index < 100; index += 1)
+        highlightSyntaxCode(`print("occupied_${index}")`, "python");
+
+    let rendered: string[] = [];
+    const redraw = () => {
+        rendered = highlightSyntaxCode('print("retried")', "python", { invalidate: redraw });
+    };
+    redraw();
+    controller.abort();
+    await settleSyntaxHighlights();
+    expect(rendered.join("\n")).toContain("\u001b[");
+});
+
 it("does not invalidate a superseded restored source when capacity returns", async () => {
     await initializeSyntaxHighlighting({}, { preloadLanguages: ["python"] });
     for (let index = 0; index < 100; index += 1) {
