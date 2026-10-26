@@ -1,7 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, onTestFinished } from "vitest";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
+import {
+    configureRenderDiagnostics,
+    diagnosticCodeHash,
+} from "../../src/diagnostics/render-events.ts";
+import type { DebugLogFields } from "../../src/diagnostics/logger.ts";
+import { createCodeStreamStore } from "../../src/rendering/streaming/code-stream.ts";
 import { createCodemodePreview } from "../../src/tools/external/codemode.ts";
 import {
     createCommandScriptFormatter,
@@ -1229,6 +1235,57 @@ describe("third-party tool renderers", () => {
 
         expect(rendered).toContain("questions: 1 item");
         expect(rendered).not.toContain("questions: 1 items");
+    });
+
+    it("joins completed streamed Codemode blocks to their analysis without scheduling another preview", async () => {
+        const events: Array<{ event: string; fields: DebugLogFields }> = [];
+        configureRenderDiagnostics((event, fields) => {
+            events.push({ event, fields: fields() });
+        });
+        onTestFinished(() => configureRenderDiagnostics(undefined));
+        const formatter = createCommandScriptFormatter(
+            parseScriptFormatterCommandsValue({
+                javascript: {
+                    kind: "command",
+                    command: [process.execPath, "-e", "process.stdin.pipe(process.stdout)"],
+                },
+            }),
+        );
+        const store = createCodeStreamStore();
+        const preview = createCodemodePreview(() => formatter);
+        const renderer = createThirdPartyToolRenderer("codemode", {
+            codemodePreview: preview,
+            streamCode: (input) => store.get({ ...input, mode: "statement", formatter }),
+        });
+        const code = "const first=1;\nconst second=2;";
+        const context = { ...renderContext, toolCallId: "complete-code", argsComplete: true };
+        try {
+            renderer.renderCall({ code }, plainTheme, context).render(80);
+            await store.settled();
+            const analyses = events.filter((entry) => entry.event === "script_analysis");
+            expect(analyses).toHaveLength(1);
+            expect(analyses[0]?.fields).toMatchObject({
+                toolCallId: "complete-code",
+                segments: [
+                    expect.objectContaining({
+                        language: "javascript",
+                        codeHash: diagnosticCodeHash(code),
+                        formattable: true,
+                    }),
+                ],
+            });
+            const formats = events.filter((entry) => entry.event === "script_format");
+            expect(formats).toHaveLength(1);
+            expect(formats[0]?.fields).toMatchObject({
+                toolCallId: "complete-code",
+                stage: "block",
+                segmentHash: diagnosticCodeHash(code),
+                outcome: "unchanged",
+            });
+        } finally {
+            preview.clear();
+            await store.dispose();
+        }
     });
 
     it("coalesces Codemode resize targets and retains the last ready preview", async () => {

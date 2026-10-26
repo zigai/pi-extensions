@@ -154,6 +154,14 @@ export function createCodemodePreview(formatterAccessor?: () => ScriptBlockForma
     }
 
     const feature = {
+        analyze(toolCallId: string, code: string): void {
+            recordScriptAnalysis({
+                toolName: "codemode",
+                toolCallId,
+                command: code,
+                formatter: formatterAccessor?.() ?? scheduled.get(toolCallId)?.options.formatter,
+            });
+        },
         observe(
             toolCallId: string,
             callback: (() => void) | undefined,
@@ -471,10 +479,10 @@ function callSource(
 
 export function createCodemodeRenderer(
     labelMode: ToolLabelMode = "static",
-    preview: Pick<
-        ReturnType<typeof createCodemodePreview>,
-        "get" | "observe"
-    > = createCodemodePreview(),
+    preview: Pick<ReturnType<typeof createCodemodePreview>, "get" | "observe"> &
+        Partial<
+            Pick<ReturnType<typeof createCodemodePreview>, "analyze">
+        > = createCodemodePreview(),
     streamCode?: CodePreview,
 ): ThirdPartyToolRenderer {
     return {
@@ -482,6 +490,8 @@ export function createCodemodeRenderer(
         // A component may outlive many streaming updates. Never close over its predecessor.
         renderCall(args, theme, { lastComponent: _lastComponent, ...context }) {
             const sourceCode = callSource(args, context)?.source;
+            if (context.argsComplete && sourceCode !== undefined)
+                preview.analyze?.(context.toolCallId, sourceCode);
 
             const completed =
                 context.phase === "complete" ||
