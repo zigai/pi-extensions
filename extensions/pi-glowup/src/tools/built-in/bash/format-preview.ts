@@ -84,7 +84,8 @@ export async function formatAndStoreScriptPreview(
         ...(options.targetWidth !== undefined && { targetWidth: options.targetWidth }),
         diagnostics: {
             toolCallId: options.toolCallId,
-            stage: "preview",
+            stage: "block",
+            segmentCode: script.code,
             ...(options.recordSegment !== undefined && { recordSegment: options.recordSegment }),
         },
     };

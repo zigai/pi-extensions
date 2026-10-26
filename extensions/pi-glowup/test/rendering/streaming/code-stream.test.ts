@@ -16,6 +16,7 @@ import {
 
 // Failure matrix: independent formatting at final/resize/history, stale async results,
 // append versus rewrite, key isolation, abort/clear/dispose, undefined-width stability.
+// Completed calls must replace partial units atomically with one whole-program job.
 const stores: CodeStreamStore[] = [];
 const directories: string[] = [];
 afterEach(async () => {
@@ -76,11 +77,12 @@ describe("code stream store", () => {
         expect(subject.get({ ...input, mode: "block", complete: true })).toBe(input.source);
     });
 
-    it("formats every statement separately across append, final and resize", async () => {
+    it("formats live statements separately and final/resize as whole programs", async () => {
         const subject = store();
         const external = formatter();
         const input = {
             key: "script",
+            toolCallId: "script-call",
             source: "const x=1;",
             language: "ts",
             complete: false,
@@ -98,7 +100,35 @@ describe("code stream store", () => {
         await subject.settled();
         subject.get({ ...appended, complete: true, targetWidth: 60 });
         await subject.settled();
-        expect(external.inputs()).toEqual(["const x=1;", "const y=2;", "const x=1;", "const y=2;"]);
+        expect(external.inputs()).toEqual([
+            "const x=1;",
+            "const y=2;",
+            appended.source,
+            appended.source,
+        ]);
+    });
+
+    it("formats completed compound shells once without statement fragments", async () => {
+        const subject = store();
+        const inputs: string[] = [];
+        const source = "if true; then echo one; else echo two; fi";
+        const input = {
+            key: "compound",
+            toolCallId: "compound-call",
+            source,
+            language: "bash",
+            complete: true,
+            mode: "statement" as const,
+            formatter: async (value: { code: string }) => {
+                inputs.push(value.code);
+                return "if true; then\n  echo one\nelse\n  echo two\nfi";
+            },
+        };
+        subject.get(input);
+        await subject.settled();
+        expect(inputs).toEqual([source]);
+        expect(subject.get(input)).toContain("\n  echo one\n");
+        expect(subject.ready(input.key)).toBe(true);
     });
 
     it("keeps formatting completed statements while later chunks append", async () => {

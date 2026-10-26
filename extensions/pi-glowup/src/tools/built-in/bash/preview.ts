@@ -200,7 +200,7 @@ export function createNativeBashFeature(
             }
         }
 
-        if (streamCode !== undefined) {
+        if (streamCode !== undefined && !context.argsComplete && !context.isError) {
             let script = streamingScriptIdentities.resolve(context.toolCallId, command);
             if (context.argsComplete) {
                 script = streamingScriptIdentities.finalize(
@@ -245,6 +245,20 @@ export function createNativeBashFeature(
                 durationMs: context.durationMs,
                 lastComponent: context.lastComponent,
             });
+        }
+
+        if (streamCode !== undefined && (context.argsComplete || context.isError)) {
+            const formatter = formatterAccessor?.();
+            if (formatter !== undefined)
+                schedule({
+                    toolCallId: context.toolCallId,
+                    command,
+                    formatter,
+                    signal: undefined,
+                    completed: true,
+                    isCurrent: () => true,
+                    invalidate: context.invalidate ?? (() => {}),
+                });
         }
 
         const displayCommand = context.argsComplete ? command : partialBashCommandPreview(command);

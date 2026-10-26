@@ -329,6 +329,8 @@ export function createCodeStreamStore(): CodeStreamStore {
 
     return {
         get(input): string {
+            if (input.toolCallId !== undefined && input.complete && input.mode === "statement")
+                input = { ...input, mode: "block" };
             if (disposed) return "";
 
             const previous = entries.get(input.key);
@@ -378,7 +380,7 @@ export function createCodeStreamStore(): CodeStreamStore {
                 input.source.startsWith(previous.input.source) &&
                 (input.source === previous.input.source || !previous.input.complete) &&
                 previous.language === language &&
-                previous.input.mode === input.mode
+                (previous.input.mode === input.mode || input.complete)
             ) {
                 // A resize/profile change rebuilds from individual units, retaining the old
                 // ready display until replacement units become available.

@@ -964,7 +964,7 @@ describe("script render diagnostics", () => {
         ]);
     });
 
-    it("attributes statement-mode format events to the tool call and its segment", async () => {
+    it("attributes completed format events to the tool call and its segment", async () => {
         const events = recordRenderEvents();
         const { showStreamed } = setup();
         const code = "a = 1;b = 2\nprint(a + b)";
@@ -973,7 +973,7 @@ describe("script render diagnostics", () => {
         await showStreamed("statement-call", command);
 
         await vi.waitUntil(() =>
-            eventsNamed(events, "script_format").some((event) => event.stage === "statement"),
+            eventsNamed(events, "script_format").some((event) => event.stage === "block"),
         );
         const [segment] = analysisFor(events, "statement-call").segments;
         expect(segment).toMatchObject({ language: "python", origin: "standalone" });
@@ -981,8 +981,11 @@ describe("script render diagnostics", () => {
         const statements = events
             .filter((entry) => entry.event === "script_format")
             .map((entry) => Value.Parse(statementEventSchema, entry.fields))
-            .filter((event) => event.stage === "statement");
-        expect(statements.length).toBeGreaterThan(1);
+            .filter((event) => event.stage === "block");
+        expect(statements.length).toBeGreaterThan(0);
+        expect(new Set(statements.map((event) => event.codeHash))).toEqual(
+            new Set([segment?.codeHash]),
+        );
 
         for (const event of statements)
             expect(event).toMatchObject({
@@ -990,7 +993,6 @@ describe("script render diagnostics", () => {
                 segmentHash: segment?.codeHash,
             });
 
-        // Each statement is formatted on its own, so none is the whole segment.
-        expect(statements.map((event) => event.codeHash)).not.toContain(segment?.codeHash);
+        expect(statements.map((event) => event.codeHash)).toContain(segment?.codeHash);
     });
 });
