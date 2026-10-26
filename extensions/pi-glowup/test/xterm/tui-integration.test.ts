@@ -936,6 +936,64 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
         await vi.waitUntil(() => getScriptFormatterWorkload().active === 0);
     });
 
+    it("keeps native image read results reusable through expansion and resize", async () => {
+        const pendingTerminal = new VirtualTerminal(100, 24);
+        const activeTui = createTui(pendingTerminal);
+        const definition = createReadToolDefinition(cwd);
+        const nativeResult = vi.spyOn(definition, "renderResult");
+        const tool = new ToolExecutionComponent(
+            "read",
+            "image-read",
+            { path: "image.png" },
+            { showImages: false },
+            definition,
+            activeTui,
+            cwd,
+        );
+        tool.setArgsComplete();
+        tool.updateResult({
+            content: [
+                { type: "text", text: "Image dimensions: 8 by 8" },
+                { type: "image", data: "", mimeType: "image/png" },
+            ],
+            isError: false,
+        });
+
+        activeTui.addChild(new LinesComponent(["BEFORE_IMAGE_READ"]));
+        activeTui.addChild(tool);
+        activeTui.addChild(new LinesComponent(["AFTER_IMAGE_READ"]));
+        terminal = pendingTerminal;
+        tui = activeTui;
+        activeTui.start();
+        await pendingTerminal.settle();
+        expect(pendingTerminal.screenText()).not.toContain("Image dimensions");
+
+        for (const columns of [100, 55, 120]) {
+            tool.setExpanded(true);
+            pendingTerminal.resize(columns, 24);
+            activeTui.requestRender();
+            await pendingTerminal.settle();
+            pendingTerminal.assertUniqueTranscriptMarkers(
+                "Image dimensions: 8 by 8",
+                "BEFORE_IMAGE_READ",
+                "AFTER_IMAGE_READ",
+            );
+            pendingTerminal.assertRowsFitWidth();
+            const settled = pendingTerminal.interpretedRows();
+            tool.invalidate();
+            activeTui.requestRender();
+            await pendingTerminal.settle();
+            expect(pendingTerminal.interpretedRows()).toEqual(settled);
+            tool.setExpanded(false);
+            activeTui.requestRender();
+            await pendingTerminal.settle();
+            expect(pendingTerminal.screenText()).not.toContain("Image dimensions");
+        }
+
+        expect(nativeResult).toHaveBeenCalled();
+        expect(nativeResult.mock.results.every((result) => result.type === "return")).toBe(true);
+    });
+
     it.each(["small", "above-shared-cache-budget"])(
         "repaints completed native read syntax at the same width without an expansion toggle (%s)",
         async (size) => {

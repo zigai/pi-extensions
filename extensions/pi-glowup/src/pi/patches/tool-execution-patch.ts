@@ -774,6 +774,27 @@ export function configureBuiltInToolRendererPatch(
     const originalGetRenderShell = prototype.getRenderShell;
     const originalHasRendererDefinition = prototype.hasRendererDefinition;
     const initializedRows = new WeakSet<ToolExecutionInstance>();
+
+    // Native renderers may require their own concrete component (for example Text).
+    // The host retains our outer wrapper, not the component returned by the fallback.
+    const originalComponents = new WeakMap<
+        ToolExecutionInstance,
+        Partial<Record<RenderSlot, Component>>
+    >();
+    const renderOriginal = (
+        row: ToolExecutionInstance,
+        slot: RenderSlot,
+        render: (previous: Component | undefined) => Component | undefined,
+    ): Component | undefined => {
+        const slots = originalComponents.get(row) ?? {};
+        const component = render(slots[slot]);
+        if (component !== undefined) {
+            slots[slot] = component;
+            originalComponents.set(row, slots);
+        }
+
+        return component;
+    };
     let state: BuiltInRendererPatchState;
     const observeRow = (row: ToolExecutionInstance): void => {
         // Constructors run ahead of argument completion. Observing boundaries there
@@ -809,7 +830,7 @@ export function configureBuiltInToolRendererPatch(
                     signature: completedCallSignature(args, theme, restoredContext),
                     invalidate: context.invalidate,
                     cacheLines: shouldCacheCompletedLines(toolName),
-                    render(invalidate) {
+                    render: (invalidate) => {
                         const glowupContext = { ...restoredContext, invalidate };
                         const rendered = state.renderingOptions.renderCall(
                             toolName,
@@ -817,10 +838,16 @@ export function configureBuiltInToolRendererPatch(
                             theme,
                             glowupContext,
                         );
-                        const originalContext = { ...context, invalidate };
+
                         return (
                             rendered ??
-                            originalRenderer?.(args, theme, originalContext) ??
+                            renderOriginal(this, "call", (lastComponent) =>
+                                originalRenderer?.(args, theme, {
+                                    ...context,
+                                    invalidate,
+                                    lastComponent,
+                                }),
+                            ) ??
                             emptyComponent()
                         );
                     },
@@ -849,8 +876,9 @@ export function configureBuiltInToolRendererPatch(
                     signature: completedResultSignature(result, renderOptions, theme, context),
                     invalidate: context.invalidate,
                     cacheLines: shouldCacheCompletedLines(toolName),
-                    render(invalidate) {
+                    render: (invalidate) => {
                         const renderContext = { ...context, invalidate };
+
                         return (
                             state.renderingOptions.renderResult(
                                 toolName,
@@ -859,7 +887,12 @@ export function configureBuiltInToolRendererPatch(
                                 theme,
                                 renderContext,
                             ) ??
-                            originalRenderer?.(result, renderOptions, theme, renderContext) ??
+                            renderOriginal(this, "result", (lastComponent) =>
+                                originalRenderer?.(result, renderOptions, theme, {
+                                    ...renderContext,
+                                    lastComponent,
+                                }),
+                            ) ??
                             emptyComponent()
                         );
                     },
