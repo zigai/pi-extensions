@@ -1545,6 +1545,178 @@ test("native compaction inserts synthetic output for missing tool results", asyn
 });
 
 test.each([
+    { encryptedContent: undefined, expectedTokens: 0 },
+    { encryptedContent: null, expectedTokens: 0 },
+    { encryptedContent: "", expectedTokens: 0 },
+    { encryptedContent: "x".repeat(866), expectedTokens: 0 },
+    { encryptedContent: "x".repeat(867), expectedTokens: 0 },
+    { encryptedContent: "x".repeat(868), expectedTokens: 1 },
+    { encryptedContent: "x".repeat(872), expectedTokens: 1 },
+    { encryptedContent: "x".repeat(873), expectedTokens: 1 },
+    { encryptedContent: "x".repeat(874), expectedTokens: 2 },
+    { encryptedContent: "q7X9".repeat(1500), expectedTokens: 963 },
+    { encryptedContent: "é".repeat(434), expectedTokens: 1 },
+])(
+    "uses upstream reasoning byte accounting ($expectedTokens tokens, case %#)",
+    async ({ encryptedContent, expectedTokens }) => {
+        const reasoningItem = {
+            type: "reasoning",
+            id: "rs_budget",
+            encrypted_content: encryptedContent,
+            summary: [{ type: "summary_text", text: "visible summary ".repeat(100) }],
+            content: [{ type: "reasoning_text", text: "plaintext reasoning ".repeat(100) }],
+        };
+        const requestParts = {
+            model: "gpt-6-sol",
+            sessionId: "reasoning-budget",
+            instructions: "system",
+            promptCacheKey: "reasoning-budget",
+            verbosity: "low",
+            fast: false,
+            reasoning: { effort: "medium" },
+        };
+        const emptyRequest = buildRemoteCompactionV2Request({ ...requestParts, input: [] });
+        const request = buildRemoteCompactionV2Request({
+            ...requestParts,
+            input: [reasoningItem],
+        });
+        const cache = createTokenEstimateCache();
+        const empty = await shrinkRemoteCompactionRequestForContextWindow(
+            emptyRequest,
+            undefined,
+            cache,
+            { tokenizer: compactionTokenizer },
+        );
+        const result = await shrinkRemoteCompactionRequestForContextWindow(
+            request,
+            undefined,
+            cache,
+            { tokenizer: compactionTokenizer },
+        );
+        assert.equal(result.estimatedTokensAfter - empty.estimatedTokensAfter, expectedTokens);
+        assert.equal(result.rewrittenToolOutputs, 0);
+        assert.equal(reasoningItem.encrypted_content, encryptedContent);
+        assert.equal(result.kind, "ok");
+        if (result.kind === "ok") {
+            const { id: _id, ...expectedItem } = reasoningItem;
+            assert.deepEqual(
+                result.promptInput.find((item) => item.type === "reasoning"),
+                expectedItem,
+            );
+        }
+    },
+);
+
+test("still rejects reasoning that exceeds the budget after ciphertext-aware estimation", async () => {
+    const reasoningItem = {
+        type: "reasoning",
+        encrypted_content: "q7X9".repeat(6000),
+        summary: [],
+    };
+    const request = buildRemoteCompactionV2Request({
+        model: "gpt-6-sol",
+        sessionId: "oversized-reasoning",
+        input: [reasoningItem],
+        instructions: "system",
+        promptCacheKey: "oversized-reasoning",
+        verbosity: "low",
+        fast: false,
+    });
+    const result = await shrinkRemoteCompactionRequestForContextWindow(
+        request,
+        2_000,
+        createTokenEstimateCache(),
+        { tokenizer: compactionTokenizer },
+    );
+    assert.equal(result.kind, "too_large");
+    assert.ok(result.estimatedTokensAfter >= 4_338);
+    assert.equal(result.budgetTokens, 1_600);
+    assert.equal(result.rewrittenToolOutputs, 0);
+    assert.equal(reasoningItem.encrypted_content, "q7X9".repeat(6000));
+});
+
+test.each(["gpt-5.5", "gpt-6-sol"])(
+    "compacts encrypted reasoning without unnecessary tool truncation for %s",
+    async (modelId) => {
+        let requestBody: unknown;
+        const runtime = makeTestRuntime(async (_input, init) => {
+            requestBody = decodeRequestBody(init);
+            return new Response(
+                [
+                    "event: response.output_item.done",
+                    'data: {"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"sealed-reasoning-budget"}}',
+                    "",
+                    "event: response.completed",
+                    'data: {"type":"response.completed","response":{"id":"resp_reasoning_budget","created_at":123}}',
+                    "",
+                ].join("\n"),
+                { status: 200 },
+            );
+        });
+        const reasoningItem = {
+            type: "reasoning",
+            id: "rs_encrypted",
+            encrypted_content: "q7X9".repeat(1500),
+            summary: [],
+        };
+        const toolOutput = "useful tool evidence ".repeat(20);
+        const result = await handleCodexNativeCompaction(
+            makeBeforeCompactEvent({
+                branchEntries: [
+                    messageEntry("assistant-reasoning", null, {
+                        ...assistantMessage([
+                            {
+                                type: "thinking",
+                                thinking: "",
+                                thinkingSignature: JSON.stringify(reasoningItem),
+                            },
+                            {
+                                type: "toolCall",
+                                id: "call/reasoning|item/reasoning",
+                                name: "read",
+                                arguments: { path: "evidence.txt" },
+                            },
+                        ]),
+                        model: modelId,
+                    }),
+                    messageEntry(
+                        "tool-evidence",
+                        "assistant-reasoning",
+                        toolResultMessage("call/reasoning|item/reasoning", toolOutput),
+                    ),
+                    messageEntry("user-after-reasoning", "tool-evidence", userMessage("continue")),
+                ],
+                firstKeptEntryId: "user-after-reasoning",
+            }),
+            makeNativeCompactionContext({ modelId, contextWindow: 2_000 }),
+            {
+                ...DEFAULT_CODEX_CORE_CONFIG,
+                compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
+            },
+            makeCompactionApi(),
+            runtime,
+        );
+        assert.ok(result?.compaction);
+        assert.equal(result.compaction.details.requestMeta?.rewrittenToolOutputs, 0);
+        const requestInput = responseInput(requestBody);
+        assert.deepEqual(
+            requestInput.find((item) => isRecord(item) && item.type === "reasoning"),
+            {
+                type: "reasoning",
+                encrypted_content: reasoningItem.encrypted_content,
+                summary: [],
+            },
+        );
+        assert.equal(
+            JsonObjectDecoder.Parse(
+                requestInput.find((item) => isRecord(item) && item.type === "function_call_output"),
+            ).output,
+            toolOutput,
+        );
+    },
+);
+
+test.each([
     { type: "compaction", repeats: 1500, expected: "ok" },
     { type: "compaction_summary", repeats: 1500, expected: "ok" },
     { type: "context_compaction", repeats: 1500, expected: "ok" },

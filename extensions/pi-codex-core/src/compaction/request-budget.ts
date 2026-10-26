@@ -39,6 +39,7 @@ const TOKEN_ESTIMATE_CHUNK_CHARS = 512 * 1024;
 const TOKEN_ESTIMATE_CACHE_TEXT_MAX_CHARS = 8 * 1024;
 const INLINE_IMAGE_TOKEN_ESTIMATE_TEXT = "(inline image data omitted for token estimate)";
 const APPROX_BYTES_PER_TOKEN = 4;
+const REASONING_ENCRYPTION_OVERHEAD_BYTES = 650;
 const RESIZED_IMAGE_BYTES_ESTIMATE = 7_373;
 const RESIZED_IMAGE_TOKEN_ESTIMATE = Math.ceil(
     RESIZED_IMAGE_BYTES_ESTIMATE / APPROX_BYTES_PER_TOKEN,
@@ -667,9 +668,21 @@ async function estimateResponsesInputItemTokens(
     options: TokenWorkOptions,
 ): Promise<number> {
     return cachedObjectTokenCount(item, cache, async () => {
+        const encryptedContent = JsonStringDecoder.decode(item.encrypted_content);
+        if (item.type === "reasoning") {
+            // Codex history.rs approximates base64-decoded bytes minus encryption
+            // overhead, not ciphertext tokens. Summaries/plaintext are not replay
+            // costs; checkpoint ciphertext below uses a different heuristic.
+            if (encryptedContent === undefined) return 0;
+            const decodedBytes = Math.floor((Buffer.byteLength(encryptedContent, "utf8") * 3) / 4);
+            return Math.ceil(
+                Math.max(0, decodedBytes - REASONING_ENCRYPTION_OVERHEAD_BYTES) /
+                    APPROX_BYTES_PER_TOKEN,
+            );
+        }
+
         let framing = item;
         let encryptedTokens = 0;
-        const encryptedContent = JsonStringDecoder.decode(item.encrypted_content);
         if (
             encryptedContent !== undefined &&
             (item.type === "compaction" ||
