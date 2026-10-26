@@ -357,6 +357,71 @@ describe("code stream store", () => {
         }
     });
 
+    it("retires an owner without letting its signal or later renders cancel a replacement", async () => {
+        const subject = store();
+        const previous = new AbortController();
+        const replacement = new AbortController();
+        const calls: AbortSignal[] = [];
+        const input = {
+            key: "owned-source",
+            source: "const value=1;",
+            language: "javascript",
+            mode: "block" as const,
+            complete: true,
+            signal: previous.signal,
+            formatter: async ({ code }: { code: string }, options?: { signal?: AbortSignal }) => {
+                if (options?.signal !== undefined) calls.push(options.signal);
+                return code;
+            },
+        };
+        subject.get(input);
+        await subject.settled();
+        subject.get({ ...input, signal: replacement.signal });
+        await subject.settled();
+        previous.abort();
+        expect(calls).toHaveLength(2);
+        expect(calls[0]?.aborted).toBe(true);
+        expect(calls[1]?.aborted).toBe(false);
+        expect(subject.get(input)).toBe("");
+        expect(subject.get({ ...input, signal: replacement.signal })).toBe(input.source);
+        expect(subject.ready(input.key)).toBe(true);
+        replacement.abort();
+        expect(calls[1]?.aborted).toBe(true);
+        expect(subject.ready(input.key)).toBe(false);
+        expect(subject.get({ ...input, signal: replacement.signal })).toBe("");
+        expect(calls).toHaveLength(2);
+    });
+
+    it("does not start a source retired synchronously while replacing its predecessor", async () => {
+        const subject = store();
+        const previous = new AbortController();
+        const replacement = new AbortController();
+        let calls = 0;
+        const input = {
+            key: "reentrant-retirement",
+            source: "const value=1;",
+            language: "javascript",
+            mode: "block" as const,
+            complete: true,
+            signal: previous.signal,
+            formatter: async ({ code }: { code: string }, options?: { signal?: AbortSignal }) => {
+                calls += 1;
+                options?.signal?.addEventListener("abort", () => replacement.abort(), {
+                    once: true,
+                });
+
+                return code;
+            },
+        };
+        subject.get(input);
+        await subject.settled();
+        expect(subject.get({ ...input, signal: replacement.signal })).toBe("");
+        await subject.settled();
+        expect(replacement.signal.aborted).toBe(true);
+        expect(subject.ready(input.key)).toBe(false);
+        expect(calls).toBe(1);
+    });
+
     it("keeps formatting completed statements while later chunks append", async () => {
         const subject = store();
         const gate = new EventEmitter();

@@ -28,6 +28,7 @@ export type CodeStreamInput = {
     readonly formatter?: ScriptBlockFormatter | undefined;
     readonly targetWidth?: number | undefined;
     readonly invalidate?: (() => void) | undefined;
+    readonly signal?: AbortSignal | undefined;
 
     /** Owning tool call for diagnostics; statement and block events carry it. */
     readonly toolCallId?: string | undefined;
@@ -62,6 +63,10 @@ type Entry = {
     lastKind: string;
     running: boolean;
 };
+
+function sourceAborted(input: CodeStreamInput): boolean {
+    return input.signal?.aborted === true;
+}
 
 function languageFor(input: CodeStreamInput): string {
     let value = input.language;
@@ -348,7 +353,7 @@ export function createCodeStreamStore(): CodeStreamStore {
             if (input.toolCallId !== undefined && input.complete && input.mode === "statement")
                 input = { ...input, mode: "block" };
 
-            if (disposed) return "";
+            if (disposed || sourceAborted(input)) return "";
 
             const previous = entries.get(input.key);
             if (input.mode === "token") {
@@ -363,6 +368,7 @@ export function createCodeStreamStore(): CodeStreamStore {
                 previous.running &&
                 previous.input.mode === input.mode &&
                 previous.input.formatter === input.formatter &&
+                previous.input.signal === input.signal &&
                 previous.language === language &&
                 previous.input.path === input.path &&
                 previous.input.source === input.source &&
@@ -378,6 +384,7 @@ export function createCodeStreamStore(): CodeStreamStore {
                 previous !== undefined &&
                 previous.input.mode === input.mode &&
                 previous.input.formatter === input.formatter &&
+                previous.input.signal === input.signal &&
                 previous.input.targetWidth === input.targetWidth &&
                 previous.language === language &&
                 previous.input.path === input.path;
@@ -436,6 +443,23 @@ export function createCodeStreamStore(): CodeStreamStore {
 
             entries.delete(input.key);
             entries.set(input.key, entry);
+
+            const retire = (): void => {
+                if (entries.get(entry.input.key) === entry) entries.delete(entry.input.key);
+                entry.controller.abort();
+            };
+
+            input.signal?.addEventListener("abort", retire, {
+                once: true,
+                signal: entry.controller.signal,
+            });
+
+            // An earlier owner's cancellation may synchronously retire this source
+            // while get() replaces its entry. Do not miss an already-fired abort.
+            if (sourceAborted(input)) {
+                retire();
+                return "";
+            }
 
             while (entries.size > MAX_SCRIPT_PREVIEW_ENTRIES) {
                 const oldest = entries.keys().next().value;
