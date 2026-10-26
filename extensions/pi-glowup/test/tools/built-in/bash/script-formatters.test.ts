@@ -268,6 +268,7 @@ describe("script formatter settings", () => {
             expect.objectContaining({ language: "javascript", outcome: "missing-executable" }),
             expect.objectContaining({ language: "ruby", outcome: "no-profile" }),
         ]);
+
         // stderr goes only to the private log, never to user-facing warnings.
         expect(warnings.join("\n")).not.toContain("formatter detail");
 
@@ -471,6 +472,64 @@ describe("script formatter settings", () => {
         await expect(formatScriptInvocation(invocation, emptyFormatter)).resolves.toEqual(
             invocation,
         );
+    });
+
+    // Failure matrix: bursts must drain, duplicate requests share work, and one
+    // consumer abort must not cancel another consumer or leak a queue permit.
+    it("drains formatter bursts without dropping requests beyond the active slots", async () => {
+        const formatter = createCommandScriptFormatter(
+            parseScriptFormatterCommandsValue({
+                javascript: {
+                    kind: "command",
+                    command: [
+                        process.execPath,
+                        "-e",
+                        "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(s+';'))",
+                    ],
+                },
+            }),
+        );
+        const results = await Promise.all(
+            Array.from({ length: 32 }, async (_, index) =>
+                formatScriptInvocation(
+                    { label: "Node", language: "javascript", code: `value${index}` },
+                    formatter,
+                ),
+            ),
+        );
+        expect(results.map((result) => result.code)).toEqual(
+            Array.from({ length: 32 }, (_, index) => `value${index};`),
+        );
+        await vi.waitUntil(() => getScriptFormatterWorkload().active === 0);
+        expect(getScriptFormatterWorkload().queued).toBe(0);
+    });
+
+    it("keeps shared formatting alive when only one consumer cancels", async () => {
+        const formatter = createCommandScriptFormatter(
+            parseScriptFormatterCommandsValue({
+                javascript: {
+                    kind: "command",
+                    command: [
+                        process.execPath,
+                        "-e",
+                        "process.stdin.resume();process.stdin.on('end',()=>setTimeout(()=>process.stdout.write(String(process.pid)),30))",
+                    ],
+                },
+            }),
+        );
+        if (formatter === undefined) throw new Error("Expected formatter");
+
+        const input = { label: "Node", language: "javascript", code: "const value=1;" };
+        const controller = new AbortController();
+        const cancelled = formatter(input, { signal: controller.signal });
+        const retained = formatter(input);
+        const duplicate = formatter(input);
+        controller.abort();
+        expect(await cancelled).toBeUndefined();
+        const output = await retained;
+        expect(output).toMatch(/^\d+$/u);
+        expect(await duplicate).toBe(output);
+        expect(await formatter(input)).toBe(output);
     });
 
     it("does not start command formatters after cancellation", async () => {
@@ -700,12 +759,12 @@ describe("script formatter settings", () => {
         for (const code of ["one", "two", "three", "four"]) {
             const invocation = { label: "Python", language: "python", code };
 
-            // Both misses happen before the first await; each caller retains independent work.
+            // Both misses happen before the first await and share one formatter job.
             const results = await Promise.all([
                 formatScriptInvocation(invocation, formatter),
                 formatScriptInvocation(invocation, formatter),
             ]);
-            expect(results[0].code).not.toBe(results[1].code);
+            expect(results[0].code).toBe(results[1].code);
 
             for (const result of results) expect(result.code).toMatch(/^\d+:é+$/u);
             const cached = await formatScriptInvocation(invocation, formatter);
@@ -744,7 +803,7 @@ describe("script formatter settings", () => {
             formatScriptInvocation(invocation, formatter),
         ]);
 
-        expect(first.code).not.toBe(second.code);
+        expect(first.code).toBe(second.code);
         expect([first.code, second.code]).toContain(queued.code);
     });
 
@@ -1001,6 +1060,7 @@ process.stdout.write(out + "\n");
         );
 
         expect([commented, defined]).toEqual([undefined, undefined]);
+
         // jqfmt drops definitions, so the program is never handed to it.
         expect(fake.calls()).toEqual([]);
     });
