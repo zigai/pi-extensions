@@ -99,6 +99,150 @@ describe("syntax highlighter lifecycle", () => {
         await disposeSyntaxHighlighting();
     });
 
+    it.each([initializeSyntaxHighlighting, refreshSyntaxHighlighting])(
+        "colors every direct request made before initialization with %s",
+        async (initialize) => {
+            const sources = ['print("first")', 'print("second")'];
+            const rendered: string[][] = [];
+            const redraws = sources.map((source, index) => () => {
+                rendered[index] = highlightSyntaxCode(source, "python", {
+                    invalidate: redraws[index],
+                });
+            });
+            for (const redraw of redraws) redraw();
+            expect(rendered).toEqual(sources.map((source) => [source]));
+
+            await initialize({}, { preloadLanguages: ["python"] });
+            await settleSyntaxHighlights();
+
+            expect(rendered.every((lines) => lines.join("\n").includes("\u001b["))).toBe(true);
+            expect(rendered.map((lines) => lines.map(stripVTControlCharacters).join("\n"))).toEqual(
+                sources,
+            );
+        },
+    );
+
+    it("loads a direct request's missing language once and colors every waiting owner", async () => {
+        let releaseLoad: (() => void) | undefined;
+        let loads = 0;
+        const blocked = new Promise<void>((resolve) => {
+            releaseLoad = resolve;
+        });
+        await initializeSyntaxHighlighting(
+            {},
+            {
+                createHighlighter: async () =>
+                    fakeHighlighter({
+                        loadedLanguages: ["markdown"],
+                        async loadLanguage() {
+                            loads += 1;
+                            await blocked;
+                        },
+                    }),
+            },
+        );
+        const invalidations = [0, 0];
+        const redraws = invalidations.map((_count, index) => () => {
+            invalidations[index] = (invalidations[index] ?? 0) + 1;
+        });
+        highlightSyntaxCode('const first = "one";', "javascript", { invalidate: redraws[0] });
+        await highlightSyntaxCodeAsync('const second = "two";', "javascript", {
+            invalidate: redraws[1],
+        });
+        expect(loads).toBe(1);
+        releaseLoad?.();
+        await settleSyntaxHighlights();
+        expect(invalidations).toEqual([1, 1]);
+        for (const [index, code] of ['const first = "one";', 'const second = "two";'].entries())
+            expect(
+                highlightSyntaxCode(code, "javascript", { invalidate: redraws[index] }).join("\n"),
+            ).toContain("\u001b[");
+    });
+
+    it("rejects superseded and aborted readiness requests without losing current owners", async () => {
+        let obsoleteInvalidations = 0;
+        const obsolete = () => {
+            obsoleteInvalidations += 1;
+        };
+        const controller = new AbortController();
+        let abortedInvalidations = 0;
+        highlightSyntaxCode('print("obsolete")', "python", { invalidate: obsolete });
+        observeSyntaxHighlightSource("replacement", obsolete);
+        highlightSyntaxCode('print("aborted")', "python", {
+            signal: controller.signal,
+            invalidate: () => {
+                abortedInvalidations += 1;
+            },
+        });
+        controller.abort();
+        let currentInvalidations = 0;
+        highlightSyntaxCode('print("current")', "python", {
+            invalidate: () => {
+                currentInvalidations += 1;
+            },
+        });
+        await refreshSyntaxHighlighting({}, { preloadLanguages: [] });
+        await settleSyntaxHighlights();
+        expect(obsoleteInvalidations).toBe(0);
+        expect(abortedInvalidations).toBe(0);
+        expect(currentInvalidations).toBe(1);
+    });
+
+    it("drops disposed readiness requests before a new initialization", async () => {
+        let invalidations = 0;
+        highlightSyntaxCode('print("old")', "python", {
+            invalidate: () => {
+                invalidations += 1;
+            },
+        });
+        await disposeSyntaxHighlighting();
+        await initializeSyntaxHighlighting({}, { preloadLanguages: ["python"] });
+        await settleSyntaxHighlights();
+        expect(invalidations).toBe(0);
+    });
+
+    it("does not let a broken readiness invalidation prevent other previews from coloring", async () => {
+        scheduleCodeOutputSyntaxLoad({ language: "python" }, () => {
+            throw new Error("invalid component");
+        });
+        let invalidations = 0;
+        highlightSyntaxCode('print("current")', "python", {
+            invalidate: () => {
+                invalidations += 1;
+            },
+        });
+        await initializeSyntaxHighlighting({}, { preloadLanguages: ["python"] });
+        await settleSyntaxHighlights();
+        expect(invalidations).toBe(1);
+    });
+
+    it.each(["python", "javascript"])(
+        "colors a completed standalone %s preview initially rendered before startup",
+        async (language) => {
+            let code = 'console.log("ready");';
+            if (language === "python") code = 'print("ready")';
+            let invalidations = 0;
+            const component = renderScriptCall(
+                plainTheme,
+                { label: "Code", language, code },
+                {
+                    state: "success",
+                    expanded: false,
+                    invalidate: () => {
+                        invalidations += 1;
+                    },
+                },
+            );
+            expect(codeText(component.render(120))).not.toContain("\u001b[");
+            await refreshSyntaxHighlighting({}, { preloadLanguages: [] });
+            await settleSyntaxHighlights();
+            expect(invalidations).toBeGreaterThan(0);
+            const colored = codeText(component.render(120));
+            expect(colored).toContain("\u001b[");
+            expect(stripVTControlCharacters(colored)).toContain(code);
+        },
+    );
+
     it.each(["preserve", "always"] as const)(
         "keeps restored Bash syntax settled across shared-cache eviction in %s layout",
         async (shellLayout) => {

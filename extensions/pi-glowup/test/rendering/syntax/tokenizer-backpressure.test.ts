@@ -88,3 +88,40 @@ it("does not let a broken invalidation prevent other owners from retrying", asyn
         await worker.dispose();
     }
 });
+
+it("waits for capacity for async callers without a redraw callback", async () => {
+    const worker = tokenizer();
+    try {
+        const first = worker.compactPython("first = 1");
+        const second = worker.compactPython("second = 2");
+        expect(await first).toEqual(["first = 1"]);
+        expect(await second).toEqual(["second = 2"]);
+    } finally {
+        await worker.dispose();
+    }
+});
+
+it("cancels capacity waits without losing later work", async () => {
+    const worker = tokenizer();
+    const controller = new AbortController();
+    try {
+        const first = worker.compactPython("first = 1");
+        const cancelled = worker.compactPython("cancelled = 2", { signal: controller.signal });
+        const later = worker.compactPython("later = 3");
+        controller.abort();
+        expect(await cancelled).toBeUndefined();
+        expect(await first).toBeDefined();
+        expect(await later).toEqual(["later = 3"]);
+    } finally {
+        await worker.dispose();
+    }
+});
+
+it("settles async capacity waits on disposal", async () => {
+    const worker = tokenizer();
+    const first = worker.compactPython("first = 1");
+    const second = worker.compactPython("second = 2");
+    await worker.dispose();
+    expect(await first).toBeUndefined();
+    expect(await second).toBeUndefined();
+});
