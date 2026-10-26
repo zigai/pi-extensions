@@ -62,11 +62,37 @@ type RendererPatchWrappers = {
 };
 
 type RenderSlot = "call" | "result";
+type RendererCallback = ToolCallRenderer | ToolResultRenderer;
+type RendererOwner = RendererCallback | ThirdPartyToolRenderer;
+
+type NativeRender = {
+    readonly owner: RendererOwner;
+    readonly component: Component;
+};
 
 type CompletedRender = {
     readonly component: Component;
     readonly signature: readonly unknown[];
+    readonly definition: PiRendererDefinition | undefined;
+    readonly fallback: { readonly owner: RendererOwner | undefined } | undefined;
 };
+
+// Getter wrappers are transient; their persistent renderer owns reusable components.
+const rendererOwners = new WeakMap<RendererCallback, ThirdPartyToolRenderer>();
+
+function withRendererOwner<T extends RendererCallback>(
+    callback: T,
+    owner: ThirdPartyToolRenderer,
+): T {
+    rendererOwners.set(callback, owner);
+    return callback;
+}
+
+function rendererOwner(callback: RendererCallback | undefined): RendererOwner | undefined {
+    if (callback === undefined) return undefined;
+
+    return rendererOwners.get(callback) ?? callback;
+}
 
 type RenderInvalidation = {
     readonly invalidate: () => void;
@@ -480,12 +506,19 @@ function renderCompletedSlot(options: {
     readonly signature: readonly unknown[] | undefined;
     readonly invalidate: () => void;
     readonly cacheLines?: boolean;
-    readonly render: (invalidate: () => void) => Component;
+    readonly fallbackOwner?: RendererOwner | undefined;
+    readonly render: (invalidate: () => void, useFallback: () => void) => Component;
 }): Component {
+    const definition = options.instance.toolDefinition;
     const cached = options.cache.get(options.instance)?.[options.slot];
+
+    // Fallback availability can change without new arguments or results. Only delegated
+    // output depends on that callback; Glowup-owned output ignores unused native changes.
     if (
         options.signature !== undefined &&
         cached !== undefined &&
+        cached.definition === definition &&
+        (cached.fallback === undefined || cached.fallback.owner === options.fallbackOwner) &&
         sameRenderSignature(cached.signature, options.signature)
     ) {
         return cached.component;
@@ -499,7 +532,10 @@ function renderCompletedSlot(options: {
         options.slot,
         options.invalidate,
     );
-    const rendered = options.render(invalidation.invalidate);
+    let fallback: CompletedRender["fallback"];
+    const rendered = options.render(invalidation.invalidate, () => {
+        fallback = { owner: options.fallbackOwner };
+    });
     invalidation.rendered = rendered;
 
     if (options.signature === undefined) {
@@ -513,7 +549,7 @@ function renderCompletedSlot(options: {
 
     const slots = options.cache.get(options.instance);
     if (slots !== undefined) {
-        slots[options.slot] = { component, signature: options.signature };
+        slots[options.slot] = { component, signature: options.signature, definition, fallback };
     }
 
     return component;
@@ -775,18 +811,25 @@ export function configureBuiltInToolRendererPatch(
     // The host retains our outer wrapper, not the component returned by the fallback.
     const originalComponents = new WeakMap<
         ToolExecutionInstance,
-        Partial<Record<RenderSlot, Component>>
+        Partial<Record<RenderSlot, NativeRender>>
     >();
     const renderOriginal = (
         row: ToolExecutionInstance,
         slot: RenderSlot,
+        owner: RendererOwner | undefined,
         render: (previous: Component | undefined) => Component | undefined,
     ): Component | undefined => {
         const slots = originalComponents.get(row) ?? {};
-        const component = render(slots[slot]);
-        if (component !== undefined) {
-            slots[slot] = component;
+        const previous = slots[slot];
+        let lastComponent: Component | undefined;
+        if (previous !== undefined && previous.owner === owner) lastComponent = previous.component;
+
+        const component = render(lastComponent);
+        if (component !== undefined && owner !== undefined) {
+            slots[slot] = { owner, component };
             originalComponents.set(row, slots);
+        } else {
+            delete slots[slot];
         }
 
         return component;
@@ -809,7 +852,9 @@ export function configureBuiltInToolRendererPatch(
                 return originalRenderer;
             }
 
+            const originalOwner = rendererOwner(originalRenderer);
             const result = currentToolResult(this);
+
             return (args: ToolCallArguments, theme: Theme, context: BuiltInToolRenderContext) => {
                 const restoredContext = restoredCallRenderContext(
                     context,
@@ -824,7 +869,8 @@ export function configureBuiltInToolRendererPatch(
                     signature: completedCallSignature(args, theme, restoredContext),
                     invalidate: context.invalidate,
                     cacheLines: shouldCacheCompletedLines(toolName),
-                    render: (invalidate) => {
+                    fallbackOwner: originalOwner,
+                    render: (invalidate, useFallback) => {
                         const glowupContext = { ...restoredContext, invalidate };
                         const rendered = state.renderingOptions.renderCall(
                             toolName,
@@ -833,16 +879,18 @@ export function configureBuiltInToolRendererPatch(
                             glowupContext,
                         );
 
+                        if (rendered !== undefined) return rendered;
+
+                        useFallback();
+
                         return (
-                            rendered ??
-                            renderOriginal(this, "call", (lastComponent) =>
+                            renderOriginal(this, "call", originalOwner, (lastComponent) =>
                                 originalRenderer?.(args, theme, {
                                     ...context,
                                     invalidate,
                                     lastComponent,
                                 }),
-                            ) ??
-                            emptyComponent()
+                            ) ?? emptyComponent()
                         );
                     },
                 });
@@ -857,6 +905,7 @@ export function configureBuiltInToolRendererPatch(
                 return originalRenderer;
             }
 
+            const originalOwner = rendererOwner(originalRenderer);
             return (
                 result: AgentToolResult<unknown>,
                 renderOptions: ToolRenderResultOptions,
@@ -870,24 +919,28 @@ export function configureBuiltInToolRendererPatch(
                     signature: completedResultSignature(result, renderOptions, theme, context),
                     invalidate: context.invalidate,
                     cacheLines: shouldCacheCompletedLines(toolName),
-                    render: (invalidate) => {
+                    fallbackOwner: originalOwner,
+                    render: (invalidate, useFallback) => {
                         const renderContext = { ...context, invalidate };
 
+                        const rendered = state.renderingOptions.renderResult(
+                            toolName,
+                            result,
+                            renderOptions,
+                            theme,
+                            renderContext,
+                        );
+                        if (rendered !== undefined) return rendered;
+
+                        useFallback();
+
                         return (
-                            state.renderingOptions.renderResult(
-                                toolName,
-                                result,
-                                renderOptions,
-                                theme,
-                                renderContext,
-                            ) ??
-                            renderOriginal(this, "result", (lastComponent) =>
+                            renderOriginal(this, "result", originalOwner, (lastComponent) =>
                                 originalRenderer?.(result, renderOptions, theme, {
                                     ...renderContext,
                                     lastComponent,
                                 }),
-                            ) ??
-                            emptyComponent()
+                            ) ?? emptyComponent()
                         );
                     },
                 });
@@ -1099,7 +1152,7 @@ export function configureThirdPartyToolRendererPatch(
                     const result = currentToolResult(this);
                     const toolName = instanceToolName(this) ?? "tool";
 
-                    return (
+                    const callback = (
                         args: ToolCallArguments,
                         theme: Theme,
                         context: BuiltInToolRenderContext,
@@ -1129,6 +1182,8 @@ export function configureThirdPartyToolRendererPatch(
                             },
                         });
                     };
+
+                    return withRendererOwner(callback, renderer);
                 }
             }
 
@@ -1162,7 +1217,7 @@ export function configureThirdPartyToolRendererPatch(
                     return undefined;
                 }
 
-                return (
+                const callback = (
                     result: ThirdPartyToolResult,
                     renderOptions: ToolRenderResultOptions,
                     theme: Theme,
@@ -1201,6 +1256,8 @@ export function configureThirdPartyToolRendererPatch(
                         },
                     });
                 };
+
+                return withRendererOwner(callback, renderer);
             }
 
             return originalGetResultRenderer?.call(this);
