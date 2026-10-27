@@ -144,6 +144,7 @@ type HighlightOwner = {
             readonly code: string;
             readonly language: string | undefined;
             readonly options: SyntaxHighlightOptions;
+            readonly version: number;
         }
     >;
     readonly pending: Map<string, Promise<string[]>>;
@@ -253,7 +254,7 @@ async function replaceSyntaxHighlighting(
             return disposedSyntaxState(state.config);
         }
 
-        clearSyntaxHighlightCache();
+        clearSyntaxColors();
         languageLoads.clear();
         syntaxState = state;
         activeConfigurationKey = configurationKey;
@@ -522,12 +523,14 @@ export function observeSyntaxHighlightSource(
                         return;
                     const requests = [...owner.capacityRequests.values()];
                     owner.capacityRequests.clear();
-                    for (const request of requests)
+                    for (const request of requests) {
+                        if (request.version !== syntaxRenderingVersion) continue;
                         void highlightSyntaxCodeAsync(
                             request.code,
                             request.language,
                             request.options,
                         );
+                    }
                 })
                 .finally(() => {
                     activeHighlights.delete(retry);
@@ -656,7 +659,7 @@ export async function highlightSyntaxCodeAsync(
             unavailable = { reason };
             if (error !== undefined) unavailable.error = error;
             if (reason === "backpressure")
-                owner?.capacityRequests.set(key, { code, language, options });
+                owner?.capacityRequests.set(key, { code, language, options, version: generation });
         };
 
         const record = (outcome: SyntaxHighlightOutcome, error?: string): void =>
@@ -849,6 +852,14 @@ async function loadSyntaxLanguage(
 }
 
 export function clearSyntaxHighlightCache(): void {
+    clearSyntaxColors();
+    highlightOwners = new WeakMap();
+    readinessRetries.clear();
+    registeredReadinessRetries.clear();
+}
+
+/** Installation preserves source identity and readiness waiters; explicit clearing cancels them. */
+function clearSyntaxColors(): void {
     syntaxRenderingVersion += 1;
 
     for (const controller of highlightControllers) controller.abort();
@@ -919,9 +930,6 @@ export function syntaxHighlighterDiagnostics(): SyntaxHighlighterDiagnostics {
 /** Disposes the central highlighter and resets syntax state for reloads or shutdown. */
 export async function disposeSyntaxHighlighting(): Promise<void> {
     clearSyntaxHighlightCache();
-    highlightOwners = new WeakMap();
-    readinessRetries.clear();
-    registeredReadinessRetries.clear();
     languageLoads.clear();
     syntaxGeneration += 1;
 

@@ -243,6 +243,83 @@ describe("syntax highlighter lifecycle", () => {
         },
     );
 
+    it.each([initializeSyntaxHighlighting, refreshSyntaxHighlighting])(
+        "does not revive readiness work explicitly cleared before initialization with %s",
+        async (initialize) => {
+            let invalidations = 0;
+            const invalidate = () => {
+                invalidations += 1;
+            };
+            const source = 'print("owned")';
+            highlightSyntaxCode(source, "python", { invalidate });
+            clearSyntaxHighlightCache();
+            await initialize({}, { preloadLanguages: ["python"] });
+            await settleSyntaxHighlights();
+            expect(invalidations).toBe(0);
+            expect(syntaxHighlightCacheStats()).toEqual({ entries: 0, bytes: 0 });
+
+            highlightSyntaxCode(source, "python", { invalidate });
+            await settleSyntaxHighlights();
+            expect(invalidations).toBe(1);
+        },
+    );
+
+    it("does not revive readiness work cleared while a language is loading", async () => {
+        await initializeSyntaxHighlighting({}, { preloadLanguages: [] });
+        let invalidations = 0;
+        const invalidate = () => {
+            invalidations += 1;
+        };
+        const source = 'print("owned")';
+        highlightSyntaxCode(source, "python", { invalidate });
+        clearSyntaxHighlightCache();
+        await settleSyntaxHighlights();
+        expect(invalidations).toBe(0);
+        expect(syntaxHighlightCacheStats()).toEqual({ entries: 0, bytes: 0 });
+
+        highlightSyntaxCode(source, "python", { invalidate });
+        await settleSyntaxHighlights();
+        expect(invalidations).toBe(1);
+    });
+
+    it("does not resubmit old capacity work when replacement preserves the source owner", async () => {
+        await initializeSyntaxHighlighting({}, { preloadLanguages: ["python"] });
+        const replacement = await fakeHighlighter({ loadedLanguages: ["python"] });
+        let invalidations = 0;
+        const invalidate = () => {
+            invalidations += 1;
+        };
+        const source = 'print("owned")';
+
+        await reinitializeSyntaxHighlighting(
+            {},
+            {
+                preloadLanguages: ["python"],
+                createHighlighter: async () => {
+                    const capacity = new AbortController();
+                    highlightSyntaxCode('print("accepted")', "python", { invalidate });
+                    highlightSyntaxCode('print("cancelled")', "python", {
+                        signal: capacity.signal,
+                    });
+                    for (let index = 0; index < 98; index += 1)
+                        highlightSyntaxCode(`print("occupied_${index}")`, "python");
+                    highlightSyntaxCode(source, "python", { invalidate });
+                    capacity.abort();
+                    // Deliver the retry while its owner's accepted request still occupies a slot.
+                    await Promise.resolve();
+                    return replacement;
+                },
+            },
+        );
+        await settleSyntaxHighlights();
+        expect(invalidations).toBe(0);
+        expect(syntaxHighlightCacheStats()).toEqual({ entries: 0, bytes: 0 });
+
+        highlightSyntaxCode(source, "python", { invalidate });
+        await settleSyntaxHighlights();
+        expect(invalidations).toBe(1);
+    });
+
     it.each(["preserve", "always"] as const)(
         "keeps restored Bash syntax settled across shared-cache eviction in %s layout",
         async (shellLayout) => {

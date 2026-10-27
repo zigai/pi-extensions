@@ -4,11 +4,13 @@ import { createPlainTheme } from "../../support/plain-theme.ts";
 import { VirtualTerminal } from "../../support/virtual-terminal.ts";
 import { afterEach, expect, it } from "vitest";
 import {
+    clearSyntaxHighlightCache,
     disposeSyntaxHighlighting,
     highlightSyntaxCode,
     initializeSyntaxHighlighting,
     observeSyntaxHighlightSource,
     settleSyntaxHighlights,
+    syntaxHighlightCacheStats,
 } from "../../../src/rendering/syntax/highlighter.ts";
 
 afterEach(async () => {
@@ -126,4 +128,26 @@ it("colors the last real script preview after a restored history burst", async (
     } finally {
         terminal.dispose();
     }
+});
+
+it("does not resubmit backpressured work after an explicit cache clear", async () => {
+    await initializeSyntaxHighlighting({}, { preloadLanguages: ["python"] });
+    for (let index = 0; index < 100; index += 1)
+        highlightSyntaxCode(`print("occupied_${index}")`, "python");
+
+    let invalidations = 0;
+    const invalidate = () => {
+        invalidations += 1;
+    };
+    const source = 'print("owned")';
+    highlightSyntaxCode(source, "python", { invalidate });
+    clearSyntaxHighlightCache();
+    await settleSyntaxHighlights();
+    expect(invalidations).toBe(0);
+    expect(syntaxHighlightCacheStats()).toEqual({ entries: 0, bytes: 0 });
+
+    highlightSyntaxCode(source, "python", { invalidate });
+    await settleSyntaxHighlights();
+    expect(invalidations).toBe(1);
+    expect(highlightSyntaxCode(source, "python", { invalidate }).join("\n")).toContain("\u001b[");
 });
