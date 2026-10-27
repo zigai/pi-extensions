@@ -523,14 +523,14 @@ export function observeSyntaxHighlightSource(
                         return;
                     const requests = [...owner.capacityRequests.values()];
                     owner.capacityRequests.clear();
+                    let adopted = false;
                     for (const request of requests) {
                         if (request.version !== syntaxRenderingVersion) continue;
-                        void highlightSyntaxCodeAsync(
-                            request.code,
-                            request.language,
-                            request.options,
-                        );
+                        adopted =
+                            retrySyntaxHighlight(request.code, request.language, request.options) ||
+                            adopted;
                     }
+                    if (adopted) notifySyntaxInvalidation(invalidate);
                 })
                 .finally(() => {
                     activeHighlights.delete(retry);
@@ -545,17 +545,47 @@ export function observeSyntaxHighlightSource(
             const requests = owner.readyRequests.get(language);
             owner.readyRequests.delete(language);
             if (requests === undefined) return;
+            let adopted = false;
             for (const [code, options] of requests) {
                 if (options.signal?.aborted === true) continue;
-                if (code === undefined) notifySyntaxInvalidation(invalidate);
-                else void highlightSyntaxCodeAsync(code, language, { ...options, invalidate });
+                if (code === undefined) adopted = true;
+                else
+                    adopted =
+                        retrySyntaxHighlight(code, language, { ...options, invalidate }) || adopted;
             }
+            if (adopted) notifySyntaxInvalidation(invalidate);
         },
         pending: new Map(),
     };
     highlightOwners.set(invalidate, owner);
 
     return () => highlightOwners.get(invalidate) === owner;
+}
+
+// Worker completion already invalidates its owner. A retry can instead adopt an existing
+// result synchronously, so its caller must invalidate any lines cached while work was pending.
+function retrySyntaxHighlight(
+    code: string,
+    language: string | undefined,
+    options: SyntaxHighlightOptions,
+): boolean {
+    const state = syntaxState;
+    const normalizedLanguage = normalizeSyntaxLanguage(language);
+    const owner = currentHighlightOwner(options.invalidate);
+    let key: string | undefined;
+    if (state?.status === "ready" && normalizedLanguage !== undefined)
+        key = highlightedCodeCacheKey(
+            state.theme.name,
+            normalizedLanguage,
+            code,
+            Buffer.byteLength(code, "utf8"),
+        );
+    let previous: HighlightedSource | undefined;
+    if (key !== undefined) previous = owner?.results.get(key);
+    void highlightSyntaxCodeAsync(code, language, options);
+    let adopted: HighlightedSource | undefined;
+    if (key !== undefined) adopted = owner?.results.get(key);
+    return adopted !== undefined && adopted !== previous;
 }
 
 export async function compactPythonStructuralBlankRows(

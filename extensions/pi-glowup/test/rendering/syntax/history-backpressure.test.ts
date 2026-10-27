@@ -1,4 +1,6 @@
 import type { Component } from "@earendil-works/pi-tui";
+import { makeComponent } from "../../../src/rendering/component.ts";
+import { createSyntaxComponent } from "../../../src/rendering/syntax/component-owner.ts";
 import { renderScriptCall } from "../../../src/tools/built-in/bash/script-renderer.ts";
 import { createPlainTheme } from "../../support/plain-theme.ts";
 import { VirtualTerminal } from "../../support/virtual-terminal.ts";
@@ -7,6 +9,7 @@ import {
     clearSyntaxHighlightCache,
     disposeSyntaxHighlighting,
     highlightSyntaxCode,
+    highlightSyntaxCodeAsync,
     initializeSyntaxHighlighting,
     observeSyntaxHighlightSource,
     settleSyntaxHighlights,
@@ -150,4 +153,53 @@ it("does not resubmit backpressured work after an explicit cache clear", async (
     await settleSyntaxHighlights();
     expect(invalidations).toBe(1);
     expect(highlightSyntaxCode(source, "python", { invalidate }).join("\n")).toContain("\u001b[");
+});
+
+it("invalidates cached script rows when a capacity retry adopts another consumer's colors", async () => {
+    await initializeSyntaxHighlighting({}, { preloadLanguages: ["python"] });
+    const source = "values = [1, 2, 3]\nprint(sum(values))";
+    // The other consumer wins the shared cache while this renderer waits for capacity.
+    const other = highlightSyntaxCodeAsync(source, "python");
+    for (let index = 0; index < 98; index += 1)
+        highlightSyntaxCode(`print("occupied_${index}")`, "python");
+
+    const superseded = new AbortController();
+    let invalidations = 0;
+    const previous = createSyntaxComponent(
+        undefined,
+        () => {
+            invalidations += 1;
+        },
+        (invalidate) => {
+            observeSyntaxHighlightSource(source, invalidate);
+            // One owner may have separate full-source and visible-run requests.
+            highlightSyntaxCode('print("retired_run")', "python", {
+                invalidate,
+                signal: superseded.signal,
+            });
+            return makeComponent(() => []);
+        },
+    );
+    const component = renderScriptCall(
+        createPlainTheme(),
+        { label: "Python", language: "python", launcher: "python -c", code: source },
+        {
+            state: "success",
+            expanded: false,
+            lastComponent: previous,
+            invalidate: () => {
+                invalidations += 1;
+            },
+        },
+    );
+    expect(component.render(80).slice(1).join("\n")).not.toContain("\u001b[");
+    expect((await other).join("\n")).toContain("\u001b[");
+    superseded.abort();
+    await settleSyntaxHighlights();
+
+    // No resize, expansion toggle or forced invalidate: the original width must repaint.
+    const body = component.render(80).slice(1);
+    expect(body).toHaveLength(2);
+    expect(body.every((line) => line.includes("\u001b[38;2;"))).toBe(true);
+    expect(invalidations).toBe(1);
 });

@@ -32,6 +32,7 @@ import { getGlowupGlobalConfigPath } from "../../src/config/load.ts";
 import { buildPierreDiffPayload } from "../../src/rendering/diff/payload.ts";
 import {
     initializeSyntaxHighlighting,
+    highlightSyntaxCode,
     loadSyntaxLanguageIfReady,
     onSyntaxHighlightComplete,
     settleSyntaxHighlights,
@@ -698,6 +699,105 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
         pendingTerminal.assertNoWrappedRows();
         pendingTerminal.assertRowsFitWidth();
     });
+
+    it.each(["stationary", "measured"])(
+        "recovers completed formatted Python colors at the same narrow width (%s)",
+        async (driving) => {
+            await installExtension({
+                streaming: { prose: "paragraph", code: "statement" },
+                scriptPreview: {
+                    formatters: {
+                        python: {
+                            kind: "command",
+                            command: [
+                                process.execPath,
+                                "-e",
+                                "let source='';process.stdin.on('data',chunk=>source+=chunk);process.stdin.on('end',()=>process.stdout.write(Number(process.argv[1])<100?source.replace(/(replacements = \\{)(.*)(\\})/,(_all,head,body,tail)=>head+'\\n    '+body.replaceAll(', ',',\\n    ')+'\\n'+tail):source));",
+                                "{width}",
+                            ],
+                        },
+                    },
+                },
+            });
+            await initializeSyntaxHighlighting(process.env, {
+                preloadLanguages: ["bash", "python"],
+            });
+            for (let index = 0; index < 140; index += 1)
+                highlightSyntaxCode(`print("invented_history_${index}")`, "python");
+            let initialColumns = 80;
+            if (driving === "measured") initialColumns = 200;
+            const pendingTerminal = new VirtualTerminal(initialColumns, 40);
+            const activeTui = createTui(pendingTerminal);
+            const source = [
+                "from pathlib import Path",
+                "",
+                'replacements = {"first/invented/template.py": "alpha", "second/invented/template.py": "beta", "third/invented/template.py": "gamma"}',
+                "for filename, label in replacements.items():",
+                "    path = Path(filename)",
+                "    text = path.read_text()",
+                '    text = text.replace("old value", label)',
+                "    path.write_text(text)",
+                'print("finished")',
+            ].join("\n");
+            const command = `python3 - <<'PY'\n${source}\nPY`;
+            const tool = new ToolExecutionComponent(
+                "bash",
+                "invented-narrow-recovery",
+                { command },
+                undefined,
+                createBashToolDefinition(cwd),
+                activeTui,
+                cwd,
+            );
+            tool.setArgsComplete();
+            tool.updateResult({ content: [], isError: false });
+            terminal = pendingTerminal;
+            tui = activeTui;
+            activeTui.addChild(new LinesComponent(["BEFORE_NARROW_RECOVERY"]));
+            activeTui.addChild(tool);
+            activeTui.addChild(new LinesComponent(["AFTER_NARROW_RECOVERY"]));
+            activeTui.start();
+
+            for (const expanded of [false, true, false]) {
+                tool.setExpanded(expanded);
+                for (const columns of [80, 120, 200, 80]) {
+                    let terminalColumns = columns;
+                    if (driving === "measured") terminalColumns = 200;
+                    pendingTerminal.resize(terminalColumns, 40);
+                    for (let pass = 0; pass < 3; pass += 1) {
+                        tool.render(columns);
+                        await pendingTerminal.settle();
+                        await presentGlowupSnapshot({
+                            key: "xterm:narrow-recovery-barrier",
+                            kind: "prose",
+                            source: "",
+                            complete: true,
+                        });
+                        await vi.waitUntil(() => getScriptFormatterWorkload().active === 0);
+                        await settleSyntaxHighlights();
+                        // A repaint must not need a forced tool/component invalidation to get colors.
+                        activeTui.requestRender();
+                    }
+                    await pendingTerminal.settle();
+                    const raw = tool.render(columns);
+                    const code = "replacements = {";
+                    const measuredRow = raw.find((line) =>
+                        stripVTControlCharacters(line).includes(code),
+                    );
+                    expect(measuredRow).toMatch(/\u001b\[38;2;/u);
+                    const row = pendingTerminal.requireRowContaining(code);
+                    expect(codeForegrounds(row, code).size).toBeGreaterThan(1);
+                    expect(codeForegrounds(row, code)).not.toContain("default");
+                    pendingTerminal.assertUniqueTranscriptMarkers(
+                        "$ python3 - <<'PY'",
+                        "BEFORE_NARROW_RECOVERY",
+                        "AFTER_NARROW_RECOVERY",
+                    );
+                    pendingTerminal.assertRowsFitWidth();
+                }
+            }
+        },
+    );
 
     it("renders completed Python blocks through completion, expansion and resize", async () => {
         await installExtension({
