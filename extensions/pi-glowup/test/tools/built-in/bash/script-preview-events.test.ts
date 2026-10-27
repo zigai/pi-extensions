@@ -33,6 +33,7 @@ import {
     settleSyntaxHighlights,
 } from "../../../../src/rendering/syntax/highlighter.ts";
 import { createStreamingPresentation } from "../../../../src/rendering/streaming/content-presentation.ts";
+import type { CodePreview } from "../../../../src/rendering/streaming/presentation.ts";
 import {
     presentGlowupContent,
     registerGlowupStreamingPolicy,
@@ -53,6 +54,96 @@ class RecordingPreviewSink {
 }
 
 describe("script preview events", () => {
+    // Expanded completed scripts must retain their full source even when only another
+    // language has a formatter. Collapsed previews remain short, and completion must
+    // retire the live preview rather than sending finished calls through it again.
+    it.each([
+        { interpreter: "ruby", language: "ruby", mode: "block" as const },
+        { interpreter: "perl", language: "perl", mode: "statement" as const },
+    ])(
+        "preserves the expanded $language tail after $mode completion without a profile",
+        async ({ interpreter, language, mode }) => {
+            const profiles = parseScriptFormatterCommandsValue({
+                javascript: { kind: "command", command: ["unused"] },
+            });
+            const formatter = Object.assign(
+                vi.fn<ScriptBlockFormatter>(async () => undefined),
+                {
+                    profileFor: (name: string) => profiles.get(name),
+                },
+            );
+            const bash = createNativeBashFeature(() => formatter);
+            const theme = new Theme(TEST_THEME_COLORS, TEST_THEME_BACKGROUND_COLORS, "truecolor");
+            const code = `${"# padding\n".repeat(8000)}print("TAIL_SENTINEL");`;
+            const command = `${interpreter} -e '${code}'`;
+            const store = createCodeStreamStore();
+            const streamCode = vi.fn<CodePreview>((input) =>
+                store.get({ ...input, mode, formatter }),
+            );
+            const context: BuiltInRenderContext = {
+                args: { command },
+                toolCallId: `unprofiled-${language}-${mode}`,
+                cwd: "/work",
+                lastComponent: undefined,
+                state: {},
+                executionStarted: false,
+                argsComplete: false,
+                isPartial: true,
+                expanded: false,
+                showImages: false,
+                isError: false,
+                durationMs: undefined,
+                outputPad: 1,
+                invalidate: () => {},
+            };
+            const render = (current: BuiltInRenderContext) =>
+                bash.renderBashCall(
+                    { command },
+                    theme,
+                    current,
+                    () => 8,
+                    () => false,
+                    () => "preserve",
+                    () => "trailing",
+                    streamCode,
+                );
+            try {
+                expect(Buffer.byteLength(code, "utf8")).toBeGreaterThan(64 * 1024);
+                expect(formatter.profileFor?.(language)).toBeUndefined();
+                const live = render(context);
+                expect(live.render(80).length).toBeLessThan(12);
+                const signal = streamCode.mock.calls[0]?.[0].signal;
+                expect(signal?.aborted).toBe(false);
+                const requests = streamCode.mock.calls.length;
+                const completedContext = { ...context, argsComplete: true, lastComponent: live };
+                const collapsed = render(completedContext);
+                expect(collapsed.render(80).length).toBeLessThan(12);
+                expect(signal?.aborted).toBe(true);
+                expect(formatter).toHaveBeenCalled();
+                expect(
+                    formatter.mock.calls.every(
+                        ([input, options]) =>
+                            input.code === code && options?.diagnostics?.stage === "block",
+                    ),
+                ).toBe(true);
+                const expanded = render({
+                    ...completedContext,
+                    expanded: true,
+                    lastComponent: collapsed,
+                });
+                const rows = expanded.render(80).map(stripVTControlCharacters);
+                expect(rows.filter((row) => row.trim() === "# padding")).toHaveLength(8000);
+                expect(rows.join("\n")).toContain("TAIL_SENTINEL");
+                expect(rows.join("\n")).not.toContain("preview truncated");
+                expect(streamCode).toHaveBeenCalledTimes(requests);
+                expect(context.args).toEqual({ command });
+            } finally {
+                bash.clear();
+                await store.dispose();
+            }
+        },
+    );
+
     // Completion must retire only its live owner: no extra statements, stale
     // invalidations, late rejection warnings or resurrection by retained components.
     it.each(["resolve", "reject", "clear"])(

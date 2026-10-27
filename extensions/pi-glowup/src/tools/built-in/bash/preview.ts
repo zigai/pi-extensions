@@ -374,7 +374,10 @@ export function createNativeBashFeature(
 
         return renderExpandableSection(context, "call", (expanded) => {
             let options = { ...bashOptions, expanded, lastComponent: previous };
-            if (expanded && profiled && parsedScript !== undefined) {
+
+            // Raw retained previews may be truncated even without a matching profile.
+            // Recover the source without replacing ready callback-only formatting.
+            if (expanded && parsedScript !== undefined && (profiled || scheduled?.ready !== true)) {
                 let expandedScript = parsedScript;
                 if (
                     scheduled?.completed === true &&
