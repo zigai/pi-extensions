@@ -67,6 +67,8 @@ type ScheduledPreview = {
 
 type StreamingScriptRenderState = {
     readonly toolCallId: string;
+    readonly signal: AbortSignal | undefined;
+    readonly invalidate: () => void;
     preview: Component | undefined;
 };
 
@@ -77,6 +79,7 @@ function renderStreamingScriptCall(
     theme: BuiltInRenderTheme,
     context: BuiltInRenderContext,
     streamCode: CodePreview,
+    signal: AbortSignal | undefined,
     options: Omit<BashCommandRenderOptions, "expanded">,
 ) {
     const { toolCallId, argsComplete, isError } = context;
@@ -87,20 +90,31 @@ function renderStreamingScriptCall(
             current,
             options.invalidate,
             (invalidate, previous) => {
-                let renderState: StreamingScriptRenderState = { toolCallId, preview: undefined };
+                let renderState: StreamingScriptRenderState = {
+                    toolCallId,
+                    signal,
+                    preview: undefined,
+                    invalidate: () => {
+                        if (signal?.aborted !== true) invalidate();
+                    },
+                };
                 if (previous !== undefined) {
                     const retained = streamingScriptRenderStates.get(previous);
-                    if (retained?.toolCallId === toolCallId) renderState = retained;
+                    if (retained?.toolCallId === toolCallId && retained.signal === signal)
+                        renderState = retained;
                 }
 
                 const component = makeComponent((width) => {
+                    if (signal?.aborted === true) return [];
+
                     const code = streamCode({
                         key: `tool:${toolCallId}:script:${invocation.language}`,
                         source: invocation.code,
                         language: invocation.language,
                         complete: argsComplete || isError,
                         targetWidth: Math.max(1, width - 6),
-                        invalidate,
+                        invalidate: renderState.invalidate,
+                        ...(signal !== undefined && { signal }),
                         toolCallId,
                     });
 
@@ -109,10 +123,11 @@ function renderStreamingScriptCall(
                     const preview = renderBashCommandCall(theme, code, {
                         ...options,
                         expanded,
-                        invalidate,
+                        invalidate: renderState.invalidate,
                         pureScriptOverride: { ...invocation, code },
                         lastComponent: renderState.preview,
                     });
+
                     renderState.preview = preview;
                     return preview.render(width);
                 });
@@ -147,6 +162,34 @@ export function createNativeBashFeature(
     const streamingScriptIdentities = new StreamingScriptIdentityStore();
     const bashRenderInvalidations = new Map<string, () => void>();
     const MAX_BASH_RENDER_INVALIDATIONS = 300;
+    const livePreviews = new Map<
+        string,
+        { readonly language: string; readonly controller: AbortController }
+    >();
+
+    function retireLivePreview(toolCallId: string): void {
+        const live = livePreviews.get(toolCallId);
+        livePreviews.delete(toolCallId);
+        live?.controller.abort();
+    }
+
+    function livePreviewSignal(toolCallId: string, language: string): AbortSignal {
+        let live = livePreviews.get(toolCallId);
+        if (live?.language === language) return live.controller.signal;
+
+        retireLivePreview(toolCallId);
+        live = { language, controller: new AbortController() };
+        livePreviews.set(toolCallId, live);
+
+        while (livePreviews.size > MAX_BASH_RENDER_INVALIDATIONS) {
+            const oldest = livePreviews.keys().next().value;
+            if (oldest === undefined) break;
+
+            retireLivePreview(oldest);
+        }
+
+        return live.controller.signal;
+    }
 
     function rememberBashRenderInvalidation(
         toolCallId: string,
@@ -181,6 +224,10 @@ export function createNativeBashFeature(
 
         const state = context.isError ? "error" : context.isPartial ? "running" : "success";
         const command = commandField(args) ?? "";
+
+        if (context.argsComplete || context.isError || streamCode === undefined)
+            retireLivePreview(context.toolCallId);
+
         if (context.argsComplete && renderDiagnosticsEnabled()) {
             // The completed preview records analysis after embedded decisions are known.
             const formatter =
@@ -212,8 +259,11 @@ export function createNativeBashFeature(
 
             const invocation = script ?? { label: "Bash", language: "bash", code: command };
             const profile = formatterAccessor?.()?.profileFor?.(invocation.language);
+            let signal: AbortSignal | undefined;
+            if (!context.argsComplete && !context.isError)
+                signal = livePreviewSignal(context.toolCallId, invocation.language);
 
-            return renderStreamingScriptCall(invocation, theme, context, streamCode, {
+            return renderStreamingScriptCall(invocation, theme, context, streamCode, signal, {
                 state,
                 maxCodePreviewLines: maxCodePreviewLines(),
                 showPrologueOmission: showPrologueOmission(),
@@ -380,6 +430,7 @@ export function createNativeBashFeature(
     }
 
     function clear(): void {
+        for (const toolCallId of livePreviews.keys()) retireLivePreview(toolCallId);
         scriptPreviews.clear();
 
         for (const scheduled of scheduledCommands.values()) scheduled.controller.abort();

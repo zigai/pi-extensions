@@ -169,6 +169,259 @@ describe("code stream store", () => {
         expect(subject.get({ ...input, targetWidth: 60 })).toBe("width60");
     });
 
+    // Handoff failures: late width/source updates must not be mistaken for work
+    // already consumed; rejection, processing errors and disposal must remain terminal.
+    it("processes the latest resize arriving during the running-to-idle handoff", async () => {
+        const subject = store();
+        const widths: Array<number | undefined> = [];
+        let injected = false;
+
+        const input = {
+            key: "handoff-width",
+            toolCallId: "handoff-width",
+            source: "const value=1;",
+            language: "javascript",
+            mode: "statement" as const,
+            complete: true,
+            targetWidth: 80,
+            formatter: async (_input: { code: string }, options?: { targetWidth?: number }) => {
+                widths.push(options?.targetWidth);
+                return `width${options?.targetWidth}`;
+            },
+        };
+        const latest = { ...input, targetWidth: 60 };
+        subject.get({
+            ...input,
+            invalidate: () => {
+                if (injected) return;
+
+                injected = true;
+                queueMicrotask(() =>
+                    queueMicrotask(() => {
+                        subject.get(latest);
+                    }),
+                );
+            },
+        });
+        await subject.settled();
+        expect(subject.get(latest)).toBe("width60");
+        expect(widths).toEqual([80, 60]);
+        expect(subject.ready(input.key)).toBe(true);
+    });
+
+    it("consumes an append arriving during the running-to-idle handoff", async () => {
+        const subject = store();
+        const inputs: string[] = [];
+        let injected = false;
+
+        const input = {
+            key: "handoff-append",
+            source: "const first=1;",
+            language: "javascript",
+            mode: "statement" as const,
+            complete: false,
+            formatter: async ({ code }: { code: string }) => {
+                inputs.push(code);
+                return code;
+            },
+        };
+        const latest = { ...input, source: input.source + "\nconst second=2;", complete: true };
+        subject.get({
+            ...input,
+            invalidate: () => {
+                if (injected) return;
+
+                injected = true;
+                queueMicrotask(() => queueMicrotask(() => subject.get(latest)));
+            },
+        });
+        await subject.settled();
+        expect(subject.get(latest)).toBe(latest.source);
+        expect(inputs).toEqual([input.source, "const second=2;"]);
+        expect(subject.ready(input.key)).toBe(true);
+    });
+
+    it.each(["decline", "reject", "processing-error"])(
+        "does not restart %s work on redraw",
+        async (failure) => {
+            const subject = store();
+            let calls = 0;
+            let redraws = 0;
+
+            const backend = Object.assign(
+                async () => {
+                    calls += 1;
+
+                    if (failure === "reject") throw new Error("Formatter rejected input");
+                    return undefined;
+                },
+                {
+                    profileFor: () => {
+                        throw new Error("Profile unavailable");
+                    },
+                },
+            );
+            const input = {
+                key: "terminal-failure",
+                source: "jq '.items[]' data.json",
+                language: "javascript",
+                mode: "block" as const,
+                complete: true,
+                formatter: backend,
+            };
+            if (failure === "processing-error") input.language = "bash";
+
+            const redraw = (): void => {
+                redraws += 1;
+                queueMicrotask(() =>
+                    queueMicrotask(() => subject.get({ ...input, invalidate: redraw })),
+                );
+            };
+            subject.get({ ...input, invalidate: redraw });
+            await subject.settled();
+            expect(subject.get(input)).toBe(input.source);
+            expect(calls).toBe(1);
+            expect(redraws).toBe(1);
+            expect(subject.ready(input.key)).toBe(true);
+        },
+    );
+
+    it("does not restart a late resize after disposal", async () => {
+        const subject = store();
+        const widths: Array<number | undefined> = [];
+        let closing: Promise<void> | undefined;
+        const input = {
+            key: "handoff-dispose",
+            source: "const value=1;",
+            language: "javascript",
+            mode: "block" as const,
+            complete: true,
+            targetWidth: 80,
+            formatter: async (_input: { code: string }, options?: { targetWidth?: number }) => {
+                widths.push(options?.targetWidth);
+                return `width${options?.targetWidth}`;
+            },
+        };
+        subject.get({
+            ...input,
+            invalidate: () => {
+                queueMicrotask(() => {
+                    closing = subject.dispose();
+                    queueMicrotask(() => subject.get({ ...input, targetWidth: 40 }));
+                });
+            },
+        });
+        await subject.settled();
+        await closing;
+        expect(subject.get({ ...input, targetWidth: 40 })).toBe("");
+        expect(widths).toEqual([80]);
+        expect(subject.ready(input.key)).toBe(false);
+    });
+
+    it("discards a pending resize and late formatter completion on disposal", async () => {
+        const subject = store();
+        let release = () => {};
+        const gate = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        const widths: Array<number | undefined> = [];
+        let invalidations = 0;
+        const input = {
+            key: "disposed-resize",
+            source: "const value=1;",
+            language: "javascript",
+            mode: "block" as const,
+            complete: true,
+            targetWidth: 80,
+            invalidate: () => {
+                invalidations += 1;
+            },
+            formatter: async (_input: { code: string }, options?: { targetWidth?: number }) => {
+                widths.push(options?.targetWidth);
+                await gate;
+                return "late output";
+            },
+        };
+        try {
+            subject.get(input);
+            subject.get({ ...input, targetWidth: 40 });
+            await subject.dispose();
+            release();
+            await gate;
+            await subject.settled();
+            expect(widths).toEqual([80]);
+            expect(invalidations).toBe(0);
+            expect(subject.get({ ...input, targetWidth: 40 })).toBe("");
+        } finally {
+            release();
+        }
+    });
+
+    it("retires an owner without letting its signal or later renders cancel a replacement", async () => {
+        const subject = store();
+        const previous = new AbortController();
+        const replacement = new AbortController();
+        const calls: AbortSignal[] = [];
+        const input = {
+            key: "owned-source",
+            source: "const value=1;",
+            language: "javascript",
+            mode: "block" as const,
+            complete: true,
+            signal: previous.signal,
+            formatter: async ({ code }: { code: string }, options?: { signal?: AbortSignal }) => {
+                if (options?.signal !== undefined) calls.push(options.signal);
+                return code;
+            },
+        };
+        subject.get(input);
+        await subject.settled();
+        subject.get({ ...input, signal: replacement.signal });
+        await subject.settled();
+        previous.abort();
+        expect(calls).toHaveLength(2);
+        expect(calls[0]?.aborted).toBe(true);
+        expect(calls[1]?.aborted).toBe(false);
+        expect(subject.get(input)).toBe("");
+        expect(subject.get({ ...input, signal: replacement.signal })).toBe(input.source);
+        expect(subject.ready(input.key)).toBe(true);
+        replacement.abort();
+        expect(calls[1]?.aborted).toBe(true);
+        expect(subject.ready(input.key)).toBe(false);
+        expect(subject.get({ ...input, signal: replacement.signal })).toBe("");
+        expect(calls).toHaveLength(2);
+    });
+
+    it("does not start a source retired synchronously while replacing its predecessor", async () => {
+        const subject = store();
+        const previous = new AbortController();
+        const replacement = new AbortController();
+        let calls = 0;
+        const input = {
+            key: "reentrant-retirement",
+            source: "const value=1;",
+            language: "javascript",
+            mode: "block" as const,
+            complete: true,
+            signal: previous.signal,
+            formatter: async ({ code }: { code: string }, options?: { signal?: AbortSignal }) => {
+                calls += 1;
+                options?.signal?.addEventListener("abort", () => replacement.abort(), {
+                    once: true,
+                });
+
+                return code;
+            },
+        };
+        subject.get(input);
+        await subject.settled();
+        expect(subject.get({ ...input, signal: replacement.signal })).toBe("");
+        await subject.settled();
+        expect(replacement.signal.aborted).toBe(true);
+        expect(subject.ready(input.key)).toBe(false);
+        expect(calls).toBe(1);
+    });
+
     it("keeps formatting completed statements while later chunks append", async () => {
         const subject = store();
         const gate = new EventEmitter();

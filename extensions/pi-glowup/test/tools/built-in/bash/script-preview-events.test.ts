@@ -32,6 +32,11 @@ import {
     initializeSyntaxHighlighting,
     settleSyntaxHighlights,
 } from "../../../../src/rendering/syntax/highlighter.ts";
+import { createStreamingPresentation } from "../../../../src/rendering/streaming/content-presentation.ts";
+import {
+    presentGlowupContent,
+    registerGlowupStreamingPolicy,
+} from "../../../../src/tools/protocol/streaming.ts";
 import { configureRenderDiagnostics } from "../../../../src/diagnostics/render-events.ts";
 import type { DebugLogFields } from "../../../../src/diagnostics/logger.ts";
 
@@ -48,6 +53,190 @@ class RecordingPreviewSink {
 }
 
 describe("script preview events", () => {
+    // Completion must retire only its live owner: no extra statements, stale
+    // invalidations, late rejection warnings or resurrection by retained components.
+    it.each(["resolve", "reject", "clear"])(
+        "retires live statement work before %s",
+        async (ending) => {
+            const events = recordRenderEvents();
+            const store = createCodeStreamStore();
+            let finishLive = (_value: string | undefined) => {};
+            let rejectLive = (_error: Error) => {};
+            const live = new Promise<string | undefined>((resolve, reject) => {
+                finishLive = resolve;
+                rejectLive = reject;
+            });
+            const attempts: Array<{
+                code: string;
+                stage: string | undefined;
+                signal: AbortSignal | undefined;
+            }> = [];
+            const profiles = parseScriptFormatterCommandsValue({
+                javascript: { kind: "command", command: ["unused"] },
+            });
+            const formatter: ScriptBlockFormatter = Object.assign(
+                async (
+                    input: ScriptBlockFormatterInput,
+                    options: ScriptBlockFormatterOptions = {},
+                ) => {
+                    attempts.push({
+                        code: input.code,
+                        stage: options.diagnostics?.stage,
+                        signal: options.signal,
+                    });
+
+                    if (
+                        options.diagnostics?.stage === "statement" &&
+                        input.code === "const first=1;"
+                    )
+                        return live;
+
+                    return input.code.replaceAll("=", " = ");
+                },
+                { profileFor: (language: string) => profiles.get(language) },
+            );
+            const policy = registerGlowupStreamingPolicy(
+                createStreamingPresentation(() => ({
+                    prose: "token",
+                    code: "statement",
+                    streams: store,
+                    formatter,
+                })),
+            );
+            const bash = createNativeBashFeature(() => formatter);
+            const theme = new Theme(TEST_THEME_COLORS, TEST_THEME_BACKGROUND_COLORS, "truecolor");
+            let obsoleteInvalidations = 0;
+            let streamRequests = 0;
+            const code = "const first=1;const second=2;";
+            const command = `node -e '${code}'`;
+            const context: BuiltInRenderContext = {
+                args: { command },
+                toolCallId: "retiring-call",
+                cwd: "/work",
+                lastComponent: undefined,
+                state: {},
+                executionStarted: false,
+                argsComplete: false,
+                isPartial: true,
+                expanded: false,
+                showImages: false,
+                isError: false,
+                durationMs: undefined,
+                outputPad: 1,
+                invalidate: () => {},
+            };
+            const render = (current: BuiltInRenderContext, source = command) =>
+                bash.renderBashCall(
+                    { command: source },
+                    theme,
+                    current,
+                    () => 8,
+                    () => false,
+                    () => "preserve",
+                    () => "trailing",
+                    (input) => {
+                        streamRequests += 1;
+
+                        return presentGlowupContent({
+                            ...input,
+                            kind: "code",
+                            invalidate: () => {
+                                if (input.toolCallId === "retiring-call")
+                                    obsoleteInvalidations += 1;
+
+                                input.invalidate?.();
+                            },
+                        });
+                    },
+                );
+            try {
+                const oldComponent = render(context);
+                oldComponent.render(80);
+                await vi.waitUntil(() =>
+                    attempts.some((attempt) => attempt.code === "const first=1;"),
+                );
+                const other = render(
+                    { ...context, toolCallId: "other-call" },
+                    "node -e 'const other=3;'",
+                );
+                other.render(80);
+                await vi.waitUntil(() =>
+                    attempts.some((attempt) => attempt.code === "const other=3;"),
+                );
+                const obsoleteBefore = obsoleteInvalidations;
+                let completed: ReturnType<typeof render> | undefined;
+                if (ending === "clear") bash.clear();
+                else {
+                    completed = render({
+                        ...context,
+                        argsComplete: true,
+                        lastComponent: oldComponent,
+                    });
+                    completed.render(80);
+                }
+
+                const first = attempts.find((attempt) => attempt.code === "const first=1;");
+                expect(first?.signal?.aborted).toBe(true);
+
+                if (ending !== "clear")
+                    expect(
+                        attempts.find((attempt) => attempt.code === "const other=3;")?.signal
+                            ?.aborted,
+                    ).toBe(false);
+
+                const requestsBefore = streamRequests;
+                oldComponent.invalidate();
+                oldComponent.render(80);
+                expect(streamRequests).toBe(requestsBefore);
+
+                if (ending === "reject") rejectLive(new Error("Obsolete formatter rejected"));
+                else finishLive("const first = 1;");
+
+                await store.settled();
+
+                if (completed !== undefined) {
+                    await vi.waitUntil(() => {
+                        completed = render({
+                            ...context,
+                            argsComplete: true,
+                            lastComponent: completed,
+                        });
+                        return stripVTControlCharacters(completed.render(80).join("\n")).includes(
+                            "const second = 2;",
+                        );
+                    });
+                    expect(
+                        attempts.some(
+                            (attempt) => attempt.stage === "block" && attempt.code === code,
+                        ),
+                    ).toBe(true);
+                }
+
+                expect(
+                    attempts.filter(
+                        (attempt) =>
+                            attempt.stage === "statement" && attempt.code === "const second=2;",
+                    ),
+                ).toEqual([]);
+
+                expect(obsoleteInvalidations).toBe(obsoleteBefore);
+                expect(store.ready("tool:retiring-call:script:javascript")).toBe(false);
+                expect(
+                    events.filter(
+                        (entry) =>
+                            entry.event === "render_error" &&
+                            entry.fields.toolCallId === "retiring-call",
+                    ),
+                ).toEqual([]);
+            } finally {
+                finishLive(undefined);
+                bash.clear();
+                policy.dispose();
+                await store.dispose();
+            }
+        },
+    );
+
     it("publishes compact Python only after readiness and completion and expands original gaps", async () => {
         const bash = createNativeBashFeature();
         const theme = new Theme(TEST_THEME_COLORS, TEST_THEME_BACKGROUND_COLORS, "truecolor");
