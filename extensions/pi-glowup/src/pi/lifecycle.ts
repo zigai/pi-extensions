@@ -215,7 +215,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
 
     let restoreAbort: AbortController | undefined;
     let stopObservingRendering: (() => void) | undefined;
-    const clearSessionState = (): void => {
+    const clearSessionState = async (): Promise<void> => {
         assistantStreaming?.dispose();
         assistantStreaming = undefined;
         streamingPolicy?.dispose();
@@ -237,6 +237,8 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         exploration.clear();
         clearQueuedDiffHighlights();
         resetRenderDiagnostics();
+
+        return bash.settled();
     };
 
     const reportWarning = (message: string): void => reportExtensionDiagnostic(message);
@@ -655,7 +657,10 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
             ...diagnosticSnapshot(),
         }));
 
-        clearSessionState();
+        await clearSessionState();
+
+        if (currentGeneration !== sessionGeneration) return;
+
         await codeStreams.dispose();
 
         if (currentGeneration !== sessionGeneration) return;
@@ -752,7 +757,8 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
             ...diagnosticSnapshot(),
         }));
 
-        clearSessionState();
+        const cleanup = clearSessionState();
+
         syntax.cancel();
         configureAssistantSeparatorPatch(false);
         configureWorkingWidgetSpacingPatch(false);
@@ -760,6 +766,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         configureMarkdownSyntaxPatch(false);
         configureBuiltInToolRendererPatch(false);
         configureThirdPartyToolRendererPatch(false);
+        await cleanup;
         await syntax.settle();
         await assistantActivation;
         await codeStreams.dispose();

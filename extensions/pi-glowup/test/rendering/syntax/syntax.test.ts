@@ -225,6 +225,8 @@ describe("central syntax highlighting", () => {
         );
         current = first;
         first.render(120);
+        await bash.settled();
+        first.render(120);
         await settleSyntaxHighlights();
         const colored = first.render(120);
         expect(colored[1]).toContain(STRING_RGB_CODE);
@@ -250,6 +252,10 @@ describe("central syntax highlighting", () => {
 
             expect(pending[1]).toBe(colored[1]);
             expect(stripVTControlCharacters(pending.join("\n"))).toContain("print(title, count)");
+            await bash.settled();
+            const updated = next.render(120);
+            expect(updated[1]).toBe(colored[1]);
+            expect(stripVTControlCharacters(updated.join("\n"))).toContain("print(title, count)");
         } finally {
             await settleSyntaxHighlights();
             bash.clear();
@@ -603,7 +609,7 @@ describe("central syntax highlighting", () => {
             code,
             "TS",
         ].join("\n");
-        const expectedCommentLine = (await highlightSyntaxCodeAsync(code, "typescript"))[1];
+        const expectedCommentLine = (await highlightSyntaxCodeAsync(`${code}\n`, "typescript"))[1];
         const rendered = renderScriptCall(
             plainTheme,
             { label: "Bash", language: "bash", code: command },
@@ -618,7 +624,7 @@ describe("central syntax highlighting", () => {
 
     it("highlights a file-writing TypeScript heredoc from its destination extension", async () => {
         const code = "const value: { readonly ok: boolean } = { ok: true };";
-        const expected = (await highlightSyntaxCodeAsync(code, "typescript"))[0];
+        const expected = (await highlightSyntaxCodeAsync(`${code}\n`, "typescript"))[0];
         const command = `cat > /tmp/sample.mts <<'EOF'\n${code}\nEOF\nnode /tmp/sample.mts`;
         const rendered = renderScriptCall(
             plainTheme,
@@ -632,7 +638,7 @@ describe("central syntax highlighting", () => {
 
     it("highlights embedded Python heredocs inside bash previews as Python", async () => {
         await highlightSyntaxCodeAsync(
-            "import json, sys\npath = sys.argv[1]\nprint(json.load(open(path)).get('$schema'))",
+            "import json, sys\npath = sys.argv[1]\nprint(json.load(open(path)).get('$schema'))\n",
             "python",
         );
         const command = [

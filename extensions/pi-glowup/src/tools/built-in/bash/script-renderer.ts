@@ -18,6 +18,7 @@ import type { EmbeddedProgramLookup } from "./embedded-service.ts";
 import { graphemes, sgrSequenceEnd } from "../../../text-boundaries.ts";
 import {
     highlightSyntaxCode,
+    observeSyntaxHighlightSource,
     type SyntaxHighlightOptions,
 } from "../../../rendering/syntax/highlighter.ts";
 import { filePathText } from "../../../rendering/path.ts";
@@ -27,7 +28,14 @@ import {
     trimEdgeBlankLines,
     collapsedPreviewLinesFromText,
 } from "../../../rendering/output.ts";
-import { scheduleCodeOutputSyntaxLoad } from "../../../rendering/syntax/code-component.ts";
+import {
+    renderSyntaxComponent,
+    scheduleCodeOutputSyntaxLoad,
+} from "../../../rendering/syntax/code-component.ts";
+import {
+    observeComponentFormat,
+    type ComponentFormat,
+} from "../../../diagnostics/highlight-requests.ts";
 import { omitLeadingImportPrologue } from "./prologue.ts";
 import {
     wrapSinglePhysicalLineWithContinuation,
@@ -54,7 +62,6 @@ type ScriptPreview = {
 const sourceOwners = new WeakMap<() => void, object>();
 
 type ChildOwners = {
-    readonly logicalSource: string;
     readonly parentSignal: AbortSignal | undefined;
     readonly controller: AbortController;
     readonly signal: AbortSignal;
@@ -65,31 +72,26 @@ const childOwners = new WeakMap<() => void, ChildOwners>();
 
 function childHighlightOptions(
     invalidate: (() => void) | undefined,
-    logicalSource: string,
     parentSignal: AbortSignal | undefined,
-): (key: string) => SyntaxHighlightOptions {
+): (key: string, source: string) => SyntaxHighlightOptions {
     if (invalidate === undefined) {
         if (parentSignal === undefined) return () => ({});
         return () => ({ signal: parentSignal });
     }
 
     let owner = childOwners.get(invalidate);
-    if (
-        owner === undefined ||
-        owner.logicalSource !== logicalSource ||
-        owner.parentSignal !== parentSignal
-    ) {
+    if (owner === undefined || owner.parentSignal !== parentSignal) {
         owner?.controller.abort();
 
         const controller = new AbortController();
         let signal = controller.signal;
         if (parentSignal !== undefined) signal = AbortSignal.any([signal, parentSignal]);
-        owner = { logicalSource, parentSignal, controller, signal, children: new Map() };
+        owner = { parentSignal, controller, signal, children: new Map() };
         childOwners.set(invalidate, owner);
     }
 
     const current = owner;
-    return (key) => {
+    return (key, source) => {
         let child = current.children.get(key);
         if (child === undefined) {
             child = {
@@ -102,15 +104,16 @@ function childHighlightOptions(
             current.children.set(key, child);
         }
 
+        if (child.invalidate !== undefined) observeSyntaxHighlightSource(source, child.invalidate);
         return child;
     };
 }
 
 function programKey(program: EmbeddedProgram): string {
-    const path: Array<[number, number, string, string]> = [];
+    const path: Array<[number, string, string]> = [];
     let current: EmbeddedProgram | undefined = program;
     while (current !== undefined) {
-        path.push([current.start, current.end, current.language, current.origin]);
+        path.push([current.start, current.language, current.origin]);
         current = current.parent;
     }
 
@@ -412,7 +415,7 @@ function embeddedInlineHighlightRows(
     theme: GlowupRenderTheme,
     programs: readonly EmbeddedProgram[],
     parent: EmbeddedProgram | undefined,
-    childOptions: (key: string) => SyntaxHighlightOptions,
+    childOptions: (key: string, source: string) => SyntaxHighlightOptions,
 ): ReadonlyMap<number, ReadonlyArray<EmbeddedInlineHighlightRow>> {
     const source = lines.join("\n");
     const scripts = programs.filter((program) => program.parent === parent && !program.expandable);
@@ -464,7 +467,7 @@ function embeddedInlineHighlightRows(
             decoded = highlightSyntaxCode(
                 script.code,
                 script.language,
-                childOptions(programKey(script)),
+                childOptions(programKey(script), script.code),
             );
 
         let projected: string | undefined;
@@ -539,7 +542,7 @@ function highlightBashScriptPreviewLines(
     theme: GlowupRenderTheme,
     programs: readonly EmbeddedProgram[],
     parent: EmbeddedProgram | undefined,
-    childOptions: (key: string) => SyntaxHighlightOptions,
+    childOptions: (key: string, source: string) => SyntaxHighlightOptions,
 ): string[] {
     const embeddedRows = embeddedInlineHighlightRows(lines, theme, programs, parent, childOptions);
 
@@ -676,6 +679,7 @@ export type ScriptCallRenderOptions = {
     readonly profile?: ScriptFormatterProfile;
     readonly embeddedPrograms?: EmbeddedProgramLookup;
     readonly logicalSource?: string;
+    readonly formatObservation?: () => ComponentFormat | undefined;
     readonly signal?: AbortSignal;
     readonly durationMs?: number | undefined;
 };
@@ -688,8 +692,36 @@ export function renderScriptCall(
 ): Component {
     const { lastComponent, ...renderOptions } = options;
 
-    return createSyntaxComponent(lastComponent, renderOptions.invalidate, (invalidate) =>
-        createScriptCallComponent(theme, invocation, { ...renderOptions, invalidate }),
+    return createSyntaxComponent(
+        lastComponent,
+        renderOptions.invalidate,
+        (invalidate) => {
+            const component = createScriptCallComponent(theme, invocation, {
+                ...renderOptions,
+                invalidate,
+            });
+            const observed: Component = {
+                render(width) {
+                    const lines = component.render(width);
+                    const observation = renderOptions.formatObservation?.();
+                    if (observation !== undefined) observeComponentFormat(invalidate, observation);
+                    return lines;
+                },
+                invalidate() {
+                    component.invalidate();
+                },
+            };
+
+            return {
+                render(width) {
+                    return renderSyntaxComponent(observed, invalidate, width);
+                },
+                invalidate() {
+                    observed.invalidate();
+                },
+            };
+        },
+        renderOptions.logicalSource ?? invocation.code,
     );
 }
 
@@ -708,16 +740,12 @@ function createScriptCallComponent(
     const showPrologueOmission = options.showPrologueOmission ?? false;
     const retained = invocation;
     const omittedHint = options.omittedHint ?? toolExpandHint();
-    const childOptions = childHighlightOptions(
-        options.invalidate,
-        options.logicalSource ?? retained.code,
-        options.signal,
-    );
+    const childOptions = childHighlightOptions(options.invalidate, options.signal);
     let syntaxOptions: SyntaxHighlightOptions = {
         invalidate: options.invalidate,
         ...(options.signal !== undefined && { signal: options.signal }),
     };
-    if (retained.language !== "bash") syntaxOptions = childOptions("standalone");
+    if (retained.language !== "bash") syntaxOptions = childOptions("standalone", retained.code);
 
     const sourceOwner = {};
     if (options.invalidate !== undefined) sourceOwners.set(options.invalidate, sourceOwner);
@@ -746,7 +774,7 @@ function createScriptCallComponent(
                 highlightSyntaxCode(
                     program.code,
                     program.language,
-                    childOptions(programKey(program)),
+                    childOptions(programKey(program), program.code),
                 );
 
             if (index < current.length) setImmediate(next);

@@ -57,6 +57,10 @@ export class StreamingScriptIdentityStore {
         return this.identities.has(toolCallId);
     }
 
+    forget(toolCallId: string): void {
+        this.identities.delete(toolCallId);
+    }
+
     clear(): void {
         this.identities.clear();
     }

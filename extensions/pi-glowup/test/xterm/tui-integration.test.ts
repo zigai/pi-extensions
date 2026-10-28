@@ -507,7 +507,7 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
             tool.updateResult({ content: [], isError: false });
             tool.updateArgs({ command: command(source) });
             const initial = tool.render(100).join("\n");
-            expect(initial).toContain(firstLine);
+            expect(stripVTControlCharacters(initial)).toContain(firstLine);
             expect(stripVTControlCharacters(initial)).toContain(header);
 
             let completions = 0;
@@ -585,6 +585,10 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
         tool.setArgsComplete();
         tool.updateResult({ content: [], isError: false });
         tool.render(100);
+        await vi.waitFor(() => {
+            tool.invalidate();
+            expect(stripVTControlCharacters(tool.render(100).join("\n"))).toContain(firstLine);
+        });
 
         // Settle the real statement worker separately from the real syntax worker.
         await presentGlowupSnapshot({
@@ -645,6 +649,7 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
         const command = (source: string) => `python - <<'PY'\n${source}\nPY`;
         const pendingTerminal = new VirtualTerminal(100, 24);
         const activeTui = createTui(pendingTerminal);
+        await extension?.startAssistantToolCall("bash", "streamed-native-syntax");
         const tool = new ToolExecutionComponent(
             "bash",
             "streamed-native-syntax",
@@ -656,7 +661,14 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
         );
         const initialSource = `${firstLine}\nprint(streamed_native_marker)`;
         tool.updateArgs({ command: command(initialSource) });
+        await vi.waitFor(() => {
+            tool.invalidate();
+            const text = stripVTControlCharacters(tool.render(100).join("\n"));
+            expect(text).toContain(firstLine);
+            expect(text).not.toMatch(/\n\s*PY\s*$/u);
+        });
         await settleSyntaxHighlights();
+        tool.invalidate();
         const initialRow = tool
             .render(100)
             .find((line) => stripVTControlCharacters(line).includes(firstLine));

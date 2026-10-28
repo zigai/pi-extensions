@@ -388,8 +388,38 @@ function inlineIndex(
     for (let i = index + 1; i < words.length; i++) {
         const value = staticWord(words[i]);
         if (value === undefined) return undefined;
-        if (flags.has(value) || (kind === "bash" && /^-[a-zA-Z]*c[a-zA-Z]*$/u.test(value)))
+
+        if (value === "eval" && basename(words[index]) === "deno") {
+            for (let next = i + 1; next < words.length; next++) {
+                const option = staticWord(words[next]);
+                if (option === undefined) return undefined;
+
+                if (option === "--") return { index: next + 1, offset: 0 };
+
+                if (option === "--ext") {
+                    next++;
+                    continue;
+                }
+
+                if (option.startsWith("--ext=")) continue;
+
+                if (["-p", "--print", "-q", "--quiet", "--no-check", "--check"].includes(option))
+                    continue;
+
+                if (option.startsWith("-")) return undefined;
+
+                return { index: next, offset: 0 };
+            }
+
+            return undefined;
+        }
+
+        if (flags.has(value) || (kind === "bash" && /^-[a-zA-Z]*c[a-zA-Z]*$/u.test(value))) {
+            const argument = staticWord(words[i + 1]);
+            if (kind === "javascript" && /^-[a-zA-Z]/u.test(argument ?? "")) return undefined;
+
             return { index: i + 1, offset: 0 };
+        }
 
         const raw = words[i]?.text ?? "";
         let attached: string | undefined;
@@ -496,6 +526,55 @@ function filterIndex(words: readonly Word[], index: number, kind: string): numbe
 }
 
 function stdinSource(words: readonly Word[], index: number, kind: string | undefined): boolean {
+    if (kind === "typescript") {
+        const name = basename(words[index]);
+        let start = index + 1;
+        if (name === "deno" || name === "bun") {
+            if (staticWord(words[start]) === "run") start++;
+            else if (name === "deno") return false;
+        }
+
+        for (let i = start; i < words.length; i++) {
+            const value = staticWord(words[i]);
+            if (value === undefined) return false;
+
+            if (value === "-") return true;
+
+            if (
+                [
+                    "--ext",
+                    "--config",
+                    "--tsconfig",
+                    "--import",
+                    "--require",
+                    "--preload",
+                    "-r",
+                ].includes(value)
+            ) {
+                i++;
+                continue;
+            }
+
+            if (
+                value.startsWith("--ext=") ||
+                value.startsWith("--config=") ||
+                value.startsWith("--tsconfig=")
+            )
+                continue;
+
+            if (
+                ["--no-warnings", "--enable-source-maps", "--no-check", "--quiet", "-q"].includes(
+                    value,
+                )
+            )
+                continue;
+
+            return false;
+        }
+
+        return false;
+    }
+
     if (kind !== "python" && kind !== "javascript" && kind !== "bash") return false;
 
     const withValues = new Set([
@@ -776,6 +855,7 @@ export function extractEmbeddedPrograms(input: string, syntax?: ParsedScript): E
         localMapping?: readonly SourceSpan[];
         splitString?: true;
         parent?: EmbeddedProgram;
+        standaloneShell?: true;
     }[] = [{ source: input, ...(syntax !== undefined && { syntax }) }];
     while (pending.length > 0) {
         const current = pending.pop();
@@ -794,7 +874,11 @@ export function extractEmbeddedPrograms(input: string, syntax?: ParsedScript): E
             standaloneLabel?: string;
         }[] = [];
         let root: Node | undefined;
-        if (parent === undefined && errorStart === Infinity && script.commands.length === 1)
+        if (
+            (parent === undefined || current.standaloneShell === true) &&
+            errorStart === Infinity &&
+            script.commands.length === 1
+        )
             root = script.commands[0]?.command;
 
         let standaloneCommand: Command | undefined;
@@ -1061,7 +1145,7 @@ export function extractEmbeddedPrograms(input: string, syntax?: ParsedScript): E
                                     redirect.operator === "<<" || redirect.operator === "<<-",
                             )
                         ) {
-                            let launcher = source.slice(0, word.pos);
+                            let launcher = source.slice(0, word.pos).replace(/=$/u, "");
                             const trailing = source.slice(word.end).trim();
                             if (trailing.length > 0)
                                 launcher = `${launcher.trimEnd()} … ${trailing}`;
@@ -1122,6 +1206,13 @@ export function extractEmbeddedPrograms(input: string, syntax?: ParsedScript): E
                                     source: code,
                                     mapping: childMapping,
                                     ...(splitString === true && { splitString: true }),
+                                    ...(node === standaloneCommand &&
+                                        root?.type === "Command" &&
+                                        remoteWords === undefined &&
+                                        node.redirects.length === 0 &&
+                                        programIndex === words.length - 1 && {
+                                            standaloneShell: true,
+                                        }),
                                     parent: program,
                                 });
                         }

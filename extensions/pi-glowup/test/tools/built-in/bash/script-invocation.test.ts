@@ -129,6 +129,32 @@ describe("embedded program extraction", () => {
         ]);
     });
 
+    it.each(["tsx -", "bun -", "bun run -", "deno run -", "deno run --ext=ts -"])(
+        "recognizes explicit TypeScript source from stdin: %s",
+        (launcher) => {
+            const source = `${launcher} <<'TS'\nconst value: number = 1;\nTS`;
+            expect(programs(source)).toEqual([
+                {
+                    language: "typescript",
+                    origin: "heredoc",
+                    source: "const value: number = 1;\n",
+                    code: "const value: number = 1;\n",
+                },
+            ]);
+        },
+    );
+
+    it.each(["tsx file.ts", "bun run file.ts", "deno run file.ts", "deno eval '1'"])(
+        "does not treat a TypeScript program's stdin data as source: %s",
+        (launcher) => {
+            expect(
+                programs(`${launcher} <<'DATA'\ninput\nDATA`).filter(
+                    ({ origin }) => origin === "heredoc",
+                ),
+            ).toEqual([]);
+        },
+    );
+
     it("finds embedded programs inside a Bash heredoc", () => {
         const source = `bash <<'SH'\npython -c 'print(4)'\nSH`;
         const extracted = extractEmbeddedPrograms(source);
