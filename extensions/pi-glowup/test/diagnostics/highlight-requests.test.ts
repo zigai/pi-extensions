@@ -9,6 +9,7 @@ import {
     highlightJobState,
     joinHighlightJob,
     observedHighlightJob,
+    observeHighlightComponentRender,
     observeHighlightRevision,
     transitionHighlightRequest,
     useHighlightRequest,
@@ -139,6 +140,60 @@ it("distinguishes initial preservation from later retirement in the ordered evid
     expect(Number(changes[1]?.fields.seq)).toBeLessThan(Number(terminal()[2]?.seq));
     expect(events.at(-1)?.fields).toMatchObject({ pendingCount: 0 });
     expect(Number(events.at(-1)?.fields.seq)).toBe(Number(changes[2]?.fields.seq) + 1);
+});
+
+it("retains the actual request owner through nested component renders", () => {
+    const outer = () => {};
+    const inner = () => {};
+    observeHighlightRevision(outer);
+    observeHighlightRevision(inner);
+    const body = {
+        render: () => {
+            beginHighlightRequest(code, "typescript", inner, undefined, false);
+            return [code];
+        },
+        invalidate() {},
+    };
+    const container = {
+        render: () => observeHighlightComponentRender(body, inner, 80),
+        invalidate() {},
+    };
+
+    expect(observeHighlightComponentRender(container, outer, 80)).toEqual([code]);
+    const renders = events.filter(({ event }) => event === "syntax_component_render");
+    const request = transitions().find(({ state }) => state === "requested");
+    expect(renders).toHaveLength(2);
+    expect(renders[0]?.fields.ownerId).toBe(request?.ownerId);
+    expect(renders[1]?.fields.ownerId).not.toBe(request?.ownerId);
+    expect(renders[0]?.fields.requests).toMatchObject([
+        { requestId: request?.requestId, ownerId: request?.ownerId },
+    ]);
+
+    expect(renders[1]?.fields.requests).toMatchObject([
+        { requestId: request?.requestId, ownerId: request?.ownerId },
+    ]);
+});
+
+it("does not attribute a render across a diagnostics reset to the new epoch", () => {
+    const owner = () => {};
+    observeHighlightRevision(owner);
+    const first = beginHighlightRequest(code, "typescript", owner, undefined, false);
+    const component = {
+        render: () => {
+            configureRenderDiagnostics(undefined);
+            configureRenderDiagnostics(sink);
+            observeHighlightRevision(owner);
+            beginHighlightRequest(code, "typescript", owner, undefined, false);
+
+            return [code];
+        },
+        invalidate() {},
+    };
+
+    expect(observeHighlightComponentRender(component, owner, 80)).toEqual([code]);
+    expect(events.filter(({ event }) => event === "syntax_component_render")).toEqual([]);
+    const next = beginHighlightRequest(code, "typescript", owner, undefined, false);
+    expect(next?.epoch).not.toBe(first?.epoch);
 });
 
 it("keeps cached adoption terminal and use publication ordered after availability", () => {
