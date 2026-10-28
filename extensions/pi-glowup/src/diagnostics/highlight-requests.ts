@@ -53,9 +53,25 @@ export type HighlightRequest = {
     detach?: () => void;
 };
 
+export type ComponentFormat =
+    | { readonly state: "ready"; readonly source: string; readonly output: string }
+    | {
+          readonly state: "pending" | "failed" | "unsupported" | "not-required";
+          readonly source: string;
+      };
+
+type ComponentFormatRecord = {
+    readonly ownerId: string | null;
+    readonly revision: number;
+    readonly state: ComponentFormat["state"];
+    readonly sourceHash: string;
+    readonly outputHash?: string;
+};
+
 type ComponentRender = {
     readonly previous: ComponentRender | undefined;
     readonly requests: Set<HighlightRequest>;
+    readonly formats: ComponentFormatRecord[];
 };
 
 type Owner = {
@@ -285,6 +301,32 @@ export function beginHighlightRequest(
     return request;
 }
 
+export function observeComponentFormat(invalidate: () => void, observation: ComponentFormat): void {
+    if (componentRender === undefined || !renderDiagnosticsEnabled()) return;
+
+    const owner = owners.get(invalidate);
+    const sourceHash = createHash("sha256").update(observation.source).digest("hex").slice(0, 16);
+    let record: ComponentFormatRecord = {
+        ownerId: owner?.id ?? null,
+        revision: owner?.revision ?? 0,
+        state: observation.state,
+        sourceHash,
+    };
+    if (observation.state === "ready") {
+        const outputHash = createHash("sha256")
+            .update(observation.output)
+            .digest("hex")
+            .slice(0, 16);
+        record = { ...record, outputHash };
+    }
+
+    let current: ComponentRender | undefined = componentRender;
+    while (current !== undefined) {
+        current.formats.push(record);
+        current = current.previous;
+    }
+}
+
 function observeRenderedRequest(request: HighlightRequest): void {
     let current = componentRender;
     while (current !== undefined) {
@@ -301,7 +343,11 @@ export function observeHighlightComponentRender(
     if (!renderDiagnosticsEnabled()) return component.render(width);
 
     const observationEpoch = currentEpoch();
-    const observation: ComponentRender = { previous: componentRender, requests: new Set() };
+    const observation: ComponentRender = {
+        previous: componentRender,
+        requests: new Set(),
+        formats: [],
+    };
     componentRender = observation;
 
     let lines: string[];
@@ -344,6 +390,7 @@ export function observeHighlightComponentRender(
         lineHashes,
         requestCoverage: "encountered",
         requests,
+        formats: observation.formats,
         monotonicNs,
     }));
 

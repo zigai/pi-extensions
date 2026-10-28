@@ -2,10 +2,12 @@ import type { Component } from "@earendil-works/pi-tui";
 import { observeHighlightComponentRender } from "../../diagnostics/highlight-requests.ts";
 import { normalizeSyntaxLanguage, syntaxLanguageFromFile } from "./language.ts";
 import {
+    cachedSyntaxCode,
     highlightSyntaxCode,
     highlightSyntaxCodeAsync,
     observeSyntaxHighlightSource,
     scheduleSyntaxLanguageLoad,
+    type SyntaxHighlightOptions,
 } from "./highlighter.ts";
 
 export type CodeOutputSyntax = {
@@ -34,12 +36,18 @@ export function highlightCodeOutput(text: string, syntax: CodeOutputSyntax | und
     });
 }
 
+export function cachedCodeOutput(text: string, syntax: CodeOutputSyntax): string[] | undefined {
+    const language = syntax.language ?? syntaxLanguageFromFile(syntax.path, text);
+    return cachedSyntaxCode(text, language, { cache: syntax.cache, invalidate: syntax.invalidate });
+}
+
 /** Schedules async loading for path/language hints so later sync renders can highlight them. */
 export function scheduleCodeOutputSyntaxLoad(
     syntax: CodeOutputSyntax | undefined,
     invalidate: (() => void) | undefined,
     content?: string,
     current?: () => boolean,
+    options?: Pick<SyntaxHighlightOptions, "invalidateOnComplete">,
 ): void {
     if (invalidate === undefined) {
         return;
@@ -57,12 +65,16 @@ export function scheduleCodeOutputSyntaxLoad(
 
     if (isCurrent !== undefined && !isCurrent()) return;
 
-    scheduleSyntaxLanguageLoad(normalizedLanguage, invalidate, content, { cache: syntax?.cache });
+    scheduleSyntaxLanguageLoad(normalizedLanguage, invalidate, content, {
+        cache: syntax?.cache,
+        ...options,
+    });
 
     if (content !== undefined)
         void highlightSyntaxCodeAsync(content, normalizedLanguage, {
             invalidate,
             cache: syntax?.cache,
+            ...options,
         });
 }
 

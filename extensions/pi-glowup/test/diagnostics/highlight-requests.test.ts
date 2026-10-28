@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import {
     beginHighlightRequest,
@@ -9,6 +10,7 @@ import {
     highlightJobState,
     joinHighlightJob,
     observedHighlightJob,
+    observeComponentFormat,
     observeHighlightComponentRender,
     observeHighlightRevision,
     transitionHighlightRequest,
@@ -140,6 +142,62 @@ it("distinguishes initial preservation from later retirement in the ordered evid
     expect(Number(changes[1]?.fields.seq)).toBeLessThan(Number(terminal()[2]?.seq));
     expect(events.at(-1)?.fields).toMatchObject({ pendingCount: 0 });
     expect(Number(events.at(-1)?.fields.seq)).toBe(Number(changes[2]?.fields.seq) + 1);
+});
+
+it("records a formatter selection only inside its owner's actual component render", () => {
+    const owner = () => {};
+    const source = "const value=1;";
+    const output = "const value = 1;";
+    const sourceHash = createHash("sha256").update(source).digest("hex").slice(0, 16);
+    const outputHash = createHash("sha256").update(output).digest("hex").slice(0, 16);
+    observeHighlightRevision(owner);
+    observeComponentFormat(owner, { state: "ready", source, output });
+    expect(events).toEqual([]);
+    const component = {
+        render: () => {
+            observeComponentFormat(owner, { state: "ready", source, output });
+            return [output];
+        },
+        invalidate() {},
+    };
+
+    expect(observeHighlightComponentRender(component, owner, 80)).toEqual([output]);
+    const rendered = events.find(({ event }) => event === "syntax_component_render")?.fields;
+    expect(rendered?.formats).toMatchObject([
+        { ownerId: rendered?.ownerId, revision: 1, state: "ready", sourceHash, outputHash },
+    ]);
+
+    expect(rendered?.requests).toEqual([]);
+    expect(JSON.stringify(events)).not.toContain(source);
+    expect(JSON.stringify(events)).not.toContain(output);
+});
+
+it("keeps a foreign pending formatter distinct without inventing output", () => {
+    const owner = () => {};
+    const foreign = () => {};
+    const source = "const pending=1;";
+    observeHighlightRevision(owner);
+    observeHighlightRevision(foreign);
+    const request = beginHighlightRequest(source, "typescript", foreign, undefined, false);
+    const component = {
+        render: () => {
+            observeComponentFormat(foreign, { state: "pending", source });
+            return [source];
+        },
+        invalidate() {},
+    };
+
+    observeHighlightComponentRender(component, owner, 80);
+    const rendered = events.find(({ event }) => event === "syntax_component_render")?.fields;
+    expect(rendered?.ownerId).not.toBe(request?.ownerId);
+    expect(rendered?.formats).toEqual([
+        {
+            ownerId: request?.ownerId,
+            revision: 1,
+            state: "pending",
+            sourceHash: createHash("sha256").update(source).digest("hex").slice(0, 16),
+        },
+    ]);
 });
 
 it("retains the actual request owner through nested component renders", () => {

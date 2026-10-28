@@ -11,8 +11,19 @@ import {
     stack,
     decodeGlowupNode,
     registerGlowupStreamingPolicy,
+    type GlowupNode,
 } from "../../../src/tools/protocol/contract.ts";
 import type { ThirdPartyToolRenderContext } from "../../../src/tools/types.ts";
+import {
+    configureRenderDiagnostics,
+    diagnosticCodeHash,
+} from "../../../src/diagnostics/render-events.ts";
+import type { DebugLogFields } from "../../../src/diagnostics/logger.ts";
+import {
+    disposeSyntaxHighlighting,
+    initializeSyntaxHighlighting,
+    settleSyntaxHighlights,
+} from "../../../src/rendering/syntax/highlighter.ts";
 
 const theme = { fg: (_token: string, value: string) => value, bold: (value: string) => value };
 const context: ThirdPartyToolRenderContext = {
@@ -80,6 +91,7 @@ describe("tool generated-content contract", () => {
                     .render(80)
                     .join("\n"),
             ).not.toContain("unfinished");
+
             expect(inputs.map((input) => input.complete)).toEqual([true, false]);
             expect(inputs[0]?.key).not.toBe(inputs[1]?.key);
             expect(
@@ -88,6 +100,7 @@ describe("tool generated-content contract", () => {
                     .render(80)
                     .join("\n"),
             ).toContain("unfinished");
+
             expect(
                 renderer
                     .renderResult({}, { expanded: true, isPartial: true }, theme, {
@@ -132,6 +145,134 @@ describe("tool generated-content contract", () => {
                 expect(seen[0]).toContain("child-a");
             } finally {
                 handle.dispose();
+            }
+        },
+    );
+
+    it("keeps separate protocol code children current under the same host invalidation", async () => {
+        const entries: Array<{ event: string; fields: DebugLogFields }> = [];
+        const first = "const alpha = 1;";
+        const second = "const beta = 2;";
+        const node = stack([
+            code(first, { syntax: { language: "javascript" } }),
+            code(second, { syntax: { language: "javascript" } }),
+        ]);
+        try {
+            await initializeSyntaxHighlighting({}, { preloadLanguages: ["javascript"] });
+            configureRenderDiagnostics((event, fields) => {
+                entries.push({ event, fields: fields() });
+            });
+            const component = compactPresentation.renderNode(
+                node,
+                theme,
+                { ...context, invalidate: () => {} },
+                "static",
+            );
+            component.render(80);
+            await settleSyntaxHighlights();
+            const terminals = entries.filter(
+                ({ event, fields }) =>
+                    event === "syntax_request" &&
+                    fields.terminal === true &&
+                    (fields.codeHash === diagnosticCodeHash(first) ||
+                        fields.codeHash === diagnosticCodeHash(second)),
+            );
+            expect(terminals.map(({ fields }) => fields.state)).toEqual(["completed", "completed"]);
+            expect(new Set(terminals.map(({ fields }) => fields.ownerId)).size).toBe(2);
+        } finally {
+            configureRenderDiagnostics(undefined);
+            await disposeSyntaxHighlighting();
+        }
+    });
+
+    it("reuses a protocol child's logical owner across A to B to A source changes", async () => {
+        const entries: Array<{ event: string; fields: DebugLogFields }> = [];
+        const first = "const alpha = 1;";
+        const second = "const beta = 2;";
+        const invalidate = () => {};
+        const render = (
+            source: string,
+            lastComponent?: Parameters<typeof compactPresentation.renderNode>[2]["lastComponent"],
+        ) =>
+            compactPresentation.renderNode(
+                stack([code(source, { syntax: { language: "javascript" } })]),
+                theme,
+                { ...context, invalidate, lastComponent },
+                "static",
+            );
+        try {
+            await initializeSyntaxHighlighting({}, { preloadLanguages: ["javascript"] });
+            configureRenderDiagnostics((event, fields) => {
+                entries.push({ event, fields: fields() });
+            });
+            const a = render(first);
+            a.render(80);
+            const b = render(second, a);
+            b.render(80);
+            const current = render(first, b);
+            current.render(80);
+            await settleSyntaxHighlights();
+            const starts = entries.filter(
+                ({ event, fields }) => event === "syntax_request" && fields.state === "requested",
+            );
+            expect(starts.map(({ fields }) => fields.revision)).toEqual([1, 2, 3]);
+            expect(new Set(starts.map(({ fields }) => fields.ownerId)).size).toBe(1);
+            expect(
+                entries
+                    .filter(
+                        ({ event, fields }) =>
+                            event === "syntax_request" && fields.terminal === true,
+                    )
+                    .map(({ fields }) => fields.state),
+            ).toEqual(["superseded", "superseded", "completed"]);
+        } finally {
+            configureRenderDiagnostics(undefined);
+            await disposeSyntaxHighlighting();
+        }
+    });
+
+    it.each([false, true])(
+        "keeps reused protocol components isolated across tool calls (stack: %s)",
+        async (nested) => {
+            const entries: Array<{ event: string; fields: DebugLogFields }> = [];
+            const source = "const shared = 4;";
+            const child = code(source, { syntax: { language: "javascript" } });
+            let node: GlowupNode = child;
+
+            if (nested) node = stack([child]);
+
+            const invalidate = () => {};
+            try {
+                await initializeSyntaxHighlighting({}, { preloadLanguages: ["javascript"] });
+                configureRenderDiagnostics((event, fields) => {
+                    entries.push({ event, fields: fields() });
+                });
+                const first = compactPresentation.renderNode(
+                    node,
+                    theme,
+                    { ...context, toolCallId: "first", invalidate },
+                    "static",
+                );
+                first.render(80);
+                const second = compactPresentation.renderNode(
+                    node,
+                    theme,
+                    { ...context, toolCallId: "second", invalidate, lastComponent: first },
+                    "static",
+                );
+                second.render(80);
+                await settleSyntaxHighlights();
+                const starts = entries.filter(
+                    ({ event, fields }) =>
+                        event === "syntax_request" &&
+                        fields.codeHash === diagnosticCodeHash(source) &&
+                        fields.state === "requested",
+                );
+                expect(starts).toHaveLength(2);
+                expect(new Set(starts.map(({ fields }) => fields.ownerId)).size).toBe(2);
+            } finally {
+                configureRenderDiagnostics(undefined);
+                await disposeSyntaxHighlighting();
             }
         },
     );

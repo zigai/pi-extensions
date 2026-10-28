@@ -1,6 +1,12 @@
+import type { Component } from "@earendil-works/pi-tui";
 import { protocolContent } from "./content.ts";
 import { emptyComponent, makeComponent, wrapPrefixedLine } from "../../rendering/component.ts";
 import { renderGlowupOutput, type GlowupOutputRenderOptions } from "../../rendering/output.ts";
+import {
+    createSyntaxComponent,
+    inheritSyntaxComponent,
+} from "../../rendering/syntax/component-owner.ts";
+import { renderSyntaxComponent } from "../../rendering/syntax/code-component.ts";
 import { dim, type GlowupRenderTheme } from "../../rendering/theme.ts";
 import type { MutationSettings } from "../../rendering/preview-settings.ts";
 import { toolStatusLabel, type ToolLabelMode } from "../../rendering/status-labels.ts";
@@ -24,6 +30,38 @@ import type { ThirdPartyToolRenderContext } from "../types.ts";
 
 const DEFAULT_EXPANDED_PREVIEW_LINES = 500;
 const BODY_INDENT = "    ";
+
+type ProtocolSlot = {
+    readonly toolCallId: string;
+    readonly streamPhase: "call" | "result" | undefined;
+    readonly streamKey: string | undefined;
+};
+
+const contentSlots = new WeakMap<Component, ProtocolSlot>();
+const stackChildren = new WeakMap<
+    Component,
+    { readonly slot: ProtocolSlot; readonly children: readonly Component[] }
+>();
+
+function protocolSlot(context: ThirdPartyToolRenderContext): ProtocolSlot {
+    return {
+        toolCallId: context.toolCallId,
+        streamPhase: context.streamPhase,
+        streamKey: context.streamKey,
+    };
+}
+
+function sameProtocolSlot(
+    slot: ProtocolSlot | undefined,
+    context: ThirdPartyToolRenderContext,
+): boolean {
+    return (
+        slot !== undefined &&
+        slot.toolCallId === context.toolCallId &&
+        slot.streamPhase === context.streamPhase &&
+        slot.streamKey === context.streamKey
+    );
+}
 
 type BodyPosition = "first" | "continued";
 
@@ -220,7 +258,7 @@ function renderProtocolList(
 function renderProtocolContent(
     node: Extract<GlowupNode, { kind: "code" | "output" }>,
     theme: GlowupRenderTheme,
-    { lastComponent: _lastComponent, ...context }: ThirdPartyToolRenderContext,
+    { lastComponent, ...context }: ThirdPartyToolRenderContext,
     position: BodyPosition,
 ) {
     let contentPosition = position;
@@ -229,29 +267,60 @@ function renderProtocolContent(
     let noOutputLabel: string | null = null;
     if (node.kind === "output") noOutputLabel = node.noOutputLabel ?? null;
 
-    const options: GlowupOutputRenderOptions = {
-        expanded: context.expanded,
-        mode: previewMode(node.preview),
-        maxPreviewLines: previewLines(node.preview, context.expanded),
-        maxExpandedLines: previewLines(node.preview, true),
-        noOutputLabel,
-        prefixFirst: bodyFirstPrefix(theme, contentPosition),
-        prefixRest: BODY_INDENT,
-        invalidate: context.invalidate,
-        ...(node.syntax !== undefined && { syntax: node.syntax }),
+    const createContent = (invalidate: (() => void) | undefined): Component => {
+        let contentContext = context;
+        if (invalidate !== undefined) contentContext = { ...context, invalidate };
+
+        const options: GlowupOutputRenderOptions = {
+            expanded: context.expanded,
+            mode: previewMode(node.preview),
+            maxPreviewLines: previewLines(node.preview, context.expanded),
+            maxExpandedLines: previewLines(node.preview, true),
+            noOutputLabel,
+            prefixFirst: bodyFirstPrefix(theme, contentPosition),
+            prefixRest: BODY_INDENT,
+            invalidate,
+            syntaxSource: node.text ?? "",
+            ...(node.syntax !== undefined && { syntax: node.syntax }),
+        };
+        const body = makeComponent((width) =>
+            renderGlowupOutput(
+                theme,
+                protocolContent(node, contentContext, Math.max(1, width - BODY_INDENT.length)),
+                options,
+            ).render(width),
+        );
+        if (invalidate === undefined || node.syntax === undefined) return body;
+
+        return {
+            render: (width) => renderSyntaxComponent(body, invalidate, width),
+            invalidate: () => body.invalidate(),
+        };
     };
-    const content = makeComponent((width) =>
-        renderGlowupOutput(
-            theme,
-            protocolContent(node, context, Math.max(1, width - BODY_INDENT.length)),
-            options,
-        ).render(width),
-    );
+    let previous: Component | undefined;
+    if (lastComponent !== undefined && sameProtocolSlot(contentSlots.get(lastComponent), context))
+        previous = lastComponent;
+
+    let content: Component;
+    if (context.invalidate !== undefined && node.syntax !== undefined) {
+        content = createSyntaxComponent(
+            previous,
+            context.invalidate,
+            createContent,
+            node.text ?? "",
+        );
+    } else content = createContent(context.invalidate);
+
+    contentSlots.set(content, protocolSlot(context));
+
     if (node.kind !== "code" || node.title === undefined) return content;
 
     const title = renderBodyText(theme, node.title, position);
+    const titled = makeComponent((width) => [...title.render(width), ...content.render(width)]);
+    inheritSyntaxComponent(titled, content);
+    contentSlots.set(titled, protocolSlot(context));
 
-    return makeComponent((width) => [...title.render(width), ...content.render(width)]);
+    return titled;
 }
 
 /** Renders a decoded public protocol node through Glowup's private style engine. */
@@ -324,7 +393,7 @@ export function renderProtocolNode(
         case "stack": {
             const { lastComponent: _lastComponent, ...childContext } = context;
             const firstVisible = node.children.findIndex((child) => child.kind !== "empty");
-            const buildChildren = () =>
+            const buildChildren = (previous: readonly Component[] = []) =>
                 node.children.map((child, index) => {
                     let childPosition: BodyPosition = "continued";
                     if (index === firstVisible) childPosition = position;
@@ -334,7 +403,7 @@ export function renderProtocolNode(
                         theme,
                         {
                             ...childContext,
-                            lastComponent: undefined,
+                            lastComponent: previous[index],
                             streamKey: `${childContext.streamKey ?? "root"}.${index}`,
                         },
                         labelMode,
@@ -342,21 +411,34 @@ export function renderProtocolNode(
                         childPosition,
                     );
                 });
-            let children = buildChildren();
+            let previous: readonly Component[] | undefined;
+            if (context.lastComponent !== undefined) {
+                const old = stackChildren.get(context.lastComponent);
+                if (old !== undefined && sameProtocolSlot(old.slot, context))
+                    previous = old.children;
+            }
+
+            let children = buildChildren(previous);
+            const slot = protocolSlot(context);
             const rendered = makeComponent((width) =>
                 children.flatMap((child) => child.render(width)),
             );
 
-            return {
+            const component: Component = {
                 render: (width) => rendered.render(width),
                 invalidate() {
                     for (const child of children) child.invalidate();
 
                     // Text and headers bake theme colors when constructed.
-                    children = buildChildren();
+                    children = buildChildren(children);
+                    stackChildren.set(component, { slot, children });
                     rendered.invalidate();
                 },
             };
+
+            stackChildren.set(component, { slot, children });
+
+            return component;
         }
     }
 
