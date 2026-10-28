@@ -95,6 +95,25 @@ describe("embedded program extraction", () => {
         expect(programs(source)).toEqual([]);
     });
 
+    it.each([
+        `env -S 'python -c "a=1;b=2"'`,
+        `env -u MODE -S 'python -c "a=1;b=2"'`,
+        `printf '😀'; env -S 'python -c "a=1;b=2"'`,
+    ])("extracts quoted shell punctuation in a literal env split string: %s", (source) => {
+        expect(programs(source)).toEqual([
+            { language: "python", origin: "inline", source: '"a=1;b=2"', code: "a=1;b=2" },
+        ]);
+    });
+
+    it.each([
+        "env -S 'python -c \"${CODE}\"'",
+        `env -S 'python -c "print(1)" > file'`,
+        `env -S 'python -c "print(1)" &'`,
+        "env -S 'python -c \"print(1)\"\fnode -e x'",
+    ])("does not guess split strings with different env semantics: %s", (source) => {
+        expect(programs(source)).toEqual([]);
+    });
+
     it("extracts a literal env split-string command with original positions", () => {
         const source = `env -S 'python -c "print(1)"'`;
         expect(programs(source)).toEqual([

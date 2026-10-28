@@ -85,7 +85,7 @@ it("formats inline source while retaining unrelated heredoc input and shell oper
 
 it("does not format split-string or sed programs without a supported encoder or backend", async () => {
     const { subject, formatter, inputs } = setup();
-    const source = `env -S 'python -c "a=1"'; sed -e 's/a/b/' input`;
+    const source = `env -S 'python -c "a=1;b=2"'; sed -e 's/a/b/' input`;
     expect(extractEmbeddedPrograms(source).map(({ language }) => language)).toEqual([
         "python",
         "sed",
@@ -110,6 +110,7 @@ it("does not send sed programs to an unprofiled formatter", async () => {
     expect(
         await subject.formatEmbedded({ label: "Bash", language: "bash", code: source }, formatter),
     ).toBe(source);
+
     expect(calls).toBe(0);
 });
 

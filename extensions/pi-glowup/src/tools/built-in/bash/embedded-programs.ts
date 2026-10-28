@@ -909,11 +909,31 @@ export function extractEmbeddedPrograms(input: string, syntax?: ParsedScript): E
 
                     if (basename(words[0]) === "env") {
                         let splitIndex = 1;
-                        while (
-                            flagOptions.get("env")?.has(staticWord(words[splitIndex]) ?? "") ===
-                            true
-                        )
-                            splitIndex++;
+                        while (splitIndex < words.length) {
+                            const candidate = staticWord(words[splitIndex]);
+                            if (candidate === undefined) break;
+
+                            if (flagOptions.get("env")?.has(candidate) === true) {
+                                splitIndex++;
+                                continue;
+                            }
+
+                            if (["-u", "--unset", "-C", "--chdir"].includes(candidate)) {
+                                if (staticWord(words[splitIndex + 1]) === undefined) break;
+
+                                splitIndex += 2;
+                                continue;
+                            }
+
+                            if (
+                                candidate.startsWith("--unset=") ||
+                                candidate.startsWith("--chdir=")
+                            ) {
+                                splitIndex++;
+                                continue;
+                            }
+                            break;
+                        }
 
                         const option = staticWord(words[splitIndex]);
                         const splitWord = words[splitIndex + 1];
@@ -922,15 +942,20 @@ export function extractEmbeddedPrograms(input: string, syntax?: ParsedScript): E
                             (option === "-S" || option === "--split-string") &&
                             splitWord !== undefined &&
                             split !== undefined &&
-                            !/[\u0024\\`#;|&<>\r\n]/u.test(split)
+                            !/[\u0024\\`#\r\n\v\f]/u.test(split)
                         ) {
                             const parsed = parse(split);
                             const absolute = mappedWord(splitWord, mapping);
                             const local = mappedWord(splitWord, localMapping);
+                            const statement = parsed.commands[0];
+
                             if (
                                 (parsed.errors?.length ?? 0) === 0 &&
                                 parsed.commands.length === 1 &&
-                                parsed.commands[0]?.command.type === "Command" &&
+                                statement?.command.type === "Command" &&
+                                statement.background !== true &&
+                                statement.redirects.length === 0 &&
+                                statement.command.redirects.length === 0 &&
                                 absolute !== undefined &&
                                 local !== undefined
                             )
