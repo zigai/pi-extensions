@@ -1,10 +1,19 @@
+import { createHash } from "node:crypto";
 import { stripVTControlCharacters } from "node:util";
 import Type from "typebox";
 import { Value } from "typebox/value";
-import { getCapabilities, setCapabilities, TuiMainScreen } from "@earendil-works/pi-tui";
+import {
+    getCapabilities,
+    setCapabilities,
+    TuiMainScreen,
+    type Component,
+} from "@earendil-works/pi-tui";
 import { VirtualTerminal } from "../../support/virtual-terminal.ts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { DebugLogFields } from "../../../src/diagnostics/logger.ts";
+import { makeComponent } from "../../../src/rendering/component.ts";
+import { createSyntaxComponent } from "../../../src/rendering/syntax/component-owner.ts";
+import { renderSyntaxComponent } from "../../../src/rendering/syntax/code-component.ts";
 import {
     configureRenderDiagnostics,
     resetRenderDiagnostics,
@@ -48,7 +57,12 @@ function verifyCheckpoints(): void {
         string,
         { seq: number; pending: Map<string, string>; terminal: Set<string> }
     >();
-    for (const entry of entries.filter(({ event }) => event.startsWith("syntax_request"))) {
+    for (const entry of entries.filter(
+        ({ event }) =>
+            event.startsWith("syntax_request") ||
+            event === "syntax_generation" ||
+            event === "syntax_component_render",
+    )) {
         const { epoch: key, seq } = Value.Parse(sequenceSchema, entry.fields);
 
         let state = epochs.get(key);
@@ -166,6 +180,72 @@ describe("optional syntax request events", () => {
         ]);
 
         expect(entries.at(-1)?.fields.pendingCount).toBe(0);
+    });
+
+    it("retires replaced logical component sources even when an earlier source returns", () => {
+        const firstSource = "const alpha = 1;";
+        const secondSource = "const beta = 2;";
+
+        const component = (previous: Parameters<typeof createSyntaxComponent>[0], code: string) =>
+            createSyntaxComponent(
+                previous,
+                owner,
+                (invalidate) => ({
+                    render: () => highlightSyntaxCode(code, "typescript", { invalidate }),
+                    invalidate() {},
+                }),
+                code,
+            );
+
+        const first = component(undefined, firstSource);
+        first.render(80);
+        const second = component(first, secondSource);
+        second.render(80);
+        const third = component(second, firstSource);
+        third.render(80);
+
+        const starts = requests().filter(({ state }) => state === "requested");
+        expect(starts.map(({ revision }) => revision)).toEqual([1, 2, 3]);
+        expect(new Set(starts.map(({ ownerId }) => ownerId)).size).toBe(1);
+        expect(terminals().map(({ state }) => state)).toEqual(["superseded", "superseded"]);
+        expect(new Set(starts.map(({ requestId }) => requestId)).size).toBe(3);
+    });
+
+    it("cancels replaced component work and invalidates only the current source", async () => {
+        await initializeSyntaxHighlighting({}, { preloadLanguages: ["typescript"] });
+        let invalidations = 0;
+        const invalidateHost = () => {
+            invalidations += 1;
+        };
+
+        const component = (previous: Parameters<typeof createSyntaxComponent>[0], code: string) =>
+            createSyntaxComponent(
+                previous,
+                invalidateHost,
+                (invalidate) => ({
+                    render: () => highlightSyntaxCode(code, "typescript", { invalidate }),
+                    invalidate() {},
+                }),
+                code,
+            );
+        const first = component(undefined, "const alpha = 1;");
+        first.render(80);
+        const second = component(first, "const beta = 2;");
+        second.render(80);
+        const current = component(second, "const alpha = 1;");
+        current.render(80);
+        await settleSyntaxHighlights();
+
+        expect(terminals().map(({ state }) => state)).toEqual([
+            "superseded",
+            "superseded",
+            "completed",
+        ]);
+
+        expect(invalidations).toBe(1);
+        const lines = current.render(80);
+        expect(lines.join("\n")).toContain("\u001b[");
+        expect(lines.map(stripVTControlCharacters)).toEqual(["const alpha = 1;"]);
     });
 
     it("never completes a superseded queued source or reuses its terminal for a new revision", async () => {
@@ -320,6 +400,186 @@ describe("optional syntax request events", () => {
         await settleSyntaxHighlights();
         current.abort();
         expect(terminals().map(({ state }) => state)).toEqual(["completed"]);
+    });
+
+    it("presents the current source in color after queued component replacements", async () => {
+        const capabilities = getCapabilities();
+        setCapabilities({ ...capabilities, trueColor: true });
+        const terminal = new VirtualTerminal(60, 8);
+        const tui = new TuiMainScreen(terminal);
+        let current: Component | undefined;
+        const update = (code: string): void => {
+            current = createSyntaxComponent(
+                current,
+                () => tui.requestRender(),
+                (invalidate) => {
+                    const body: Component = {
+                        render: () => highlightSyntaxCode(code, "typescript", { invalidate }),
+                        invalidate() {},
+                    };
+
+                    return {
+                        render: (width) => renderSyntaxComponent(body, invalidate, width),
+                        invalidate: () => body.invalidate(),
+                    };
+                },
+                code,
+            );
+        };
+        try {
+            update("const alpha = 1;");
+            tui.addChild({
+                render: (width) => current?.render(width) ?? [],
+                invalidate: () => current?.invalidate(),
+            });
+            tui.start();
+            await terminal.settle();
+            update("const beta = 2;");
+            tui.requestRender();
+            await terminal.settle();
+            update("const alpha = 1;");
+            tui.requestRender();
+            await terminal.settle();
+            expect(
+                requests()
+                    .filter(({ state }) => state === "requested")
+                    .map(({ revision }) => revision),
+            ).toEqual([1, 2, 3]);
+            await initializeSyntaxHighlighting({}, { preloadLanguages: ["typescript"] });
+            await settleSyntaxHighlights();
+            await terminal.settle();
+            expect(
+                terminal
+                    .requireRowContaining("const alpha = 1;")
+                    .cells.some((cell) => !cell.isForegroundDefault),
+            ).toBe(true);
+
+            expect(terminals().map(({ state }) => state)).toEqual([
+                "superseded",
+                "superseded",
+                "completed",
+            ]);
+            const rendered = entries
+                .filter(({ event }) => event === "syntax_component_render")
+                .at(-1);
+            const currentRequest = terminals().at(-1);
+            expect(rendered?.fields).toMatchObject({
+                ownerId: currentRequest?.ownerId,
+                revision: currentRequest?.revision,
+                width: 60,
+                requests: [{ requestId: currentRequest?.requestId, state: "completed" }],
+            });
+        } finally {
+            tui.stop();
+            await terminal.settle(0);
+            terminal.dispose();
+            setCapabilities(capabilities);
+        }
+    });
+
+    it("binds component render observations to the requests and returned lines", async () => {
+        const code = "const visible = 9;";
+        let invalidations = 0;
+        const component = createSyntaxComponent(
+            undefined,
+            () => {
+                invalidations += 1;
+            },
+            (invalidate) => {
+                const body: Component = {
+                    render: () => highlightSyntaxCode(code, "typescript", { invalidate }),
+                    invalidate() {},
+                };
+
+                return {
+                    render: (width) => renderSyntaxComponent(body, invalidate, width),
+                    invalidate: () => body.invalidate(),
+                };
+            },
+            code,
+        );
+        expect(component.render(60)).toEqual([code]);
+        await initializeSyntaxHighlighting({}, { preloadLanguages: ["typescript"] });
+        await settleSyntaxHighlights();
+        expect(invalidations).toBe(1);
+        expect(component.render(60).join("\n")).toContain("\u001b[");
+
+        const observations = entries.filter(({ event }) => event === "syntax_component_render");
+        const request = requests().find(({ state }) => state === "requested");
+        const lineHash = createHash("sha256").update(code).digest("hex").slice(0, 16);
+        expect(observations.map(({ fields }) => fields)).toMatchObject([
+            {
+                ownerId: request?.ownerId,
+                revision: 1,
+                width: 60,
+                lineHashes: [lineHash],
+                requests: [{ requestId: request?.requestId, state: "waiting-ready" }],
+            },
+            {
+                ownerId: request?.ownerId,
+                revision: 1,
+                width: 60,
+                lineHashes: [lineHash],
+                requests: [{ requestId: request?.requestId, state: "completed" }],
+            },
+        ]);
+    });
+
+    it("keeps a different owner's request distinct in the component observation", () => {
+        const foreign = () => {};
+        const code = "const shared = 8;";
+        const component = createSyntaxComponent(
+            undefined,
+            owner,
+            (invalidate) => {
+                const body: Component = {
+                    render: () => highlightSyntaxCode(code, "typescript", { invalidate: foreign }),
+                    invalidate() {},
+                };
+
+                return {
+                    render: (width) => renderSyntaxComponent(body, invalidate, width),
+                    invalidate: () => body.invalidate(),
+                };
+            },
+            code,
+        );
+        component.render(60);
+        const rendered = entries.find(({ event }) => event === "syntax_component_render")?.fields;
+        const request = requests().find(({ state }) => state === "requested");
+        expect(rendered?.ownerId).not.toBe(request?.ownerId);
+        expect(rendered?.requests).toMatchObject([
+            { requestId: request?.requestId, ownerId: request?.ownerId, state: "waiting-ready" },
+        ]);
+    });
+
+    it("does not claim request observations when a component returns cached lines", () => {
+        const code = "const cached = 3;";
+        const component = createSyntaxComponent(
+            undefined,
+            owner,
+            (invalidate) => {
+                const body = makeComponent(() =>
+                    highlightSyntaxCode(code, "typescript", { invalidate }),
+                );
+
+                return {
+                    render: (width) => renderSyntaxComponent(body, invalidate, width),
+                    invalidate: () => body.invalidate(),
+                };
+            },
+            code,
+        );
+        expect(component.render(60)).toEqual([code]);
+        expect(component.render(60)).toEqual([code]);
+        const observations = entries.filter(({ event }) => event === "syntax_component_render");
+        expect(observations).toHaveLength(2);
+        expect(observations[0]?.fields.requests).toHaveLength(1);
+        expect(observations[1]?.fields.requests).toEqual([]);
+        configureRenderDiagnostics(undefined);
+        entries.length = 0;
+        expect(component.render(60)).toEqual([code]);
+        expect(entries).toEqual([]);
     });
 
     it("keeps actual native TUI frames identical with optional diagnostics off and on", async () => {

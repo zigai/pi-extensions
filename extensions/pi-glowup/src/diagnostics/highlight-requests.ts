@@ -1,4 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { stripVTControlCharacters } from "node:util";
+import type { Component } from "@earendil-works/pi-tui";
 import type { DebugLogFields } from "./logger.ts";
 import {
     diagnosticCodeHash,
@@ -51,6 +53,27 @@ export type HighlightRequest = {
     detach?: () => void;
 };
 
+export type ComponentFormat =
+    | { readonly state: "ready"; readonly source: string; readonly output: string }
+    | {
+          readonly state: "pending" | "failed" | "unsupported" | "not-required";
+          readonly source: string;
+      };
+
+type ComponentFormatRecord = {
+    readonly ownerId: string | null;
+    readonly revision: number;
+    readonly state: ComponentFormat["state"];
+    readonly sourceHash: string;
+    readonly outputHash?: string;
+};
+
+type ComponentRender = {
+    readonly previous: ComponentRender | undefined;
+    readonly requests: Set<HighlightRequest>;
+    readonly formats: ComponentFormatRecord[];
+};
+
 type Owner = {
     readonly id: string;
     revision: number;
@@ -77,6 +100,7 @@ let jobs = new WeakMap<Promise<string[]>, HighlightJob>();
 const pending = new Map<string, HighlightRequest>();
 const pendingStates = new Map<RequestState, number>();
 let releasedOwners: FinalizationRegistry<{ epoch: string; ownerId: string }> | undefined;
+let componentRender: ComponentRender | undefined;
 
 function registerOwner(invalidate: () => void, ownerId: string): void {
     releasedOwners ??= new FinalizationRegistry((released) => {
@@ -240,6 +264,8 @@ export function beginHighlightRequest(
     const existing = owner?.requests.get(key);
     if (existing !== undefined && (!existing.terminal || !newIntention)) {
         if (existing.state === "waiting-ready") observeSignal(existing, signal);
+        observeRenderedRequest(existing);
+
         return existing;
     }
 
@@ -270,8 +296,115 @@ export function beginHighlightRequest(
     if (existing?.terminal === true) reason = "resubmitted";
     publish(request, reason);
     observeSignal(request, signal);
+    observeRenderedRequest(request);
 
     return request;
+}
+
+export function observeComponentFormat(invalidate: () => void, observation: ComponentFormat): void {
+    if (componentRender === undefined || !renderDiagnosticsEnabled()) return;
+
+    const owner = owners.get(invalidate);
+    const sourceHash = createHash("sha256").update(observation.source).digest("hex").slice(0, 16);
+    let record: ComponentFormatRecord = {
+        ownerId: owner?.id ?? null,
+        revision: owner?.revision ?? 0,
+        state: observation.state,
+        sourceHash,
+    };
+    if (observation.state === "ready") {
+        const outputHash = createHash("sha256")
+            .update(observation.output)
+            .digest("hex")
+            .slice(0, 16);
+        record = { ...record, outputHash };
+    }
+
+    let current: ComponentRender | undefined = componentRender;
+    while (current !== undefined) {
+        current.formats.push(record);
+        current = current.previous;
+    }
+}
+
+function observeRenderedRequest(request: HighlightRequest): void {
+    let current = componentRender;
+    while (current !== undefined) {
+        current.requests.add(request);
+        current = current.previous;
+    }
+}
+
+export function observeHighlightComponentRender(
+    component: Component,
+    invalidate: () => void,
+    width: number,
+): string[] {
+    if (!renderDiagnosticsEnabled()) return component.render(width);
+
+    const observationEpoch = currentEpoch();
+    const initialOwner = owners.get(invalidate);
+    const initialOwnerId = initialOwner?.id;
+    const initialRevision = initialOwner?.revision;
+    const observation: ComponentRender = {
+        previous: componentRender,
+        requests: new Set(),
+        formats: [],
+    };
+    componentRender = observation;
+
+    let lines: string[];
+    try {
+        lines = component.render(width);
+    } finally {
+        if (componentRender === observation) componentRender = observation.previous;
+    }
+
+    const owner = owners.get(invalidate);
+    if (
+        owner === undefined ||
+        initialOwnerId === undefined ||
+        owner.id !== initialOwnerId ||
+        owner.revision !== initialRevision ||
+        epoch !== observationEpoch ||
+        !renderDiagnosticsEnabled()
+    )
+        return lines;
+
+    const ownerId = owner.id;
+    const revision = owner.revision;
+    const currentGeneration = generation;
+    const sequence = ++seq;
+    const monotonicNs = process.hrtime.bigint().toString();
+    const lineHashes = lines.map((line) =>
+        createHash("sha256").update(stripVTControlCharacters(line)).digest("hex").slice(0, 16),
+    );
+    const requests = [...observation.requests]
+        .filter((request) => request.epoch === observationEpoch)
+        .map((request) => ({
+            requestId: request.requestId,
+            ownerId: request.ownerId,
+            revision: request.revision,
+            generation: request.generation,
+            state: request.state,
+        }));
+
+    recordRenderEvent("syntax_component_render", () => ({
+        schemaVersion: 1,
+        epoch: observationEpoch,
+        seq: sequence,
+        ownerId,
+        revision,
+        generation: currentGeneration,
+        width,
+        lineHashes,
+        requestCoverage: "encountered",
+        requests,
+        formats: observation.formats,
+        monotonicNs,
+    }));
+
+    return lines;
 }
 
 function observeSignal(request: HighlightRequest, signal: AbortSignal | undefined): void {
@@ -315,7 +448,25 @@ export function useHighlightRequest(
 export function cancelHighlightRequests(reason: string, preserveReady = false): void {
     if (!renderDiagnosticsEnabled()) return;
 
+    const previousGeneration = generation;
     generation += 1;
+
+    const currentGeneration = generation;
+
+    if (nextRequest > 0) {
+        const sequence = ++seq;
+        const observationEpoch = currentEpoch();
+
+        recordRenderEvent("syntax_generation", () => ({
+            schemaVersion: 1,
+            epoch: observationEpoch,
+            seq: sequence,
+            previousGeneration,
+            generation: currentGeneration,
+            disposition: preserveReady ? "preserve-ready" : "retire",
+            reason,
+        }));
+    }
 
     for (const request of pending.values()) {
         if (preserveReady && request.state === "waiting-ready") continue;
@@ -439,4 +590,5 @@ onRenderDiagnosticsReset(() => {
     nextRequest = 0;
     nextJob = 0;
     generation = 0;
+    componentRender = undefined;
 });

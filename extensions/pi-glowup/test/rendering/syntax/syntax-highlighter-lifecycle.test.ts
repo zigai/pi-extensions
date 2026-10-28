@@ -125,6 +125,7 @@ describe("syntax highlighter lifecycle", () => {
     it("loads a direct request's missing language once and colors every waiting owner", async () => {
         let releaseLoad: (() => void) | undefined;
         let loads = 0;
+
         const blocked = new Promise<void>((resolve) => {
             releaseLoad = resolve;
         });
@@ -153,6 +154,7 @@ describe("syntax highlighter lifecycle", () => {
         releaseLoad?.();
         await settleSyntaxHighlights();
         expect(invalidations).toEqual([1, 1]);
+
         for (const [index, code] of ['const first = "one";', 'const second = "two";'].entries())
             expect(
                 highlightSyntaxCode(code, "javascript", { invalidate: redraws[index] }).join("\n"),
@@ -164,6 +166,7 @@ describe("syntax highlighter lifecycle", () => {
         const obsolete = () => {
             obsoleteInvalidations += 1;
         };
+
         const controller = new AbortController();
         let abortedInvalidations = 0;
         highlightSyntaxCode('print("obsolete")', "python", { invalidate: obsolete });
@@ -174,6 +177,7 @@ describe("syntax highlighter lifecycle", () => {
                 abortedInvalidations += 1;
             },
         });
+
         controller.abort();
         let currentInvalidations = 0;
         highlightSyntaxCode('print("current")', "python", {
@@ -221,6 +225,7 @@ describe("syntax highlighter lifecycle", () => {
         async (language) => {
             let code = 'console.log("ready");';
             if (language === "python") code = 'print("ready")';
+
             let invalidations = 0;
             const component = renderScriptCall(
                 plainTheme,
@@ -250,6 +255,7 @@ describe("syntax highlighter lifecycle", () => {
             const invalidate = () => {
                 invalidations += 1;
             };
+
             const source = 'print("owned")';
             highlightSyntaxCode(source, "python", { invalidate });
             clearSyntaxHighlightCache();
@@ -270,6 +276,7 @@ describe("syntax highlighter lifecycle", () => {
         const invalidate = () => {
             invalidations += 1;
         };
+
         const source = 'print("owned")';
         highlightSyntaxCode(source, "python", { invalidate });
         clearSyntaxHighlightCache();
@@ -289,6 +296,7 @@ describe("syntax highlighter lifecycle", () => {
         const invalidate = () => {
             invalidations += 1;
         };
+
         const source = 'print("owned")';
 
         await reinitializeSyntaxHighlighting(
@@ -301,12 +309,16 @@ describe("syntax highlighter lifecycle", () => {
                     highlightSyntaxCode('print("cancelled")', "python", {
                         signal: capacity.signal,
                     });
+
                     for (let index = 0; index < 98; index += 1)
                         highlightSyntaxCode(`print("occupied_${index}")`, "python");
+
                     highlightSyntaxCode(source, "python", { invalidate });
                     capacity.abort();
+
                     // Deliver the retry while its owner's accepted request still occupies a slot.
                     await Promise.resolve();
+
                     return replacement;
                 },
             },
@@ -411,7 +423,7 @@ describe("syntax highlighter lifecycle", () => {
         current.render(100);
         await settleSyntaxHighlights();
 
-        expect(invalidations).toBe(2);
+        expect(invalidations).toBe(3);
         current.invalidate();
         const lines = current.render(100);
         expect(lines[0]).not.toBe(stripVTControlCharacters(lines[0] ?? ""));

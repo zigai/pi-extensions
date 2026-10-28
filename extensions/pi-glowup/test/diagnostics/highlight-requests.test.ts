@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import {
     beginHighlightRequest,
@@ -9,6 +10,8 @@ import {
     highlightJobState,
     joinHighlightJob,
     observedHighlightJob,
+    observeComponentFormat,
+    observeHighlightComponentRender,
     observeHighlightRevision,
     transitionHighlightRequest,
     useHighlightRequest,
@@ -95,6 +98,179 @@ it("preserves initial readiness but terminally supersedes theme generations and 
         ["superseded", "theme-replaced"],
         ["cancelled", "shutdown"],
     ]);
+});
+
+it("distinguishes initial preservation from later retirement in the ordered evidence", () => {
+    const owner = () => {};
+    observeHighlightRevision(owner);
+    const waiting = beginHighlightRequest(code, "typescript", owner, undefined, false);
+    transitionHighlightRequest(waiting, "waiting-ready");
+    const active = beginHighlightRequest(
+        "const active = 2;",
+        "typescript",
+        owner,
+        undefined,
+        false,
+    );
+    transitionHighlightRequest(active, "waiting-ready");
+    transitionHighlightRequest(active, "queued");
+    cancelHighlightRequests("theme-replaced", true);
+    finishHighlightJob(createHighlightJob(waiting), "failed");
+    const later = beginHighlightRequest("const next = 1;", "typescript", owner, undefined, false);
+    cancelHighlightRequests("theme-replaced");
+    cancelHighlightRequests("cache-clear");
+
+    const changes = events.filter(({ event }) => event === "syntax_generation");
+    expect(changes.map(({ fields }) => fields)).toMatchObject([
+        { previousGeneration: 0, generation: 1, disposition: "preserve-ready" },
+        { previousGeneration: 1, generation: 2, disposition: "retire" },
+        { previousGeneration: 2, generation: 3, disposition: "retire" },
+    ]);
+
+    expect(Number(changes[0]?.fields.seq)).toBeGreaterThan(
+        Number(transitions().find(({ state }) => state === "waiting-ready")?.seq),
+    );
+
+    expect(Number(changes[0]?.fields.seq)).toBeLessThan(
+        Number(transitions().find(({ state }) => state === "failed")?.seq),
+    );
+
+    expect(later?.generation).toBe(1);
+    expect(terminal().map(({ state }) => state)).toEqual(["superseded", "failed", "superseded"]);
+
+    expect(Number(changes[0]?.fields.seq)).toBeLessThan(Number(terminal()[0]?.seq));
+    expect(Number(changes[1]?.fields.seq)).toBeLessThan(Number(terminal()[2]?.seq));
+    expect(events.at(-1)?.fields).toMatchObject({ pendingCount: 0 });
+    expect(Number(events.at(-1)?.fields.seq)).toBe(Number(changes[2]?.fields.seq) + 1);
+});
+
+it("records a formatter selection only inside its owner's actual component render", () => {
+    const owner = () => {};
+    const source = "const value=1;";
+    const output = "const value = 1;";
+    const sourceHash = createHash("sha256").update(source).digest("hex").slice(0, 16);
+    const outputHash = createHash("sha256").update(output).digest("hex").slice(0, 16);
+    observeHighlightRevision(owner);
+    observeComponentFormat(owner, { state: "ready", source, output });
+    expect(events).toEqual([]);
+    const component = {
+        render: () => {
+            observeComponentFormat(owner, { state: "ready", source, output });
+            return [output];
+        },
+        invalidate() {},
+    };
+
+    expect(observeHighlightComponentRender(component, owner, 80)).toEqual([output]);
+    const rendered = events.find(({ event }) => event === "syntax_component_render")?.fields;
+    expect(rendered?.formats).toMatchObject([
+        { ownerId: rendered?.ownerId, revision: 1, state: "ready", sourceHash, outputHash },
+    ]);
+
+    expect(rendered?.requests).toEqual([]);
+    expect(JSON.stringify(events)).not.toContain(source);
+    expect(JSON.stringify(events)).not.toContain(output);
+});
+
+it("keeps a foreign pending formatter distinct without inventing output", () => {
+    const owner = () => {};
+    const foreign = () => {};
+    const source = "const pending=1;";
+    observeHighlightRevision(owner);
+    observeHighlightRevision(foreign);
+    const request = beginHighlightRequest(source, "typescript", foreign, undefined, false);
+    const component = {
+        render: () => {
+            observeComponentFormat(foreign, { state: "pending", source });
+            return [source];
+        },
+        invalidate() {},
+    };
+
+    observeHighlightComponentRender(component, owner, 80);
+    const rendered = events.find(({ event }) => event === "syntax_component_render")?.fields;
+    expect(rendered?.ownerId).not.toBe(request?.ownerId);
+    expect(rendered?.formats).toEqual([
+        {
+            ownerId: request?.ownerId,
+            revision: 1,
+            state: "pending",
+            sourceHash: createHash("sha256").update(source).digest("hex").slice(0, 16),
+        },
+    ]);
+});
+
+it.each([false, true])(
+    "does not attribute lines when the source changes during render (known: %s)",
+    (known) => {
+        const owner = () => {};
+        if (known) observeHighlightRevision(owner);
+
+        const component = {
+            render: () => {
+                observeHighlightRevision(owner);
+                return ["old content"];
+            },
+            invalidate() {},
+        };
+
+        expect(observeHighlightComponentRender(component, owner, 80)).toEqual(["old content"]);
+        expect(events.filter(({ event }) => event === "syntax_component_render")).toEqual([]);
+    },
+);
+
+it("retains the actual request owner through nested component renders", () => {
+    const outer = () => {};
+    const inner = () => {};
+    observeHighlightRevision(outer);
+    observeHighlightRevision(inner);
+    const body = {
+        render: () => {
+            beginHighlightRequest(code, "typescript", inner, undefined, false);
+            return [code];
+        },
+        invalidate() {},
+    };
+    const container = {
+        render: () => observeHighlightComponentRender(body, inner, 80),
+        invalidate() {},
+    };
+
+    expect(observeHighlightComponentRender(container, outer, 80)).toEqual([code]);
+    const renders = events.filter(({ event }) => event === "syntax_component_render");
+    const request = transitions().find(({ state }) => state === "requested");
+    expect(renders).toHaveLength(2);
+    expect(renders[0]?.fields.ownerId).toBe(request?.ownerId);
+    expect(renders[1]?.fields.ownerId).not.toBe(request?.ownerId);
+    expect(renders[0]?.fields.requests).toMatchObject([
+        { requestId: request?.requestId, ownerId: request?.ownerId },
+    ]);
+
+    expect(renders[1]?.fields.requests).toMatchObject([
+        { requestId: request?.requestId, ownerId: request?.ownerId },
+    ]);
+});
+
+it("does not attribute a render across a diagnostics reset to the new epoch", () => {
+    const owner = () => {};
+    observeHighlightRevision(owner);
+    const first = beginHighlightRequest(code, "typescript", owner, undefined, false);
+    const component = {
+        render: () => {
+            configureRenderDiagnostics(undefined);
+            configureRenderDiagnostics(sink);
+            observeHighlightRevision(owner);
+            beginHighlightRequest(code, "typescript", owner, undefined, false);
+
+            return [code];
+        },
+        invalidate() {},
+    };
+
+    expect(observeHighlightComponentRender(component, owner, 80)).toEqual([code]);
+    expect(events.filter(({ event }) => event === "syntax_component_render")).toEqual([]);
+    const next = beginHighlightRequest(code, "typescript", owner, undefined, false);
+    expect(next?.epoch).not.toBe(first?.epoch);
 });
 
 it("keeps cached adoption terminal and use publication ordered after availability", () => {

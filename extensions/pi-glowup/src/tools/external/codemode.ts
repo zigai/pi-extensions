@@ -3,13 +3,14 @@ import type { CodePreview, CodeSource } from "../../rendering/streaming/presenta
 import { makeComponent, wrapPrefixedLine, toolExpandHint } from "../../rendering/component.ts";
 import type { ScriptBlockFormatter } from "../built-in/bash/formatter.ts";
 import { recordScriptAnalysis } from "../built-in/bash/script-analysis.ts";
-import { recordRenderError } from "../../diagnostics/render-events.ts";
+import { recordRenderError, renderDiagnosticsEnabled } from "../../diagnostics/render-events.ts";
+import { observeComponentFormat } from "../../diagnostics/highlight-requests.ts";
 import { omitLeadingImportPrologue } from "../built-in/bash/prologue.ts";
 import { PreviewStore } from "../built-in/file-previews.ts";
 import { renderGlowupOutput } from "../../rendering/output.ts";
 import {
     detectStructuredOutputLanguage,
-    scheduleCodeOutputSyntaxLoad,
+    renderSyntaxComponent,
 } from "../../rendering/syntax/code-component.ts";
 import { toolStatusLabel, type ToolLabelMode } from "../../rendering/status-labels.ts";
 import { dim, muted, type GlowupRenderTheme } from "../../rendering/theme.ts";
@@ -508,8 +509,9 @@ export function createCodemodeRenderer(
                     }),
                 });
 
-                return makeComponent((width) => {
+                const body = makeComponent((width) => {
                     let code: string | undefined;
+                    let formatted: string | undefined;
                     if (sourceCode !== undefined) {
                         if (streamCode !== undefined) {
                             code = streamCode({
@@ -522,17 +524,14 @@ export function createCodemodeRenderer(
                                 toolCallId: context.toolCallId,
                             });
                         } else {
-                            code =
-                                preview.get(context.toolCallId, sourceCode, {
-                                    contentWidth: Math.max(1, width - 4),
-                                    completed,
-                                    expanded,
-                                }) ?? sourceCode;
+                            formatted = preview.get(context.toolCallId, sourceCode, {
+                                contentWidth: Math.max(1, width - 4),
+                                completed,
+                                expanded,
+                            });
+                            code = formatted ?? sourceCode;
                         }
                     }
-
-                    if (code !== undefined)
-                        scheduleCodeOutputSyntaxLoad({ language: "javascript" }, invalidate, code);
 
                     const source = renderGlowupOutput(theme, code, {
                         expanded,
@@ -543,10 +542,31 @@ export function createCodemodeRenderer(
                         dimContent: false,
                         noOutputLabel: null,
                         syntax: { language: "javascript", invalidate },
+                        ...(sourceCode !== undefined && { syntaxSource: sourceCode }),
                     });
 
-                    return [...header.render(width), ...source.render(width)];
+                    const lines = [...header.render(width), ...source.render(width)];
+
+                    if (
+                        renderDiagnosticsEnabled() &&
+                        invalidate !== undefined &&
+                        sourceCode !== undefined &&
+                        formatted !== undefined
+                    )
+                        observeComponentFormat(invalidate, {
+                            state: "ready",
+                            source: sourceCode,
+                            output: formatted,
+                        });
+
+                    return lines;
                 });
+                if (invalidate === undefined) return body;
+
+                return {
+                    render: (width) => renderSyntaxComponent(body, invalidate, width),
+                    invalidate: () => body.invalidate(),
+                };
             });
         },
         renderResult(result, options, theme, context) {
