@@ -333,6 +333,7 @@ export function createNativeBashFeature(
         streamCode?: CodePreview,
     ) {
         const sessionSignal = sessionController.signal;
+        const toolCallId = context.toolCallId;
         const invalidate = sessionInvalidate(context.invalidate);
         const renderContext = { ...context, invalidate };
 
@@ -382,7 +383,7 @@ export function createNativeBashFeature(
             let signal: AbortSignal | undefined;
             let signalForLanguage: ((language: string) => AbortSignal) | undefined;
             if (!context.argsComplete && !context.isError) {
-                signalForLanguage = (language) => livePreviewSignal(context.toolCallId, language);
+                signalForLanguage = (language) => livePreviewSignal(toolCallId, language);
 
                 if (knownPrograms === undefined)
                     signal = livePreviews.get(context.toolCallId)?.controller.signal;
@@ -587,7 +588,7 @@ export function createNativeBashFeature(
                     ...options,
                     formatObservation: () => {
                         if (
-                            scheduledCommands.get(context.toolCallId) !== scheduled ||
+                            scheduledCommands.get(toolCallId) !== scheduled ||
                             !scheduled.options.isCurrent() ||
                             scheduled.options.signal?.aborted === true
                         )
@@ -600,7 +601,7 @@ export function createNativeBashFeature(
                             scheduled.ready &&
                             scheduled.readyWidth === scheduled.targetWidth &&
                             selected !== undefined &&
-                            (selected === scriptPreviews.get(context.toolCallId) ||
+                            (selected === scriptPreviews.get(toolCallId) ||
                                 selected === scheduled.expandedScript)
                         )
                             return { state: "ready", source: command, output: selected.code };
