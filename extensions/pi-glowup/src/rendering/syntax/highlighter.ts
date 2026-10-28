@@ -662,7 +662,7 @@ async function highlightSyntaxCodeAsyncObserved(
     const invalidate = options.invalidate;
     if (invalidate !== undefined && !highlightOwners.has(invalidate))
         observeSyntaxHighlightSource(code, invalidate);
-    const request =
+    let request =
         observation ?? diagnoseHighlightRequest(code, normalizedLanguage, options, language);
     const plainLines = normalizedCodeLines(code);
     const size = Buffer.byteLength(code, "utf8");
@@ -721,6 +721,10 @@ async function highlightSyntaxCodeAsyncObserved(
         (pendingKey === undefined ? undefined : pendingHighlights.get(pendingKey));
     if (pending === undefined) {
         highlightControllers.add(controller);
+        // A terminal observation cannot describe a new real submission, even when
+        // the source revision is unchanged. Cache returns above retain the old ID.
+        if (request?.terminal === true)
+            request = diagnoseHighlightRequest(code, normalizedLanguage, options, language, true);
         const job = createHighlightJob(request);
         const diagnosticJob = () => observedHighlightJob(pending) ?? job;
 
@@ -1255,6 +1259,7 @@ function diagnoseHighlightRequest(
     language: string | undefined,
     options: SyntaxHighlightOptions,
     requestedLanguage?: string,
+    newSubmission = false,
 ): HighlightRequest | undefined {
     if (!renderDiagnosticsEnabled()) return undefined;
     let pending: Promise<string[]> | undefined;
@@ -1271,6 +1276,16 @@ function diagnoseHighlightRequest(
         if (options.invalidate === undefined && options.signal === undefined)
             pending ??= pendingHighlights.get(key);
     }
+    let newIntention = newSubmission;
+    if (
+        options.invalidate !== undefined &&
+        options.signal?.aborted !== true &&
+        language !== undefined &&
+        language !== "text" &&
+        isLoadableSyntaxLanguage(language) &&
+        (state === undefined || (state.status === "ready" && !state.loadedLanguages.has(language)))
+    )
+        newIntention = true;
     return beginHighlightRequest(
         code,
         language,
@@ -1278,6 +1293,7 @@ function diagnoseHighlightRequest(
         options.signal,
         pending !== undefined && observedHighlightJob(pending) === undefined,
         requestedLanguage,
+        newIntention,
     );
 }
 

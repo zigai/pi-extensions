@@ -381,4 +381,160 @@ describe("optional syntax request events", () => {
             setCapabilities(capabilities);
         }
     });
+
+    it.each(["fresh", "absent"] as const)(
+        "observes a new same-revision submission after external abort with %s signal",
+        async (signalMode) => {
+            await initializeSyntaxHighlighting({}, { preloadLanguages: ["typescript"] });
+            const abort = new AbortController();
+            const cancelled = highlightSyntaxCodeAsync(source, "typescript", {
+                invalidate: owner,
+                signal: abort.signal,
+            });
+            abort.abort();
+            expect(await cancelled).toEqual([source]);
+            const old = terminals()[0];
+            let signal: AbortSignal | undefined;
+            if (signalMode === "fresh") signal = new AbortController().signal;
+
+            const options = { invalidate: owner };
+            let retried: Promise<string[]>;
+            if (signal === undefined)
+                retried = highlightSyntaxCodeAsync(source, "typescript", options);
+            else retried = highlightSyntaxCodeAsync(source, "typescript", { ...options, signal });
+
+            expect(
+                entries.filter(({ event }) => event === "syntax_request_ledger").at(-1)?.fields
+                    .pendingCount,
+            ).toBe(1);
+
+            expect(requests().filter(({ state }) => state === "requested")).toHaveLength(2);
+            const result = await retried;
+            expect(result.join("\n")).toContain("\u001b[");
+            expect(terminals().map(({ state }) => state)).toEqual(["cancelled", "completed"]);
+            const current = terminals()[1];
+            expect(current?.requestId).not.toBe(old?.requestId);
+            expect(current?.ownerId).toBe(old?.ownerId);
+            expect(current?.revision).toBe(old?.revision);
+            expect(current?.generation).toBe(old?.generation);
+            expect(current?.attempt).toBe(1);
+            expect(current?.jobId).not.toBe(old?.jobId);
+            expect(
+                requests()
+                    .filter(({ requestId }) => requestId === current?.requestId)
+                    .map(({ state }) => state),
+            ).toEqual(["requested", "queued", "running", "completed"]);
+        },
+    );
+
+    it("observes each failed same-revision resubmission to an unavailable real backend", async () => {
+        const state = await initializeSyntaxHighlighting({}, { preloadLanguages: ["typescript"] });
+        if (state.status !== "ready") throw new Error("invented backend was not initialized");
+
+        await state.tokenizer.dispose();
+        expect(await highlightSyntaxCodeAsync(source, "typescript", { invalidate: owner })).toEqual(
+            [source],
+        );
+        const retried = highlightSyntaxCodeAsync(source, "typescript", { invalidate: owner });
+        expect(
+            entries.filter(({ event }) => event === "syntax_request_ledger").at(-1)?.fields
+                .pendingCount,
+        ).toBe(1);
+
+        expect(await retried).toEqual([source]);
+        expect(terminals().map(({ state }) => state)).toEqual(["failed", "failed"]);
+        expect(new Set(terminals().map(({ requestId }) => requestId)).size).toBe(2);
+        expect(new Set(terminals().map(({ ownerId }) => ownerId)).size).toBe(1);
+        expect(new Set(terminals().map(({ revision }) => revision)).size).toBe(1);
+        expect(terminals().map(({ attempt }) => attempt)).toEqual([1, 1]);
+    });
+
+    it("observes a renewed same-revision readiness intention after external cancellation", async () => {
+        const abort = new AbortController();
+        highlightSyntaxCode(source, "typescript", { invalidate: owner, signal: abort.signal });
+        abort.abort();
+        highlightSyntaxCode(source, "typescript", { invalidate: owner });
+        const intended = requests().at(-1);
+        expect(intended?.state).toBe("waiting-ready");
+        expect(entries.at(-1)?.fields.pendingCount).toBe(1);
+        await initializeSyntaxHighlighting({}, { preloadLanguages: ["typescript"] });
+        await settleSyntaxHighlights();
+        expect(terminals().map(({ state }) => state)).toEqual(["cancelled", "completed"]);
+        expect(terminals()[1]?.requestId).toBe(intended?.requestId);
+        expect(terminals()[1]?.requestId).not.toBe(terminals()[0]?.requestId);
+        expect(terminals()[1]?.revision).toBe(terminals()[0]?.revision);
+    });
+
+    it("keeps a post-cancellation cache return attached to the old immutable terminal", async () => {
+        await initializeSyntaxHighlighting({}, { preloadLanguages: ["typescript"] });
+        const abort = new AbortController();
+        const cancelled = highlightSyntaxCodeAsync(source, "typescript", {
+            invalidate: owner,
+            signal: abort.signal,
+        });
+        abort.abort();
+        await cancelled;
+        const old = terminals()[0];
+        const colors = await highlightSyntaxCodeAsync(source, "typescript");
+        expect(await highlightSyntaxCodeAsync(source, "typescript", { invalidate: owner })).toEqual(
+            colors,
+        );
+
+        expect(requests().filter(({ state }) => state === "requested")).toHaveLength(2);
+        expect(terminals().filter(({ requestId }) => requestId === old?.requestId)).toEqual([old]);
+        expect(
+            entries.filter(({ event }) => event === "syntax_request_use").at(-1)?.fields,
+        ).toMatchObject({ requestId: old?.requestId, state: "cancelled", reason: "cache" });
+    });
+
+    it("does not renew repeatedly aborted calls without an actual submission", async () => {
+        await initializeSyntaxHighlighting({}, { preloadLanguages: ["typescript"] });
+        const abort = new AbortController();
+        abort.abort();
+
+        for (let index = 0; index < 3; index += 1)
+            expect(
+                await highlightSyntaxCodeAsync(source, "typescript", {
+                    invalidate: owner,
+                    signal: abort.signal,
+                }),
+            ).toEqual([source]);
+
+        expect(requests().map(({ state }) => state)).toEqual(["requested", "cancelled"]);
+        expect(
+            entries.filter(({ event }) => event === "syntax_request_ledger").at(-1)?.fields
+                .pendingCount,
+        ).toBe(0);
+    });
+
+    it("preserves real abort, pending-join, resubmission and cache behavior with diagnostics off/on", async () => {
+        const results: unknown[] = [];
+        for (const enabled of [false, true]) {
+            await disposeSyntaxHighlighting();
+            let diagnosticSink: typeof sink | undefined;
+            if (enabled) diagnosticSink = sink;
+            configureRenderDiagnostics(diagnosticSink);
+            await initializeSyntaxHighlighting({}, { preloadLanguages: ["typescript"] });
+            let invalidations = 0;
+            const invalidate = () => {
+                invalidations += 1;
+            };
+
+            const abort = new AbortController();
+            const first = highlightSyntaxCodeAsync(source, "typescript", {
+                invalidate,
+                signal: abort.signal,
+            });
+            abort.abort();
+            const joined = highlightSyntaxCodeAsync(source, "typescript", { invalidate });
+            const cancelled = await Promise.all([first, joined]);
+            const available = await highlightSyntaxCodeAsync(source, "typescript", { invalidate });
+            const cached = highlightSyntaxCode(source, "typescript", { invalidate });
+            expect(available.join("\n")).toContain("\u001b[");
+            results.push({ cancelled, available, cached, invalidations });
+        }
+
+        expect(results[0]).toEqual(results[1]);
+        expect(terminals().map(({ state }) => state)).toEqual(["cancelled", "completed"]);
+    });
 });

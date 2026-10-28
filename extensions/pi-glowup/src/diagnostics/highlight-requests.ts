@@ -223,6 +223,7 @@ export function beginHighlightRequest(
     signal: AbortSignal | undefined,
     late: boolean,
     requestedLanguage?: string,
+    newIntention = false,
 ): HighlightRequest | undefined {
     if (!renderDiagnosticsEnabled() || code.length === 0) return undefined;
 
@@ -237,7 +238,7 @@ export function beginHighlightRequest(
 
     const key = `${codeHash}\0${bytes}\0${language ?? ""}\0${languageHash ?? ""}`;
     const existing = owner?.requests.get(key);
-    if (existing !== undefined) {
+    if (existing !== undefined && (!existing.terminal || !newIntention)) {
         if (existing.state === "waiting-ready") observeSignal(existing, signal);
         return existing;
     }
@@ -264,7 +265,10 @@ export function beginHighlightRequest(
     owner?.requests.set(key, request);
     pending.set(request.requestId, request);
     countPending(request.state, 1);
-    publish(request);
+
+    let reason: string | undefined;
+    if (existing?.terminal === true) reason = "resubmitted";
+    publish(request, reason);
     observeSignal(request, signal);
 
     return request;
