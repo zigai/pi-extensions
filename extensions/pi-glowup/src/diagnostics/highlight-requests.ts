@@ -343,6 +343,9 @@ export function observeHighlightComponentRender(
     if (!renderDiagnosticsEnabled()) return component.render(width);
 
     const observationEpoch = currentEpoch();
+    const initialOwner = owners.get(invalidate);
+    const initialOwnerId = initialOwner?.id;
+    const initialRevision = initialOwner?.revision;
     const observation: ComponentRender = {
         previous: componentRender,
         requests: new Set(),
@@ -358,7 +361,14 @@ export function observeHighlightComponentRender(
     }
 
     const owner = owners.get(invalidate);
-    if (owner === undefined || epoch !== observationEpoch || !renderDiagnosticsEnabled())
+    if (
+        owner === undefined ||
+        initialOwnerId === undefined ||
+        owner.id !== initialOwnerId ||
+        owner.revision !== initialRevision ||
+        epoch !== observationEpoch ||
+        !renderDiagnosticsEnabled()
+    )
         return lines;
 
     const ownerId = owner.id;

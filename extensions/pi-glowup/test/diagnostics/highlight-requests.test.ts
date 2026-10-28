@@ -200,6 +200,25 @@ it("keeps a foreign pending formatter distinct without inventing output", () => 
     ]);
 });
 
+it.each([false, true])(
+    "does not attribute lines when the source changes during render (known: %s)",
+    (known) => {
+        const owner = () => {};
+        if (known) observeHighlightRevision(owner);
+
+        const component = {
+            render: () => {
+                observeHighlightRevision(owner);
+                return ["old content"];
+            },
+            invalidate() {},
+        };
+
+        expect(observeHighlightComponentRender(component, owner, 80)).toEqual(["old content"]);
+        expect(events.filter(({ event }) => event === "syntax_component_render")).toEqual([]);
+    },
+);
+
 it("retains the actual request owner through nested component renders", () => {
     const outer = () => {};
     const inner = () => {};

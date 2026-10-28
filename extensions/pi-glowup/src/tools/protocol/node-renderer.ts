@@ -38,6 +38,10 @@ type ProtocolSlot = {
 };
 
 const contentSlots = new WeakMap<Component, ProtocolSlot>();
+const callBodies = new WeakMap<
+    Component,
+    { readonly slot: ProtocolSlot; readonly body: Component }
+>();
 const stackChildren = new WeakMap<
     Component,
     { readonly slot: ProtocolSlot; readonly children: readonly Component[] }
@@ -281,7 +285,8 @@ function renderProtocolContent(
             prefixRest: BODY_INDENT,
             invalidate,
             syntaxSource: node.text ?? "",
-            ...(node.syntax !== undefined && { syntax: node.syntax }),
+            ...(node.syntax !== undefined &&
+                context.renderProbe !== true && { syntax: node.syntax }),
         };
         const body = makeComponent((width) =>
             renderGlowupOutput(
@@ -376,19 +381,40 @@ export function renderProtocolNode(
                 });
             }
 
+            let previous: Component | undefined;
+            if (context.lastComponent !== undefined) {
+                const old = callBodies.get(context.lastComponent);
+                if (old !== undefined && sameProtocolSlot(old.slot, context)) previous = old.body;
+            }
+
             const header = renderThirdPartyCall(theme, headerOptions);
             const body = renderProtocolNode(
                 node.body,
                 theme,
                 {
                     ...context,
+                    lastComponent: previous,
                     streamKey: `${context.streamKey ?? "root"}.body`,
                 },
                 labelMode,
                 mutationSettings,
             );
+            const rendered = makeComponent((width) => [
+                ...header.render(width),
+                ...body.render(width),
+            ]);
+            const component: Component = {
+                render: (width) => rendered.render(width),
+                invalidate() {
+                    header.invalidate();
+                    body.invalidate();
+                    rendered.invalidate();
+                },
+            };
 
-            return makeComponent((width) => [...header.render(width), ...body.render(width)]);
+            callBodies.set(component, { slot: protocolSlot(context), body });
+
+            return component;
         }
         case "stack": {
             const { lastComponent: _lastComponent, ...childContext } = context;

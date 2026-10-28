@@ -13,7 +13,7 @@ import {
 } from "./contract.ts";
 import { selectedGlowupPresentation } from "../../rendering/presentation-registry.ts";
 import type { ThirdPartyToolRenderContext, ThirdPartyToolRenderer } from "../types.ts";
-import { renderExpandableSection } from "../section-expansion.ts";
+import { renderExpandableSection, sectionContent } from "../section-expansion.ts";
 import { recordRenderError } from "../../diagnostics/render-events.ts";
 
 const MAX_MUTATION_CALL_SLOTS = 500;
@@ -195,15 +195,25 @@ export function createProtocolRenderer(
 
             let callContext: ThirdPartyToolRenderContext = {
                 ...initialContext,
+                lastComponent: sectionContent(initialContext.lastComponent),
                 streamPhase: "call",
                 contentComplete: initialContext.argsComplete || initialContext.isError,
             };
             if (streamCode !== undefined) callContext = { ...callContext, streamCode };
 
             return adapter.independentExpansion === true
-                ? renderExpandableSection(callContext, "call", (expanded) =>
-                      render({ ...callContext, expanded }),
-                  )
+                ? renderExpandableSection(callContext, "call", (expanded, probe) => {
+                      if (probe) {
+                          const {
+                              invalidate: _invalidate,
+                              lastComponent: _previous,
+                              ...context
+                          } = callContext;
+                          return render({ ...context, expanded, renderProbe: true });
+                      }
+
+                      return render({ ...callContext, expanded });
+                  })
                 : render(callContext);
         },
         renderResult(result, initialOptions, theme, initialContext) {
@@ -253,6 +263,7 @@ export function createProtocolRenderer(
 
             const resultContext: ThirdPartyToolRenderContext = {
                 ...initialContext,
+                lastComponent: sectionContent(initialContext.lastComponent),
                 streamPhase: "result",
                 phase,
                 isPartial: initialOptions.isPartial,
@@ -265,8 +276,24 @@ export function createProtocolRenderer(
                 ? renderExpandableSection(
                       { ...resultContext, expanded: initialOptions.expanded },
                       "result",
-                      (expanded) =>
-                          render({ ...resultContext, expanded }, { ...initialOptions, expanded }),
+                      (expanded, probe) => {
+                          if (probe) {
+                              const {
+                                  invalidate: _invalidate,
+                                  lastComponent: _previous,
+                                  ...context
+                              } = resultContext;
+                              return render(
+                                  { ...context, expanded, renderProbe: true },
+                                  { ...initialOptions, expanded },
+                              );
+                          }
+
+                          return render(
+                              { ...resultContext, expanded },
+                              { ...initialOptions, expanded },
+                          );
+                      },
                   )
                 : render(resultContext, initialOptions);
         },
