@@ -7,10 +7,13 @@ import { Value } from "typebox/value";
 import { stripVTControlCharacters } from "node:util";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { createNativeBashFeature } from "../../../../src/tools/built-in/bash/preview.ts";
+import { createCodeStreamStore } from "../../../../src/rendering/streaming/code-stream.ts";
+import type { CodePreview } from "../../../../src/rendering/streaming/presentation.ts";
 import type { BuiltInRenderContext } from "../../../../src/tools/built-in/context.ts";
 import {
     disposeSyntaxHighlighting,
     initializeSyntaxHighlighting,
+    onSyntaxHighlightComplete,
     settleSyntaxHighlights,
 } from "../../../../src/rendering/syntax/highlighter.ts";
 import { TEST_THEME_COLORS, TEST_THEME_BACKGROUND_COLORS } from "../../../support/theme-colors.ts";
@@ -438,6 +441,138 @@ describe("streaming Bash syntax ownership", () => {
             );
         expect(childOwners(wide).size).toBeGreaterThanOrEqual(2);
         expect(childOwners(narrow)).toEqual(childOwners(wide));
+    });
+
+    it("keeps a complete child source and its colors when outer Bash arguments grow", async () => {
+        await initializeSyntaxHighlighting({}, { preloadLanguages: ["javascript"] });
+        const feature = createNativeBashFeature();
+        onTestFinished(() => feature.clear());
+        const firstCommand = `node -e '${source}' --mode`;
+        const nextCommand = `${firstCommand} --verbose`;
+        let previous: Component | undefined;
+        const render = (command: string) => {
+            const context = {
+                args: { command },
+                toolCallId: "outer-arguments",
+                cwd: "/work",
+                lastComponent: previous,
+                state: {},
+                executionStarted: false,
+                argsComplete: false,
+                isPartial: true,
+                expanded: false,
+                showImages: false,
+                isError: false,
+                durationMs: undefined,
+                outputPad: 1,
+                invalidate: () => previous?.invalidate(),
+            } satisfies BuiltInRenderContext;
+            previous = feature.renderBashCall(
+                { command },
+                theme,
+                context,
+                () => 8,
+                () => false,
+                () => "preserve",
+                () => "trailing",
+            );
+
+            return previous.render(120);
+        };
+        render(firstCommand);
+        await feature.settled();
+        render(firstCommand);
+        await settleSyntaxHighlights();
+        previous?.invalidate();
+        const colored = render(firstCommand).join("\n");
+        expect(colored).toContain("\u001b[38;2;");
+        expect(stripVTControlCharacters(colored)).toContain("syntax_0");
+        let completions = 0;
+        const stop = onSyntaxHighlightComplete(() => {
+            completions++;
+        });
+        try {
+            const pending = render(nextCommand).join("\n");
+            expect(pending).toContain("\u001b[38;2;");
+            expect(stripVTControlCharacters(pending)).toContain("syntax_0");
+            await feature.settled();
+            const next = render(nextCommand).join("\n");
+            await settleSyntaxHighlights();
+            expect(next).toContain("\u001b[38;2;");
+            expect(stripVTControlCharacters(next)).toContain("syntax_0");
+            expect(completions).toBe(0);
+        } finally {
+            stop();
+        }
+    });
+
+    it("retains a streamed child when its Bash call completes with extra arguments", async () => {
+        await initializeSyntaxHighlighting({}, { preloadLanguages: ["javascript"] });
+        const feature = createNativeBashFeature();
+        const store = createCodeStreamStore();
+        onTestFinished(async () => {
+            feature.clear();
+            await store.dispose();
+        });
+        const stream: CodePreview = (input) => store.get({ ...input, mode: "token" });
+        const command = `node -e '${source}' --mode`;
+        let previous: Component | undefined;
+        const render = (value: string, complete: boolean) => {
+            const context = {
+                args: { command: value },
+                toolCallId: "stream-complete",
+                cwd: "/work",
+                lastComponent: previous,
+                state: {},
+                executionStarted: true,
+                argsComplete: complete,
+                isPartial: !complete,
+                expanded: false,
+                showImages: false,
+                isError: false,
+                durationMs: undefined,
+                outputPad: 1,
+                invalidate: () => previous?.invalidate(),
+            } satisfies BuiltInRenderContext;
+            previous = feature.renderBashCall(
+                { command: value },
+                theme,
+                context,
+                () => 8,
+                () => false,
+                () => "preserve",
+                () => "trailing",
+                stream,
+            );
+
+            return previous.render(120);
+        };
+        render(command, false);
+        await feature.settled();
+        render(command, false);
+        await settleSyntaxHighlights();
+        previous?.invalidate();
+        const colored = render(command, false).join("\n");
+        expect(colored).toContain("\u001b[38;2;");
+        expect(stripVTControlCharacters(colored)).toContain("syntax_0");
+        let completions = 0;
+        const stop = onSyntaxHighlightComplete(() => {
+            completions++;
+        });
+        try {
+            const completed = `${command} --verbose`;
+            const pending = render(completed, true).join("\n");
+            expect(pending).toContain("\u001b[38;2;");
+            expect(stripVTControlCharacters(pending)).toContain("syntax_0");
+            await feature.settled();
+            const settled = render(completed, true).join("\n");
+            await settleSyntaxHighlights();
+            expect(settled).toContain("\u001b[38;2;");
+            expect(stripVTControlCharacters(settled)).toContain("syntax_0");
+            expect(completions).toBe(0);
+        } finally {
+            stop();
+        }
     });
 
     it("retains independent embedded programs across width changes", async () => {

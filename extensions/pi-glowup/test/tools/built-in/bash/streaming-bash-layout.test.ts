@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import { Theme } from "@earendil-works/pi-coding-agent";
 import { TEST_THEME_BACKGROUND_COLORS, TEST_THEME_COLORS } from "../../../support/theme-colors.ts";
 import { stripVTControlCharacters } from "node:util";
@@ -34,7 +34,7 @@ function context(command: string, expanded = false): BuiltInRenderContext {
     };
 }
 
-function render(
+async function render(
     command: string,
     streamCode: CodePreview,
     options: {
@@ -44,7 +44,9 @@ function render(
         argsComplete?: boolean;
     } = {},
 ) {
-    return createNativeBashFeature().renderBashCall(
+    const feature = createNativeBashFeature();
+    onTestFinished(() => feature.clear());
+    const component = feature.renderBashCall(
         { command },
         theme,
         { ...context(command, options.expanded), argsComplete: options.argsComplete ?? true },
@@ -54,31 +56,34 @@ function render(
         () => options.operators ?? "trailing",
         streamCode,
     );
+    await feature.settled();
+
+    return component;
 }
 
-function rows(component: ReturnType<typeof render>, width = 160) {
+function rows(component: Awaited<ReturnType<typeof render>>, width = 160) {
     return component.render(width).map((line) => stripVTControlCharacters(line));
 }
 
 describe("streaming Bash layout", () => {
-    it.each([false, true])("splits semicolon statements with expansion %s", (expanded) => {
+    it.each([false, true])("splits semicolon statements with expansion %s", async (expanded) => {
         const command = "cat AGENTS.md; cat package.json; rg -n stream extensions | head -100";
-        expect(rows(render(command, ({ source }) => source, { expanded }))).toEqual([
+        expect(rows(await render(command, ({ source }) => source, { expanded }))).toEqual([
             "$ cat AGENTS.md;",
             "  cat package.json;",
             "  rg -n stream extensions | head -100",
         ]);
     });
 
-    it("applies preserve, always, and operator positioning to streamed snapshots", () => {
+    it("applies preserve, always, and operator positioning to streamed snapshots", async () => {
         const command = "first && second; third";
-        expect(rows(render(command, ({ source }) => source, { layout: "preserve" }))).toEqual([
-            `$ ${command}`,
-        ]);
+        expect(rows(await render(command, ({ source }) => source, { layout: "preserve" }))).toEqual(
+            [`$ ${command}`],
+        );
 
         expect(
             rows(
-                render("first && second", ({ source }) => source, {
+                await render("first && second", ({ source }) => source, {
                     layout: "always",
                     operators: "leading",
                 }),
@@ -86,8 +91,8 @@ describe("streaming Bash layout", () => {
         ).toEqual(["$ first", "  && second"]);
     });
 
-    it("recomputes automatic layout on resize", () => {
-        const component = render("alpha && beta", ({ source }) => source);
+    it("recomputes automatic layout on resize", async () => {
+        const component = await render("alpha && beta", ({ source }) => source);
         expect(rows(component, 100)).toEqual(["$ alpha && beta"]);
         expect(rows(component, 14)).toEqual(["$ alpha &&", "  beta"]);
         expect(rows(component, 100)).toEqual(["$ alpha && beta"]);
@@ -97,7 +102,7 @@ describe("streaming Bash layout", () => {
         const store = createCodeStreamStore();
         const command = "first; second; echo 'UNFINISHED";
         const streamCode: CodePreview = (input) => store.get({ ...input, mode: "statement" });
-        const component = render(command, streamCode, { argsComplete: false });
+        const component = await render(command, streamCode, { argsComplete: false });
         try {
             rows(component);
             await store.settled();
@@ -110,9 +115,9 @@ describe("streaming Bash layout", () => {
         }
     });
 
-    it("retains quoted separators and heredoc body text", () => {
+    it("retains quoted separators and heredoc body text", async () => {
         const command = "echo 'literal; && value'; cat <<'DATA'\nbody; literal\nDATA\nlast; final";
-        expect(rows(render(command, ({ source }) => source, { expanded: true }))).toEqual([
+        expect(rows(await render(command, ({ source }) => source, { expanded: true }))).toEqual([
             "$ echo 'literal; && value';",
             "  cat <<'DATA'",
             "  body; literal",
@@ -148,7 +153,7 @@ describe("streaming Bash layout", () => {
             "print(data)",
             "PY",
         ].join("\n");
-        const component = render(command, streamCode, { expanded: true });
+        const component = await render(command, streamCode, { expanded: true });
         try {
             rows(component);
             await store.settled();
@@ -203,6 +208,57 @@ describe("streaming Bash layout", () => {
         }
     });
 
+    it("waits for extraction and does not reuse an unrelated child language", async () => {
+        const feature = createNativeBashFeature();
+        const languages: Array<string | undefined> = [];
+        const stream: CodePreview = ({ source, language }) => {
+            languages.push(language);
+            return source;
+        };
+
+        const firstCommand = `node -e 'const value = 1'`;
+        const nextCommand = `python -c 'print(2)'`;
+        try {
+            const first = feature.renderBashCall(
+                { command: firstCommand },
+                theme,
+                { ...context(firstCommand), argsComplete: false, isPartial: true },
+                () => 8,
+                () => false,
+                () => "preserve",
+                () => "trailing",
+                stream,
+            );
+            expect(rows(first)).toEqual([]);
+            expect(languages).toEqual([]);
+            await feature.settled();
+            expect(rows(first).join("\n")).toContain("const value = 1");
+            expect(languages).toEqual(["javascript"]);
+            const next = feature.renderBashCall(
+                { command: nextCommand },
+                theme,
+                {
+                    ...context(nextCommand),
+                    argsComplete: false,
+                    isPartial: true,
+                    lastComponent: first,
+                },
+                () => 8,
+                () => false,
+                () => "preserve",
+                () => "trailing",
+                stream,
+            );
+            expect(rows(next)).toEqual([]);
+            expect(languages).toEqual(["javascript"]);
+            await feature.settled();
+            expect(rows(next).join("\n")).toContain("print(2)");
+            expect(languages).toEqual(["javascript", "python"]);
+        } finally {
+            feature.clear();
+        }
+    });
+
     it("reclassifies an unfinished standalone heredoc when extraction completes", async () => {
         const feature = createNativeBashFeature();
         const command = `python - <<'PY'\nprint(1)`;
@@ -232,7 +288,7 @@ describe("streaming Bash layout", () => {
     it("keeps standalone interpreter previews in their own language", async () => {
         const feature = createNativeBashFeature();
         const command = `python -c "print('hello')"`;
-        const show = (lastComponent?: ReturnType<typeof render>) =>
+        const show = (lastComponent?: Awaited<ReturnType<typeof render>>) =>
             feature.renderBashCall(
                 { command },
                 theme,

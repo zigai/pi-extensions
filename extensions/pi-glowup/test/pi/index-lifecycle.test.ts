@@ -706,12 +706,12 @@ describe("extension lifecycle", () => {
         const beforeReload = await highlightSyntaxCodeAsync(code, "typescript");
         expect(beforeReload.map(stripAnsi)).toEqual([code]);
         expect(beforeReload).not.toEqual([code]);
-        expect(workers).toHaveLength(1);
-        expect(workers[0]?.threadId).toBeGreaterThan(0);
+        expect(workers).toHaveLength(2);
+        expect(workers.every((worker) => worker.threadId > 0)).toBe(true);
 
         await pi.shutdownSession("reload");
 
-        expect(workers[0]?.threadId).toBe(-1);
+        expect(workers.every((worker) => worker.threadId === -1)).toBe(true);
         expect(isSyntaxHighlightingReady()).toBe(false);
         expect(await highlightSyntaxCodeAsync(code, "typescript")).toEqual([code]);
 
@@ -723,12 +723,12 @@ describe("extension lifecycle", () => {
         await vi.waitUntil(() => isSyntaxHighlightingReady());
 
         expect(await highlightSyntaxCodeAsync(code, "typescript")).toEqual(beforeReload);
-        expect(workers).toHaveLength(2);
-        expect(workers[0]?.threadId).toBe(-1);
-        expect(workers[1]?.threadId).toBeGreaterThan(0);
+        expect(workers).toHaveLength(4);
+        expect(workers.slice(0, 2).every((worker) => worker.threadId === -1)).toBe(true);
+        expect(workers.slice(2).every((worker) => worker.threadId > 0)).toBe(true);
 
         await nextPi.shutdownSession("reload");
-        expect(workers[1]?.threadId).toBe(-1);
+        expect(workers.every((worker) => worker.threadId === -1)).toBe(true);
     });
 
     it("refreshes retained tool components after TUI syntax startup", async () => {

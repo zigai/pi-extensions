@@ -62,7 +62,6 @@ type ScriptPreview = {
 const sourceOwners = new WeakMap<() => void, object>();
 
 type ChildOwners = {
-    readonly logicalSource: string;
     readonly parentSignal: AbortSignal | undefined;
     readonly controller: AbortController;
     readonly signal: AbortSignal;
@@ -73,7 +72,6 @@ const childOwners = new WeakMap<() => void, ChildOwners>();
 
 function childHighlightOptions(
     invalidate: (() => void) | undefined,
-    logicalSource: string,
     parentSignal: AbortSignal | undefined,
 ): (key: string, source: string) => SyntaxHighlightOptions {
     if (invalidate === undefined) {
@@ -82,17 +80,13 @@ function childHighlightOptions(
     }
 
     let owner = childOwners.get(invalidate);
-    if (
-        owner === undefined ||
-        owner.logicalSource !== logicalSource ||
-        owner.parentSignal !== parentSignal
-    ) {
+    if (owner === undefined || owner.parentSignal !== parentSignal) {
         owner?.controller.abort();
 
         const controller = new AbortController();
         let signal = controller.signal;
         if (parentSignal !== undefined) signal = AbortSignal.any([signal, parentSignal]);
-        owner = { logicalSource, parentSignal, controller, signal, children: new Map() };
+        owner = { parentSignal, controller, signal, children: new Map() };
         childOwners.set(invalidate, owner);
     }
 
@@ -116,10 +110,10 @@ function childHighlightOptions(
 }
 
 function programKey(program: EmbeddedProgram): string {
-    const path: Array<[number, number, string, string]> = [];
+    const path: Array<[number, string, string]> = [];
     let current: EmbeddedProgram | undefined = program;
     while (current !== undefined) {
-        path.push([current.start, current.end, current.language, current.origin]);
+        path.push([current.start, current.language, current.origin]);
         current = current.parent;
     }
 
@@ -746,11 +740,7 @@ function createScriptCallComponent(
     const showPrologueOmission = options.showPrologueOmission ?? false;
     const retained = invocation;
     const omittedHint = options.omittedHint ?? toolExpandHint();
-    const childOptions = childHighlightOptions(
-        options.invalidate,
-        options.logicalSource ?? retained.code,
-        options.signal,
-    );
+    const childOptions = childHighlightOptions(options.invalidate, options.signal);
     let syntaxOptions: SyntaxHighlightOptions = {
         invalidate: options.invalidate,
         ...(options.signal !== undefined && { signal: options.signal }),
