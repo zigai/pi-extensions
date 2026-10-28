@@ -1,4 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { stripVTControlCharacters } from "node:util";
+import type { Component } from "@earendil-works/pi-tui";
 import type { DebugLogFields } from "./logger.ts";
 import {
     diagnosticCodeHash,
@@ -51,6 +53,11 @@ export type HighlightRequest = {
     detach?: () => void;
 };
 
+type ComponentRender = {
+    readonly previous: ComponentRender | undefined;
+    readonly requests: Set<HighlightRequest>;
+};
+
 type Owner = {
     readonly id: string;
     revision: number;
@@ -77,6 +84,7 @@ let jobs = new WeakMap<Promise<string[]>, HighlightJob>();
 const pending = new Map<string, HighlightRequest>();
 const pendingStates = new Map<RequestState, number>();
 let releasedOwners: FinalizationRegistry<{ epoch: string; ownerId: string }> | undefined;
+let componentRender: ComponentRender | undefined;
 
 function registerOwner(invalidate: () => void, ownerId: string): void {
     releasedOwners ??= new FinalizationRegistry((released) => {
@@ -240,6 +248,8 @@ export function beginHighlightRequest(
     const existing = owner?.requests.get(key);
     if (existing !== undefined && (!existing.terminal || !newIntention)) {
         if (existing.state === "waiting-ready") observeSignal(existing, signal);
+        observeRenderedRequest(existing);
+
         return existing;
     }
 
@@ -270,8 +280,74 @@ export function beginHighlightRequest(
     if (existing?.terminal === true) reason = "resubmitted";
     publish(request, reason);
     observeSignal(request, signal);
+    observeRenderedRequest(request);
 
     return request;
+}
+
+function observeRenderedRequest(request: HighlightRequest): void {
+    let current = componentRender;
+    while (current !== undefined) {
+        current.requests.add(request);
+        current = current.previous;
+    }
+}
+
+export function observeHighlightComponentRender(
+    component: Component,
+    invalidate: () => void,
+    width: number,
+): string[] {
+    if (!renderDiagnosticsEnabled()) return component.render(width);
+
+    const observationEpoch = currentEpoch();
+    const observation: ComponentRender = { previous: componentRender, requests: new Set() };
+    componentRender = observation;
+
+    let lines: string[];
+    try {
+        lines = component.render(width);
+    } finally {
+        if (componentRender === observation) componentRender = observation.previous;
+    }
+
+    const owner = owners.get(invalidate);
+    if (owner === undefined || epoch !== observationEpoch || !renderDiagnosticsEnabled())
+        return lines;
+
+    const ownerId = owner.id;
+    const revision = owner.revision;
+    const currentGeneration = generation;
+    const sequence = ++seq;
+    const monotonicNs = process.hrtime.bigint().toString();
+    const lineHashes = lines.map((line) =>
+        createHash("sha256").update(stripVTControlCharacters(line)).digest("hex").slice(0, 16),
+    );
+    const requests = [...observation.requests]
+        .filter((request) => request.epoch === observationEpoch)
+        .map((request) => ({
+            requestId: request.requestId,
+            ownerId: request.ownerId,
+            revision: request.revision,
+            generation: request.generation,
+            state: request.state,
+        }));
+
+    recordRenderEvent("syntax_component_render", () => ({
+        schemaVersion: 1,
+        epoch: observationEpoch,
+        seq: sequence,
+        ownerId,
+        revision,
+        generation: currentGeneration,
+        width,
+        lineHashes,
+        requestCoverage: "encountered",
+        requests,
+        monotonicNs,
+    }));
+
+    return lines;
 }
 
 function observeSignal(request: HighlightRequest, signal: AbortSignal | undefined): void {
@@ -457,4 +533,5 @@ onRenderDiagnosticsReset(() => {
     nextRequest = 0;
     nextJob = 0;
     generation = 0;
+    componentRender = undefined;
 });

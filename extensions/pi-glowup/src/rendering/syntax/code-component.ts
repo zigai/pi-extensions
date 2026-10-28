@@ -1,3 +1,5 @@
+import type { Component } from "@earendil-works/pi-tui";
+import { observeHighlightComponentRender } from "../../diagnostics/highlight-requests.ts";
 import { normalizeSyntaxLanguage, syntaxLanguageFromFile } from "./language.ts";
 import {
     highlightSyntaxCode,
@@ -14,6 +16,15 @@ export type CodeOutputSyntax = {
 };
 
 const MAX_STRUCTURED_OUTPUT_DETECTION_CHARS = 64 * 1024;
+
+export function renderSyntaxComponent(
+    component: Component,
+    invalidate: () => void,
+    width: number,
+): string[] {
+    return observeHighlightComponentRender(component, invalidate, width);
+}
+
 /** Highlights code-like output when a language or path is known; otherwise returns normalized plain lines. */
 export function highlightCodeOutput(text: string, syntax: CodeOutputSyntax | undefined): string[] {
     const language = syntax?.language ?? syntaxLanguageFromFile(syntax?.path, text);
@@ -45,7 +56,9 @@ export function scheduleCodeOutputSyntaxLoad(
     }
 
     if (isCurrent !== undefined && !isCurrent()) return;
+
     scheduleSyntaxLanguageLoad(normalizedLanguage, invalidate, content, { cache: syntax?.cache });
+
     if (content !== undefined)
         void highlightSyntaxCodeAsync(content, normalizedLanguage, {
             invalidate,
