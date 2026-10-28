@@ -97,6 +97,50 @@ it("preserves initial readiness but terminally supersedes theme generations and 
     ]);
 });
 
+it("distinguishes initial preservation from later retirement in the ordered evidence", () => {
+    const owner = () => {};
+    observeHighlightRevision(owner);
+    const waiting = beginHighlightRequest(code, "typescript", owner, undefined, false);
+    transitionHighlightRequest(waiting, "waiting-ready");
+    const active = beginHighlightRequest(
+        "const active = 2;",
+        "typescript",
+        owner,
+        undefined,
+        false,
+    );
+    transitionHighlightRequest(active, "waiting-ready");
+    transitionHighlightRequest(active, "queued");
+    cancelHighlightRequests("theme-replaced", true);
+    finishHighlightJob(createHighlightJob(waiting), "failed");
+    const later = beginHighlightRequest("const next = 1;", "typescript", owner, undefined, false);
+    cancelHighlightRequests("theme-replaced");
+    cancelHighlightRequests("cache-clear");
+
+    const changes = events.filter(({ event }) => event === "syntax_generation");
+    expect(changes.map(({ fields }) => fields)).toMatchObject([
+        { previousGeneration: 0, generation: 1, disposition: "preserve-ready" },
+        { previousGeneration: 1, generation: 2, disposition: "retire" },
+        { previousGeneration: 2, generation: 3, disposition: "retire" },
+    ]);
+
+    expect(Number(changes[0]?.fields.seq)).toBeGreaterThan(
+        Number(transitions().find(({ state }) => state === "waiting-ready")?.seq),
+    );
+
+    expect(Number(changes[0]?.fields.seq)).toBeLessThan(
+        Number(transitions().find(({ state }) => state === "failed")?.seq),
+    );
+
+    expect(later?.generation).toBe(1);
+    expect(terminal().map(({ state }) => state)).toEqual(["superseded", "failed", "superseded"]);
+
+    expect(Number(changes[0]?.fields.seq)).toBeLessThan(Number(terminal()[0]?.seq));
+    expect(Number(changes[1]?.fields.seq)).toBeLessThan(Number(terminal()[2]?.seq));
+    expect(events.at(-1)?.fields).toMatchObject({ pendingCount: 0 });
+    expect(Number(events.at(-1)?.fields.seq)).toBe(Number(changes[2]?.fields.seq) + 1);
+});
+
 it("keeps cached adoption terminal and use publication ordered after availability", () => {
     const owner = () => {};
     observeHighlightRevision(owner);

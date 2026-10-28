@@ -315,7 +315,25 @@ export function useHighlightRequest(
 export function cancelHighlightRequests(reason: string, preserveReady = false): void {
     if (!renderDiagnosticsEnabled()) return;
 
+    const previousGeneration = generation;
     generation += 1;
+
+    const currentGeneration = generation;
+
+    if (nextRequest > 0) {
+        const sequence = ++seq;
+        const observationEpoch = currentEpoch();
+
+        recordRenderEvent("syntax_generation", () => ({
+            schemaVersion: 1,
+            epoch: observationEpoch,
+            seq: sequence,
+            previousGeneration,
+            generation: currentGeneration,
+            disposition: preserveReady ? "preserve-ready" : "retire",
+            reason,
+        }));
+    }
 
     for (const request of pending.values()) {
         if (preserveReady && request.state === "waiting-ready") continue;

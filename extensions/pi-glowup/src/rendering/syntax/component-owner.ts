@@ -1,4 +1,5 @@
 import type { Component } from "@earendil-works/pi-tui";
+import { observeSyntaxHighlightSource } from "./highlighter.ts";
 
 type SyntaxComponentOwner = {
     component: Component | undefined;
@@ -25,11 +26,13 @@ export function createSyntaxComponent(
     previous: Component | undefined,
     invalidateHost: (() => void) | undefined,
     render: (invalidate: () => void, previous: Component | undefined) => Component,
+    source?: string,
 ): Component {
     let owner: SyntaxComponentOwner | undefined;
     if (previous !== undefined) owner = owners.get(previous);
     owner ??= createOwner();
     owner.invalidateHost = invalidateHost;
+    if (source !== undefined) observeSyntaxHighlightSource(source, owner.invalidate);
 
     const component = render(owner.invalidate, owner.component);
     owner.component = component;
