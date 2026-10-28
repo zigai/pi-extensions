@@ -21,6 +21,7 @@ type Work = {
     readonly signal: AbortSignal | undefined;
     readonly cancel: () => void;
     readonly onUnavailable: TokenizeUnavailableListener | undefined;
+    readonly onState: TokenizeCancellation["onState"];
 };
 
 export type TokenizeUnavailableReason = "backpressure" | "failed" | "cancelled";
@@ -32,6 +33,8 @@ type TokenizeCancellation = {
 
     /** Explains an undefined result for diagnostics. */
     readonly onUnavailable?: TokenizeUnavailableListener | undefined;
+    /** Reports actual queue admission and worker dispatch, never an intention. */
+    readonly onState?: ((state: "queued" | "running") => void) | undefined;
 };
 
 export function createSyntaxTokenizer(
@@ -240,6 +243,7 @@ export function createSyntaxTokenizer(
         try {
             worker.ref();
             worker.postMessage(work.request);
+            work.onState?.("running");
         } catch (cause: unknown) {
             recordRenderError("syntax.worker-dispatch", cause);
             fail();
@@ -299,6 +303,7 @@ export function createSyntaxTokenizer(
                 resolve,
                 signal: cancellation.signal,
                 onUnavailable: cancellation.onUnavailable,
+                onState: cancellation.onState,
                 cancel: () => {
                     if (active === work) {
                         active = undefined;
@@ -319,6 +324,7 @@ export function createSyntaxTokenizer(
             bytes += size;
             cancellation.signal?.addEventListener("abort", work.cancel, { once: true });
             queue.push(work);
+            work.onState?.("queued");
             dispatch();
         });
     }
