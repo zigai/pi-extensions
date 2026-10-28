@@ -54,6 +54,7 @@ type CodemodeWork = {
     controller: AbortController;
     completed: boolean;
     ready: boolean;
+    running: boolean;
 };
 
 export type CodemodePreviewReadOptions = {
@@ -91,8 +92,6 @@ export function createCodemodePreview(formatterAccessor?: () => ScriptBlockForma
     async function format(work: CodemodeWork): Promise<void> {
         if (work.width === undefined) return;
 
-        work.controller.abort();
-
         const controller = new AbortController();
         work.controller = controller;
 
@@ -106,11 +105,17 @@ export function createCodemodePreview(formatterAccessor?: () => ScriptBlockForma
                 {
                     signal,
                     targetWidth: width,
-                    diagnostics: { toolCallId: options.toolCallId, stage: "preview" },
+                    diagnostics: {
+                        toolCallId: options.toolCallId,
+                        stage: "block",
+                        segmentCode: options.code,
+                    },
                 },
             )
             .catch((cause: unknown) => {
-                recordRenderError("codemode.format", cause, options.toolCallId);
+                if (!signal.aborted)
+                    recordRenderError("codemode.format", cause, options.toolCallId);
+
                 return undefined;
             });
         if (
@@ -118,6 +123,7 @@ export function createCodemodePreview(formatterAccessor?: () => ScriptBlockForma
             signal.aborted ||
             scheduled.get(options.toolCallId) !== work ||
             work.controller !== controller ||
+            work.width !== width ||
             !work.options.isCurrent()
         )
             return;
@@ -127,7 +133,35 @@ export function createCodemodePreview(formatterAccessor?: () => ScriptBlockForma
         if (work.completed) invalidate(work);
     }
 
+    function requestFormatting(work: CodemodeWork): void {
+        if (work.running) return;
+
+        work.running = true;
+        void (async () => {
+            while (
+                scheduled.get(work.options.toolCallId) === work &&
+                work.options.isCurrent() &&
+                work.options.signal?.aborted !== true
+            ) {
+                const width = work.width;
+                await format(work);
+
+                if (work.width === width) return;
+            }
+        })().finally(() => {
+            work.running = false;
+        });
+    }
+
     const feature = {
+        analyze(toolCallId: string, code: string): void {
+            recordScriptAnalysis({
+                toolName: "codemode",
+                toolCallId,
+                command: code,
+                formatter: formatterAccessor?.() ?? scheduled.get(toolCallId)?.options.formatter,
+            });
+        },
         observe(
             toolCallId: string,
             callback: (() => void) | undefined,
@@ -188,8 +222,6 @@ export function createCodemodePreview(formatterAccessor?: () => ScriptBlockForma
                 if (read.completed) complete(work);
 
                 if (work.width !== read.contentWidth) {
-                    work.controller.abort();
-                    work.ready = false;
                     work.width = read.contentWidth;
                     queueMicrotask(() => {
                         if (
@@ -197,7 +229,7 @@ export function createCodemodePreview(formatterAccessor?: () => ScriptBlockForma
                             work.options.isCurrent() &&
                             work.width === read.contentWidth
                         )
-                            void format(work);
+                            requestFormatting(work);
                     });
                 }
 
@@ -255,7 +287,9 @@ export function createCodemodePreview(formatterAccessor?: () => ScriptBlockForma
                 controller: new AbortController(),
                 completed: options.completed ?? false,
                 ready: false,
+                running: false,
             };
+
             scheduled.set(options.toolCallId, work);
 
             if (scheduled.size > 300) {
@@ -266,7 +300,7 @@ export function createCodemodePreview(formatterAccessor?: () => ScriptBlockForma
                 }
             }
 
-            void format(work);
+            requestFormatting(work);
         },
         clear(): void {
             generation += 1;
@@ -445,10 +479,10 @@ function callSource(
 
 export function createCodemodeRenderer(
     labelMode: ToolLabelMode = "static",
-    preview: Pick<
-        ReturnType<typeof createCodemodePreview>,
-        "get" | "observe"
-    > = createCodemodePreview(),
+    preview: Pick<ReturnType<typeof createCodemodePreview>, "get" | "observe"> &
+        Partial<
+            Pick<ReturnType<typeof createCodemodePreview>, "analyze">
+        > = createCodemodePreview(),
     streamCode?: CodePreview,
 ): ThirdPartyToolRenderer {
     return {
@@ -456,6 +490,8 @@ export function createCodemodeRenderer(
         // A component may outlive many streaming updates. Never close over its predecessor.
         renderCall(args, theme, { lastComponent: _lastComponent, ...context }) {
             const sourceCode = callSource(args, context)?.source;
+            if (context.argsComplete && sourceCode !== undefined)
+                preview.analyze?.(context.toolCallId, sourceCode);
 
             const completed =
                 context.phase === "complete" ||

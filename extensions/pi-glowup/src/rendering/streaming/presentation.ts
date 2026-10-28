@@ -7,6 +7,9 @@ export type CodePreview = (input: {
     readonly targetWidth?: number;
     readonly invalidate?: () => void;
 
+    /** Retires an owned live preview when its renderer switches to a final block. */
+    readonly signal?: AbortSignal;
+
     /** Owning tool call, used only to attribute render diagnostics. */
     readonly toolCallId?: string;
 }) => string;

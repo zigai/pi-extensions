@@ -45,16 +45,27 @@ const MAX_STACK_CHARS = 2_000;
 let sink: RenderDiagnosticSink | undefined;
 let emitted = new Set<string>();
 const memoizedHashes = new Map<string, string>();
+const resetListeners = new Set<() => void>();
+
+/** Internal diagnostic owners close their observations against the outgoing sink. */
+export function onRenderDiagnosticsReset(listener: () => void): void {
+    resetListeners.add(listener);
+}
 
 /** Enables render diagnostics while debugLog is enabled; undefined disables them. */
 export function configureRenderDiagnostics(next: RenderDiagnosticSink | undefined): void {
-    sink = next;
-
     if (next === undefined) resetRenderDiagnostics();
+    else if (next !== sink) {
+        // Close lifecycle observations, preserving legacy deduplication on sink replacement.
+        for (const listener of resetListeners) listener();
+    }
+
+    sink = next;
 }
 
 /** Forgets per-session deduplication so a new session records restored history again. */
 export function resetRenderDiagnostics(): void {
+    for (const listener of resetListeners) listener();
     emitted = new Set();
     memoizedHashes.clear();
 }

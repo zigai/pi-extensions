@@ -12,6 +12,21 @@ import {
     renderDiagnosticsEnabled,
     utf8Bytes,
 } from "../../diagnostics/render-events.ts";
+import {
+    beginHighlightRequest,
+    bindHighlightJob,
+    cancelHighlightRequests,
+    createHighlightJob,
+    failHighlightReadiness,
+    finishHighlightJob,
+    highlightJobState,
+    joinHighlightJob,
+    observedHighlightJob,
+    observeHighlightRevision,
+    transitionHighlightRequest,
+    useHighlightRequest,
+    type HighlightRequest,
+} from "../../diagnostics/highlight-requests.ts";
 import { configureBracketPairColoring } from "./brackets.ts";
 import {
     isLoadableSyntaxLanguage,
@@ -31,7 +46,6 @@ import {
     type SyntaxConfig,
 } from "./theme-loader.ts";
 
-const MAX_CODE_BYTES = 40 * 1024;
 const MAX_CACHEABLE_CODE_BYTES = 8 * 1024;
 const MAX_CACHE_BYTES = 512 * 1024;
 const CACHE_LIMIT = 100;
@@ -134,8 +148,20 @@ type HighlightOwner = {
     readonly source: string | readonly DiffSection[];
     readonly controller: AbortController;
     readonly results: Map<string, HighlightedSource>;
-    readonly previousResults: ReadonlyMap<string, HighlightedSource>;
+    previousResults: ReadonlyMap<string, HighlightedSource>;
+    version: number;
     readonly retryWhenCapacityAvailable: () => void;
+    readonly retryWhenReady: (language: SyntaxLanguage) => void;
+    readonly readyRequests: Map<SyntaxLanguage, Map<string | undefined, SyntaxHighlightOptions>>;
+    readonly capacityRequests: Map<
+        string,
+        {
+            readonly code: string;
+            readonly language: string | undefined;
+            readonly options: SyntaxHighlightOptions;
+            readonly version: number;
+        }
+    >;
     readonly pending: Map<string, Promise<string[]>>;
 };
 
@@ -145,8 +171,17 @@ const pendingHighlights = new Map<string, Promise<string[]>>();
 const highlightControllers = new Set<AbortController>();
 const tokenizerDisposals = new Set<Promise<void>>();
 const highlightCompletionListeners = new Set<() => void>();
-const activeHighlights = new Set<Promise<string[]>>();
+const activeHighlights = new Set<Promise<unknown>>();
 const completedUnownedHighlights = new Map<string, WeakRef<string[]>>();
+const readinessRetries = new Map<
+    SyntaxLanguage,
+    Set<WeakRef<(language: SyntaxLanguage) => void>>
+>();
+const registeredReadinessRetries = new Map<
+    SyntaxLanguage,
+    WeakSet<(language: SyntaxLanguage) => void>
+>();
+const languageLoads = new Map<SyntaxLanguage, Promise<boolean>>();
 
 let highlightedCodeCacheBytes = 0;
 const syntaxStateListeners = new Set<SyntaxStateListener>();
@@ -234,7 +269,8 @@ async function replaceSyntaxHighlighting(
             return disposedSyntaxState(state.config);
         }
 
-        clearSyntaxHighlightCache();
+        clearSyntaxColors("theme-replaced", previousState === undefined);
+        languageLoads.clear();
         syntaxState = state;
         activeConfigurationKey = configurationKey;
         disposeReadySyntaxState(previousState);
@@ -314,7 +350,8 @@ export function onSyntaxHighlightComplete(listener: () => void): () => void {
 }
 
 export async function settleSyntaxHighlights(): Promise<void> {
-    while (activeHighlights.size > 0) await Promise.allSettled(activeHighlights);
+    while (activeHighlights.size > 0 || languageLoads.size > 0)
+        await Promise.allSettled([...activeHighlights, ...languageLoads.values()]);
 }
 
 /** Returns completed colors, retaining unchanged prefixes while owned tokenization is pending. */
@@ -325,6 +362,10 @@ export function highlightSyntaxCode(
 ): string[] {
     const state = syntaxState;
     const normalizedLanguage = normalizeSyntaxLanguage(language);
+    const invalidate = options.invalidate;
+    if (invalidate !== undefined && !highlightOwners.has(invalidate))
+        observeSyntaxHighlightSource(code, invalidate);
+    const request = diagnoseHighlightRequest(code, normalizedLanguage, options, language);
     if (
         code.length === 0 ||
         state?.status !== "ready" ||
@@ -332,25 +373,20 @@ export function highlightSyntaxCode(
         normalizedLanguage === "text" ||
         !state.loadedLanguages.has(normalizedLanguage)
     ) {
+        diagnoseUnhighlightedRequest(request, normalizedLanguage, options);
         recordUnhighlightedRequest(code, language, normalizedLanguage);
+        if (code.length > 0 && options.signal?.aborted !== true)
+            scheduleSyntaxLanguageLoad(language, invalidate, code, options);
         return normalizedCodeLines(code);
     }
 
     const codeByteLength = Buffer.byteLength(code, "utf8");
-    if (codeByteLength > MAX_CODE_BYTES) {
-        recordSyntaxHighlight(code, language, normalizedLanguage, "over-budget");
-        return normalizedCodeLines(code);
-    }
-
     const key = highlightedCodeCacheKey(state.theme.name, normalizedLanguage, code, codeByteLength);
-    const invalidate = options.invalidate;
-    if (invalidate !== undefined && !highlightOwners.has(invalidate))
-        observeSyntaxHighlightSource(code, invalidate);
-
-    const owned = invalidate === undefined ? undefined : highlightOwners.get(invalidate);
+    const owned = currentHighlightOwner(invalidate);
     const completed = owned?.results.get(key) ?? owned?.previousResults.get(key);
     if (completed !== undefined) {
         owned?.results.set(key, completed);
+        useHighlightRequest(request, "cache");
         recordSyntaxHighlight(code, language, normalizedLanguage, "cached");
         return completed.lines;
     }
@@ -361,6 +397,7 @@ export function highlightSyntaxCode(
             key,
             highlightedSource(code, normalizedLanguage, state.theme.name, cached.lines),
         );
+        useHighlightRequest(request, "cache");
         recordSyntaxHighlight(code, language, normalizedLanguage, "cached");
         return cached.lines;
     }
@@ -371,13 +408,100 @@ export function highlightSyntaxCode(
             key,
             highlightedSource(code, normalizedLanguage, state.theme.name, unowned),
         );
+        useHighlightRequest(request, "cache");
         recordSyntaxHighlight(code, language, normalizedLanguage, "cached");
         return unowned;
     }
 
-    void highlightSyntaxCodeAsync(code, normalizedLanguage, options);
+    void highlightSyntaxCodeAsyncObserved(code, normalizedLanguage, options, request);
 
     return pendingHighlightLines(code, normalizedLanguage, state.theme.name, owned);
+}
+
+/** Arranges a redraw once a requested grammar is available, without retaining the component. */
+export function scheduleSyntaxLanguageLoad(
+    language: string | undefined,
+    invalidate: (() => void) | undefined,
+    code?: string,
+    options: SyntaxHighlightOptions = {},
+): void {
+    const normalizedLanguage = normalizeSyntaxLanguage(language);
+    if (normalizedLanguage === undefined || normalizedLanguage === "text") return;
+    if (!isLoadableSyntaxLanguage(normalizedLanguage)) return;
+    if (syntaxState?.status === "ready" && syntaxState.loadedLanguages.has(normalizedLanguage))
+        return;
+
+    if (invalidate !== undefined) {
+        if (!highlightOwners.has(invalidate)) observeSyntaxHighlightSource("", invalidate);
+        const owner = highlightOwners.get(invalidate);
+        const retry = owner?.retryWhenReady;
+        if (owner !== undefined && retry !== undefined) {
+            let requests = owner.readyRequests.get(normalizedLanguage);
+            if (requests === undefined) {
+                requests = new Map();
+                owner.readyRequests.set(normalizedLanguage, requests);
+            }
+            requests.set(code, options);
+            let registered = registeredReadinessRetries.get(normalizedLanguage);
+            if (registered === undefined) {
+                registered = new WeakSet();
+                registeredReadinessRetries.set(normalizedLanguage, registered);
+            }
+            if (!registered.has(retry)) {
+                registered.add(retry);
+                let retries = readinessRetries.get(normalizedLanguage);
+                if (retries === undefined) {
+                    retries = new Set();
+                    readinessRetries.set(normalizedLanguage, retries);
+                }
+                retries.add(new WeakRef(retry));
+            }
+        }
+    }
+
+    if (syntaxState?.status === "ready") requestSyntaxLanguageLoad(normalizedLanguage);
+}
+
+function requestSyntaxLanguageLoad(language: SyntaxLanguage): void {
+    if (languageLoads.has(language)) return;
+    void loadSyntaxLanguageIfReady(language).catch((cause: unknown) => {
+        recordRenderError("syntax.language-load", cause);
+    });
+}
+
+function retryReadySyntaxLanguages(): void {
+    const state = syntaxState;
+    if (state?.status !== "ready") return;
+    for (const [language, retries] of readinessRetries) {
+        if (!state.loadedLanguages.has(language)) {
+            requestSyntaxLanguageLoad(language);
+            continue;
+        }
+        readinessRetries.delete(language);
+        registeredReadinessRetries.delete(language);
+        for (const reference of retries) reference.deref()?.(language);
+    }
+}
+
+function notifySyntaxInvalidation(invalidate: () => void): void {
+    try {
+        invalidate();
+    } catch (cause: unknown) {
+        recordRenderError("syntax.invalidate", cause);
+    }
+}
+
+function currentHighlightOwner(invalidate: (() => void) | undefined): HighlightOwner | undefined {
+    if (invalidate === undefined) return undefined;
+    const owner = highlightOwners.get(invalidate);
+    if (owner !== undefined && owner.version !== syntaxRenderingVersion) {
+        owner.results.clear();
+        owner.previousResults = new Map();
+        owner.pending.clear();
+        owner.capacityRequests.clear();
+        owner.version = syntaxRenderingVersion;
+    }
+    return owner;
 }
 
 /** Cancels obsolete work when a renderer observes a different submitted source. */
@@ -385,9 +509,10 @@ export function observeSyntaxHighlightSource(
     source: string | readonly DiffSection[],
     invalidate: () => void,
 ): () => boolean {
-    const previous = highlightOwners.get(invalidate);
+    const previous = currentHighlightOwner(invalidate);
     if (previous?.source === source) return () => highlightOwners.get(invalidate) === previous;
 
+    observeHighlightRevision(invalidate);
     previous?.controller.abort();
 
     let previousResults: ReadonlyMap<string, HighlightedSource> = new Map();
@@ -406,16 +531,88 @@ export function observeSyntaxHighlightSource(
         controller: new AbortController(),
         results: new Map(),
         previousResults,
+        version: syntaxRenderingVersion,
         retryWhenCapacityAvailable: () => {
+            // Capacity can return before the rejected request's promise has unwound.
+            // Redrawing earlier would just reuse that doomed pending entry.
+            const retry = Promise.allSettled(owner.pending.values())
+                .then(() => {
+                    if (
+                        highlightOwners.get(invalidate) !== owner ||
+                        owner.controller.signal.aborted
+                    )
+                        return;
+                    const requests = [...owner.capacityRequests.values()];
+                    owner.capacityRequests.clear();
+                    let adopted = false;
+                    for (const request of requests) {
+                        if (request.version !== syntaxRenderingVersion) continue;
+                        adopted =
+                            retrySyntaxHighlight(request.code, request.language, request.options) ||
+                            adopted;
+                    }
+                    if (adopted) notifySyntaxInvalidation(invalidate);
+                })
+                .finally(() => {
+                    activeHighlights.delete(retry);
+                });
+            activeHighlights.add(retry);
+        },
+        capacityRequests: new Map(),
+        readyRequests: new Map(),
+        retryWhenReady: (language) => {
             if (highlightOwners.get(invalidate) !== owner || owner.controller.signal.aborted)
                 return;
-            invalidate();
+            const requests = owner.readyRequests.get(language);
+            owner.readyRequests.delete(language);
+            if (requests === undefined) return;
+            let adopted = false;
+            for (const [code, options] of requests) {
+                if (options.signal?.aborted === true) continue;
+                if (code === undefined) adopted = true;
+                else
+                    adopted =
+                        retrySyntaxHighlight(code, language, { ...options, invalidate }) || adopted;
+            }
+            if (adopted) notifySyntaxInvalidation(invalidate);
         },
         pending: new Map(),
     };
     highlightOwners.set(invalidate, owner);
 
     return () => highlightOwners.get(invalidate) === owner;
+}
+
+// Worker completion already invalidates its owner. A retry can instead adopt an existing
+// result synchronously, so its caller must invalidate any lines cached while work was pending.
+function retrySyntaxHighlight(
+    code: string,
+    language: string | undefined,
+    options: SyntaxHighlightOptions,
+): boolean {
+    const state = syntaxState;
+    const normalizedLanguage = normalizeSyntaxLanguage(language);
+    const owner = currentHighlightOwner(options.invalidate);
+    let key: string | undefined;
+    if (state?.status === "ready" && normalizedLanguage !== undefined)
+        key = highlightedCodeCacheKey(
+            state.theme.name,
+            normalizedLanguage,
+            code,
+            Buffer.byteLength(code, "utf8"),
+        );
+    let previous: HighlightedSource | undefined;
+    if (key !== undefined) previous = owner?.results.get(key);
+    void highlightSyntaxCodeAsync(code, language, options);
+    let adopted: HighlightedSource | undefined;
+    if (key !== undefined) adopted = owner?.results.get(key);
+    const changed = adopted !== undefined && adopted !== previous;
+    if (changed)
+        useHighlightRequest(
+            diagnoseHighlightRequest(code, normalizedLanguage, options),
+            "invalidation",
+        );
+    return changed;
 }
 
 export async function compactPythonStructuralBlankRows(
@@ -446,13 +643,27 @@ export async function compactPythonStructuralBlankRows(
 }
 
 /** Computes complete code colors off the TUI thread, preserving grammar state across all lines. */
-export async function highlightSyntaxCodeAsync(
+export function highlightSyntaxCodeAsync(
     code: string,
     language: string | undefined,
     options: SyntaxHighlightOptions = {},
 ): Promise<string[]> {
+    return highlightSyntaxCodeAsyncObserved(code, language, options);
+}
+
+async function highlightSyntaxCodeAsyncObserved(
+    code: string,
+    language: string | undefined,
+    options: SyntaxHighlightOptions,
+    observation?: HighlightRequest,
+): Promise<string[]> {
     const state = syntaxState;
     const normalizedLanguage = normalizeSyntaxLanguage(language);
+    const invalidate = options.invalidate;
+    if (invalidate !== undefined && !highlightOwners.has(invalidate))
+        observeSyntaxHighlightSource(code, invalidate);
+    let request =
+        observation ?? diagnoseHighlightRequest(code, normalizedLanguage, options, language);
     const plainLines = normalizedCodeLines(code);
     const size = Buffer.byteLength(code, "utf8");
 
@@ -463,12 +674,10 @@ export async function highlightSyntaxCodeAsync(
         normalizedLanguage === "text" ||
         !state.loadedLanguages.has(normalizedLanguage)
     ) {
+        diagnoseUnhighlightedRequest(request, normalizedLanguage, options);
         recordUnhighlightedRequest(code, language, normalizedLanguage);
-        return plainLines;
-    }
-
-    if (size > MAX_CODE_BYTES) {
-        recordSyntaxHighlight(code, language, normalizedLanguage, "over-budget");
+        if (code.length > 0 && options.signal?.aborted !== true)
+            scheduleSyntaxLanguageLoad(language, invalidate, code, options);
         return plainLines;
     }
 
@@ -479,14 +688,11 @@ export async function highlightSyntaxCodeAsync(
 
     const key = highlightedCodeCacheKey(state.theme.name, normalizedLanguage, code, size);
     const shouldCache = options.cache !== false && size <= MAX_CACHEABLE_CODE_BYTES;
-    const invalidate = options.invalidate;
-    if (invalidate !== undefined && !highlightOwners.has(invalidate))
-        observeSyntaxHighlightSource(code, invalidate);
-
-    const owner = invalidate === undefined ? undefined : highlightOwners.get(invalidate);
+    const owner = currentHighlightOwner(invalidate);
     const ownedResult = owner?.results.get(key) ?? owner?.previousResults.get(key);
     if (ownedResult !== undefined) {
         owner?.results.set(key, ownedResult);
+        useHighlightRequest(request, "cache");
         recordSyntaxHighlight(code, language, normalizedLanguage, "cached");
         return ownedResult.lines;
     }
@@ -497,6 +703,7 @@ export async function highlightSyntaxCodeAsync(
             key,
             highlightedSource(code, normalizedLanguage, state.theme.name, cached.lines),
         );
+        useHighlightRequest(request, "cache");
         recordSyntaxHighlight(code, language, normalizedLanguage, "cached");
         return cached.lines;
     }
@@ -514,6 +721,12 @@ export async function highlightSyntaxCodeAsync(
         (pendingKey === undefined ? undefined : pendingHighlights.get(pendingKey));
     if (pending === undefined) {
         highlightControllers.add(controller);
+        // A terminal observation cannot describe a new real submission, even when
+        // the source revision is unchanged. Cache returns above retain the old ID.
+        if (request?.terminal === true)
+            request = diagnoseHighlightRequest(code, normalizedLanguage, options, language, true);
+        const job = createHighlightJob(request);
+        const diagnosticJob = () => observedHighlightJob(pending) ?? job;
 
         let started = 0;
         if (renderDiagnosticsEnabled()) started = performance.now();
@@ -522,6 +735,10 @@ export async function highlightSyntaxCodeAsync(
         const onUnavailable = (reason: TokenizeUnavailableReason, error?: string): void => {
             unavailable = { reason };
             if (error !== undefined) unavailable.error = error;
+            if (reason === "backpressure") {
+                highlightJobState(diagnosticJob(), "waiting-capacity");
+                owner?.capacityRequests.set(key, { code, language, options, version: generation });
+            }
         };
 
         const record = (outcome: SyntaxHighlightOutcome, error?: string): void =>
@@ -531,7 +748,8 @@ export async function highlightSyntaxCodeAsync(
             .tokenize(plainLines.join("\n"), normalizedLanguage, bracketPairColoringEnabled, {
                 signal,
                 retryWhenCapacityAvailable: owner?.retryWhenCapacityAvailable,
-                ...(renderDiagnosticsEnabled() && { onUnavailable }),
+                onUnavailable,
+                onState: (phase) => highlightJobState(diagnosticJob(), phase),
             })
             .then((lines) => {
                 if (
@@ -539,11 +757,18 @@ export async function highlightSyntaxCodeAsync(
                     syntaxState !== state ||
                     syntaxRenderingVersion !== generation
                 ) {
+                    finishHighlightJob(diagnosticJob(), "cancelled", "stale-result");
                     record("cancelled");
                     return plainLines;
                 }
 
                 if (lines === undefined) {
+                    if (unavailable?.reason !== "backpressure")
+                        finishHighlightJob(
+                            diagnosticJob(),
+                            unavailable?.reason ?? "failed",
+                            "backend-unavailable",
+                        );
                     record(unavailable?.reason ?? "failed", unavailable?.error);
                     return plainLines;
                 }
@@ -563,7 +788,8 @@ export async function highlightSyntaxCodeAsync(
                         highlightedSource(code, normalizedLanguage, state.theme.name, highlighted),
                     );
 
-                    invalidate();
+                    finishHighlightJob(diagnosticJob(), "completed", undefined, true);
+                    notifySyntaxInvalidation(invalidate);
                 } else if (!shouldCache && options.cache !== false) {
                     if (completedUnownedHighlights.size >= CACHE_LIMIT) {
                         const oldest = completedUnownedHighlights.keys().next().value;
@@ -573,11 +799,13 @@ export async function highlightSyntaxCodeAsync(
                     completedUnownedHighlights.set(key, new WeakRef(highlighted));
                 }
 
+                finishHighlightJob(diagnosticJob(), "completed");
                 for (const listener of highlightCompletionListeners) listener();
 
                 return highlighted;
             })
             .catch((cause: unknown) => {
+                finishHighlightJob(diagnosticJob(), "failed", "backend-error");
                 recordRenderError("syntax.highlight", cause);
                 record("failed", errorMessage(cause));
                 return plainLines;
@@ -593,10 +821,17 @@ export async function highlightSyntaxCodeAsync(
                 if (owner !== undefined && owner.pending.get(key) === pending)
                     owner.pending.delete(key);
             });
+        bindHighlightJob(pending, job);
         activeHighlights.add(pending);
 
         if (pendingKey !== undefined) pendingHighlights.set(pendingKey, pending);
         owner?.pending.set(key, pending);
+    } else {
+        let job = observedHighlightJob(pending);
+        if (job === undefined) {
+            job = createHighlightJob(request, false);
+            bindHighlightJob(pending, job);
+        } else joinHighlightJob(job, request);
     }
 
     return pending;
@@ -645,27 +880,8 @@ export async function getSyntaxHighlighterForLanguage(
     }
 
     const normalizedLanguage = normalizeSyntaxLanguage(language) ?? "text";
-    if (normalizedLanguage !== "text" && !state.loadedLanguages.has(normalizedLanguage)) {
-        if (!isLoadableSyntaxLanguage(normalizedLanguage)) {
-            return undefined;
-        }
-
-        try {
-            await state.highlighter.loadLanguage(syntaxLanguageInput(normalizedLanguage));
-        } catch (cause: unknown) {
-            if (generation !== syntaxGeneration) return undefined;
-
-            throw cause;
-        }
-
-        if (generation !== syntaxGeneration) {
-            return undefined;
-        }
-
-        state.loadedLanguages.add(normalizedLanguage);
-        state.dynamicLanguages.add(normalizedLanguage);
-        notifySyntaxStateListeners(state.status);
-    }
+    if (!(await loadSyntaxLanguageIfReady(normalizedLanguage))) return undefined;
+    if (generation !== syntaxGeneration || syntaxState !== state) return undefined;
 
     return {
         highlighter: state.highlighter,
@@ -695,10 +911,29 @@ export async function loadSyntaxLanguageIfReady(language: string | undefined): P
         return false;
     }
 
+    const pending = languageLoads.get(normalizedLanguage);
+    if (pending !== undefined) return pending;
+
+    const loading = loadSyntaxLanguage(state, normalizedLanguage, generation);
+    languageLoads.set(normalizedLanguage, loading);
+    try {
+        return await loading;
+    } finally {
+        if (languageLoads.get(normalizedLanguage) === loading)
+            languageLoads.delete(normalizedLanguage);
+    }
+}
+
+async function loadSyntaxLanguage(
+    state: Extract<SyntaxState, { status: "ready" }>,
+    normalizedLanguage: SyntaxLanguage,
+    generation: number,
+): Promise<boolean> {
     try {
         await state.highlighter.loadLanguage(syntaxLanguageInput(normalizedLanguage));
     } catch (cause: unknown) {
         if (generation !== syntaxGeneration || syntaxState !== state) return false;
+        failHighlightReadiness(normalizedLanguage, "language-load-failed");
 
         throw cause;
     }
@@ -715,12 +950,24 @@ export async function loadSyntaxLanguageIfReady(language: string | undefined): P
 }
 
 export function clearSyntaxHighlightCache(): void {
+    resetSyntaxHighlightCache("cache-clear");
+}
+
+function resetSyntaxHighlightCache(reason: string): void {
+    clearSyntaxColors(reason);
+    highlightOwners = new WeakMap();
+    readinessRetries.clear();
+    registeredReadinessRetries.clear();
+}
+
+/** Installation preserves source identity and readiness waiters; explicit clearing cancels them. */
+function clearSyntaxColors(reason = "cache-clear", preserveReady = false): void {
+    cancelHighlightRequests(reason, preserveReady);
     syntaxRenderingVersion += 1;
 
     for (const controller of highlightControllers) controller.abort();
     highlightControllers.clear();
     pendingHighlights.clear();
-    highlightOwners = new WeakMap();
     completedUnownedHighlights.clear();
     highlightedCodeCache.clear();
     highlightedCodeCacheBytes = 0;
@@ -785,7 +1032,8 @@ export function syntaxHighlighterDiagnostics(): SyntaxHighlighterDiagnostics {
 
 /** Disposes the central highlighter and resets syntax state for reloads or shutdown. */
 export async function disposeSyntaxHighlighting(): Promise<void> {
-    clearSyntaxHighlightCache();
+    resetSyntaxHighlightCache("shutdown");
+    languageLoads.clear();
     syntaxGeneration += 1;
 
     const state = syntaxState;
@@ -849,6 +1097,9 @@ async function prepareSyntaxSource(
 }
 
 function notifySyntaxStateListeners(status: SyntaxStateStatus): void {
+    if (status === "ready") retryReadySyntaxLanguages();
+    if (status === "disabled" || status === "failed")
+        failHighlightReadiness(undefined, "syntax-unavailable");
     for (const listener of syntaxStateListeners) {
         listener(status);
     }
@@ -993,7 +1244,6 @@ type SyntaxHighlightOutcome =
     | "unsupported-language"
     | "not-ready"
     | "unavailable"
-    | "over-budget"
     | "failed"
     | "cancelled"
     | "backpressure";
@@ -1001,6 +1251,65 @@ type SyntaxHighlightOutcome =
 function errorMessage(cause: unknown): string {
     if (cause instanceof Error) return cause.message;
     return String(cause);
+}
+
+/** Diagnostic identity is independent of backend deduplication and cache keys. */
+function diagnoseHighlightRequest(
+    code: string,
+    language: string | undefined,
+    options: SyntaxHighlightOptions,
+    requestedLanguage?: string,
+    newSubmission = false,
+): HighlightRequest | undefined {
+    if (!renderDiagnosticsEnabled()) return undefined;
+    let pending: Promise<string[]> | undefined;
+    const state = syntaxState;
+    if (state?.status === "ready" && language !== undefined) {
+        const key = highlightedCodeCacheKey(
+            state.theme.name,
+            language,
+            code,
+            Buffer.byteLength(code, "utf8"),
+        );
+        if (options.invalidate !== undefined)
+            pending = highlightOwners.get(options.invalidate)?.pending.get(key);
+        if (options.invalidate === undefined && options.signal === undefined)
+            pending ??= pendingHighlights.get(key);
+    }
+    let newIntention = newSubmission;
+    if (
+        options.invalidate !== undefined &&
+        options.signal?.aborted !== true &&
+        language !== undefined &&
+        language !== "text" &&
+        isLoadableSyntaxLanguage(language) &&
+        (state === undefined || (state.status === "ready" && !state.loadedLanguages.has(language)))
+    )
+        newIntention = true;
+    return beginHighlightRequest(
+        code,
+        language,
+        options.invalidate,
+        options.signal,
+        pending !== undefined && observedHighlightJob(pending) === undefined,
+        requestedLanguage,
+        newIntention,
+    );
+}
+
+function diagnoseUnhighlightedRequest(
+    request: HighlightRequest | undefined,
+    language: string | undefined,
+    options: SyntaxHighlightOptions,
+): void {
+    if (request === undefined || request.terminal) return;
+    if (language === undefined || language === "text" || !isLoadableSyntaxLanguage(language)) {
+        transitionHighlightRequest(request, "unsupported", "plain-language");
+    } else if (syntaxState?.status === "disabled" || syntaxState?.status === "failed") {
+        transitionHighlightRequest(request, "failed", "syntax-unavailable");
+    } else if (options.invalidate === undefined) {
+        transitionHighlightRequest(request, "cancelled", "no-readiness-owner");
+    } else transitionHighlightRequest(request, "waiting-ready");
 }
 
 /** Records why a request stayed plain, including transient not-ready states (deduplicated). */

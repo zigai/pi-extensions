@@ -86,9 +86,9 @@ async function abortable(
                 signal.removeEventListener("abort", abort);
                 resolve(value);
             },
-            () => {
+            (cause: unknown) => {
                 signal.removeEventListener("abort", abort);
-                reject(new Error("Statement formatter rejected its input"));
+                reject(cause instanceof Error ? cause : new Error(String(cause)));
             },
         );
     });
@@ -171,15 +171,16 @@ export async function formatCodeUnit(
         if (input.mode === "block") stage = "block";
 
         // A streaming source is not yet the analysed segment; only a complete one joins it.
-        let diagnostics: ScriptFormatDiagnostics = { stage };
-        if (input.toolCallId !== undefined) {
-            diagnostics = { ...diagnostics, toolCallId: input.toolCallId };
-            if (input.complete) diagnostics = { ...diagnostics, segmentCode: input.source };
-        }
+        const diagnostics: ScriptFormatDiagnostics = {
+            stage,
+            ...(input.toolCallId !== undefined && { toolCallId: input.toolCallId }),
+            ...(input.complete && { segmentCode: input.source }),
+            ...input.diagnostics,
+        };
 
         let formatterOptions: ScriptBlockFormatterOptions = {
             signal,
-            diagnostics: input.diagnostics ?? diagnostics,
+            diagnostics,
         };
         if (input.targetWidth !== undefined) {
             formatterInput = { ...formatterInput, targetWidth: input.targetWidth };
@@ -188,6 +189,9 @@ export async function formatCodeUnit(
 
         formatted = await abortable(input.formatter(formatterInput, formatterOptions), signal);
     } catch (cause: unknown) {
+        if (signal.aborted || (cause instanceof Error && cause.name === "AbortError"))
+            return { text: raw };
+
         recordRenderError(
             "statement.format",
             cause,

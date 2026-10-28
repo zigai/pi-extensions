@@ -61,11 +61,14 @@ type ScheduledPreview = {
     completion: Promise<void>;
     completed: boolean;
     ready: boolean;
+    running: boolean;
     expandedScript: ScriptInvocation | undefined;
 };
 
 type StreamingScriptRenderState = {
     readonly toolCallId: string;
+    readonly signal: AbortSignal | undefined;
+    readonly invalidate: () => void;
     preview: Component | undefined;
 };
 
@@ -76,6 +79,7 @@ function renderStreamingScriptCall(
     theme: BuiltInRenderTheme,
     context: BuiltInRenderContext,
     streamCode: CodePreview,
+    signal: AbortSignal | undefined,
     options: Omit<BashCommandRenderOptions, "expanded">,
 ) {
     const { toolCallId, argsComplete, isError } = context;
@@ -86,20 +90,31 @@ function renderStreamingScriptCall(
             current,
             options.invalidate,
             (invalidate, previous) => {
-                let renderState: StreamingScriptRenderState = { toolCallId, preview: undefined };
+                let renderState: StreamingScriptRenderState = {
+                    toolCallId,
+                    signal,
+                    preview: undefined,
+                    invalidate: () => {
+                        if (signal?.aborted !== true) invalidate();
+                    },
+                };
                 if (previous !== undefined) {
                     const retained = streamingScriptRenderStates.get(previous);
-                    if (retained?.toolCallId === toolCallId) renderState = retained;
+                    if (retained?.toolCallId === toolCallId && retained.signal === signal)
+                        renderState = retained;
                 }
 
                 const component = makeComponent((width) => {
+                    if (signal?.aborted === true) return [];
+
                     const code = streamCode({
                         key: `tool:${toolCallId}:script:${invocation.language}`,
                         source: invocation.code,
                         language: invocation.language,
                         complete: argsComplete || isError,
                         targetWidth: Math.max(1, width - 6),
-                        invalidate,
+                        invalidate: renderState.invalidate,
+                        ...(signal !== undefined && { signal }),
                         toolCallId,
                     });
 
@@ -108,19 +123,23 @@ function renderStreamingScriptCall(
                     const preview = renderBashCommandCall(theme, code, {
                         ...options,
                         expanded,
-                        invalidate,
+                        invalidate: renderState.invalidate,
                         pureScriptOverride: { ...invocation, code },
                         lastComponent: renderState.preview,
                     });
+
                     renderState.preview = preview;
                     return preview.render(width);
                 });
+
                 // Host invalidations rebuild this wrapper. Retain the child syntax owner
                 // instead of flashing plain text and tokenizing the same script again.
                 streamingScriptRenderStates.set(component, renderState);
+
                 return component;
             },
         );
+
         // Expansion callbacks outlive this render. Replace their previous component
         // reference instead of retaining every historical host row through a closure.
         current = rendered;
@@ -143,6 +162,34 @@ export function createNativeBashFeature(
     const streamingScriptIdentities = new StreamingScriptIdentityStore();
     const bashRenderInvalidations = new Map<string, () => void>();
     const MAX_BASH_RENDER_INVALIDATIONS = 300;
+    const livePreviews = new Map<
+        string,
+        { readonly language: string; readonly controller: AbortController }
+    >();
+
+    function retireLivePreview(toolCallId: string): void {
+        const live = livePreviews.get(toolCallId);
+        livePreviews.delete(toolCallId);
+        live?.controller.abort();
+    }
+
+    function livePreviewSignal(toolCallId: string, language: string): AbortSignal {
+        let live = livePreviews.get(toolCallId);
+        if (live?.language === language) return live.controller.signal;
+
+        retireLivePreview(toolCallId);
+        live = { language, controller: new AbortController() };
+        livePreviews.set(toolCallId, live);
+
+        while (livePreviews.size > MAX_BASH_RENDER_INVALIDATIONS) {
+            const oldest = livePreviews.keys().next().value;
+            if (oldest === undefined) break;
+
+            retireLivePreview(oldest);
+        }
+
+        return live.controller.signal;
+    }
 
     function rememberBashRenderInvalidation(
         toolCallId: string,
@@ -177,42 +224,46 @@ export function createNativeBashFeature(
 
         const state = context.isError ? "error" : context.isPartial ? "running" : "success";
         const command = commandField(args) ?? "";
+
+        if (context.argsComplete || context.isError || streamCode === undefined)
+            retireLivePreview(context.toolCallId);
+
         if (context.argsComplete && renderDiagnosticsEnabled()) {
-            // The token preview records analysis after formatting whenever it formats.
+            // The completed preview records analysis after embedded decisions are known.
             const formatter =
                 formatterAccessor?.() ??
                 scheduledCommands.get(context.toolCallId)?.options.formatter;
             if (
-                streamCode !== undefined ||
                 formatter === undefined ||
                 scriptForPreview(command, formatter, formatEmbedded !== undefined) === undefined
             ) {
-                let heredocSkipReason: string | undefined;
-                if (streamCode !== undefined) heredocSkipReason = "untracked-streaming";
-
                 recordScriptAnalysis({
                     toolName: "bash",
                     toolCallId: context.toolCallId,
                     command,
                     formatter,
-                    ...(heredocSkipReason !== undefined && { heredocSkipReason }),
                 });
             }
         }
 
-        if (streamCode !== undefined) {
+        if (
+            streamCode !== undefined &&
+            ((!context.argsComplete && !context.isError) || formatterAccessor?.() === undefined)
+        ) {
             let script = streamingScriptIdentities.resolve(context.toolCallId, command);
-            if (context.argsComplete) {
+            if (context.argsComplete)
                 script = streamingScriptIdentities.finalize(
                     context.toolCallId,
                     parseScriptInvocation(command),
                 );
-            }
 
             const invocation = script ?? { label: "Bash", language: "bash", code: command };
             const profile = formatterAccessor?.()?.profileFor?.(invocation.language);
+            let signal: AbortSignal | undefined;
+            if (!context.argsComplete && !context.isError)
+                signal = livePreviewSignal(context.toolCallId, invocation.language);
 
-            return renderStreamingScriptCall(invocation, theme, context, streamCode, {
+            return renderStreamingScriptCall(invocation, theme, context, streamCode, signal, {
                 state,
                 maxCodePreviewLines: maxCodePreviewLines(),
                 showPrologueOmission: showPrologueOmission(),
@@ -245,6 +296,20 @@ export function createNativeBashFeature(
                 durationMs: context.durationMs,
                 lastComponent: context.lastComponent,
             });
+        }
+
+        if (streamCode !== undefined && (context.argsComplete || context.isError)) {
+            const formatter = formatterAccessor?.();
+            if (formatter !== undefined)
+                schedule({
+                    toolCallId: context.toolCallId,
+                    command,
+                    formatter,
+                    signal: undefined,
+                    completed: true,
+                    isCurrent: () => true,
+                    invalidate: context.invalidate,
+                });
         }
 
         const displayCommand = context.argsComplete ? command : partialBashCommandPreview(command);
@@ -309,7 +374,10 @@ export function createNativeBashFeature(
 
         return renderExpandableSection(context, "call", (expanded) => {
             let options = { ...bashOptions, expanded, lastComponent: previous };
-            if (expanded && profiled && parsedScript !== undefined) {
+
+            // Raw retained previews may be truncated even without a matching profile.
+            // Recover the source without replacing ready callback-only formatting.
+            if (expanded && parsedScript !== undefined && (profiled || scheduled?.ready !== true)) {
                 let expandedScript = parsedScript;
                 if (
                     scheduled?.completed === true &&
@@ -317,6 +385,7 @@ export function createNativeBashFeature(
                     scheduled.expandedScript !== undefined
                 )
                     expandedScript = scheduled.expandedScript;
+
                 options = {
                     ...options,
                     pureScriptOverride: expandedScript,
@@ -352,7 +421,6 @@ export function createNativeBashFeature(
             prefixFirst: prefix,
             prefixRest: prefix,
         };
-
         if (language !== undefined) {
             outputOptions = { ...outputOptions, syntax: { language } };
         }
@@ -365,6 +433,7 @@ export function createNativeBashFeature(
     }
 
     function clear(): void {
+        for (const toolCallId of livePreviews.keys()) retireLivePreview(toolCallId);
         scriptPreviews.clear();
 
         for (const scheduled of scheduledCommands.values()) scheduled.controller.abort();
@@ -404,8 +473,6 @@ export function createNativeBashFeature(
     }
 
     async function formatPreview(scheduled: ScheduledPreview): Promise<void> {
-        scheduled.controller.abort();
-
         const controller = new AbortController();
         scheduled.controller = controller;
 
@@ -427,12 +494,14 @@ export function createNativeBashFeature(
                         code = await formatEmbedded(input, backend, formatterOptions);
                         if (code !== input.code) {
                             const candidate = { label: "Bash", language: "bash", code };
+
                             // Large expanded calls can still use their original
                             // input; do not retain another unbounded source copy.
                             if (boundedScriptPreview(candidate) === candidate)
                                 expandedScript = candidate;
                         }
                     }
+
                     const formatted = await backend({ ...input, code }, formatterOptions);
                     if (formatted !== undefined) return formatted;
                     if (code !== input.code) return code;
@@ -466,9 +535,12 @@ export function createNativeBashFeature(
                 !signal.aborted &&
                 options.isCurrent() &&
                 scheduledCommands.get(options.toolCallId) === scheduled &&
-                scheduled.controller === controller,
+                scheduled.controller === controller &&
+                scheduled.targetWidth === targetWidth,
         }).catch((cause: unknown) => {
-            recordRenderError("bash.format-preview", cause, options.toolCallId);
+            if (!signal.aborted)
+                recordRenderError("bash.format-preview", cause, options.toolCallId);
+
             return false;
         });
 
@@ -476,7 +548,8 @@ export function createNativeBashFeature(
             signal.aborted ||
             !options.isCurrent() ||
             scheduledCommands.get(options.toolCallId) !== scheduled ||
-            scheduled.controller !== controller
+            scheduled.controller !== controller ||
+            scheduled.targetWidth !== targetWidth
         )
             return;
 
@@ -508,6 +581,26 @@ export function createNativeBashFeature(
         invalidatePreview(scheduled);
     }
 
+    function requestFormatting(scheduled: ScheduledPreview): void {
+        if (scheduled.running) return;
+
+        scheduled.running = true;
+        scheduled.completion = (async () => {
+            while (
+                scheduledCommands.get(scheduled.options.toolCallId) === scheduled &&
+                scheduled.options.isCurrent() &&
+                scheduled.options.signal?.aborted !== true
+            ) {
+                const width = scheduled.targetWidth;
+                await formatPreview(scheduled);
+
+                if (scheduled.targetWidth === width) return;
+            }
+        })().finally(() => {
+            scheduled.running = false;
+        });
+    }
+
     function rememberRenderWidth(
         toolCallId: string,
         contentWidth: number,
@@ -535,7 +628,7 @@ export function createNativeBashFeature(
             )
                 return;
 
-            scheduled.completion = formatPreview(scheduled);
+            requestFormatting(scheduled);
         });
     }
 
@@ -557,6 +650,7 @@ export function createNativeBashFeature(
             completion: Promise.resolve(),
             completed: options.completed ?? false,
             ready: false,
+            running: false,
             expandedScript: undefined,
         };
 
@@ -570,7 +664,8 @@ export function createNativeBashFeature(
             scheduledCommands.delete(oldest);
         }
 
-        scheduled.completion = formatPreview(scheduled);
+        requestFormatting(scheduled);
+
         return true;
     }
 
@@ -586,11 +681,13 @@ export function createNativeBashFeature(
         let restored = 0;
         for (const call of options.calls) {
             if (options.signal.aborted || !options.isCurrent()) return;
+
             if (
                 scriptForPreview(call.command, options.formatter, formatEmbedded !== undefined) ===
                 undefined
             )
                 continue;
+
             if (restored >= MAX_SCRIPT_PREVIEW_ENTRIES) return;
 
             restored += 1;

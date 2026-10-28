@@ -102,6 +102,39 @@ class FakeExtensionApi extends ExtensionRegistrationFixture {
         }
     }
 
+    async startAssistant(source: AssistantSourceMessage): Promise<void> {
+        for (const registration of this.registrations) {
+            if (registration[0] === "message_start") {
+                await registration[1](
+                    { type: "message_start", message: assistantMessage(source) },
+                    this.context,
+                );
+            }
+        }
+    }
+
+    async endAssistant(
+        source: AssistantSourceMessage,
+        stopReason: AssistantMessage["stopReason"] = "toolUse",
+    ): Promise<void> {
+        for (const registration of this.registrations) {
+            if (registration[0] === "message_end") {
+                await registration[1](
+                    { type: "message_end", message: { ...assistantMessage(source), stopReason } },
+                    this.context,
+                );
+            }
+        }
+    }
+
+    async endAgent(): Promise<void> {
+        for (const registration of this.registrations) {
+            if (registration[0] === "agent_end") {
+                await registration[1]({ type: "agent_end", messages: [] }, this.context);
+            }
+        }
+    }
+
     async updateAssistant(source: AssistantSourceMessage): Promise<void> {
         const message = assistantMessage(source);
         for (const registration of this.registrations) {
@@ -180,7 +213,7 @@ class FakeExtensionApi extends ExtensionRegistrationFixture {
         );
     }
 
-    async runTurn(): Promise<void> {
+    async runTurn(outcome: "completed" | "aborted" = "completed"): Promise<void> {
         for (const registration of this.registrations) {
             if (registration[0] === "turn_start") {
                 await registration[1](
@@ -209,7 +242,7 @@ class FakeExtensionApi extends ExtensionRegistrationFixture {
                             pendingMessages: [],
                             canContinue: false,
                         },
-                        outcome: "completed",
+                        outcome,
                     },
                     this.context,
                 );
@@ -375,6 +408,7 @@ describe("extension lifecycle", () => {
             await rm(root, { recursive: true, force: true });
         });
         const command = "python - <<'PY'\nprint('hi')\nPY";
+
         const renderEvents = (): Static<typeof renderLogEntrySchema>[] =>
             readFileSync(log, "utf8")
                 .trim()
@@ -437,7 +471,7 @@ describe("extension lifecycle", () => {
         );
         expect(format?.fields).toMatchObject({
             toolCallId: "call-1",
-            stage: "preview",
+            stage: "block",
             outcome: "unchanged",
         });
     });
@@ -723,6 +757,125 @@ describe("extension lifecycle", () => {
         expect(stripAnsi(row.render(80).join("\n"))).toContain("const total = 3;");
     });
 
+    async function argumentSession(presentation = "compact") {
+        const root = await mkdtemp(join(tmpdir(), "pi-glowup-arguments-"));
+        const agentDir = join(root, "agent");
+        process.env[AGENT_DIR_ENV] = agentDir;
+        process.env[SCRIPT_FORMATTERS_ENV] = "{}";
+        const settingsPath = getGlowupGlobalConfigPath(agentDir);
+        await mkdir(dirname(settingsPath), { recursive: true });
+        await writeFile(
+            settingsPath,
+            JSON.stringify({ presentation, streaming: { prose: "token", code: "block" } }),
+        );
+        const pi = new FakeExtensionApi();
+        installGlowup(pi);
+        initTheme("dark");
+        await pi.startSession(root, false, "tui");
+        onTestFinished(async () => {
+            await pi.shutdownSession();
+            await rm(root, { recursive: true, force: true });
+        });
+        const row = (id: string, command: string) =>
+            new ToolExecutionComponent(
+                "bash",
+                id,
+                { command },
+                undefined,
+                undefined,
+                createTui(),
+                root,
+            );
+        return { pi, root, row };
+    }
+
+    function bashMessage(id: string, command: string): AssistantSourceMessage {
+        return {
+            role: "assistant",
+            content: [{ type: "toolCall", id, name: "bash", arguments: { command } }],
+        };
+    }
+
+    it.each(["compact", "outline"])(
+        "renders resultless history while another call streams in %s",
+        async (presentation) => {
+            const { pi, row } = await argumentSession(presentation);
+            await pi.startAssistant(bashMessage("live", "printf held"));
+            const live = row("live", "printf held");
+            const historical = row("historical", "printf restored");
+            const screen = (tool: ToolExecutionComponent, width = 80) =>
+                stripAnsi(tool.render(width).join("\n"));
+            expect(screen(live)).not.toContain("held");
+            await vi.waitFor(() => expect(screen(historical)).toContain("printf restored"));
+            await pi.updateAssistant(bashMessage("live", "printf held_tail"));
+            live.updateArgs({ command: "printf held_tail" });
+            live.setExpanded(true);
+            for (const width of [80, 45, 100])
+                expect(screen(live, width)).not.toContain("held_tail");
+            await pi.endAssistant(bashMessage("live", "printf held_tail"));
+            await vi.waitFor(() => expect(screen(live)).toContain("printf held_tail"));
+        },
+    );
+
+    it.each(["aborted", "error", "turn", "agent"])(
+        "releases resultless arguments after %s without a host completion update",
+        async (ending) => {
+            const { pi, row } = await argumentSession();
+            const source = bashMessage("interrupted", "printf interrupted_tail");
+            await pi.startAssistant(source);
+            const interrupted = row("interrupted", "printf interrupted_tail");
+            const screen = () => stripAnsi(interrupted.render(80).join("\n"));
+            expect(screen()).not.toContain("interrupted_tail");
+            if (ending === "turn") await pi.runTurn("aborted");
+            else if (ending === "agent") await pi.endAgent();
+            else if (ending === "aborted") await pi.endAssistant(source, "aborted");
+            else await pi.endAssistant(source, "error");
+            await vi.waitFor(() => expect(screen()).toContain("printf interrupted_tail"));
+        },
+    );
+
+    it("does not complete a new stream from a previous agent's deferred repaint", async () => {
+        const { pi, row } = await argumentSession();
+        await pi.startAssistant(bashMessage("previous", "printf previous"));
+        const previous = row("previous", "printf previous");
+        previous.render(80);
+        const ending = pi.endAgent();
+        await pi.startAssistant(bashMessage("next", "printf next_tail"));
+        const next = row("next", "printf next_tail");
+        const screen = () => stripAnsi(next.render(80).join("\n"));
+        expect(screen()).not.toContain("next_tail");
+        await ending;
+        next.invalidate();
+        expect(screen()).not.toContain("next_tail");
+        await pi.endAssistant(bashMessage("next", "printf next_tail"));
+        await vi.waitFor(() => expect(screen()).toContain("printf next_tail"));
+    });
+
+    it.each(["resume", "reload", "tree"])(
+        "clears unfinished argument ownership on %s",
+        async (reset) => {
+            const { pi, row, root } = await argumentSession();
+            await pi.startAssistant(bashMessage("retained", "printf retained_tail"));
+            const live = row("retained", "printf retained_tail");
+            expect(stripAnsi(live.render(80).join("\n"))).not.toContain("retained_tail");
+            if (reset === "tree") {
+                await pi.navigateTree();
+                await vi.waitFor(() =>
+                    expect(stripAnsi(live.render(80).join("\n"))).toContain("printf retained_tail"),
+                );
+            } else {
+                if (reset === "reload") await pi.shutdownSession("reload");
+                await pi.startSession(root, false, "tui");
+                const restored = row("retained", "printf retained_tail");
+                await vi.waitFor(() =>
+                    expect(stripAnsi(restored.render(80).join("\n"))).toContain(
+                        "printf retained_tail",
+                    ),
+                );
+            }
+        },
+    );
+
     it.each(["compact", "outline"])(
         "applies configured statement formatting while write arguments are streaming in %s",
         async (presentation) => {
@@ -764,6 +917,20 @@ describe("extension lifecycle", () => {
             initTheme("dark");
             try {
                 await pi.startSession(root, false, "tui");
+                await pi.updateAssistant({
+                    role: "assistant",
+                    content: [
+                        {
+                            type: "toolCall",
+                            id: "streamed-write",
+                            name: "write",
+                            arguments: {
+                                path: "example.js",
+                                content: "const first={value:1};\nconst second =",
+                            },
+                        },
+                    ],
+                });
                 const row = new ToolExecutionComponent(
                     "write",
                     "streamed-write",
@@ -991,6 +1158,23 @@ describe("extension lifecycle", () => {
         const tui = createTui();
         await pi.startSession(root, false, "tui");
         const command = "cd /tmp && sleep 300";
+        await pi.updateAssistant({
+            role: "assistant",
+            content: [
+                {
+                    type: "toolCall",
+                    id: "call-complete-args",
+                    name: "bash",
+                    arguments: { command },
+                },
+                {
+                    type: "toolCall",
+                    id: "call-started-execution",
+                    name: "bash",
+                    arguments: { command },
+                },
+            ],
+        });
         const completedArgs = new ToolExecutionComponent(
             "bash",
             "call-complete-args",
