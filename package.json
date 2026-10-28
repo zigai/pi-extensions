@@ -101,6 +101,7 @@
       "./extensions/pi-response-renderer/src/index.ts",
       "./extensions/pi-plain-user-messages/src/index.ts",
       "./extensions/pi-message-highlights/src/index.ts",
+      "./extensions/pi-message-timestamps/src/index.ts",
       "./extensions/pi-status-bar/src/index.ts",
       "./extensions/pi-keymap-tweaks/src/index.ts",
       "./extensions/pi-model-modes/src/index.ts",

@@ -18,6 +18,7 @@ A collection of small Pi extensions for improving interaction, display, and mode
 | [@zigai/pi-tree](extensions/pi-tree)                               | A cleaner, more informative `/tree` for Pi.                                       | `pi install npm:@zigai/pi-tree`                |
 | [@zigai/pi-plain-user-messages](extensions/pi-plain-user-messages) | Plain-text rendering for user-submitted messages in Pi.                           | `pi install npm:@zigai/pi-plain-user-messages` |
 | [@zigai/pi-message-highlights](extensions/pi-message-highlights)   | Highlights URLs and file paths in messages and the prompt editor.                 | `pi install npm:@zigai/pi-message-highlights`  |
+| [@zigai/pi-message-timestamps](extensions/pi-message-timestamps)   | Shows timestamps on conversation messages.                                        | `pi install npm:@zigai/pi-message-timestamps`  |
 | [@zigai/pi-status-bar](extensions/pi-status-bar)                   | Provides a programmable active and idle status bar with timing stats.             | `pi install npm:@zigai/pi-status-bar`          |
 | [@zigai/pi-model-modes](extensions/pi-model-modes)                 | Mode presets for switching models and thinking levels in Pi.                      | `pi install npm:@zigai/pi-model-modes`         |
 | [@zigai/pi-prompt-history](extensions/pi-prompt-history)           | Current-session prompt history for Pi's prompt editor.                            | `pi install npm:@zigai/pi-prompt-history`      |

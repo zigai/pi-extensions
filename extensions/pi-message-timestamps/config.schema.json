@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/zigai/pi-tweaks/master/extensions/pi-message-timestamps/config.schema.json",
+  "title": "Pi Message Timestamps settings",
+  "description": "Settings for message timestamps.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "default": "./schemas/pi-message-timestamps.schema.json",
+      "description": "JSON Schema used by editors for this settings file."
+    },
+    "enabled": {
+      "type": "boolean",
+      "default": true,
+      "description": "Show timestamps on messages."
+    },
+    "format": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "auto"
+        },
+        {
+          "type": "string",
+          "const": "time-only"
+        },
+        {
+          "type": "string",
+          "const": "date-time"
+        },
+        {
+          "type": "string",
+          "const": "relative"
+        }
+      ],
+      "default": "auto",
+      "description": "Timestamp format: auto shows time today and date and time on other days; time-only, date-time, or relative always use that format."
+    }
+  }
+}

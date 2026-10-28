@@ -17,6 +17,7 @@
     "extensions/pi-mention-project/README.md",
     "extensions/pi-mention-skill/README.md",
     "extensions/pi-message-highlights/README.md",
+    "extensions/pi-message-timestamps/README.md",
     "extensions/pi-model-alias/README.md",
     "extensions/pi-model-filter/README.md",
     "extensions/pi-model-modes/README.md",
