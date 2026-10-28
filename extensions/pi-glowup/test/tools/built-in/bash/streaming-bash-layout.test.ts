@@ -75,6 +75,7 @@ describe("streaming Bash layout", () => {
         expect(rows(render(command, ({ source }) => source, { layout: "preserve" }))).toEqual([
             `$ ${command}`,
         ]);
+
         expect(
             rows(
                 render("first && second", ({ source }) => source, {
@@ -132,11 +133,14 @@ describe("streaming Bash layout", () => {
         const pythonInputs: string[] = [];
         const formatter: ScriptBlockFormatter = async (input) => {
             languages.push(input.language);
+
             if (input.language === "python") pythonInputs.push(input.code);
             return input.code;
         };
+
         const streamCode: CodePreview = (input) =>
             store.get({ ...input, mode: "statement", formatter });
+
         const command = [
             "bun run inspect.ts > /tmp/result.json; python - <<'PY'",
             "import json,xml.etree.ElementTree as E",
@@ -157,9 +161,11 @@ describe("streaming Bash layout", () => {
             expect(
                 languages.every((language) => language === "bash" || language === "python"),
             ).toBe(true);
+
             expect(pythonInputs).toEqual([
                 "import json,xml.etree.ElementTree as E\ndata=json.load(open('/tmp/result.json'))\nprint(data)\n",
             ]);
+
             expect(warnings).toEqual([]);
         } finally {
             await store.dispose();
@@ -167,10 +173,83 @@ describe("streaming Bash layout", () => {
         }
     });
 
-    it("keeps standalone interpreter previews in their own language", () => {
-        expect(rows(render(`python -c "print('hello')"`, ({ source }) => source))).toEqual([
-            "$ python -c",
-            "  print('hello')",
-        ]);
+    it("does not multiply extraction redraws for the same host", async () => {
+        const feature = createNativeBashFeature();
+        const command = "echo ready";
+        let invalidations = 0;
+        const renderContext = {
+            ...context(command),
+            invalidate: () => {
+                invalidations++;
+            },
+        };
+        try {
+            let previous: ReturnType<typeof feature.renderBashCall> | undefined;
+            for (let i = 0; i < 3; i++)
+                previous = feature.renderBashCall(
+                    { command },
+                    theme,
+                    { ...renderContext, lastComponent: previous },
+                    () => 8,
+                    () => false,
+                    () => "preserve",
+                    () => "trailing",
+                );
+
+            await feature.settled();
+            expect(invalidations).toBeLessThanOrEqual(2);
+        } finally {
+            feature.clear();
+        }
+    });
+
+    it("reclassifies an unfinished standalone heredoc when extraction completes", async () => {
+        const feature = createNativeBashFeature();
+        const command = `python - <<'PY'\nprint(1)`;
+        const component = feature.renderBashCall(
+            { command },
+            theme,
+            { ...context(command), argsComplete: false },
+            () => 8,
+            () => false,
+            () => "preserve",
+            () => "trailing",
+            ({ source, language }) => {
+                if (language === "python") return source.replace("print", "PRINT");
+                return source;
+            },
+        );
+        try {
+            rows(component);
+            await feature.settled();
+            component.invalidate();
+            expect(rows(component).join("\n")).toContain("PRINT(1)");
+        } finally {
+            feature.clear();
+        }
+    });
+
+    it("keeps standalone interpreter previews in their own language", async () => {
+        const feature = createNativeBashFeature();
+        const command = `python -c "print('hello')"`;
+        const show = (lastComponent?: ReturnType<typeof render>) =>
+            feature.renderBashCall(
+                { command },
+                theme,
+                { ...context(command), lastComponent },
+                () => 8,
+                () => false,
+                () => "auto",
+                () => "trailing",
+                ({ source }) => source,
+            );
+        try {
+            const initial = show();
+            rows(initial);
+            await feature.settled();
+            expect(rows(show(initial))).toEqual(["$ python -c", "  print('hello')"]);
+        } finally {
+            feature.clear();
+        }
     });
 });

@@ -1,6 +1,12 @@
 import { createRequire } from "node:module";
+import {
+    bashCompoundRanges,
+    extractEmbeddedPrograms,
+    type EmbeddedProgram,
+} from "../../tools/built-in/bash/embedded-programs.ts";
 import { parentPort } from "node:worker_threads";
 import { Language, Parser, type Node } from "web-tree-sitter";
+import { parse as parseBash, type ParsedScript } from "unbash";
 import { structuralUnits, type HeaderScaffold } from "./statement-structure.ts";
 import {
     isStatementLiteral,
@@ -30,8 +36,28 @@ export type StatementRequest = {
 };
 
 export type StatementResponse =
-    | { readonly id: number; readonly units: StatementUnit[]; readonly malformed: boolean }
+    | {
+          readonly id: number;
+          readonly units: StatementUnit[];
+          readonly malformed: boolean;
+          readonly programs?: EmbeddedProgram[];
+      }
     | { readonly id: number; readonly error: string };
+
+export type EmbeddedRequest = {
+    readonly id: number;
+    readonly kind: "embedded";
+    readonly source: string;
+};
+
+export type EmbeddedResponse = {
+    readonly id: number;
+    readonly kind: "embedded";
+    readonly programs: EmbeddedProgram[];
+};
+
+export type WorkerRequest = StatementRequest | EmbeddedRequest;
+export type WorkerResponse = StatementResponse | EmbeddedResponse;
 
 const require = createRequire(import.meta.url);
 const parsers = new Map<string, Parser>();
@@ -217,6 +243,7 @@ function unitsFor(
     complete: boolean,
     root: Node,
     literalInfo: ReturnType<typeof statementLiterals>,
+    syntax?: ParsedScript,
 ): StatementUnit[] {
     let statements = javascriptStatements;
     if (language === "python") statements = pythonStatements;
@@ -325,7 +352,27 @@ function unitsFor(
 
     visit(root);
 
-    const structured = structuralUnits(source, language, root, units);
+    let structured = structuralUnits(source, language, root, units);
+    if (language === "bash") {
+        const compounds = bashCompoundRanges(source, complete, syntax);
+
+        structured = structured.filter(
+            (unit) => !compounds.some((range) => unit.start < range.end && unit.end > range.start),
+        );
+        for (const range of compounds) {
+            if (range.settled)
+                structured.push({
+                    start: range.start,
+                    end: range.end,
+                    format: true,
+                    indent: indentAt(source, range.start),
+                    kind: "compound",
+                });
+        }
+
+        structured.sort((left, right) => left.start - right.start);
+    }
+
     const ordered: StatementUnit[] = [];
     let end = 0;
     for (const unit of structured) {
@@ -399,14 +446,21 @@ async function parse(request: StatementRequest): Promise<StatementResponse> {
         const tree = parser.parse(request.source);
         if (tree === null) throw new Error("Parser did not produce a tree");
         try {
+            let syntax: ParsedScript | undefined;
+            if (request.language === "bash") syntax = parseBash(request.source);
+
             return {
                 id: request.id,
+                ...(syntax !== undefined && {
+                    programs: extractEmbeddedPrograms(request.source, syntax),
+                }),
                 units: unitsFor(
                     request.source,
                     request.language,
                     request.complete,
                     tree.rootNode,
                     statementLiterals(request.source, request.language, tree.rootNode),
+                    syntax,
                 ),
                 malformed: tree.rootNode.hasError,
             };
@@ -424,8 +478,24 @@ async function parse(request: StatementRequest): Promise<StatementResponse> {
 // Serialize language loading and parsing; a tree never outlives its request.
 let work = Promise.resolve();
 
-port.on("message", (request: StatementRequest) => {
+port.on("message", (request: WorkerRequest) => {
     work = work.then(async () => {
+        if ("kind" in request) {
+            try {
+                port.postMessage({
+                    id: request.id,
+                    kind: "embedded",
+                    programs: extractEmbeddedPrograms(request.source),
+                } satisfies EmbeddedResponse);
+            } catch (cause: unknown) {
+                let message = "Bash parser failed";
+                if (cause instanceof Error) message = cause.message;
+                port.postMessage({ id: request.id, error: message } satisfies StatementResponse);
+            }
+
+            return;
+        }
+
         port.postMessage(await parse(request));
     });
 });

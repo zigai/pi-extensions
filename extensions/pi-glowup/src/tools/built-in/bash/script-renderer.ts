@@ -7,44 +7,115 @@ import {
     red,
 } from "../../../rendering/theme.ts";
 import { formatCallDuration } from "./duration.ts";
+import type { ScriptInvocation } from "./invocation.ts";
 import {
-    detectHeredocInterpreter,
-    detectScriptInterpreter,
-    heredocScriptInterpreter,
-    embeddedInlineScripts,
-    type ScriptInvocation,
-} from "./invocation.ts";
-import { highlightSyntaxCode } from "../../../rendering/syntax/highlighter.ts";
+    extractEmbeddedPrograms,
+    sourceCharacterAt,
+    type EmbeddedProgram,
+    type SourceSpan,
+} from "./embedded-programs.ts";
+import type { EmbeddedProgramLookup } from "./embedded-service.ts";
+import { graphemes, sgrSequenceEnd } from "../../../text-boundaries.ts";
+import {
+    highlightSyntaxCode,
+    type SyntaxHighlightOptions,
+} from "../../../rendering/syntax/highlighter.ts";
 import { filePathText } from "../../../rendering/path.ts";
 import { createSyntaxComponent } from "../../../rendering/syntax/component-owner.ts";
 import {
     isPreviewMetaLine,
-    highlightCodePreviewRuns,
     trimEdgeBlankLines,
-    detachString,
     collapsedPreviewLinesFromText,
 } from "../../../rendering/output.ts";
 import { scheduleCodeOutputSyntaxLoad } from "../../../rendering/syntax/code-component.ts";
 import { omitLeadingImportPrologue } from "./prologue.ts";
-import { truncateUtf8ByGrapheme } from "../../../text-boundaries.ts";
 import {
     wrapSinglePhysicalLineWithContinuation,
     toolExpandHint,
     makeComponent,
 } from "../../../rendering/component.ts";
-import { type Component, visibleWidth } from "@earendil-works/pi-tui";
+import {
+    type Component,
+    truncateToWidth,
+    visibleWidth,
+    wrapTextWithAnsi,
+} from "@earendil-works/pi-tui";
 import { parse, type WordPart } from "unbash";
 import { shellWords } from "./shell-words.ts";
-import { highlightDoubleQuotedSource } from "./quoted-source.ts";
-import { embeddedFilterPrograms } from "./filter-programs.ts";
 import type { ScriptFormatterProfile } from "../../../settings-input.ts";
 import { recordRenderError } from "../../../diagnostics/render-events.ts";
 
 type ScriptPreview = {
     readonly code: string;
+    readonly omittedLines?: number;
+    readonly omissionMarker?: string;
 };
 
-const MAX_COLLAPSED_SCRIPT_PREVIEW_BYTES = 64 * 1024;
+const sourceOwners = new WeakMap<() => void, object>();
+
+type ChildOwners = {
+    readonly logicalSource: string;
+    readonly parentSignal: AbortSignal | undefined;
+    readonly controller: AbortController;
+    readonly signal: AbortSignal;
+    readonly children: Map<string, SyntaxHighlightOptions>;
+};
+
+const childOwners = new WeakMap<() => void, ChildOwners>();
+
+function childHighlightOptions(
+    invalidate: (() => void) | undefined,
+    logicalSource: string,
+    parentSignal: AbortSignal | undefined,
+): (key: string) => SyntaxHighlightOptions {
+    if (invalidate === undefined) {
+        if (parentSignal === undefined) return () => ({});
+        return () => ({ signal: parentSignal });
+    }
+
+    let owner = childOwners.get(invalidate);
+    if (
+        owner === undefined ||
+        owner.logicalSource !== logicalSource ||
+        owner.parentSignal !== parentSignal
+    ) {
+        owner?.controller.abort();
+
+        const controller = new AbortController();
+        let signal = controller.signal;
+        if (parentSignal !== undefined) signal = AbortSignal.any([signal, parentSignal]);
+        owner = { logicalSource, parentSignal, controller, signal, children: new Map() };
+        childOwners.set(invalidate, owner);
+    }
+
+    const current = owner;
+    return (key) => {
+        let child = current.children.get(key);
+        if (child === undefined) {
+            child = {
+                signal: current.signal,
+                invalidate: () => {
+                    if (childOwners.get(invalidate) === current && !current.signal.aborted)
+                        invalidate();
+                },
+            };
+            current.children.set(key, child);
+        }
+
+        return child;
+    };
+}
+
+function programKey(program: EmbeddedProgram): string {
+    const path: Array<[number, number, string, string]> = [];
+    let current: EmbeddedProgram | undefined = program;
+    while (current !== undefined) {
+        path.push([current.start, current.end, current.language, current.origin]);
+        current = current.parent;
+    }
+
+    return JSON.stringify(path);
+}
 
 function shellCommand(theme: GlowupRenderTheme, text: string): string {
     return theme.fg("syntaxFunction", text);
@@ -190,33 +261,6 @@ const initialShellHighlightState: ShellHighlightState = {
     subcommandSeen: false,
 };
 
-type BashHeredocHighlight = {
-    readonly marker: string;
-    readonly language: string;
-};
-
-function bashHeredocHighlightFromLine(line: string): BashHeredocHighlight | undefined {
-    const match = /<<-?\s*["']?(?<marker>[A-Za-z_][A-Za-z0-9_]*)["']?/u.exec(line);
-    const marker = match?.groups?.marker;
-    if (match === null || marker === undefined) {
-        return undefined;
-    }
-
-    const suffix = line.slice(match.index + match[0].length);
-    const pipeMatch = /^\s*\|\s*(?<pipedCmd>.+)$/u.exec(suffix);
-    let interpreter: ReturnType<typeof detectHeredocInterpreter>;
-    if (pipeMatch?.groups?.pipedCmd !== undefined) {
-        interpreter = detectScriptInterpreter(pipeMatch.groups.pipedCmd);
-    }
-    interpreter ??= detectHeredocInterpreter(line.slice(0, match.index));
-    interpreter ??= heredocScriptInterpreter(line.slice(0, match.index) + suffix);
-    if (interpreter === undefined) {
-        return undefined;
-    }
-
-    return { marker, language: interpreter.language };
-}
-
 function highlightShellLine(theme: GlowupRenderTheme, line: string): string {
     const commentStart = shellCommentStart(line);
     const shellPart = commentStart === undefined ? line : line.slice(0, commentStart);
@@ -233,13 +277,128 @@ function highlightShellLine(theme: GlowupRenderTheme, line: string): string {
     return `${highlightedShell}${commentPart.length === 0 ? "" : dim(theme, commentPart)}`;
 }
 
-/** Inline interpreter source and awk/jq programs, ordered by position. */
-function embeddedSourceSpans(
+function projectLinearHighlight(
     source: string,
-): ReadonlyArray<{ readonly start: number; readonly end: number; readonly language: string }> {
-    return [...embeddedInlineScripts(source), ...embeddedFilterPrograms(source)].sort(
-        (left, right) => left.start - right.start,
-    );
+    code: string,
+    highlighted: string,
+    span: SourceSpan,
+    start: number,
+    end: number,
+): string | undefined {
+    let result = "";
+    let pending = "";
+    let cursor = start;
+    let index = 0;
+    let codeIndex = 0;
+    while (index < highlighted.length) {
+        const sgrEnd = sgrSequenceEnd(highlighted, index);
+        if (sgrEnd !== undefined) {
+            pending += highlighted.slice(index, sgrEnd);
+            index = sgrEnd;
+            continue;
+        }
+
+        let next = highlighted.indexOf("\u001b", index + 1);
+        while (next >= 0 && sgrSequenceEnd(highlighted, next) === undefined)
+            next = highlighted.indexOf("\u001b", next + 1);
+
+        if (next < 0) next = highlighted.length;
+
+        const text = highlighted.slice(index, next);
+        if (!code.startsWith(text, codeIndex)) return undefined;
+
+        const rawStart = span.start + codeIndex;
+        if (rawStart >= source.length) return result + pending;
+
+        const length = Math.min(text.length, source.length - rawStart);
+        result +=
+            source.slice(cursor, rawStart) + pending + source.slice(rawStart, rawStart + length);
+        pending = "";
+        cursor = rawStart + length;
+        codeIndex += length;
+
+        if (length < text.length) return result;
+
+        index = next;
+    }
+
+    if (end <= source.length && codeIndex !== code.length && code.slice(codeIndex) !== "\n")
+        return undefined;
+
+    return result + pending + source.slice(cursor, end);
+}
+
+function projectHighlightedSource(
+    source: string,
+    program: EmbeddedProgram,
+    highlighted: string,
+    parent: EmbeddedProgram | undefined,
+): string | undefined {
+    let characters = program.characters;
+    let start = program.start;
+    let endPosition = program.end;
+    if (parent !== undefined) {
+        characters = program.localCharacters;
+        start = program.localStart;
+        endPosition = program.localEnd;
+    }
+
+    if (characters === undefined || (characters.at(-1)?.to ?? 0) !== program.code.length)
+        return undefined;
+
+    const span = characters[0];
+    if (
+        characters.length === 1 &&
+        span?.from === 0 &&
+        span.to === program.code.length &&
+        span.end - span.start === program.code.length &&
+        !program.code.includes("\r")
+    )
+        return projectLinearHighlight(source, program.code, highlighted, span, start, endPosition);
+
+    let result = "";
+    let pending = "";
+    let cursor = start;
+    let codeIndex = 0;
+    for (let index = 0; index < highlighted.length; index++) {
+        const end = sgrSequenceEnd(highlighted, index);
+        if (end !== undefined) {
+            pending += highlighted.slice(index, end);
+            index = end - 1;
+            continue;
+        }
+
+        let consumed = 1;
+        if (highlighted[index] === "\n" && program.code[codeIndex] === "\r") {
+            if (program.code[codeIndex + 1] === "\n") consumed = 2;
+        } else if (highlighted[index] !== program.code[codeIndex]) return undefined;
+
+        const character = sourceCharacterAt(characters, codeIndex);
+        const last = sourceCharacterAt(characters, codeIndex + consumed - 1);
+
+        codeIndex += consumed;
+
+        if (character === undefined || last === undefined) return undefined;
+        if (character.start >= source.length) return result + pending;
+
+        if (last.end > cursor) {
+            result +=
+                source.slice(cursor, character.start) +
+                pending +
+                source.slice(Math.max(cursor, character.start), last.end);
+            pending = "";
+            cursor = last.end;
+        }
+    }
+
+    if (
+        endPosition <= source.length &&
+        codeIndex !== program.code.length &&
+        !["\n", "\r", "\r\n"].includes(program.code.slice(codeIndex))
+    )
+        return undefined;
+
+    return result + pending + source.slice(cursor, endPosition);
 }
 
 type EmbeddedInlineHighlightRow = {
@@ -251,10 +410,12 @@ type EmbeddedInlineHighlightRow = {
 function embeddedInlineHighlightRows(
     lines: ReadonlyArray<string>,
     theme: GlowupRenderTheme,
-    invalidate: (() => void) | undefined,
+    programs: readonly EmbeddedProgram[],
+    parent: EmbeddedProgram | undefined,
+    childOptions: (key: string) => SyntaxHighlightOptions,
 ): ReadonlyMap<number, ReadonlyArray<EmbeddedInlineHighlightRow>> {
     const source = lines.join("\n");
-    const scripts = embeddedSourceSpans(source);
+    const scripts = programs.filter((program) => program.parent === parent && !program.expandable);
     if (scripts.length === 0) return new Map();
 
     const lineStarts: number[] = [0];
@@ -264,23 +425,69 @@ function embeddedInlineHighlightRows(
 
     const rows = new Map<number, EmbeddedInlineHighlightRow[]>();
     for (const script of scripts) {
-        const code = source.slice(script.start, script.end);
-        let highlightedLines: string[];
-        if (script.language === "bash") {
-            const highlight = (source: string): string[] =>
-                highlightBashScriptPreviewLines(source.split("\n"), theme, invalidate);
-            if (source[script.start - 1] === '"') {
-                highlightedLines = highlightDoubleQuotedSource(code, highlight);
-            } else {
-                highlightedLines = highlight(code);
-            }
-        } else {
-            highlightedLines = highlightSyntaxCode(code, script.language, { invalidate });
+        let start = script.start;
+        let end = script.end;
+        if (parent !== undefined) {
+            start = script.localStart;
+            end = script.localEnd;
         }
 
-        let absoluteStart = script.start;
+        if (start >= source.length) continue;
+
+        let decoded: string[];
+        if (script.language === "bash") {
+            let code = script.code;
+            let characters = script.characters;
+            if (parent !== undefined) characters = script.localCharacters;
+
+            if (end > source.length && characters !== undefined) {
+                let low = 0;
+                let high = code.length;
+                while (low < high) {
+                    const middle = Math.floor((low + high) / 2);
+                    const character = sourceCharacterAt(characters, middle);
+                    if (character === undefined || character.start >= source.length) high = middle;
+                    else low = middle + 1;
+                }
+
+                code = code.slice(0, low);
+            }
+
+            decoded = highlightBashScriptPreviewLines(
+                code.split("\n"),
+                theme,
+                programs,
+                script,
+                childOptions,
+            );
+        } else
+            decoded = highlightSyntaxCode(
+                script.code,
+                script.language,
+                childOptions(programKey(script)),
+            );
+
+        let projected: string | undefined;
+        const raw = source.slice(start, end);
+        if (script.language === "bash" && raw === script.code) projected = decoded.join("\n");
+        else if (
+            script.language === "bash" &&
+            raw.length >= 2 &&
+            raw.slice(1, -1) === script.code &&
+            (raw.startsWith("'") || raw.startsWith('"'))
+        )
+            projected = raw[0] + decoded.join("\n") + raw.at(-1);
+        else projected = projectHighlightedSource(source, script, decoded.join("\n"), parent);
+
+        if (projected === undefined) continue;
+
+        const highlightedLines = wrapTextWithAnsi(projected, Number.POSITIVE_INFINITY);
+        let absoluteStart = start;
+        let lineIndex = 0;
+
         for (const highlighted of highlightedLines) {
-            let lineIndex = 0;
+            if (absoluteStart >= end) break;
+
             while (
                 lineIndex + 1 < lineStarts.length &&
                 (lineStarts[lineIndex + 1] ?? Number.POSITIVE_INFINITY) <= absoluteStart
@@ -292,7 +499,7 @@ function embeddedInlineHighlightRows(
             if (lineStart === undefined) break;
 
             const newline = source.indexOf("\n", absoluteStart);
-            const absoluteEnd = newline < 0 || newline > script.end ? script.end : newline;
+            const absoluteEnd = newline < 0 || newline > end ? end : newline;
             const lineRows = rows.get(lineIndex) ?? [];
             lineRows.push({
                 start: absoluteStart - lineStart,
@@ -330,158 +537,53 @@ function highlightShellLineWithEmbeddedCode(
 function highlightBashScriptPreviewLines(
     lines: ReadonlyArray<string>,
     theme: GlowupRenderTheme,
-    invalidate: (() => void) | undefined,
+    programs: readonly EmbeddedProgram[],
+    parent: EmbeddedProgram | undefined,
+    childOptions: (key: string) => SyntaxHighlightOptions,
 ): string[] {
-    const highlighted: string[] = [];
-    const embeddedRows = embeddedInlineHighlightRows(lines, theme, invalidate);
-    let heredoc: BashHeredocHighlight | undefined;
-    let heredocBody: string[] = [];
+    const embeddedRows = embeddedInlineHighlightRows(lines, theme, programs, parent, childOptions);
 
-    function flushHeredocBody(): void {
-        if (heredoc === undefined || heredocBody.length === 0) {
-            return;
-        }
-
-        highlighted.push(
-            ...highlightSyntaxCode(heredocBody.join("\n"), heredoc.language, { invalidate }),
-        );
-        heredocBody = [];
-    }
-
-    for (const [lineIndex, line] of lines.entries()) {
-        if (isPreviewMetaLine(line)) {
-            flushHeredocBody();
-            highlighted.push(line);
-            continue;
-        }
-
-        if (heredoc !== undefined) {
-            if (line.trim() === heredoc.marker) {
-                flushHeredocBody();
-                highlighted.push(highlightShellLine(theme, line));
-                heredoc = undefined;
-                continue;
-            }
-
-            heredocBody.push(line);
-            continue;
-        }
-
-        highlighted.push(
-            highlightShellLineWithEmbeddedCode(theme, line, embeddedRows.get(lineIndex)),
-        );
-        heredoc = bashHeredocHighlightFromLine(line);
-    }
-
-    flushHeredocBody();
-
-    return highlighted;
+    return lines.map((line, lineIndex) => {
+        if (isPreviewMetaLine(line)) return line;
+        return highlightShellLineWithEmbeddedCode(theme, line, embeddedRows.get(lineIndex));
+    });
 }
 
-export type BashHeredocHighlightBody = {
-    readonly language: string;
-    readonly start: number;
-    readonly end: number;
-    readonly code: string;
-};
-
-/** Heredoc bodies the Bash preview highlights with an interpreter grammar, by UTF-16 offset. */
-export function bashHeredocHighlightBodies(source: string): BashHeredocHighlightBody[] {
-    const bodies: BashHeredocHighlightBody[] = [];
-    let heredoc: BashHeredocHighlight | undefined;
-    let bodyStart = 0;
-    let bodyLines: string[] = [];
-    let offset = 0;
-
-    const flush = (end: number): void => {
-        if (heredoc !== undefined && bodyLines.length > 0)
-            bodies.push({
-                language: heredoc.language,
-                start: bodyStart,
-                end,
-                code: bodyLines.join("\n"),
-            });
-
-        bodyLines = [];
-    };
-
-    for (const line of source.split("\n")) {
-        const lineStart = offset;
-        offset += line.length + 1;
-
-        if (isPreviewMetaLine(line)) {
-            flush(Math.max(bodyStart, lineStart - 1));
-            continue;
-        }
-
-        if (heredoc !== undefined) {
-            if (line.trim() === heredoc.marker) {
-                flush(Math.max(bodyStart, lineStart - 1));
-                heredoc = undefined;
-                continue;
-            }
-
-            if (bodyLines.length === 0) bodyStart = lineStart;
-            bodyLines.push(line);
-            continue;
-        }
-
-        heredoc = bashHeredocHighlightFromLine(line);
-    }
-
-    flush(Math.min(source.length, offset - 1));
-
-    return bodies;
-}
-
-function highlightScriptPreviewLines(
-    lines: ReadonlyArray<string>,
-    language: string,
-    theme: GlowupRenderTheme,
-    invalidate: (() => void) | undefined,
-): string[] {
-    if (language === "bash") {
-        return highlightBashScriptPreviewLines(lines, theme, invalidate);
-    }
-
-    return [
-        ...highlightCodePreviewRuns(lines, (code) =>
-            highlightSyntaxCode(code, language, { invalidate }),
-        ),
-    ];
-}
-
-function scriptPreviewSyntaxLanguages(invocation: ScriptInvocation): readonly string[] {
-    const languages = new Set<string>([invocation.language]);
-    if (invocation.language !== "bash") {
-        return [...languages];
-    }
-
-    for (const line of invocation.code.split("\n")) {
-        const heredoc = bashHeredocHighlightFromLine(line);
-        if (heredoc !== undefined) {
-            languages.add(heredoc.language);
-        }
-    }
-
-    for (const script of embeddedSourceSpans(invocation.code)) {
-        languages.add(script.language);
-    }
-
-    return [...languages];
-}
-
-function scheduleScriptPreviewSyntaxLoads(
+function scheduleScriptPreviewSyntaxLoad(
     invocation: ScriptInvocation,
     invalidate: (() => void) | undefined,
 ): void {
-    for (const language of scriptPreviewSyntaxLanguages(invocation)) {
-        scheduleCodeOutputSyntaxLoad(
-            { language },
-            invalidate,
-            language === invocation.language ? invocation.code : undefined,
-        );
+    if (invocation.language === "bash") return;
+
+    scheduleCodeOutputSyntaxLoad({ language: invocation.language }, invalidate, invocation.code);
+}
+
+function visibleBashPrefix(source: string, width: number, rows: number): string {
+    let end = 0;
+    let row = 0;
+    let column = 0;
+    const contentWidth = Math.max(1, width - 6);
+
+    for (const character of graphemes(source)) {
+        if (character === "\n" || character === "\r\n" || character === "\r") {
+            row++;
+            column = 0;
+        } else {
+            const cells = visibleWidth(character);
+            if (column > 0 && column + cells > contentWidth) {
+                row++;
+                column = 0;
+            }
+
+            column += cells;
+        }
+
+        if (row > rows) break;
+
+        end += character.length;
     }
+
+    return source.slice(0, end);
 }
 
 function collapsedScriptPreview(
@@ -490,7 +592,12 @@ function collapsedScriptPreview(
     showPrologueOmission: boolean,
     profile?: ScriptFormatterProfile,
 ): ScriptPreview {
-    if (profile?.kind === "bash" || profile?.kind === "awk" || profile?.kind === "jq")
+    if (
+        invocation.language === "bash" ||
+        profile?.kind === "bash" ||
+        profile?.kind === "awk" ||
+        profile?.kind === "jq"
+    )
         return { code: invocation.code };
 
     if (profile !== undefined && profile.kind !== "command") {
@@ -511,9 +618,11 @@ function collapsedScriptPreview(
     if (omission === undefined) return { code: invocation.code };
 
     return {
-        code: showPrologueOmission
-            ? `… ${omission.omittedLines} import/setup lines omitted\n${omission.code}`
-            : omission.code,
+        code: omission.code,
+        omittedLines: omission.omittedLines,
+        ...(showPrologueOmission && {
+            omissionMarker: `… ${omission.omittedLines} import/setup lines omitted`,
+        }),
     };
 }
 
@@ -529,39 +638,6 @@ function scriptPreviewForRender(
     }
 
     return collapsedScriptPreview(invocation, maxCodePreviewLines, showPrologueOmission, profile);
-}
-
-function retainedScriptInvocation(
-    invocation: ScriptInvocation,
-    expanded: boolean,
-    maxCodePreviewLines: number,
-    showPrologueOmission: boolean,
-    profile?: ScriptFormatterProfile,
-): ScriptInvocation {
-    if (expanded) {
-        return invocation;
-    }
-
-    return {
-        ...invocation,
-        code: detachedScriptPreviewCode(
-            collapsedScriptPreview(invocation, maxCodePreviewLines, showPrologueOmission, profile)
-                .code,
-        ),
-    };
-}
-
-function detachedScriptPreviewCode(code: string): string {
-    if (Buffer.byteLength(code, "utf8") <= MAX_COLLAPSED_SCRIPT_PREVIEW_BYTES) {
-        return detachString(code);
-    }
-
-    const suffix = "\n… script preview truncated";
-    const budget = Math.max(
-        0,
-        MAX_COLLAPSED_SCRIPT_PREVIEW_BYTES - Buffer.byteLength(suffix, "utf8"),
-    );
-    return detachString(`${truncateUtf8ByGrapheme(code, budget)}${suffix}`);
 }
 
 function promptDuration(
@@ -598,6 +674,9 @@ export type ScriptCallRenderOptions = {
     readonly lastComponent?: Component | undefined;
     readonly onContentWidth?: (contentWidth: number, renderWidth: number) => void;
     readonly profile?: ScriptFormatterProfile;
+    readonly embeddedPrograms?: EmbeddedProgramLookup;
+    readonly logicalSource?: string;
+    readonly signal?: AbortSignal;
     readonly durationMs?: number | undefined;
 };
 
@@ -627,18 +706,75 @@ function createScriptCallComponent(
     const state = options.state;
     const maxCodePreviewLines = options.maxCodePreviewLines ?? 8;
     const showPrologueOmission = options.showPrologueOmission ?? false;
-    const retained = retainedScriptInvocation(
-        invocation,
-        expanded,
-        maxCodePreviewLines,
-        showPrologueOmission,
-        options.profile,
-    );
+    const retained = invocation;
     const omittedHint = options.omittedHint ?? toolExpandHint();
+    const childOptions = childHighlightOptions(
+        options.invalidate,
+        options.logicalSource ?? retained.code,
+        options.signal,
+    );
+    let syntaxOptions: SyntaxHighlightOptions = {
+        invalidate: options.invalidate,
+        ...(options.signal !== undefined && { signal: options.signal }),
+    };
+    if (retained.language !== "bash") syntaxOptions = childOptions("standalone");
 
-    scheduleScriptPreviewSyntaxLoads(retained, options.invalidate);
+    const sourceOwner = {};
+    if (options.invalidate !== undefined) sourceOwners.set(options.invalidate, sourceOwner);
+
+    const schedulePrograms = (current: readonly EmbeddedProgram[]): void => {
+        if (current.length === 0) return;
+
+        let index = 0;
+        const next = (): void => {
+            if (options.signal?.aborted === true) return;
+            if (
+                options.invalidate !== undefined &&
+                sourceOwners.get(options.invalidate) !== sourceOwner
+            )
+                return;
+            if (
+                options.embeddedPrograms?.isCurrent !== undefined &&
+                !options.embeddedPrograms.isCurrent(retained.code, current)
+            )
+                return;
+
+            const program = current[index++];
+            if (program === undefined) return;
+
+            if (!program.expandable)
+                highlightSyntaxCode(
+                    program.code,
+                    program.language,
+                    childOptions(programKey(program)),
+                );
+
+            if (index < current.length) setImmediate(next);
+        };
+
+        setImmediate(next);
+    };
+
+    let programs: readonly EmbeddedProgram[] = [];
+    if (retained.language === "bash") {
+        if (options.embeddedPrograms === undefined)
+            programs = extractEmbeddedPrograms(retained.code);
+        else programs = options.embeddedPrograms(retained.code, options.invalidate) ?? [];
+    }
+
+    scheduleScriptPreviewSyntaxLoad(retained, syntaxOptions.invalidate);
+    schedulePrograms(programs);
 
     return makeComponent((width) => {
+        if (retained.language === "bash" && options.embeddedPrograms !== undefined) {
+            const available = options.embeddedPrograms(retained.code, options.invalidate);
+            if (available !== undefined && available !== programs) {
+                programs = available;
+                scheduleScriptPreviewSyntaxLoad(retained, syntaxOptions.invalidate);
+                schedulePrograms(programs);
+            }
+        }
+
         const promptPrefix = `${renderShellPrompt(theme)} `;
         let duration = promptDuration(theme, state, options.durationMs);
         let durationReserve = 0;
@@ -676,17 +812,54 @@ function createScriptCallComponent(
             return appendRightAligned(rendered, duration, width);
         }
 
-        let fullLines = preview.code.split("\n");
-        if (!expanded || options.profile === undefined) {
-            fullLines = trimEdgeBlankLines(fullLines);
+        let visibleCode = preview.code;
+        if (!expanded && retained.language === "bash")
+            visibleCode = visibleBashPrefix(preview.code, width, maxCodePreviewLines);
+
+        let viewClipped = visibleCode.length < preview.code.length;
+        let fullLines = visibleCode.split("\n");
+        let fullHighlighted: string[];
+        if (retained.language === "bash") {
+            fullHighlighted = highlightBashScriptPreviewLines(
+                fullLines,
+                theme,
+                programs,
+                undefined,
+                childOptions,
+            );
+        } else {
+            fullHighlighted = highlightSyntaxCode(
+                retained.code,
+                retained.language,
+                syntaxOptions,
+            ).slice(preview.omittedLines ?? 0);
         }
 
-        const fullHighlighted = highlightScriptPreviewLines(
-            fullLines,
-            retained.language,
-            theme,
-            options.invalidate,
-        );
+        if (preview.omissionMarker !== undefined) {
+            fullLines = [preview.omissionMarker, ...fullLines];
+            fullHighlighted = [preview.omissionMarker, ...fullHighlighted];
+        }
+
+        if (!expanded || options.profile === undefined) {
+            let start = 0;
+            let end = fullLines.length;
+            while (start < end && (fullLines[start] ?? "").trim().length === 0) start++;
+            while (end > start && (fullLines[end - 1] ?? "").trim().length === 0) end--;
+            fullHighlighted = fullHighlighted.slice(start, end);
+        }
+
+        if (!expanded) {
+            const columns = Math.max(1, width - 6) * (maxCodePreviewLines + 1);
+
+            if (fullHighlighted.length > maxCodePreviewLines + 1) viewClipped = true;
+
+            fullHighlighted = fullHighlighted.slice(0, maxCodePreviewLines + 1).map((line) => {
+                const clipped = truncateToWidth(line, columns, "");
+                if (clipped.length < line.length) viewClipped = true;
+                return clipped;
+            });
+        }
+
         const collapsedPreview = expanded
             ? undefined
             : collapsedPreviewLinesFromText(
@@ -727,7 +900,10 @@ function createScriptCallComponent(
         const totalContentRows = wrappedLines
             .filter((line) => !line.meta)
             .reduce((rows, line) => rows + line.wrapped.length, 0);
-        if (expanded || (!hasTailOmission && totalContentRows <= maxCodePreviewLines + 1)) {
+        if (
+            expanded ||
+            (!viewClipped && !hasTailOmission && totalContentRows <= maxCodePreviewLines + 1)
+        ) {
             return appendRightAligned(
                 [...rendered, ...wrappedLines.flatMap((line) => line.wrapped)],
                 duration,
@@ -736,6 +912,7 @@ function createScriptCallComponent(
         }
 
         let contentRows = 0;
+        let shownLines = 0;
         let softWrapTruncated = false;
         for (const { meta, wrapped } of wrappedLines) {
             if (meta) {
@@ -747,18 +924,33 @@ function createScriptCallComponent(
             if (wrapped.length <= remainingRows) {
                 rendered.push(...wrapped);
                 contentRows += wrapped.length;
+                shownLines++;
                 continue;
             }
 
             rendered.push(...wrapped.slice(0, remainingRows));
-            softWrapTruncated = true;
+            softWrapTruncated = remainingRows > 0;
             break;
         }
 
-        if (softWrapTruncated) {
+        if (softWrapTruncated || (viewClipped && !hasTailOmission)) {
+            let marker = "… preview truncated";
+            if (!softWrapTruncated) {
+                let lines = 1;
+                for (
+                    let at = preview.code.indexOf("\n");
+                    at >= 0;
+                    at = preview.code.indexOf("\n", at + 1)
+                )
+                    lines++;
+
+                const omitted = Math.max(0, lines - shownLines);
+                if (omitted > 0) marker = `… +${omitted} lines (${omittedHint})`;
+            }
+
             rendered.push(
                 ...wrapSinglePhysicalLineWithContinuation(
-                    muted(theme, "… preview truncated"),
+                    muted(theme, marker),
                     width,
                     PROMPT_LINE_PREFIX,
                     PROMPT_CONTINUATION_PREFIX,

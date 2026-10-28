@@ -5,11 +5,11 @@ import type {
     ScriptBlockFormatterInput,
     ScriptBlockFormatterOptions,
 } from "../../tools/built-in/bash/formatter.ts";
-import { formatEmbeddedHeredocs } from "./embedded-heredocs.ts";
-import { formatEmbeddedFilterPrograms, hasFormattableFilterProgram } from "./embedded-filters.ts";
+import { formatEmbeddedPrograms } from "./embedded-programs.ts";
 import { formatCodeUnit } from "./code-unit.ts";
 import { MAX_SCRIPT_PREVIEW_ENTRIES } from "../../tools/built-in/bash/preview-store.ts";
 import { createStatementService } from "./statement-service.ts";
+import type { EmbeddedProgram } from "../../tools/built-in/bash/embedded-programs.ts";
 import type { StatementUnit } from "./statement-worker.ts";
 import {
     recordRenderError,
@@ -82,9 +82,39 @@ function languageFor(input: CodeStreamInput): string {
 }
 
 function embeddedOptions(input: CodeStreamInput, signal: AbortSignal): ScriptBlockFormatterOptions {
-    if (input.toolCallId === undefined) return { signal };
+    if (input.toolCallId === undefined && input.diagnostics === undefined) return { signal };
 
-    return { signal, diagnostics: { toolCallId: input.toolCallId } };
+    return {
+        signal,
+        diagnostics: {
+            ...(input.toolCallId !== undefined && { toolCallId: input.toolCallId }),
+            ...input.diagnostics,
+        },
+    };
+}
+
+function programsForUnit(
+    programs: readonly EmbeddedProgram[],
+    start: number,
+    end: number,
+): EmbeddedProgram[] {
+    const included = new Map<EmbeddedProgram, EmbeddedProgram>();
+    for (const program of programs) {
+        if (program.start < start || program.end > end) continue;
+
+        if (program.parent !== undefined) {
+            const parent = included.get(program.parent);
+            if (parent !== undefined) included.set(program, { ...program, parent });
+        } else {
+            included.set(program, {
+                ...program,
+                localStart: program.localStart - start,
+                localEnd: program.localEnd - start,
+            });
+        }
+    }
+
+    return [...included.values()];
 }
 
 /** Display-only snapshots. No formatted text is written back to tool input or model history. */
@@ -102,18 +132,19 @@ export function createCodeStreamStore(): CodeStreamStore {
         options: ScriptBlockFormatterOptions = {},
     ): Promise<string> {
         if (disposed || formatter === undefined) return input.code;
-        if (!input.code.includes("<<") && !hasFormattableFilterProgram(input.code, formatter))
-            return input.code;
 
         let signal = externalController.signal;
         if (options.signal !== undefined) signal = AbortSignal.any([signal, options.signal]);
 
-        const operation = formatEmbeddedHeredocs(input, formatter, parser, {
-            ...options,
-            signal,
-        }).then(async (code) =>
-            formatEmbeddedFilterPrograms({ ...input, code }, formatter, { ...options, signal }),
-        );
+        const operation = (async () => {
+            let programs = options.programs;
+            programs ??= await parser.extract(input.code, signal);
+            if (programs === undefined || signal.aborted) return input.code;
+            return formatEmbeddedPrograms(input, formatter, parser, programs, {
+                ...options,
+                signal,
+            });
+        })();
         const job = operation.then(
             () => {},
             () => {},
@@ -155,30 +186,37 @@ export function createCodeStreamStore(): CodeStreamStore {
         if (input.mode === "block") {
             if (!input.complete) return;
 
+            let source = input.source;
+            if (entry.language === "bash")
+                source = await formatEmbedded(
+                    {
+                        label: "Bash",
+                        language: "bash",
+                        code: input.source,
+                        ...(input.targetWidth !== undefined && { targetWidth: input.targetWidth }),
+                    },
+                    input.formatter,
+                    embeddedOptions(input, signal),
+                );
+
             const unit: StatementUnit = {
                 start: 0,
-                end: input.source.length,
+                end: source.length,
                 format: true,
                 indent: "",
                 kind: "block",
             };
-            let formatted = await formatCodeUnit(input, entry.language, unit, signal, "");
-            if (entry.language === "bash")
-                formatted = {
-                    ...formatted,
-                    text: await formatEmbedded(
-                        {
-                            label: "Bash",
-                            language: "bash",
-                            code: formatted.text,
-                            ...(input.targetWidth !== undefined && {
-                                targetWidth: input.targetWidth,
-                            }),
-                        },
-                        input.formatter,
-                        embeddedOptions(input, signal),
-                    ),
-                };
+            const formatted = await formatCodeUnit(
+                {
+                    ...input,
+                    source,
+                    diagnostics: { ...input.diagnostics, segmentCode: input.source },
+                },
+                entry.language,
+                unit,
+                signal,
+                "",
+            );
 
             if (input.targetWidth !== entry.input.targetWidth) return;
 
@@ -202,6 +240,7 @@ export function createCodeStreamStore(): CodeStreamStore {
         // partial example or grammar mismatch must not raise session warnings
         // (again on every resize); the parser retains unformatted source spans.
 
+        const programs = response.programs ?? [];
         let display = initialDisplay;
         let consumed = entry.consumed;
         let lastKind = entry.lastKind;
@@ -219,23 +258,44 @@ export function createCodeStreamStore(): CodeStreamStore {
             if (unit.start < consumed) {
                 display += input.source.slice(consumed, unit.end);
             } else {
-                let formatted = await formatCodeUnit(input, entry.language, unit, signal, indent);
-                if (entry.language === "bash")
-                    formatted = {
-                        ...formatted,
-                        text: await formatEmbedded(
+                let formatted;
+                if (entry.language === "bash") {
+                    const original = input.source.slice(unit.start, unit.end);
+                    const source = await formatEmbedded(
+                        {
+                            label: "Bash",
+                            language: "bash",
+                            code: original,
+                            ...(input.targetWidth !== undefined && {
+                                targetWidth: input.targetWidth,
+                            }),
+                        },
+                        input.formatter,
+                        {
+                            ...embeddedOptions(input, signal),
+                            programs: programsForUnit(programs, unit.start, unit.end),
+                        },
+                    );
+                    const parsed = await parser.parse(source, "bash", true, signal);
+                    if (parsed === undefined || "error" in parsed || parsed.malformed) {
+                        formatted = { text: original };
+                    } else {
+                        const literals = parsed.units.flatMap((part) => part.literals ?? []);
+
+                        formatted = await formatCodeUnit(
                             {
-                                label: "Bash",
-                                language: "bash",
-                                code: formatted.text,
-                                ...(input.targetWidth !== undefined && {
-                                    targetWidth: input.targetWidth,
-                                }),
+                                ...input,
+                                source,
+                                diagnostics: { ...input.diagnostics, segmentCode: original },
                             },
-                            input.formatter,
-                            embeddedOptions(input, signal),
-                        ),
-                    };
+                            entry.language,
+                            { ...unit, start: 0, end: source.length, literals },
+                            signal,
+                            indent,
+                        );
+                    }
+                } else
+                    formatted = await formatCodeUnit(input, entry.language, unit, signal, indent);
 
                 if (!current(entry) || input.targetWidth !== entry.input.targetWidth) return;
 

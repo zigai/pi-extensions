@@ -3,13 +3,12 @@ import {
     type ScriptBlockFormatter,
     type ScriptBlockFormatterOptions,
 } from "./formatter.ts";
-import { boundedScriptPreview } from "./preview-store.ts";
-import { parseScriptInvocation, type ScriptInvocation } from "./invocation.ts";
+import { scriptInvocationFromPrograms, type ScriptInvocation } from "./invocation.ts";
+import { extractEmbeddedPrograms, type EmbeddedProgram } from "./embedded-programs.ts";
 import {
     recordRenderError,
     type ScriptFormatDiagnostics,
 } from "../../../diagnostics/render-events.ts";
-import { hasFormattableFilterProgram } from "../../../rendering/streaming/embedded-filters.ts";
 
 type ScriptPreviewSink = {
     get(toolCallId: string): ScriptInvocation | undefined;
@@ -21,7 +20,8 @@ export type FormatScriptPreviewOptions = {
     readonly toolCallId: string;
     readonly command: string;
     readonly formatter: ScriptBlockFormatter | undefined;
-    readonly embeddedHeredocs?: boolean;
+    readonly embeddedFormatting?: boolean;
+    readonly programs?: readonly EmbeddedProgram[];
     readonly signal?: AbortSignal;
     readonly targetWidth?: number;
     readonly isCurrent?: () => boolean;
@@ -31,25 +31,29 @@ export type FormatScriptPreviewOptions = {
 
 /** Source the embedded formatter can rewrite in place inside a Bash command. */
 export function hasEmbeddedSource(
-    command: string,
+    programs: readonly EmbeddedProgram[],
     formatter: ScriptBlockFormatter | undefined,
 ): boolean {
-    if (formatter === undefined) return false;
-
-    return command.includes("<<") || hasFormattableFilterProgram(command, formatter);
+    return (
+        formatter !== undefined &&
+        programs.some((program) => !program.incomplete && !program.expandable)
+    );
 }
 
 export function scriptForPreview(
     command: string,
     formatter: ScriptBlockFormatter | undefined,
-    embeddedHeredocs = false,
+    embeddedFormatting = false,
+    programs?: readonly EmbeddedProgram[],
 ): ScriptInvocation | undefined {
-    const script = parseScriptInvocation(command);
+    programs ??= extractEmbeddedPrograms(command);
+
+    const script = scriptInvocationFromPrograms(programs);
     if (script !== undefined) return script;
 
     if (
         formatter?.profileFor?.("bash") === undefined &&
-        !(embeddedHeredocs && hasEmbeddedSource(command, formatter))
+        !(embeddedFormatting && hasEmbeddedSource(programs, formatter))
     )
         return undefined;
 
@@ -62,21 +66,27 @@ export function rememberRawScriptPreview(
     toolCallId: string,
     command: string,
     formatter?: ScriptBlockFormatter,
-    embeddedHeredocs = false,
+    embeddedFormatting = false,
+    programs?: readonly EmbeddedProgram[],
 ): void {
-    const script = scriptForPreview(command, formatter, embeddedHeredocs);
+    const script = scriptForPreview(command, formatter, embeddedFormatting, programs);
     if (script === undefined) {
         return;
     }
 
-    sink.set(toolCallId, boundedScriptPreview(script));
+    sink.set(toolCallId, script);
 }
 
 /** Formats and stores a script preview after the final bash command is known. */
 export async function formatAndStoreScriptPreview(
     options: FormatScriptPreviewOptions,
 ): Promise<boolean> {
-    const script = scriptForPreview(options.command, options.formatter, options.embeddedHeredocs);
+    const script = scriptForPreview(
+        options.command,
+        options.formatter,
+        options.embeddedFormatting,
+        options.programs,
+    );
     if (options.formatter === undefined || script === undefined) return false;
 
     const formatterOptions: ScriptBlockFormatterOptions = {
@@ -96,7 +106,7 @@ export async function formatAndStoreScriptPreview(
     );
     const previousCode = options.sink.get(options.toolCallId)?.code ?? script.code;
     if (formattedScript.code !== previousCode && (options.isCurrent?.() ?? true)) {
-        options.sink.set(options.toolCallId, boundedScriptPreview(formattedScript));
+        options.sink.set(options.toolCallId, formattedScript);
         options.invalidate?.();
     }
 

@@ -18,6 +18,38 @@ import {
 } from "../../../../src/tools/built-in/bash/formatter.ts";
 
 describe("script formatter settings", () => {
+    it("retains complete formatter output larger than the former output budget", async () => {
+        const code = `# ${"x".repeat(1024 * 1024 + 1)}`;
+        const formatter = createCommandScriptFormatter(
+            parseScriptFormatterCommandsValue({
+                python: {
+                    kind: "command",
+                    command: [process.execPath, "-e", "process.stdin.pipe(process.stdout)"],
+                },
+            }),
+        );
+        if (formatter === undefined) throw new Error("Expected a formatter");
+
+        const output = await formatter({ label: "Python", language: "python", code });
+        expect(output?.length).toBe(code.length);
+        expect(output).toBe(code);
+    });
+
+    it("formats a complete program larger than the former input limit", async () => {
+        const code = `# ${"x".repeat(70_000)}\nprint(1)`;
+        const formatter = createCommandScriptFormatter(
+            parseScriptFormatterCommandsValue({
+                python: {
+                    kind: "command",
+                    command: [process.execPath, "-e", "process.stdin.pipe(process.stdout)"],
+                },
+            }),
+        );
+        if (formatter === undefined) throw new Error("Expected a formatter");
+
+        expect(await formatter({ label: "Python", language: "python", code })).toBe(code);
+    });
+
     it("fits Python imports, class and function bodies after compacting structural gaps", async () => {
         const code =
             "import math\n\n\nclass Sample:\n    pass\n\n\ndef read():\n    return 1\n\n\nassert read() == 1";
@@ -390,35 +422,6 @@ describe("script formatter settings", () => {
         ).resolves.toEqual({ label: "Python", language: "python", code: "76:76" });
     });
 
-    it("skips command formatters for oversized inputs", async () => {
-        const dir = mkdtempSync(join(tmpdir(), "pi-glowup-formatter-limit-"));
-        const marker = join(dir, "started");
-        try {
-            const commands = parseScriptFormatterCommands(
-                JSON.stringify({
-                    python: {
-                        kind: "command",
-                        command: [
-                            process.execPath,
-                            "-e",
-                            "require('node:fs').writeFileSync(process.argv[1], 'started');process.stdout.write('FORMATTER_RAN')",
-                            marker,
-                        ],
-                    },
-                }),
-            );
-            const formatter = createCommandScriptFormatter(commands);
-            const code = "print(1)\n".repeat(10_000);
-
-            await expect(
-                formatScriptInvocation({ label: "Python", language: "python", code }, formatter),
-            ).resolves.toEqual({ label: "Python", language: "python", code });
-            expect(existsSync(marker)).toBe(false);
-        } finally {
-            rmSync(dir, { recursive: true, force: true });
-        }
-    });
-
     it("reuses successful formatting for identical language source", async () => {
         const formatter = createCommandScriptFormatter(
             new Map<string, ScriptFormatterProfile>([
@@ -764,9 +767,10 @@ describe("script formatter settings", () => {
             process.kill(pid, 0); // Fallback happened while the real child still existed.
             await vi.waitUntil(() => getScriptFormatterWorkload().active === 0);
             expect(() => process.kill(pid, 0)).toThrow("ESRCH");
-            let reason = "timed out after 1000 ms";
-            if (failure === "overflow") reason = "output exceeded 1048576 bytes";
-            expect(warnings).toEqual([`[pi-glowup] python display formatter ${reason}`]);
+            expect(warnings).toHaveLength(1);
+
+            if (failure === "timeout") expect(warnings[0]).toContain("timed out");
+            else expect(warnings[0]).toContain("output exceeded");
         } finally {
             controller.abort();
             await pending;

@@ -7,7 +7,8 @@ import {
     type Redirect,
 } from "unbash";
 
-import { parseScriptInvocation, type ScriptInvocation } from "./invocation.ts";
+import { scriptInvocationFromPrograms, type ScriptInvocation } from "./invocation.ts";
+import { extractEmbeddedPrograms, type EmbeddedProgram } from "./embedded-programs.ts";
 import { recordRenderError } from "../../../diagnostics/render-events.ts";
 
 export type ShellLayout = "preserve" | "auto" | "always";
@@ -372,6 +373,7 @@ type BashLayoutAnalysis = {
 function analyzeBashLayout(
     command: string,
     operatorPosition: ShellOperatorPosition,
+    syntax?: ParsedScript,
 ): BashLayoutAnalysis {
     const unchanged = { reflowedCommand: undefined, structurallyComplex: false } as const;
     if (command.trim().length === 0 || command.length > MAX_LAYOUT_SOURCE_CHARACTERS) {
@@ -380,7 +382,7 @@ function analyzeBashLayout(
 
     let script: ParsedScript;
     try {
-        script = parse(command);
+        script = syntax ?? parse(command);
     } catch (cause: unknown) {
         recordRenderError("bash.layout-parse", cause);
         return unchanged;
@@ -409,10 +411,22 @@ export function reflowBashCommand(
 export function analyzeBashCommand(
     command: string,
     operatorPosition: ShellOperatorPosition = "trailing",
+    programs?: readonly EmbeddedProgram[],
 ): BashCommandAnalysis {
-    const pureScript = parseScriptInvocation(command);
+    let syntax: ParsedScript | undefined;
+    if (programs === undefined) {
+        try {
+            syntax = parse(command);
+            programs = extractEmbeddedPrograms(command, syntax);
+        } catch (cause: unknown) {
+            recordRenderError("bash.command-parse", cause);
+            programs = [];
+        }
+    }
+
+    const pureScript = scriptInvocationFromPrograms(programs);
     const layout =
-        pureScript === undefined ? analyzeBashLayout(command, operatorPosition) : undefined;
+        pureScript === undefined ? analyzeBashLayout(command, operatorPosition, syntax) : undefined;
     return {
         command,
         pureScript,

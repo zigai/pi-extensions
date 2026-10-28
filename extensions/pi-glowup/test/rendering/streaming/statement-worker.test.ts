@@ -54,7 +54,7 @@ describe("real statement parser worker", () => {
         expect(ends(await parse("echo one |\n", "bash"))).toEqual([]);
         expect(ends(await parse("x=1\ny=", "python"))).toEqual([3]);
         const shell = "if true; then\n echo one\n echo two\n";
-        expect(ends(await parse(shell, "bash"))).toContain(shell.indexOf("\n echo two"));
+        expect(ends(await parse(shell, "bash"))).toEqual([]);
     });
 
     it("holds unfinished heredocs and boolean pipelines until their actual terminators", async () => {

@@ -3,6 +3,7 @@ import { reportExtensionDiagnostic } from "@zigai/pi-extension-internals";
 import { createHash } from "node:crypto";
 import type { Readable, Writable } from "node:stream";
 import type { ScriptInvocation } from "./invocation.ts";
+import type { EmbeddedProgram } from "./embedded-programs.ts";
 import { jsonObjectParser, type JsonValue } from "../../../json-value.ts";
 import { stringParser } from "../../../json-scalar.ts";
 import { Value } from "typebox/value";
@@ -36,6 +37,7 @@ export type ScriptBlockFormatterOptions = {
     readonly signal?: AbortSignal;
     readonly targetWidth?: number;
     readonly diagnostics?: ScriptFormatDiagnostics;
+    readonly programs?: readonly EmbeddedProgram[];
 };
 
 export type ScriptBlockFormatter = ((
@@ -53,10 +55,9 @@ export type ScriptFormatterParseOptions = {
     readonly reportWarning?: ScriptFormatterWarningReporter;
 };
 
-const FORMATTER_TIMEOUT_MS = 1_000;
+const FORMATTER_TIMEOUT_MS = 5_000;
 const FORMATTER_TERMINATION_GRACE_MS = 250;
 const FORMATTER_MAX_BUFFER = 1024 * 1024;
-const FORMATTER_MAX_INPUT_BYTES = 64 * 1024;
 const MAX_CONCURRENT_FORMATTERS = 2;
 const MAX_FORMATTER_CACHE_ENTRIES = 300;
 const MAX_FORMATTER_CACHE_BYTES = 4 * 1024 * 1024;
@@ -70,7 +71,6 @@ type ScriptFormatOutcome =
     | "failed"
     | "timeout"
     | "output-limit"
-    | "input-limit"
     | "missing-executable"
     | "cancelled"
     | "no-profile";
@@ -234,6 +234,9 @@ async function runFormatterCommand(
                   COLUMNS: String(targetWidth),
               };
     const env = { ...process.env, ...widthEnv };
+    const inputBytes = Buffer.byteLength(input, "utf8");
+    const timeoutMs = FORMATTER_TIMEOUT_MS + Math.ceil(inputBytes / 1024) * 100;
+    const outputBudget = Math.max(FORMATTER_MAX_BUFFER, inputBytes * 64);
 
     // Formatter stderr is read only for the private debug log; otherwise it stays ignored.
     const captureStderr = renderDiagnosticsEnabled();
@@ -310,8 +313,8 @@ async function runFormatterCommand(
         };
 
         const timeout = setTimeout(
-            () => fail(`timed out after ${FORMATTER_TIMEOUT_MS} ms`, "timeout"),
-            FORMATTER_TIMEOUT_MS,
+            () => fail(`timed out after ${timeoutMs} ms`, "timeout"),
+            timeoutMs,
         );
         timeout.unref();
 
@@ -320,8 +323,8 @@ async function runFormatterCommand(
             if (settled) return;
 
             stdoutBytes += Buffer.byteLength(chunk, "utf8");
-            if (stdoutBytes > FORMATTER_MAX_BUFFER) {
-                fail(`output exceeded ${FORMATTER_MAX_BUFFER} bytes`, "output-limit");
+            if (stdoutBytes > outputBudget) {
+                fail(`output exceeded ${outputBudget} bytes`, "output-limit");
                 return;
             }
 
@@ -585,10 +588,6 @@ export function createCommandScriptFormatter(
             profileKind: command.kind,
             ...(targetWidth !== undefined && { targetWidth }),
         };
-
-        if (Buffer.byteLength(input.code, "utf8") > FORMATTER_MAX_INPUT_BYTES) {
-            return { output: undefined, outcome: "input-limit", ...described };
-        }
 
         const effectiveOptions: ScriptBlockFormatterOptions =
             targetWidth === undefined ? options : { ...options, targetWidth };

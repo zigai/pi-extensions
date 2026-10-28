@@ -9,27 +9,24 @@ import {
 import type { DebugLogFields } from "../../../diagnostics/logger.ts";
 import { reflowBashCommand } from "./command.ts";
 import type { ScriptBlockFormatter } from "./formatter.ts";
-import { embeddedInlineScripts, hasHeredocOperator, parseScriptInvocation } from "./invocation.ts";
-import { filterProgramsBeforeHeredoc } from "./filter-programs.ts";
-import { filterProgramSafetyReason } from "./filter-formatting.ts";
-import { bashHeredocHighlightBodies } from "./script-renderer.ts";
-
-const FORMATTER_MAX_INPUT_BYTES = 64 * 1024;
+import { scriptInvocationFromPrograms } from "./invocation.ts";
+import { extractEmbeddedPrograms, type EmbeddedProgram } from "./embedded-programs.ts";
 
 export type ScriptAnalysisInput = {
     readonly toolName: "bash" | "codemode";
     readonly toolCallId: string;
     readonly command: string;
     readonly formatter: ScriptBlockFormatter | undefined;
+    readonly programs?: readonly EmbeddedProgram[];
 
     /**
      * Heredoc and inline awk/jq decisions from embedded formatting; undefined when that pass
      * did not run.
      */
-    readonly heredocs?: readonly ScriptSegmentDiagnostic[];
+    readonly embeddedDecisions?: readonly ScriptSegmentDiagnostic[];
 
     /** Why embedded source was not offered to the formatter when no decision was recorded. */
-    readonly heredocSkipReason?: string;
+    readonly embeddedSkipReason?: string;
 
     /** Whether the stored preview differs from the original source. */
     readonly formatted?: boolean;
@@ -41,13 +38,11 @@ export type ScriptAnalysisInput = {
 function formatterSkipReason(
     formatter: ScriptBlockFormatter | undefined,
     language: string,
-    code: string,
 ): string | undefined {
     if (formatter === undefined) return "no-formatter";
     if (formatter.profileFor !== undefined && formatter.profileFor(language) === undefined)
         return "no-profile";
 
-    if (utf8Bytes(code) > FORMATTER_MAX_INPUT_BYTES) return "input-limit";
     return undefined;
 }
 
@@ -56,7 +51,7 @@ function standaloneSegment(
     code: string,
     input: ScriptAnalysisInput,
 ): ScriptSegmentDiagnostic {
-    const skipReason = formatterSkipReason(input.formatter, language, code);
+    const skipReason = formatterSkipReason(input.formatter, language);
 
     return {
         language,
@@ -68,84 +63,37 @@ function standaloneSegment(
     };
 }
 
-function isFilterSegment(segment: ScriptSegmentDiagnostic): boolean {
-    return segment.origin === "inline" && (segment.language === "awk" || segment.language === "jq");
-}
+function shellSegments(input: ScriptAnalysisInput): ScriptSegmentDiagnostic[] {
+    return (input.programs ?? extractEmbeddedPrograms(input.command)).map((program) => {
+        const recorded = input.embeddedDecisions?.find(
+            (segment) =>
+                segment.start === program.start &&
+                segment.end === program.end &&
+                segment.language === program.language &&
+                segment.code === program.code,
+        );
+        if (recorded !== undefined) return recorded;
 
-/** awk/jq programs the embedded formatting pass did not examine, with the reason. */
-function unexaminedFilterSegments(input: ScriptAnalysisInput): ScriptSegmentDiagnostic[] {
-    const { command, formatter } = input;
-    const heredoc = hasHeredocOperator(command);
-
-    return filterProgramsBeforeHeredoc(command).map((program) => {
-        let skipReason = input.heredocSkipReason ?? "not-detected-for-formatting";
-        if (formatter === undefined) skipReason = "no-formatter";
-        else if (heredoc) skipReason = "heredoc-present";
-        else if (program.quote !== "single") skipReason = "double-quoted";
-        else {
-            const profile = formatter.profileFor?.(program.language);
-            const code = command.slice(program.start, program.end);
-            if (profile === undefined) skipReason = "no-profile";
-            else if (profile.kind === "awk" || profile.kind === "jq")
-                skipReason = filterProgramSafetyReason(code, profile.kind) ?? skipReason;
-        }
+        let skipReason = input.embeddedSkipReason ?? "not-detected-for-formatting";
+        if (input.formatter === undefined) skipReason = "no-formatter";
+        else if (program.incomplete) skipReason = "incomplete-heredoc";
+        else if (program.expandable) skipReason = "unquoted-expansion";
+        else if (
+            input.formatter.profileFor !== undefined &&
+            input.formatter.profileFor(program.language) === undefined
+        )
+            skipReason = "no-profile";
 
         return {
             language: program.language,
-            origin: "inline",
+            origin: program.origin,
             start: program.start,
             end: program.end,
-            code: command.slice(program.start, program.end),
+            code: program.code,
             formattable: false,
             skipReason,
         };
     });
-}
-
-function shellSegments(input: ScriptAnalysisInput): ScriptSegmentDiagnostic[] {
-    const { command } = input;
-    const highlighted = bashHeredocHighlightBodies(command);
-    const recorded = input.heredocs ?? [];
-    let filters = recorded.filter(isFilterSegment);
-    if (filters.length === 0) filters = unexaminedFilterSegments(input);
-
-    // The preview highlights some heredocs the formatter pass cannot attach to a command.
-    let heredocs = recorded
-        .filter((segment) => !isFilterSegment(segment))
-        .map((segment) => {
-            const body = highlighted.find((candidate) => candidate.start === segment.start);
-            if (segment.language !== "text" || body === undefined) return segment;
-
-            return { ...segment, language: body.language };
-        });
-    if (heredocs.length === 0) {
-        let skipReason = input.heredocSkipReason ?? "not-detected-for-formatting";
-        if (input.formatter === undefined) skipReason = "no-formatter";
-
-        heredocs = highlighted.map((body) => ({
-            language: body.language,
-            origin: "heredoc",
-            start: body.start,
-            end: body.end,
-            code: body.code,
-            formattable: false,
-            skipReason,
-        }));
-    }
-
-    const inline = embeddedInlineScripts(command).map((script): ScriptSegmentDiagnostic => ({
-        language: script.language,
-        origin: "inline",
-        start: script.start,
-        end: script.end,
-        code: command.slice(script.start, script.end),
-        formattable: false,
-        skipReason: "inline-not-formatted",
-    }));
-
-    return [...heredocs, ...inline, ...filters].sort(
-        (left, right) => (left.start ?? 0) - (right.start ?? 0),
-    );
 }
 
 function analysisFields(input: ScriptAnalysisInput): DebugLogFields {
@@ -168,7 +116,9 @@ function analysisFields(input: ScriptAnalysisInput): DebugLogFields {
         };
     }
 
-    const standalone = parseScriptInvocation(command);
+    const standalone = scriptInvocationFromPrograms(
+        input.programs ?? extractEmbeddedPrograms(command),
+    );
     if (standalone !== undefined) {
         return {
             ...base,
@@ -181,14 +131,10 @@ function analysisFields(input: ScriptAnalysisInput): DebugLogFields {
         };
     }
 
-    let inlineSkipReason: string | undefined;
-    if (hasHeredocOperator(command)) inlineSkipReason = "heredoc-present";
-
     return {
         ...base,
         path: "shell",
         segments: shellSegments(input).map(scriptSegmentFields),
-        inlineSkipReason,
         reflowed: reflowBashCommand(input.displayCode ?? command) !== undefined,
     };
 }

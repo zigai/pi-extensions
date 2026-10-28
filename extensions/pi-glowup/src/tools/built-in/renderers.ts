@@ -1,6 +1,5 @@
 import { jsonValueParser, type JsonValue } from "../../json-value.ts";
 import type { CodePreview, CodeSource } from "../../rendering/streaming/presentation.ts";
-import { parseScriptInvocation } from "./bash/invocation.ts";
 import { emptyComponent } from "../../rendering/component.ts";
 import { renderGlowupOutput } from "../../rendering/output.ts";
 import { type MutationSettings } from "../../rendering/preview-settings.ts";
@@ -216,7 +215,9 @@ export function createNativeToolRenderers(features: {
             const command = commandField(args);
             if (command === undefined) return undefined;
 
-            const script = parseScriptInvocation(command) ?? { language: "bash", code: command };
+            const script = features.bash.scriptForSource(command);
+            if (script === undefined) return undefined;
+
             return {
                 key: `tool:${context.toolCallId}:script:${script.language}`,
                 source: script.code,

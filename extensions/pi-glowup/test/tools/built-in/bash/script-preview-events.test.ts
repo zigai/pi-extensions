@@ -20,8 +20,10 @@ import { createNativeBashFeature } from "../../../../src/tools/built-in/bash/pre
 import {
     rememberRawScriptPreview,
     scheduleFormattedScriptPreview,
+    scriptForPreview,
 } from "../../../../src/tools/built-in/bash/format-preview.ts";
 import type { ScriptInvocation } from "../../../../src/tools/built-in/bash/invocation.ts";
+import { extractEmbeddedPrograms } from "../../../../src/tools/built-in/bash/embedded-programs.ts";
 import type { BuiltInRenderContext } from "../../../../src/tools/built-in/context.ts";
 import {
     createCodeStreamStore,
@@ -40,6 +42,20 @@ import {
 } from "../../../../src/tools/protocol/streaming.ts";
 import { configureRenderDiagnostics } from "../../../../src/diagnostics/render-events.ts";
 import type { DebugLogFields } from "../../../../src/diagnostics/logger.ts";
+
+it("only selects an embedded formatting preview for extracted programs", () => {
+    const formatter: ScriptBlockFormatter = async ({ code }) => code;
+    const plain = `printf '%s' '<<'`;
+    expect(
+        scriptForPreview(plain, formatter, true, extractEmbeddedPrograms(plain)),
+    ).toBeUndefined();
+    const embedded = `echo ready; python -c 'print(1)'`;
+    expect(scriptForPreview(embedded, formatter, true, extractEmbeddedPrograms(embedded))).toEqual({
+        label: "Bash",
+        language: "bash",
+        code: embedded,
+    });
+});
 
 class RecordingPreviewSink {
     readonly previews = new Map<string, ScriptInvocation>();
@@ -112,13 +128,17 @@ describe("script preview events", () => {
                 expect(formatter.profileFor?.(language)).toBeUndefined();
                 const live = render(context);
                 expect(live.render(80).length).toBeLessThan(12);
-                const signal = streamCode.mock.calls[0]?.[0].signal;
+                await bash.settled();
+                live.invalidate();
+                live.render(80);
+                const signal = streamCode.mock.calls.at(-1)?.[0].signal;
                 expect(signal?.aborted).toBe(false);
                 const requests = streamCode.mock.calls.length;
                 const completedContext = { ...context, argsComplete: true, lastComponent: live };
                 const collapsed = render(completedContext);
                 expect(collapsed.render(80).length).toBeLessThan(12);
                 expect(signal?.aborted).toBe(true);
+                await bash.settled();
                 expect(formatter).toHaveBeenCalled();
                 expect(
                     formatter.mock.calls.every(
@@ -243,6 +263,8 @@ describe("script preview events", () => {
             try {
                 const oldComponent = render(context);
                 oldComponent.render(80);
+                await bash.settled();
+                oldComponent.render(80);
                 await vi.waitUntil(() =>
                     attempts.some((attempt) => attempt.code === "const first=1;"),
                 );
@@ -250,6 +272,8 @@ describe("script preview events", () => {
                     { ...context, toolCallId: "other-call" },
                     "node -e 'const other=3;'",
                 );
+                other.render(80);
+                await bash.settled();
                 other.render(80);
                 await vi.waitUntil(() =>
                     attempts.some((attempt) => attempt.code === "const other=3;"),
@@ -398,7 +422,7 @@ describe("script preview events", () => {
                 invalidate: context.invalidate,
             });
 
-            expect(render()).toContain(raw);
+            await vi.waitUntil(() => render().includes(raw));
             context = { ...context, isPartial: false };
             bash.renderBashResult(
                 { content: [{ type: "text", text: "SAFE_RESULT" }] },
@@ -659,9 +683,12 @@ describe("script preview events", () => {
         render(44);
         render(60);
         render(44);
+        await vi.waitUntil(() => signals.length > 0);
+        render(44);
         expect(signals[0]?.aborted).toBe(false);
         release();
         await narrowed;
+        await vi.waitUntil(() => widths.length === 2);
         expect(widths).toHaveLength(2);
         expect(signals.every((signal) => !signal.aborted)).toBe(true);
         expect(render(44)).toContain("  console.log([\n");
@@ -671,6 +698,7 @@ describe("script preview events", () => {
         });
         render(100);
         await widened;
+        await vi.waitUntil(() => render(100).includes(code));
         expect(render(100)).toContain(code);
         expect(render(100)).not.toContain("  console.log([\n");
         bash.clear();
@@ -716,10 +744,10 @@ describe("script preview events", () => {
 
         bash.schedule({ ...options, command: `node -e 'console.log(1)'` });
         bash.schedule({ ...options, command: `node -e 'console.log(1)'` });
-        expect(pending).toHaveLength(1);
+        await vi.waitUntil(() => pending.length === 1);
 
         bash.schedule({ ...options, command: `node -e 'console.log(3)'` });
-        expect(pending).toHaveLength(2);
+        await vi.waitUntil(() => pending.length === 2);
 
         pending[0]?.("console.log(2)");
         pending[1]?.("console.log(4)");
@@ -938,6 +966,7 @@ describe("script render diagnostics", () => {
                 isCurrent: () => true,
                 invalidate: () => {},
             });
+            await bash.settled();
             await vi.waitUntil(() => getScriptFormatterWorkload().active === 0);
             await store.settled();
 
@@ -969,6 +998,8 @@ describe("script render diagnostics", () => {
                         () => "trailing",
                     )
                     .render(120);
+            render();
+            await bash.settled();
             render();
             await settleSyntaxHighlights();
             render();
@@ -1009,6 +1040,8 @@ describe("script render diagnostics", () => {
                     )
                     .render(120);
             render();
+            await bash.settled();
+            render();
             await store.settled();
             await vi.waitUntil(() => getScriptFormatterWorkload().active === 0);
             render();
@@ -1016,6 +1049,64 @@ describe("script render diagnostics", () => {
 
         return { show, showStreamed };
     }
+
+    it("highlights independent embedded programs without superseding each other", async () => {
+        const events = recordRenderEvents();
+        const { show } = setup();
+        const first = `# ${"a".repeat(9000)}\nprint(1)`;
+        const second = `# ${"b".repeat(9000)}\nprint(2)`;
+        const command = `python -c '${first}'; python -c '${second}'`;
+        await show("independent-programs", command);
+        await vi.waitUntil(async () => {
+            await settleSyntaxHighlights();
+            const completed = eventsNamed(events, "syntax_highlight").filter(
+                (event) => event.outcome === "highlighted",
+            );
+
+            return [first, second].every((code) =>
+                completed.some(
+                    (event) => event.language === "python" && event.codeHash === sha16(code),
+                ),
+            );
+        });
+    });
+
+    it("joins nested Bash heredoc programs to their original ranges and highlighting", async () => {
+        const events = recordRenderEvents();
+        const { show } = setup();
+        const code = "print(7)";
+        const command = `bash <<'SH'\npython -c '${code}'\nSH`;
+        await show("nested-code", command);
+        const analysis = analysisFor(events, "nested-code");
+        const python = analysis.segments.find((segment) => segment.language === "python");
+        if (python?.start === undefined || python.end === undefined)
+            throw new Error("Expected nested Python range");
+
+        expect(command.slice(python.start, python.end)).toBe(`'${code}'`);
+        expect(python.codeHash).toBe(sha16(code));
+        await vi.waitUntil(async () => {
+            await settleSyntaxHighlights();
+
+            return eventsNamed(events, "syntax_highlight").some(
+                (event) => event.language === "python" && event.codeHash === sha16(code),
+            );
+        });
+    });
+
+    it("requests highlighting for an embedded program beyond the collapsed view", async () => {
+        const events = recordRenderEvents();
+        const { show } = setup();
+        const code = "print(7)";
+        const command = `${"echo line\n".repeat(35)}python -c '${code}'`;
+        await show("offscreen-code", command);
+        await vi.waitUntil(async () => {
+            await settleSyntaxHighlights();
+
+            return eventsNamed(events, "syntax_highlight").some(
+                (event) => event.language === "python" && event.codeHash === sha16(code),
+            );
+        });
+    });
 
     it("joins extracted heredoc and inline programs to their format and highlight events", async () => {
         const events = recordRenderEvents();
@@ -1031,10 +1122,14 @@ describe("script render diagnostics", () => {
         const heredocAnalysis = analysisFor(events, "heredoc-call");
         expect(heredocAnalysis.path).toBe("shell");
 
-        // Glowup does not recognize inline programs in commands that open a heredoc.
-        expect(heredocAnalysis.inlineSkipReason).toBe("heredoc-present");
-        const [heredoc] = heredocAnalysis.segments;
-        expect(heredocAnalysis.segments).toHaveLength(1);
+        const [heredoc, inlineAfterHeredoc] = heredocAnalysis.segments;
+        expect(heredocAnalysis.segments).toHaveLength(2);
+        expect(inlineAfterHeredoc).toMatchObject({
+            language: "javascript",
+            origin: "inline",
+            codeHash: sha16("console.log(1)"),
+        });
+
         expect(heredoc).toMatchObject({
             language: "python",
             origin: "heredoc",
@@ -1057,11 +1152,11 @@ describe("script render diagnostics", () => {
             outcome: "formatted",
         });
 
-        // The preview highlights the formatted body, so its hash is the formatter output.
+        // The displayed heredoc includes the newline before its delimiter.
         expect(eventsNamed(events, "syntax_highlight")).toContainEqual(
             expect.objectContaining({
                 language: "python",
-                codeHash: heredocFormat?.outputHash,
+                codeHash: heredoc.displayHash,
                 outcome: "highlighted",
             }),
         );
@@ -1072,14 +1167,14 @@ describe("script render diagnostics", () => {
         expect(inline).toMatchObject({
             language: "javascript",
             origin: "inline",
-            formattable: false,
+            formattable: true,
             codeHash: sha16('console.log("inline")'),
         });
 
         if (inline?.start === undefined || inline.end === undefined)
             throw new Error("Expected inline offsets");
 
-        expect(inlineCommand.slice(inline.start, inline.end)).toBe('console.log("inline")');
+        expect(inlineCommand.slice(inline.start, inline.end)).toBe(`'console.log("inline")'`);
         expect(eventsNamed(events, "syntax_highlight")).toContainEqual(
             expect.objectContaining({
                 language: "javascript",
@@ -1118,7 +1213,6 @@ describe("script render diagnostics", () => {
         ).toEqual([
             { language: "python", formattable: false, skipReason: "malformed" },
             { language: "python", formattable: false, skipReason: "unquoted-expansion" },
-            { language: "text", formattable: false, skipReason: "data-heredoc" },
         ]);
 
         expect(analysis.segments[0]?.codeHash).toBe(sha16(invalid));
@@ -1159,15 +1253,19 @@ describe("script render diagnostics", () => {
             skipReason: "fits-width",
         });
 
-        for (const segment of analysis.segments) {
-            if (segment.start === undefined || segment.end === undefined)
-                throw new Error("Expected filter offsets");
+        if (
+            jqSegment?.start === undefined ||
+            jqSegment.end === undefined ||
+            awkSegment?.start === undefined ||
+            awkSegment.end === undefined
+        )
+            throw new Error("Expected filter offsets");
 
-            expect(sha16(command.slice(segment.start, segment.end))).toBe(segment.codeHash);
-        }
+        expect(command.slice(jqSegment.start, jqSegment.end)).toBe(`'${jq}'`);
+        expect(command.slice(awkSegment.start, awkSegment.end)).toBe(`'${awk}'`);
 
         const formats = eventsNamed(events, "script_format");
-        const jqFormat = formats.find((event) => event.codeHash === jqSegment?.codeHash);
+        const jqFormat = formats.find((event) => event.codeHash === jqSegment.codeHash);
         expect(jqFormat).toMatchObject({
             toolCallId: "filter-call",
             stage: "embedded-filter",
@@ -1176,8 +1274,8 @@ describe("script render diagnostics", () => {
         });
 
         // The program starts its row, so the displayed text is exactly the formatter output.
-        expect(jqSegment?.displayHash).toBe(jqFormat?.outputHash);
-        expect(formats.filter((event) => event.codeHash === awkSegment?.codeHash)).toEqual([]);
+        expect(jqSegment.displayHash).toBe(jqFormat?.outputHash);
+        expect(formats.filter((event) => event.codeHash === awkSegment.codeHash)).toEqual([]);
 
         // The formatted preview may publish after the first render; highlighting follows it.
         await vi.waitUntil(async () => {
@@ -1194,7 +1292,7 @@ describe("script render diagnostics", () => {
         );
 
         expect(highlights).toContainEqual(
-            expect.objectContaining({ language: "awk", codeHash: awkSegment?.codeHash }),
+            expect.objectContaining({ language: "awk", codeHash: awkSegment.codeHash }),
         );
     });
 
@@ -1259,7 +1357,7 @@ describe("script render diagnostics", () => {
                 language: "jq",
                 codeHash: sha16(plain),
                 formattable: false,
-                skipReason: "double-quoted",
+                skipReason: "fits-width",
             },
             {
                 language: "jq",
