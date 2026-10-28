@@ -259,6 +259,41 @@ describe("streaming Bash layout", () => {
         }
     });
 
+    it("shows the current command when an appended expansion makes the script dynamic", async () => {
+        const feature = createNativeBashFeature();
+        onTestFinished(() => feature.clear());
+        const firstCommand = "python -c 'print(1)'";
+        const nextCommand = `${firstCommand}"$INPUT"`;
+        const first = feature.renderBashCall(
+            { command: firstCommand },
+            theme,
+            { ...context(firstCommand), argsComplete: false, isPartial: true },
+            () => 8,
+            () => false,
+            () => "preserve",
+            () => "trailing",
+            ({ source }) => source,
+        );
+        await feature.settled();
+        expect(rows(first).join("\n")).toContain("print(1)");
+        const next = feature.renderBashCall(
+            { command: nextCommand },
+            theme,
+            {
+                ...context(nextCommand),
+                argsComplete: false,
+                isPartial: true,
+                lastComponent: first,
+            },
+            () => 8,
+            () => false,
+            () => "preserve",
+            () => "trailing",
+            ({ source }) => source,
+        );
+        expect(rows(next).join("\n")).toContain("$INPUT");
+    });
+
     it("reclassifies an unfinished standalone heredoc when extraction completes", async () => {
         const feature = createNativeBashFeature();
         const command = `python - <<'PY'\nprint(1)`;

@@ -1,7 +1,11 @@
 import type { Component } from "@earendil-works/pi-tui";
 import { createSyntaxComponent } from "../../../rendering/syntax/component-owner.ts";
 import { createEmbeddedProgramService, type EmbeddedProgramLookup } from "./embedded-service.ts";
-import { sourceCharacterAt, type EmbeddedProgram } from "./embedded-programs.ts";
+import {
+    extractEmbeddedPrograms,
+    sourceCharacterAt,
+    type EmbeddedProgram,
+} from "./embedded-programs.ts";
 import type { ShellLayout, ShellOperatorPosition, ShellOutputStyle } from "./command.ts";
 import { type JsonValue } from "../../../json-value.ts";
 import { makeComponent } from "../../../rendering/component.ts";
@@ -73,6 +77,7 @@ type StreamingScriptRenderState = {
     readonly invalidate: () => void;
     preview: Component | undefined;
     sourcePrefix: string | undefined;
+    pending: { source: string; programs: readonly EmbeddedProgram[] } | undefined;
 };
 
 const streamingScriptRenderStates = new WeakMap<Component, StreamingScriptRenderState>();
@@ -107,6 +112,7 @@ function renderStreamingScriptCall(
                     signal,
                     preview: undefined,
                     sourcePrefix: undefined,
+                    pending: undefined,
                     invalidate: () => {
                         if (renderState.signal?.aborted !== true) invalidate();
                     },
@@ -132,16 +138,24 @@ function renderStreamingScriptCall(
                     }
 
                     let currentInvocation = invocation;
-                    const available = options.embeddedPrograms?.(command, renderState.invalidate);
+                    let available = options.embeddedPrograms?.(command, renderState.invalidate);
                     if (available === undefined) {
                         if (
-                            renderState.preview !== undefined &&
-                            renderState.sourcePrefix !== undefined &&
-                            command.startsWith(renderState.sourcePrefix)
+                            renderState.preview === undefined ||
+                            renderState.sourcePrefix === undefined ||
+                            !command.startsWith(renderState.sourcePrefix)
                         )
-                            return renderState.preview.render(width);
+                            return [];
 
-                        return [];
+                        if (renderState.pending?.source !== command)
+                            renderState.pending = {
+                                source: command,
+                                programs: extractEmbeddedPrograms(command),
+                            };
+
+                        available = renderState.pending.programs;
+                    } else {
+                        renderState.pending = undefined;
                     }
 
                     let detected;

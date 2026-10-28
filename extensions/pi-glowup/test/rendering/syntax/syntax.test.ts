@@ -251,6 +251,7 @@ describe("central syntax highlighting", () => {
             const pending = next.render(120);
 
             expect(pending[1]).toBe(colored[1]);
+            expect(stripVTControlCharacters(pending.join("\n"))).toContain("print(title, count)");
             await bash.settled();
             const updated = next.render(120);
             expect(updated[1]).toBe(colored[1]);
