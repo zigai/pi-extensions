@@ -424,6 +424,60 @@ describe("bash command rendering", () => {
         expect(rendered.every((line) => visibleWidth(line) <= 32)).toBe(true);
     });
 
+    it("highlights a literal child program inside an expanded Bash heredoc", async () => {
+        await initializeSyntaxHighlighting({}, { preloadLanguages: ["python"] });
+        try {
+            const command = `printf start\nbash <<'SH'\npython -c 'print(1)'\nSH`;
+            const actualTheme = new Theme(
+                TEST_THEME_COLORS,
+                TEST_THEME_BACKGROUND_COLORS,
+                "truecolor",
+            );
+            const component = renderBashCommandCall(actualTheme, command, {
+                state: "success",
+                expanded: true,
+                maxCodePreviewLines: 8,
+                showPrologueOmission: false,
+                shellLayout: "preserve",
+                shellOperatorPosition: "trailing",
+                invalidate: () => {},
+            });
+            component.render(80);
+            await settleSyntaxHighlights();
+            component.invalidate();
+            const rendered = component.render(80).join("\n");
+            const highlighted = highlightSyntaxCode("print(1)", "python").join("\n");
+            expect(highlighted).not.toBe("print(1)");
+            expect(rendered).toContain(highlighted);
+            expect(stripVTControlCharacters(rendered)).toContain("python -c 'print(1)'");
+
+            const dynamic = `bash <<SH\npython -c 'print($VALUE)'\nSH`;
+            const unknown = renderBashCommandCall(actualTheme, dynamic, {
+                state: "success",
+                expanded: true,
+                maxCodePreviewLines: 8,
+                showPrologueOmission: false,
+                shellLayout: "preserve",
+                shellOperatorPosition: "trailing",
+                invalidate: () => {},
+            });
+            unknown.render(80);
+            await settleSyntaxHighlights();
+            unknown.invalidate();
+            const dynamicRendered = unknown.render(80).join("\n");
+            highlightSyntaxCode("print($VALUE)", "python");
+            await settleSyntaxHighlights();
+            const dynamicHighlight = highlightSyntaxCode("print($VALUE)", "python").join("\n");
+            expect(dynamicHighlight).not.toBe("print($VALUE)");
+            expect(stripVTControlCharacters(dynamicRendered)).toContain(
+                "python -c 'print($VALUE)'",
+            );
+            expect(dynamicRendered).not.toContain(dynamicHighlight);
+        } finally {
+            await disposeSyntaxHighlighting();
+        }
+    });
+
     it("keeps heredoc syntax colors when the complete body is expanded", async () => {
         await initializeSyntaxHighlighting({}, { preloadLanguages: ["python"] });
         try {
