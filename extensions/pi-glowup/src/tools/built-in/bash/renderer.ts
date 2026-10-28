@@ -4,6 +4,7 @@ import { createSyntaxComponent } from "../../../rendering/syntax/component-owner
 import { renderScriptCall, type ScriptCallRenderOptions } from "./script-renderer.ts";
 import { type GlowupCallState, type GlowupRenderTheme } from "../../../rendering/theme.ts";
 import { type ScriptInvocation } from "./invocation.ts";
+import type { EmbeddedProgramLookup } from "./embedded-service.ts";
 import {
     analyzeBashCommand,
     type BashCommandAnalysis,
@@ -48,8 +49,15 @@ function scriptCallRenderOptions(options: BashCommandRenderOptions): ScriptCallR
         renderOptions = { ...renderOptions, onContentWidth: options.onContentWidth };
     }
 
+    if (options.logicalSource !== undefined)
+        renderOptions = { ...renderOptions, logicalSource: options.logicalSource };
+
+    if (options.signal !== undefined) renderOptions = { ...renderOptions, signal: options.signal };
     if (options.profile !== undefined)
         renderOptions = { ...renderOptions, profile: options.profile };
+
+    if (options.embeddedPrograms !== undefined)
+        renderOptions = { ...renderOptions, embeddedPrograms: options.embeddedPrograms };
 
     return renderOptions;
 }
@@ -141,10 +149,13 @@ export type BashCommandRenderOptions = {
     readonly shellLayout: ShellLayout;
     readonly shellOperatorPosition: ShellOperatorPosition;
     readonly pureScriptOverride?: ScriptInvocation;
+    readonly logicalSource?: string;
+    readonly signal?: AbortSignal;
     readonly lastComponent?: Component | undefined;
     readonly invalidate?: () => void;
     readonly onContentWidth?: (contentWidth: number, renderWidth: number) => void;
     readonly profile?: ScriptCallRenderOptions["profile"];
+    readonly embeddedPrograms?: EmbeddedProgramLookup;
     readonly durationMs?: number | undefined;
 };
 
@@ -154,11 +165,15 @@ function renderScriptInvocation(
     options: BashCommandRenderOptions,
 ): Component {
     if (pureScript.language === "bash") {
+        let programs;
+        if (options.embeddedPrograms !== undefined)
+            programs = options.embeddedPrograms(pureScript.code, options.invalidate) ?? [];
+
         return renderFullShellCommand(
             theme,
             pureScript.code,
             pureScript.launcher,
-            analyzeBashCommand(pureScript.code, options.shellOperatorPosition),
+            analyzeBashCommand(pureScript.code, options.shellOperatorPosition, programs),
             options,
         );
     }
@@ -172,11 +187,17 @@ export function renderBashCommandCall(
     command: string,
     options: BashCommandRenderOptions,
 ): Component {
+    if (options.logicalSource === undefined) options = { ...options, logicalSource: command };
+
     if (options.pureScriptOverride !== undefined) {
         return renderScriptInvocation(theme, options.pureScriptOverride, options);
     }
 
-    const analysis = analyzeBashCommand(command, options.shellOperatorPosition);
+    let programs;
+    if (options.embeddedPrograms !== undefined)
+        programs = options.embeddedPrograms(command, options.invalidate) ?? [];
+
+    const analysis = analyzeBashCommand(command, options.shellOperatorPosition, programs);
     if (analysis.pureScript !== undefined) {
         return renderScriptInvocation(theme, analysis.pureScript, options);
     }

@@ -14,7 +14,7 @@ import {
     type ScriptBlockFormatter,
     type ScriptBlockFormatterInput,
 } from "../../../src/tools/built-in/bash/formatter.ts";
-import { heredocScriptInterpreter } from "../../../src/tools/built-in/bash/invocation.ts";
+import { extractEmbeddedPrograms } from "../../../src/tools/built-in/bash/embedded-programs.ts";
 import { shellWords } from "../../../src/tools/built-in/bash/shell-words.ts";
 
 const stores: CodeStreamStore[] = [];
@@ -62,6 +62,203 @@ function setup(shellProfile = true) {
 
     return { subject, formatter, inputs };
 }
+
+it("preserves Unicode, CRLF, and tab-stripped heredoc boundaries while formatting", async () => {
+    const { subject, formatter } = setup();
+    const source = `printf '😀'\r\npython - <<-'PY'\r\n\ta=1;b=2\r\n\tPY\r\nprintf done`;
+    const display = await subject.formatEmbedded(
+        { label: "Bash", language: "bash", code: source },
+        formatter,
+    );
+    expect(display).toBe(`printf '😀'\r\npython - <<-'PY'\r\na = 1\nb = 2\r\n\tPY\r\nprintf done`);
+    const program = extractEmbeddedPrograms(display)[0];
+    expect(program?.code).toBe("a = 1\nb = 2\r\n");
+});
+
+it("formats inline source while retaining unrelated heredoc input and shell operations", async () => {
+    const { subject, formatter } = setup();
+    const source = `python -c 'a=1;b=2' <<'DATA'\ninput\nDATA\nprintf end`;
+    expect(
+        await subject.formatEmbedded({ label: "Bash", language: "bash", code: source }, formatter),
+    ).toBe(`python -c 'a = 1\nb = 2' <<'DATA'\ninput\nDATA\nprintf end`);
+});
+
+it("does not format split-string or sed programs without a supported encoder or backend", async () => {
+    const { subject, formatter, inputs } = setup();
+    const source = `env -S 'python -c "a=1"'; sed -e 's/a/b/' input`;
+    expect(extractEmbeddedPrograms(source).map(({ language }) => language)).toEqual([
+        "python",
+        "sed",
+    ]);
+
+    expect(
+        await subject.formatEmbedded({ label: "Bash", language: "bash", code: source }, formatter),
+    ).toBe(source);
+
+    expect(inputs).toEqual([]);
+});
+
+it("does not send sed programs to an unprofiled formatter", async () => {
+    const { subject } = setup();
+    let calls = 0;
+    const formatter: ScriptBlockFormatter = async () => {
+        calls++;
+        return "changed";
+    };
+
+    const source = `sed -e 's/a/b/' input`;
+    expect(
+        await subject.formatEmbedded({ label: "Bash", language: "bash", code: source }, formatter),
+    ).toBe(source);
+    expect(calls).toBe(0);
+});
+
+it("formats combined interpreter flags inside an SSH command after Unicode text", async () => {
+    const { subject, formatter } = setup();
+    const source = `printf '😀'; ssh host 'python -Ic "a=1;b=2"'`;
+    const display = await subject.formatEmbedded(
+        { label: "Bash", language: "bash", code: source },
+        formatter,
+    );
+    const extracted = extractEmbeddedPrograms(display);
+    expect(extracted.map(({ language, code }) => ({ language, code }))).toEqual([
+        { language: "bash", code: `python -Ic 'a = 1\nb = 2'` },
+        { language: "python", code: "a = 1\nb = 2" },
+    ]);
+
+    for (const program of extracted) expect(display.slice(program.start, program.end)).not.toBe("");
+});
+
+it.each([String.raw`python -c $'a=1;#\xFF'`, String.raw`python -c $'a=1;#\377'`])(
+    "preserves non-UTF-8 ANSI-C byte escapes without formatting: %s",
+    async (source) => {
+        const { subject, formatter, inputs } = setup();
+        expect(
+            await subject.formatEmbedded(
+                { label: "Bash", language: "bash", code: source },
+                formatter,
+            ),
+        ).toBe(source);
+
+        expect(inputs).toEqual([]);
+    },
+);
+
+it("formats an inline program without formatting its stdin data", async () => {
+    const { subject, formatter } = setup();
+    const source = `node -e 'console.log(1)' <<'DATA'\nnot source\nDATA`;
+    expect(
+        await subject.formatEmbedded({ label: "Bash", language: "bash", code: source }, formatter),
+    ).toBe(`node -e 'console.log(1);' <<'DATA'\nnot source\nDATA`);
+});
+
+it("re-escapes literal dollar signs when formatting an unquoted heredoc", async () => {
+    const { subject, formatter } = setup();
+    const source = "python - <<END\na='\\$HOME';b=2\nEND";
+    expect(
+        await subject.formatEmbedded({ label: "Bash", language: "bash", code: source }, formatter),
+    ).toBe("python - <<END\na = '\\$HOME'\nb = 2\nEND");
+});
+
+it("formats literal double-quoted source without expanding its new shell characters", async () => {
+    const { subject, formatter } = setup();
+    const source = `python -c "a=1;b=2"`;
+    expect(
+        await subject.formatEmbedded({ label: "Bash", language: "bash", code: source }, formatter),
+    ).toBe(`python -c 'a = 1\nb = 2'`);
+});
+
+it.each(["bash -c", "ssh host"])(
+    "re-encodes nested shell words after formatting embedded source: %s",
+    async (launcher) => {
+        const { subject, formatter } = setup();
+        const source = `${launcher} ` + String.raw`'python -c '\''a=1;b=2'\'''`;
+        const display = await subject.formatEmbedded(
+            { label: "Bash", language: "bash", code: source },
+            formatter,
+        );
+        const programs = extractEmbeddedPrograms(display);
+        expect(programs.map(({ language, code }) => ({ language, code }))).toEqual([
+            { language: "bash", code: `python -c 'a = 1\nb = 2'` },
+            { language: "python", code: "a = 1\nb = 2" },
+        ]);
+    },
+);
+
+it("formats nested programs in a Bash heredoc without requiring a Bash formatter", async () => {
+    const { subject, formatter } = setup(false);
+    const source = `bash <<'SH'\npython -c 'a=1;b=2'\nSH`;
+    expect(
+        await subject.formatEmbedded({ label: "Bash", language: "bash", code: source }, formatter),
+    ).toBe(`bash <<'SH'\npython -c 'a = 1\nb = 2'\nSH`);
+});
+
+it("rejects a formatter result that cannot be represented in a shell argument", async () => {
+    const subject = createCodeStreamStore();
+    stores.push(subject);
+    const source = `python -c 'x=1'`;
+    const formatter: ScriptBlockFormatter = async () => "a\0b";
+    expect(
+        await subject.formatEmbedded({ label: "Bash", language: "bash", code: source }, formatter),
+    ).toBe(source);
+});
+
+it("allows an escaped formatter result that is not the raw heredoc terminator", async () => {
+    const subject = createCodeStreamStore();
+    stores.push(subject);
+    const source = "bash <<$END\ntrue\n$END";
+
+    const formatter: ScriptBlockFormatter = async ({ language }) => {
+        if (language === "bash") return "$END";
+        return undefined;
+    };
+    expect(
+        await subject.formatEmbedded({ label: "Bash", language: "bash", code: source }, formatter),
+    ).toBe("bash <<$END\n\\$END\n$END");
+});
+
+it("rejects nested formatting that creates the enclosing heredoc terminator", async () => {
+    const subject = createCodeStreamStore();
+    stores.push(subject);
+    const source = `bash <<'END'\npython -c 'x=1'\nEND`;
+    const formatter: ScriptBlockFormatter = async ({ language }) => {
+        if (language === "python") return "first\nEND\nlast";
+        return undefined;
+    };
+    expect(
+        await subject.formatEmbedded({ label: "Bash", language: "bash", code: source }, formatter),
+    ).toBe(source);
+});
+
+it("does not format nested programs in an unfinished Bash heredoc", async () => {
+    const { subject, formatter, inputs } = setup();
+    const source = `bash <<'SH'\npython -c 'a=1;b=2'`;
+    expect(
+        await subject.formatEmbedded({ label: "Bash", language: "bash", code: source }, formatter),
+    ).toBe(source);
+
+    expect(inputs).toEqual([]);
+});
+
+it("does not format an unfinished heredoc body", async () => {
+    const { subject, formatter, inputs } = setup();
+    const source = `python - <<'PY'\na=1;b=2`;
+    expect(
+        await subject.formatEmbedded({ label: "Bash", language: "bash", code: source }, formatter),
+    ).toBe(source);
+
+    expect(inputs).toEqual([]);
+});
+
+it("preserves dynamic source without sending it to an embedded formatter", async () => {
+    const { subject, formatter, inputs } = setup();
+    const source = `python -c "$program"`;
+    expect(
+        await subject.formatEmbedded({ label: "Bash", language: "bash", code: source }, formatter),
+    ).toBe(source);
+
+    expect(inputs).toEqual([]);
+});
 
 it.each(["statement", "block"] as const)(
     "formats both Python heredocs in place in %s mode, preserving shell and Rust literals",
@@ -129,9 +326,7 @@ it.each([
     "cat <<'PY'\na=1;b=2\nPY",
     "cat > data.txt <<'PY'\na=1;b=2\nPY",
     "python3 script.py <<'PY'\na=1;b=2\nPY",
-    "python3 -c 'print(1)' <<'PY'\na=1;b=2\nPY",
     "python3 -m json.tool <<'PY'\na=1;b=2\nPY",
-    "node -e 'console.log(1)' <<'PY'\na=1;b=2\nPY",
     "python3 - 3<<'PY'\na=1;b=2\nPY",
     "python3 - <<'PY' <input\na=1;b=2\nPY",
     "python3 - <<PY\na='$HOME';b=2\nPY",
@@ -194,7 +389,8 @@ it.each([
     ["cat > '/tmp/a file.py'", "python"],
     ["cat > /tmp/a.tsx", "tsx"],
 ])("identifies stdin/file source ownership for %s", (command, language) => {
-    expect(heredocScriptInterpreter(command)?.language).toBe(language);
+    const source = `${command} <<'END'\nexample\nEND`;
+    expect(extractEmbeddedPrograms(source).map((program) => program.language)).toEqual([language]);
 });
 
 it.each([true, false])(

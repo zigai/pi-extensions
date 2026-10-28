@@ -1,10 +1,15 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { EventEmitter, once } from "node:events";
 import { transform } from "esbuild";
+import { parse as parseBash } from "unbash";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { stringParser } from "../../../src/json-scalar.ts";
+import {
+    configureRenderDiagnostics,
+    type ScriptSegmentDiagnostic,
+} from "../../../src/diagnostics/render-events.ts";
 import {
     createCodeStreamStore,
     type CodeStreamStore,
@@ -106,6 +111,123 @@ describe("code stream store", () => {
             appended.source,
             appended.source,
         ]);
+    });
+
+    it.each([
+        ["if check; then\n  echo one\n", "fi"],
+        ["for x in a; do\n  echo x\n", "done"],
+        ["while check; do\n  echo x\n", "done"],
+        ["case value in\n  a) echo x;;\n", "esac"],
+        ["f() {\n  echo x\n", "}"],
+        ["(echo x;\n", ")"],
+    ])("only sends complete compound Bash programs to a live formatter", async (prefix, close) => {
+        const subject = store();
+        const received: string[] = [];
+        const formatter = async ({ code }: { code: string }) => {
+            received.push(code);
+            return code;
+        };
+        const input = {
+            key: "live-compound",
+            source: prefix,
+            language: "bash",
+            complete: false,
+            mode: "statement" as const,
+            formatter,
+        };
+        subject.get(input);
+        await subject.settled();
+        expect(received).toEqual([]);
+        const next = { ...input, source: `${prefix}${close}\necho next` };
+        subject.get(next);
+        await subject.settled();
+        expect(received).toHaveLength(1);
+        expect(received[0]).toContain(close);
+        expect(parseBash(received[0] ?? "").errors ?? []).toEqual([]);
+    });
+
+    it("formats embedded code against the original Bash source before outer shell formatting", async () => {
+        const subject = store();
+        const pythonInputs: string[] = [];
+        const formatter = async ({ language, code }: { language: string; code: string }) => {
+            if (language === "python") {
+                pythonInputs.push(code);
+                return code.replace("a=1", "a = 1");
+            }
+
+            if (language === "bash") return code.replace("a=1", "a  =  1");
+            return undefined;
+        };
+
+        const source = `python -c 'a=1'; echo done`;
+        const input = {
+            key: "embedded-identity",
+            source,
+            language: "bash",
+            complete: true,
+            mode: "block" as const,
+            formatter,
+        };
+        subject.get(input);
+        await subject.settled();
+        expect(pythonInputs).toEqual(["a=1"]);
+        expect(subject.get(input)).toContain("'a = 1'");
+    });
+
+    it("formats embedded code before its live Bash statement", async () => {
+        const subject = store();
+        const pythonInputs: string[] = [];
+        const formatter = async ({ language, code }: { language: string; code: string }) => {
+            if (language === "python") {
+                pythonInputs.push(code);
+                return code.replace("a=1", "a = 1");
+            }
+
+            if (language === "bash") return code.replace("a=1", "a  =  1");
+            return undefined;
+        };
+        const input = {
+            key: "embedded-live",
+            source: `python -c 'a=1';\necho next`,
+            language: "bash",
+            complete: false,
+            mode: "statement" as const,
+            formatter,
+        };
+        subject.get(input);
+        await subject.settled();
+        expect(pythonInputs).toEqual(["a=1"]);
+        expect(subject.get(input)).toContain("'a = 1'");
+    });
+
+    it("reports live embedded ranges against the original complete input", async () => {
+        const subject = store();
+        const segments: ScriptSegmentDiagnostic[] = [];
+        const source = `echo first;\npython -c 'a=1';\necho next`;
+        configureRenderDiagnostics(() => {});
+        try {
+            subject.get({
+                key: "embedded-ranges",
+                source,
+                language: "bash",
+                complete: false,
+                mode: "statement",
+                formatter: async ({ code }) => code,
+                diagnostics: {
+                    recordSegment: (segment) => {
+                        segments.push(segment);
+                    },
+                },
+            });
+            await subject.settled();
+            const python = segments.find((segment) => segment.language === "python");
+            if (python?.start === undefined || python.end === undefined)
+                throw new Error("Expected Python source range");
+
+            expect(source.slice(python.start, python.end)).toBe("'a=1'");
+        } finally {
+            configureRenderDiagnostics(undefined);
+        }
     });
 
     it("formats completed compound shells once without statement fragments", async () => {

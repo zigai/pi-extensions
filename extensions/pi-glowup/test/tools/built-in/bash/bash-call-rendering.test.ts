@@ -5,6 +5,12 @@ import { describe, expect, it } from "vitest";
 import { Theme } from "@earendil-works/pi-coding-agent";
 import { renderBashCommandCall } from "../../../../src/tools/built-in/bash/renderer.ts";
 import { createNativeBashFeature } from "../../../../src/tools/built-in/bash/preview.ts";
+import {
+    disposeSyntaxHighlighting,
+    highlightSyntaxCode,
+    initializeSyntaxHighlighting,
+    settleSyntaxHighlights,
+} from "../../../../src/rendering/syntax/highlighter.ts";
 import type { ShellOutputStyle } from "../../../../src/tools/built-in/bash/command.ts";
 import type { BuiltInRenderContext } from "../../../../src/tools/built-in/context.ts";
 import type { GlowupRenderTheme } from "../../../../src/rendering/theme.ts";
@@ -45,6 +51,7 @@ describe("bash command rendering", () => {
         "pwd && bash -c 'git status --short' && echo done",
         "bash -o pipefail -lc 'git status --short'",
         "bash -c 'bash -lc \"git status --short\"'",
+        "bash -c 'ssh host git status --short'",
     ])("highlights quoted nested Bash as code: %s", (command) => {
         const coloredTheme: GlowupRenderTheme = {
             ...theme,
@@ -415,6 +422,36 @@ describe("bash command rendering", () => {
             { width: 32 },
         );
         expect(rendered.every((line) => visibleWidth(line) <= 32)).toBe(true);
+    });
+
+    it("keeps heredoc syntax colors when the complete body is expanded", async () => {
+        await initializeSyntaxHighlighting({}, { preloadLanguages: ["python"] });
+        try {
+            const command = `echo start\npython - <<'PY'\nprint(1)\nPY`;
+            const actualTheme = new Theme(
+                TEST_THEME_COLORS,
+                TEST_THEME_BACKGROUND_COLORS,
+                "truecolor",
+            );
+            const component = renderBashCommandCall(actualTheme, command, {
+                state: "success",
+                expanded: true,
+                maxCodePreviewLines: 8,
+                showPrologueOmission: false,
+                shellLayout: "preserve",
+                shellOperatorPosition: "trailing",
+                invalidate: () => {},
+            });
+            component.render(80);
+            await settleSyntaxHighlights();
+            component.invalidate();
+            const highlighted = highlightSyntaxCode("print(1)\n", "python").join("\n");
+            expect(stripVTControlCharacters(highlighted)).toBe("print(1)");
+            expect(highlighted).not.toBe("print(1)");
+            expect(component.render(80).join("\n")).toContain(highlighted);
+        } finally {
+            await disposeSyntaxHighlighting();
+        }
     });
 
     it("highlights embedded heredocs accurately across preview truncation boundaries", () => {
