@@ -5,6 +5,7 @@ import { renderGlowupOutput, type GlowupOutputRenderOptions } from "../../render
 import {
     createSyntaxComponent,
     inheritSyntaxComponent,
+    retireSyntaxComponent,
 } from "../../rendering/syntax/component-owner.ts";
 import { renderSyntaxComponent } from "../../rendering/syntax/code-component.ts";
 import { dim, type GlowupRenderTheme } from "../../rendering/theme.ts";
@@ -37,7 +38,10 @@ type ProtocolSlot = {
     readonly streamKey: string | undefined;
 };
 
-const contentSlots = new WeakMap<Component, ProtocolSlot>();
+const contentSlots = new WeakMap<
+    Component,
+    { readonly slot: ProtocolSlot; readonly kind: "code" | "output" }
+>();
 const callBodies = new WeakMap<
     Component,
     { readonly slot: ProtocolSlot; readonly body: Component }
@@ -65,6 +69,53 @@ function sameProtocolSlot(
         slot.streamPhase === context.streamPhase &&
         slot.streamKey === context.streamKey
     );
+}
+
+function retireProtocolComponent(component: Component): void {
+    const call = callBodies.get(component);
+    if (call !== undefined) {
+        callBodies.delete(component);
+        retireProtocolComponent(call.body);
+    }
+
+    const stack = stackChildren.get(component);
+    if (stack !== undefined) {
+        stackChildren.delete(component);
+
+        for (const child of stack.children) retireProtocolComponent(child);
+    }
+
+    contentSlots.delete(component);
+    retireSyntaxComponent(component);
+}
+
+function retireReplacedComponent(node: GlowupNode, context: ThirdPartyToolRenderContext): void {
+    const previous = context.lastComponent;
+    if (previous === undefined) return;
+
+    const content = contentSlots.get(previous);
+    if (content !== undefined && sameProtocolSlot(content.slot, context)) {
+        if (
+            node.kind !== content.kind ||
+            node.syntax === undefined ||
+            context.invalidate === undefined
+        )
+            retireProtocolComponent(previous);
+
+        return;
+    }
+
+    const call = callBodies.get(previous);
+    if (call !== undefined && sameProtocolSlot(call.slot, context)) {
+        if (node.kind !== "call" || node.body === undefined || node.body.kind === "text")
+            retireProtocolComponent(previous);
+
+        return;
+    }
+
+    const stack = stackChildren.get(previous);
+    if (stack !== undefined && sameProtocolSlot(stack.slot, context) && node.kind !== "stack")
+        retireProtocolComponent(previous);
 }
 
 type BodyPosition = "first" | "continued";
@@ -303,7 +354,10 @@ function renderProtocolContent(
         };
     };
     let previous: Component | undefined;
-    if (lastComponent !== undefined && sameProtocolSlot(contentSlots.get(lastComponent), context))
+    if (
+        lastComponent !== undefined &&
+        sameProtocolSlot(contentSlots.get(lastComponent)?.slot, context)
+    )
         previous = lastComponent;
 
     let content: Component;
@@ -316,14 +370,14 @@ function renderProtocolContent(
         );
     } else content = createContent(context.invalidate);
 
-    contentSlots.set(content, protocolSlot(context));
+    contentSlots.set(content, { slot: protocolSlot(context), kind: node.kind });
 
     if (node.kind !== "code" || node.title === undefined) return content;
 
     const title = renderBodyText(theme, node.title, position);
     const titled = makeComponent((width) => [...title.render(width), ...content.render(width)]);
     inheritSyntaxComponent(titled, content);
-    contentSlots.set(titled, protocolSlot(context));
+    contentSlots.set(titled, { slot: protocolSlot(context), kind: node.kind });
 
     return titled;
 }
@@ -337,6 +391,8 @@ export function renderProtocolNode(
     mutationSettings?: MutationSettings,
     position: BodyPosition = "first",
 ): ReturnType<typeof emptyComponent> {
+    retireReplacedComponent(node, context);
+
     switch (node.kind) {
         case "empty":
             return emptyComponent();
@@ -442,6 +498,11 @@ export function renderProtocolNode(
                 const old = stackChildren.get(context.lastComponent);
                 if (old !== undefined && sameProtocolSlot(old.slot, context))
                     previous = old.children;
+            }
+
+            if (previous !== undefined) {
+                for (const child of previous.slice(node.children.length))
+                    retireProtocolComponent(child);
             }
 
             let children = buildChildren(previous);

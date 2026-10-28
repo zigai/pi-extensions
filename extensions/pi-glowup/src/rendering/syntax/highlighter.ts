@@ -576,6 +576,16 @@ function currentHighlightOwner(invalidate: (() => void) | undefined): HighlightO
     return owner;
 }
 
+export function retireSyntaxHighlightSource(invalidate: () => void): void {
+    const owner = highlightOwners.get(invalidate);
+    if (owner === undefined && !highlightSources.has(invalidate)) return;
+
+    highlightSources.delete(invalidate);
+    highlightOwners.delete(invalidate);
+    observeHighlightRevision(invalidate);
+    owner?.controller.abort();
+}
+
 /** Cancels obsolete work when a renderer observes a different submitted source. */
 export function observeSyntaxHighlightSource(
     source: string | readonly DiffSection[],

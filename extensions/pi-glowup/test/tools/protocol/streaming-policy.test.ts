@@ -10,8 +10,10 @@ import { registerGlowupToolRenderer } from "../../../src/presentation.ts";
 import {
     call,
     code,
+    empty,
     output,
     stack,
+    text,
     decodeGlowupNode,
     registerGlowupStreamingPolicy,
     type GlowupNode,
@@ -571,6 +573,234 @@ describe("tool generated-content contract", () => {
             await disposeSyntaxHighlighting();
         }
     });
+
+    it.each([false, true])(
+        "retires a removed call child with diagnostics enabled: %s",
+        async (diagnostics) => {
+            const events: Array<{ event: string; fields: DebugLogFields }> = [];
+            let invalidations = 0;
+            let node: GlowupNode = call(
+                { static: "Run" },
+                { body: stack([code("const old = 1;", { syntax: { language: "javascript" } })]) },
+            );
+            const renderer = createProtocolRenderer(
+                { version: 3, parseArgs: (value) => value, renderCall: () => node },
+                createGenericRenderer("test"),
+            );
+            const invalidate = () => {
+                invalidations += 1;
+            };
+            try {
+                await initializeSyntaxHighlighting({}, { preloadLanguages: ["javascript"] });
+
+                if (diagnostics)
+                    configureRenderDiagnostics((event, fields) => {
+                        events.push({ event, fields: fields() });
+                    });
+
+                const first = renderer.renderCall({}, theme, { ...context, invalidate });
+                first.render(80);
+                node = call({ static: "Run" }, { body: stack([text("finished")]) });
+                const current = renderer.renderCall({}, theme, {
+                    ...context,
+                    invalidate,
+                    lastComponent: first,
+                });
+                expect(current.render(80).join("\n")).toContain("finished");
+                await settleSyntaxHighlights();
+                expect(invalidations).toBe(0);
+
+                if (diagnostics) {
+                    expect(
+                        events
+                            .filter(
+                                ({ event, fields }) =>
+                                    event === "syntax_request" && fields.terminal === true,
+                            )
+                            .map(({ fields }) => fields.state),
+                    ).toEqual(["superseded"]);
+                }
+            } finally {
+                configureRenderDiagnostics(undefined);
+                await disposeSyntaxHighlighting();
+            }
+        },
+    );
+
+    it.each(["body-text", "body-empty", "root-empty", "syntax-removed"])(
+        "retires pending code on %s replacement",
+        async (replacement) => {
+            let invalidations = 0;
+            let node: GlowupNode = call(
+                { static: "Run" },
+                { body: stack([code("const old = 1;", { syntax: { language: "javascript" } })]) },
+            );
+            const renderer = createProtocolRenderer(
+                { version: 3, parseArgs: (value) => value, renderCall: () => node },
+                createGenericRenderer("test"),
+            );
+            const invalidate = () => {
+                invalidations += 1;
+            };
+            try {
+                await initializeSyntaxHighlighting({}, { preloadLanguages: ["javascript"] });
+                const first = renderer.renderCall({}, theme, { ...context, invalidate });
+                first.render(80);
+
+                if (replacement === "body-text")
+                    node = call({ static: "Run" }, { body: text("finished") });
+
+                if (replacement === "body-empty") node = call({ static: "Run" });
+                if (replacement === "root-empty") node = empty();
+
+                if (replacement === "syntax-removed")
+                    node = call({ static: "Run" }, { body: stack([code("const old = 1;")]) });
+
+                const current = renderer.renderCall({}, theme, {
+                    ...context,
+                    invalidate,
+                    lastComponent: first,
+                });
+                current.render(80);
+                await settleSyntaxHighlights();
+                expect(invalidations).toBe(0);
+            } finally {
+                await disposeSyntaxHighlighting();
+            }
+        },
+    );
+
+    it("keeps stack position as the owner identity when code children reorder", async () => {
+        const events: Array<{ event: string; fields: DebugLogFields }> = [];
+        const firstSource = "const left = 1;";
+        const secondSource = "const right = 2;";
+        let node: GlowupNode = call(
+            { static: "Run" },
+            {
+                body: stack([
+                    code(firstSource, { syntax: { language: "javascript" } }),
+                    code(secondSource, { syntax: { language: "javascript" } }),
+                ]),
+            },
+        );
+        const renderer = createProtocolRenderer(
+            { version: 3, parseArgs: (value) => value, renderCall: () => node },
+            createGenericRenderer("test"),
+        );
+        let invalidations = 0;
+        const invalidate = () => {
+            invalidations += 1;
+        };
+        try {
+            await initializeSyntaxHighlighting({}, { preloadLanguages: ["javascript"] });
+            configureRenderDiagnostics((event, fields) => {
+                events.push({ event, fields: fields() });
+            });
+            const first = renderer.renderCall({}, theme, { ...context, invalidate });
+            first.render(80);
+            node = call(
+                { static: "Run" },
+                {
+                    body: stack([
+                        code(secondSource, { syntax: { language: "javascript" } }),
+                        code(firstSource, { syntax: { language: "javascript" } }),
+                    ]),
+                },
+            );
+            const current = renderer.renderCall({}, theme, {
+                ...context,
+                invalidate,
+                lastComponent: first,
+            });
+            current.render(80);
+            await settleSyntaxHighlights();
+            const starts = events.filter(
+                ({ event, fields }) => event === "syntax_request" && fields.state === "requested",
+            );
+            expect(starts.map(({ fields }) => fields.revision)).toEqual([1, 1, 2, 2]);
+            expect(starts[0]?.fields.ownerId).toBe(starts[2]?.fields.ownerId);
+            expect(starts[1]?.fields.ownerId).toBe(starts[3]?.fields.ownerId);
+            expect(starts[0]?.fields.ownerId).not.toBe(starts[1]?.fields.ownerId);
+            expect(
+                events
+                    .filter(
+                        ({ event, fields }) =>
+                            event === "syntax_request" && fields.terminal === true,
+                    )
+                    .map(({ fields }) => fields.state),
+            ).toEqual(["superseded", "superseded", "completed", "completed"]);
+
+            expect(invalidations).toBe(2);
+        } finally {
+            configureRenderDiagnostics(undefined);
+            await disposeSyntaxHighlighting();
+        }
+    });
+
+    it.each(["text", "empty", "delete"])(
+        "retires a %s child while preserving its pending sibling",
+        async (replacement) => {
+            const events: Array<{ event: string; fields: DebugLogFields }> = [];
+            const retained = "const keep = 2;";
+            const removed = "const remove = 3;";
+            const keep = code(retained, { syntax: { language: "javascript" } });
+            let node: GlowupNode = call(
+                { static: "Run" },
+                {
+                    body: stack([
+                        keep,
+                        stack([code(removed, { syntax: { language: "javascript" } })]),
+                    ]),
+                },
+            );
+            let invalidations = 0;
+            const renderer = createProtocolRenderer(
+                { version: 3, parseArgs: (value) => value, renderCall: () => node },
+                createGenericRenderer("test"),
+            );
+            const invalidate = () => {
+                invalidations += 1;
+            };
+            try {
+                await initializeSyntaxHighlighting({}, { preloadLanguages: ["javascript"] });
+                configureRenderDiagnostics((event, fields) => {
+                    events.push({ event, fields: fields() });
+                });
+                const first = renderer.renderCall({}, theme, { ...context, invalidate });
+                first.render(80);
+                let children: GlowupNode[] = [keep];
+                if (replacement === "text") children = [keep, text("finished")];
+                if (replacement === "empty") children = [keep, empty()];
+                node = call({ static: "Run" }, { body: stack(children) });
+                const current = renderer.renderCall({}, theme, {
+                    ...context,
+                    invalidate,
+                    lastComponent: first,
+                });
+                current.render(80);
+                await settleSyntaxHighlights();
+                const terminals = events.filter(
+                    ({ event, fields }) => event === "syntax_request" && fields.terminal === true,
+                );
+                expect(
+                    terminals
+                        .filter(({ fields }) => fields.codeHash === diagnosticCodeHash(removed))
+                        .map(({ fields }) => fields.state),
+                ).toEqual(["superseded"]);
+
+                expect(
+                    terminals
+                        .filter(({ fields }) => fields.codeHash === diagnosticCodeHash(retained))
+                        .map(({ fields }) => fields.state),
+                ).toEqual(["completed"]);
+
+                expect(invalidations).toBe(1);
+            } finally {
+                configureRenderDiagnostics(undefined);
+                await disposeSyntaxHighlighting();
+            }
+        },
+    );
 
     it("passes code streaming through public renderer contributions", () => {
         const registration = registerGlowupToolRenderer(
