@@ -30,6 +30,11 @@ export type DefaultModelSpec = {
 export type ModesFile = {
     version: 1;
     currentMode: ModeName;
+
+    /** False when modes were generated from the active model rather than configured. */
+    hasConfiguredModes?: boolean;
+
+    /** Legacy value retained for diagnostics only; explicit saves remove it. */
     defaultModel?: DefaultModelSpec;
     modes: Record<ModeName, ModeSpec>;
 };
@@ -43,7 +48,9 @@ export type ModeSpecPatch = {
 
 export type ModesPatch = {
     currentMode?: ModeName;
-    defaultModel?: DefaultModelSpec | null;
+    defaultModel?: null;
+    modeOrder?: readonly ModeName[];
+    expectedModeOrder?: readonly ModeName[];
     modes?: Record<ModeName, ModeSpecPatch | null>;
 };
 
@@ -126,6 +133,10 @@ export function cloneModesFile(file: ModesFile): ModesFile {
         currentMode: file.currentMode,
         modes,
     };
+    if (file.hasConfiguredModes !== undefined) {
+        cloned.hasConfiguredModes = file.hasConfiguredModes;
+    }
+
     if (file.defaultModel !== undefined) {
         cloned.defaultModel = cloneDefaultModelSpec(file.defaultModel);
     }
@@ -136,6 +147,10 @@ export function cloneModesFile(file: ModesFile): ModesFile {
 export function modeSpec(modes: Record<string, ModeSpec>, name: string): ModeSpec | undefined {
     if (Object.hasOwn(modes, name)) return modes[name];
     return undefined;
+}
+
+function sameModeOrder(before: readonly string[], after: readonly string[]): boolean {
+    return before.length === after.length && before.every((name, index) => name === after[index]);
 }
 
 export function computeModesPatch(
@@ -149,18 +164,13 @@ export function computeModesPatch(
         patch.currentMode = next.currentMode;
     }
 
-    if (base.defaultModel === undefined && next.defaultModel !== undefined) {
-        patch.defaultModel = cloneDefaultModelSpec(next.defaultModel);
-    } else if (base.defaultModel !== undefined && next.defaultModel === undefined) {
-        patch.defaultModel = null;
-    } else if (base.defaultModel !== undefined && next.defaultModel !== undefined) {
-        if (
-            base.defaultModel.provider !== next.defaultModel.provider ||
-            base.defaultModel.modelId !== next.defaultModel.modelId ||
-            base.defaultModel.thinkingLevel !== next.defaultModel.thinkingLevel
-        ) {
-            patch.defaultModel = cloneDefaultModelSpec(next.defaultModel);
-        }
+    if (base.defaultModel !== undefined) patch.defaultModel = null;
+
+    const beforeOrder = Object.keys(base.modes);
+    const afterOrder = Object.keys(next.modes);
+    if (!sameModeOrder(beforeOrder, afterOrder)) {
+        patch.modeOrder = afterOrder;
+        patch.expectedModeOrder = beforeOrder;
     }
 
     const keys = new Set([...Object.keys(base.modes), ...Object.keys(next.modes)]);
@@ -209,7 +219,8 @@ export function computeModesPatch(
     if (
         patch.modes === undefined &&
         patch.currentMode === undefined &&
-        patch.defaultModel === undefined
+        patch.defaultModel === undefined &&
+        patch.modeOrder === undefined
     ) {
         return null;
     }
@@ -217,22 +228,25 @@ export function computeModesPatch(
     return patch;
 }
 
+export function orderedModeNames(modes: Record<string, ModeSpec>): string[] {
+    return Object.keys(modes).filter((name) => name !== CUSTOM_MODE_NAME);
+}
+
 export function applyModesPatch(target: ModesFile, patch: ModesPatch): void {
+    if (
+        patch.expectedModeOrder !== undefined &&
+        !sameModeOrder(Object.keys(target.modes), patch.expectedModeOrder)
+    ) {
+        throw new Error("Mode order changed after loading; reload before saving.");
+    }
+
     if (patch.currentMode !== undefined) {
         target.currentMode = patch.currentMode;
     }
 
-    if (patch.defaultModel !== undefined) {
-        if (patch.defaultModel === null) {
-            delete target.defaultModel;
-        } else {
-            target.defaultModel = cloneDefaultModelSpec(patch.defaultModel);
-        }
-    }
+    if (patch.defaultModel !== undefined) delete target.defaultModel;
 
-    if (patch.modes === undefined) return;
-
-    for (const [mode, specPatch] of Object.entries(patch.modes)) {
+    for (const [mode, specPatch] of Object.entries(patch.modes ?? {})) {
         if (specPatch === null) {
             delete target.modes[mode];
             continue;
@@ -273,6 +287,24 @@ export function applyModesPatch(target: ModesFile, patch: ModesPatch): void {
             }
         }
     }
+
+    if (patch.modeOrder !== undefined) {
+        const reordered: Record<string, ModeSpec> = {};
+        for (const name of patch.modeOrder) {
+            const spec = modeSpec(target.modes, name);
+            if (spec !== undefined) reordered[name] = spec;
+        }
+
+        for (const [name, spec] of Object.entries(target.modes)) {
+            if (!Object.hasOwn(reordered, name)) reordered[name] = spec;
+        }
+
+        target.modes = reordered;
+    }
+
+    if (patch.modes !== undefined || patch.modeOrder !== undefined) {
+        target.hasConfiguredModes = orderedModeNames(target.modes).length > 0;
+    }
 }
 
 function isModeColor(value: string): value is NonNullable<ModeSpec["color"]> {
@@ -288,6 +320,7 @@ export function createDefaultModes(base: ModeSpec): ModesFile {
     return {
         version: 1,
         currentMode: "default",
+        hasConfiguredModes: false,
         modes: {
             default: { ...base },
             fast: { ...base, thinkingLevel: "off" },
@@ -296,8 +329,9 @@ export function createDefaultModes(base: ModeSpec): ModesFile {
 }
 
 export function ensureDefaultModeEntries(file: ModesFile, fallbackMode: ModeSpec): void {
-    if (Object.keys(file.modes).length === 0) {
+    if (orderedModeNames(file.modes).length === 0) {
         file.modes = createDefaultModes(fallbackMode).modes;
+        file.hasConfiguredModes = false;
     }
 
     if (file.currentMode === CUSTOM_MODE_NAME) {
@@ -318,10 +352,6 @@ export function ensureDefaultModeEntries(file: ModesFile, fallbackMode: ModeSpec
             file.currentMode = "default";
         }
     }
-}
-
-export function orderedModeNames(modes: Record<string, ModeSpec>): string[] {
-    return Object.keys(modes).filter((name) => name !== CUSTOM_MODE_NAME);
 }
 
 function modeUsesModel(spec: ModeSpec | undefined, provider: string, modelId: string): boolean {

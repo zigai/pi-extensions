@@ -15,6 +15,8 @@ import {
     createDefaultModes,
     ensureDefaultModeEntries,
     parseModeColor,
+    orderedModeNames,
+    modeSpec,
     type DefaultModelSpec,
     type ModesFile,
     type ModeSpec,
@@ -31,7 +33,7 @@ const ModeSpecJsonSchema = Type.Object(
     {
         provider: Type.Optional(Type.String()),
         modelId: Type.Optional(Type.String()),
-        thinkingLevel: Type.Optional(modeThinkingLevelSchema),
+        thinkingLevel: Type.Optional(Type.Union([modeThinkingLevelSchema, Type.Null()])),
         color: Type.Optional(Type.String()),
     },
     { additionalProperties: false },
@@ -63,6 +65,7 @@ const ModesFileJsonSchema = Type.Object(
                 { additionalProperties: false },
             ),
         ),
+        deletedModes: Type.Optional(Type.Array(Type.String())),
         modes: Type.Optional(Type.Record(Type.String(), ModeSpecJsonSchema)),
     },
     { additionalProperties: false },
@@ -126,7 +129,7 @@ function sanitizeModeSpec(spec: ModeSpecJson | undefined): ModeSpec {
     if (spec === undefined) return {};
 
     const sanitized: ModeSpec = {};
-    const thinkingLevel = normalizeThinkingLevel(spec.thinkingLevel);
+    const thinkingLevel = normalizeThinkingLevel(spec.thinkingLevel ?? undefined);
     if (thinkingLevel !== undefined) sanitized.thinkingLevel = thinkingLevel;
     if (spec.provider !== undefined) sanitized.provider = spec.provider;
     if (spec.modelId !== undefined) sanitized.modelId = spec.modelId;
@@ -197,7 +200,10 @@ export type ModesStoreContext = {
 
 type LoadModelModesSettings = (
     context: ModesStoreContext,
-) => Pick<LoadedModelModesSettings, "globalConfigPath" | "projectConfigPath">;
+) => Pick<
+    LoadedModelModesSettings,
+    "globalConfigPath" | "projectConfigPath" | "settings" | "diagnostics" | "projectSettingsLayer"
+>;
 
 export type SavedModes = {
     readonly data: ModesFile;
@@ -213,6 +219,7 @@ function modesFromConfig(parsed: ModesFileJson, fallbackMode: ModeSpec): ModesFi
     const file: ModesFile = {
         version: 1,
         currentMode: parsed.currentMode ?? "default",
+        hasConfiguredModes: orderedModeNames(modes).length > 0,
         modes,
     };
     const defaultModel = sanitizeDefaultModelSpec(parsed.defaultModel);
@@ -222,8 +229,43 @@ function modesFromConfig(parsed: ModesFileJson, fallbackMode: ModeSpec): ModesFi
     return file;
 }
 
+function modesFromSettings(
+    loaded: ReturnType<LoadModelModesSettings>,
+    fallbackMode: ModeSpec,
+): ModesFile {
+    const merged = modesFileJsonDecoder.parse(loaded.settings);
+    let project: ModesFileJson | undefined;
+    if (loaded.projectSettingsLayer !== undefined) {
+        project = modesFileJsonDecoder.parse(loaded.projectSettingsLayer);
+    }
+
+    for (const name of project?.deletedModes ?? []) delete merged.modes?.[name];
+    const file = modesFromConfig(merged, fallbackMode);
+
+    // Project declarations define the local cycle priority; inherited specs still come from
+    // the shared loader's recursive merge, including partial per-mode overrides.
+    if (project !== undefined && file.hasConfiguredModes !== false) {
+        const names = new Set([...Object.keys(project.modes ?? {}), ...Object.keys(file.modes)]);
+        const reordered: Record<string, ModeSpec> = {};
+        for (const name of names) {
+            const spec = modeSpec(file.modes, name);
+            if (spec !== undefined) reordered[name] = spec;
+        }
+
+        file.modes = reordered;
+    }
+
+    return file;
+}
+
+type ResolvedModesContext = {
+    readonly context: ModesStoreContext;
+    readonly globalConfigPath: string;
+    readonly projectConfigPath: string | undefined;
+};
+
 export class ModesStore {
-    private readonly contexts = new Map<string, ModesStoreContext>();
+    private readonly contexts = new Map<string, ResolvedModesContext>();
 
     constructor(private readonly loadSettings: LoadModelModesSettings = loadModelModesSettings) {}
 
@@ -238,9 +280,39 @@ export class ModesStore {
             path = loaded.projectConfigPath;
         }
 
-        this.contexts.set(path, context);
+        this.contexts.set(path, {
+            context,
+            globalConfigPath: loaded.globalConfigPath,
+            projectConfigPath: loaded.projectConfigPath,
+        });
 
         return path;
+    }
+
+    /** Cache token for all settings sources, including a trusted project file not created yet. */
+    async getRevision(filePath: string): Promise<string> {
+        const resolved = this.contexts.get(filePath);
+        const paths = [filePath];
+        if (resolved !== undefined) {
+            paths.splice(0, 1, resolved.globalConfigPath);
+
+            if (resolved.context.projectTrusted && resolved.projectConfigPath !== undefined) {
+                paths.push(resolved.projectConfigPath);
+            }
+        }
+
+        const revisions = await Promise.all(
+            paths.map(async (sourcePath) => {
+                try {
+                    const stat = await fs.stat(sourcePath);
+                    return [sourcePath, stat.mtimeMs, stat.ctimeMs, stat.size];
+                } catch {
+                    return [sourcePath, null];
+                }
+            }),
+        );
+
+        return JSON.stringify(revisions);
     }
 
     async load(
@@ -249,6 +321,22 @@ export class ModesStore {
         options?: { readonly throwOnInvalid?: boolean },
     ): Promise<ModesFile> {
         try {
+            const resolved = this.contexts.get(filePath);
+            if (resolved !== undefined) {
+                const loaded = this.loadSettings(resolved.context);
+                if (options?.throwOnInvalid === true) {
+                    const invalid = loaded.diagnostics.filter(
+                        (diagnostic) =>
+                            diagnostic.scope === "global" || diagnostic.scope === "project",
+                    );
+                    if (invalid.length > 0) {
+                        throw new Error(invalid.map((diagnostic) => diagnostic.message).join("; "));
+                    }
+                }
+
+                return modesFromSettings(loaded, fallbackMode);
+            }
+
             const raw = await fs.readFile(filePath, "utf8");
             const parsedJson: unknown = JSON.parse(raw);
             return modesFromConfig(modesFileJsonDecoder.parse(parsedJson), fallbackMode);
@@ -266,13 +354,12 @@ export class ModesStore {
         fallbackMode: ModeSpec,
     ): Promise<SavedModes | null> {
         const patch = computeModesPatch(baseline, next, false);
-        if (patch === null) return null;
-
-        const context = this.contexts.get(filePath);
-        if (context === undefined)
+        const resolved = this.contexts.get(filePath);
+        if (resolved === undefined)
             throw new Error("Mode settings path was not resolved for this session.");
 
-        loadModelModesSettings(context);
+        const { context } = resolved;
+        this.loadSettings(context);
 
         const projectPath = getProjectModesPath(context.cwd);
         let scope: "global" | "project" = "global";
@@ -285,17 +372,73 @@ export class ModesStore {
             {
                 scope,
                 update: (config) => {
-                    const latest = modesFromConfig(
-                        modesFileJsonDecoder.parse(config),
-                        fallbackMode,
-                    );
-                    applyModesPatch(latest, patch);
+                    let latest = modesFromConfig(modesFileJsonDecoder.parse(config), fallbackMode);
+                    if (scope === "project") {
+                        latest = modesFromSettings(this.loadSettings(context), fallbackMode);
+                    }
+
+                    if (patch === null && latest.defaultModel === undefined) return config;
+                    if (patch !== null) applyModesPatch(latest, patch);
+                    delete latest.defaultModel;
                     ensureDefaultModeEntries(latest, fallbackMode);
                     config.version = latest.version;
                     config.currentMode = latest.currentMode;
-                    if (latest.defaultModel === undefined) delete config.defaultModel;
-                    else config.defaultModel = latest.defaultModel;
-                    config.modes = latest.modes;
+                    delete config.defaultModel;
+
+                    if (scope === "project" && patch !== null) {
+                        const localConfig = modesFileJsonDecoder.parse(config);
+                        const local = localConfig.modes ?? {};
+
+                        // Apply only changed fields to the project layer, never copying inherited specs.
+                        for (const [name, change] of Object.entries(patch.modes ?? {})) {
+                            if (change === null) {
+                                delete local[name];
+                                continue;
+                            }
+
+                            const spec = local[name] ?? {};
+                            local[name] = spec;
+
+                            if (change.provider === null) delete spec.provider;
+                            else if (change.provider !== undefined) spec.provider = change.provider;
+
+                            if (change.modelId === null) delete spec.modelId;
+                            else if (change.modelId !== undefined) spec.modelId = change.modelId;
+
+                            if (change.color === null) delete spec.color;
+                            else if (change.color !== undefined) spec.color = change.color;
+
+                            if (change.thinkingLevel !== undefined)
+                                spec.thinkingLevel = change.thinkingLevel;
+                        }
+
+                        const deleted = new Set(config.deletedModes ?? []);
+                        for (const [name, change] of Object.entries(patch.modes ?? {})) {
+                            if (change === null) deleted.add(name);
+                            else deleted.delete(name);
+                        }
+
+                        if (deleted.size > 0) config.deletedModes = [...deleted];
+                        else delete config.deletedModes;
+
+                        if (patch.modeOrder !== undefined) {
+                            const reordered: Record<string, ModeSpecJson> = {};
+                            if (latest.hasConfiguredModes !== false) {
+                                for (const name of Object.keys(latest.modes)) {
+                                    reordered[name] = local[name] ?? {};
+                                }
+                            }
+
+                            config.modes = reordered;
+                        } else {
+                            config.modes = local;
+                        }
+                    } else if (scope === "global") {
+                        // Fallback modes are runtime-only, including after deleting the final mode.
+                        config.modes = latest.modes;
+                        if (latest.hasConfiguredModes === false) config.modes = {};
+                    }
+
                     saved = latest;
                     return config;
                 },
@@ -313,7 +456,11 @@ export class ModesStore {
                 throw new Error(result.message);
         }
 
-        if (saved === undefined) throw new Error("Mode settings update produced no result.");
-        return { data: saved, mtimeMs: await getMtimeMs(filePath) };
+        if (saved === undefined) return null;
+
+        return {
+            data: await this.load(filePath, fallbackMode),
+            mtimeMs: await getMtimeMs(filePath),
+        };
     }
 }

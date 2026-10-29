@@ -5,6 +5,8 @@ import { test } from "vitest";
 import {
     applyModesPatch,
     computeModesPatch,
+    cloneModesFile,
+    createDefaultModes,
     ensureDefaultModeEntries,
     findModeForModel,
     getModeThinkingLevels,
@@ -99,6 +101,8 @@ test("computeModesPatch records additions, deletions, removals, and current mode
 
     assert.deepEqual(computeModesPatch(base, next, true), {
         currentMode: "review",
+        modeOrder: ["default", "review"],
+        expectedModeOrder: ["default", "docs"],
         modes: {
             default: { thinkingLevel: null },
             docs: null,
@@ -111,21 +115,16 @@ test("computeModesPatch records additions, deletions, removals, and current mode
     });
 });
 
-test("computeModesPatch records changes to the persistent default model", () => {
+test("legacy default models are diagnostic only and removed by an explicit save", () => {
     const base = baseModesFile();
-    const next = baseModesFile();
-    next.defaultModel = {
-        provider: "openai-codex",
-        modelId: "gpt-5.6-luna",
-        thinkingLevel: "xhigh",
-    };
-
-    assert.deepEqual(computeModesPatch(base, next, false), {
-        defaultModel: next.defaultModel,
-    });
-
-    applyModesPatch(base, { defaultModel: next.defaultModel });
-    assert.deepEqual(base.defaultModel, next.defaultModel);
+    base.defaultModel = { provider: "legacy", modelId: "old", thinkingLevel: "low" };
+    const next = cloneModesFile(base);
+    assert.deepEqual(computeModesPatch(base, next, false), { defaultModel: null });
+    assert.deepEqual(next.defaultModel, base.defaultModel);
+    applyModesPatch(next, { defaultModel: null });
+    assert.equal(next.defaultModel, undefined);
+    const withoutLegacy = baseModesFile();
+    assert.equal(computeModesPatch(withoutLegacy, base, false), null);
 });
 
 test("computeModesPatch can omit current mode so runtime-only switches are not written", () => {
@@ -245,4 +244,81 @@ test("applyModesPatch merges into the latest file without deleting unrelated mod
         modelId: "o4-mini",
         thinkingLevel: "off",
     });
+});
+
+test("computeModesPatch persists an order-only change", () => {
+    const base = baseModesFile();
+    const next = cloneModesFile(base);
+    next.modes = { docs: next.modes.docs, default: next.modes.default };
+    const patch = computeModesPatch(base, next, false);
+    assert.deepEqual(patch, {
+        modeOrder: ["docs", "default"],
+        expectedModeOrder: ["default", "docs"],
+    });
+
+    applyModesPatch(base, patch);
+    assert.deepEqual(Object.keys(base.modes), ["docs", "default"]);
+});
+
+test("renaming a mode preserves its position instead of appending it", () => {
+    const base = baseModesFile();
+    const next = cloneModesFile(base);
+    next.modes = { primary: next.modes.default, docs: next.modes.docs };
+    const patch = computeModesPatch(base, next, false);
+    assert.notEqual(patch, null);
+    if (patch === null) throw new Error("Expected a modes patch");
+
+    assert.deepEqual(patch.modeOrder, ["primary", "docs"]);
+    assert.deepEqual(patch.expectedModeOrder, ["default", "docs"]);
+    applyModesPatch(base, patch);
+    assert.deepEqual(Object.keys(base.modes), ["primary", "docs"]);
+});
+
+test("order edits reject concurrent reorders before mutating the target", () => {
+    const base = baseModesFile();
+    const next = cloneModesFile(base);
+    next.modes = { primary: next.modes.default, docs: next.modes.docs };
+    const patch = computeModesPatch(base, next, false);
+    assert.notEqual(patch, null);
+    if (patch === null) throw new Error("Expected a modes patch");
+
+    const latest = cloneModesFile(base);
+    latest.modes = { docs: latest.modes.docs, default: latest.modes.default };
+    const untouched = cloneModesFile(latest);
+    assert.throws(() => applyModesPatch(latest, patch), /order changed.*reload/i);
+    assert.deepEqual(latest, untouched);
+    assert.deepEqual(Object.keys(latest.modes), ["docs", "default"]);
+});
+
+test("non-order edits preserve the latest concurrent mode order and additions", () => {
+    const base = baseModesFile();
+    const next = cloneModesFile(base);
+    next.modes.default.thinkingLevel = "high";
+    const patch = computeModesPatch(base, next, false);
+    assert.notEqual(patch, null);
+    if (patch === null) throw new Error("Expected a modes patch");
+
+    assert.equal(patch.modeOrder, undefined);
+    const latest = cloneModesFile(base);
+    latest.modes = { docs: latest.modes.docs, new: {}, default: latest.modes.default };
+    applyModesPatch(latest, patch);
+    assert.deepEqual(Object.keys(latest.modes), ["docs", "new", "default"]);
+    assert.equal(latest.modes.default.thinkingLevel, "high");
+});
+
+test("cloning preserves generated fallback provenance without persisting it", () => {
+    const generated = createDefaultModes({ provider: "active", modelId: "current" });
+    assert.equal(generated.hasConfiguredModes, false);
+    assert.equal(cloneModesFile(generated).hasConfiguredModes, false);
+    assert.equal(computeModesPatch(generated, cloneModesFile(generated), false), null);
+});
+
+test("real mode patches update configured provenance before fallback generation", () => {
+    const generated = createDefaultModes({ modelId: "active" });
+    applyModesPatch(generated, { modes: { default: { modelId: "chosen" } } });
+    assert.equal(generated.hasConfiguredModes, true);
+    applyModesPatch(generated, { modes: { default: null, fast: null } });
+    assert.equal(generated.hasConfiguredModes, false);
+    ensureDefaultModeEntries(generated, { modelId: "active" });
+    assert.equal(generated.hasConfiguredModes, false);
 });

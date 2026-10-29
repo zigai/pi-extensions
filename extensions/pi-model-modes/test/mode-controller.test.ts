@@ -177,7 +177,7 @@ test.each(["mode", "default"] as const)(
                 },
             );
             const ctx = runner.createContext();
-            let operation: Promise<void>;
+            let operation: Promise<unknown>;
             if (selection === "mode") operation = controller.applyMode(ctx, "review");
             else
                 operation = controller.handleSessionActivated(ctx, {

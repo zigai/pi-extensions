@@ -63,7 +63,9 @@ export default function (pi: ExtensionAPI) {
         });
     };
 
-    const controller = new ModeController(pi, new ModesStore(resolveSessionSettings), publishMode);
+    // The store deliberately refreshes model settings when either settings layer changes.
+    // Do not give it the session-cached display-settings loader.
+    const controller = new ModeController(pi, new ModesStore(), publishMode);
     const unsubscribeContext = pi.events.on("pi-toggles:context-ready", () => {
         if (currentContext !== undefined) publishMode(controller.currentMode);
     });

@@ -67,7 +67,12 @@ export const modeSpecSchema = Type.Object(
     {
         provider: Type.Optional(Type.String()),
         modelId: Type.Optional(Type.String()),
-        thinkingLevel: Type.Optional(modeThinkingLevelSchema),
+        thinkingLevel: Type.Optional(
+            Type.Union([modeThinkingLevelSchema, Type.Null()], {
+                description:
+                    "Pi thinking level for this mode; null clears an inherited project value.",
+            }),
+        ),
         color: Type.Optional(
             Type.String({
                 "x-control": "combobox",
@@ -83,12 +88,21 @@ export const defaultModelSchema = Type.Object(
     {
         provider: Type.String({
             minLength: 1,
-            description: "Default model provider.",
+            description:
+                "Legacy startup model provider; ignored. The first cycle mode is used instead.",
         }),
-        modelId: Type.String({ minLength: 1, description: "Default model ID." }),
+        modelId: Type.String({
+            minLength: 1,
+            description: "Legacy startup model ID; ignored. The first cycle mode is used instead.",
+        }),
         thinkingLevel: Type.Optional(defaultThinkingLevelSchema),
     },
-    { additionalProperties: false },
+    {
+        additionalProperties: false,
+        deprecated: true,
+        description:
+            "Deprecated and ignored. Fresh sessions use the first configured cycle mode. Removed on explicit mode saves.",
+    },
 );
 
 export const modeShortcutsSchema = Type.Object(
@@ -126,9 +140,15 @@ export const extensionSettingsInput = {
                 description: "Show thinking level alongside mode status.",
             }),
             shortcuts: Type.Optional(modeShortcutsSchema),
+            deletedModes: Type.Optional(
+                Type.Array(Type.String(), {
+                    description: "Global mode names hidden by this project configuration.",
+                }),
+            ),
             modes: Type.Record(Type.String(), modeSpecSchema, {
                 default: {},
-                description: "Named model-mode specifications keyed by mode ID.",
+                description:
+                    "Named model modes in cycle order. The first configured mode is used on fresh startup and /new; resumed sessions keep their selection.",
             }),
         },
         { additionalProperties: false },

@@ -27,12 +27,12 @@
         "provider": {
           "type": "string",
           "minLength": 1,
-          "description": "Default model provider."
+          "description": "Legacy startup model provider; ignored. The first cycle mode is used instead."
         },
         "modelId": {
           "type": "string",
           "minLength": 1,
-          "description": "Default model ID."
+          "description": "Legacy startup model ID; ignored. The first cycle mode is used instead."
         },
         "thinkingLevel": {
           "enum": [
@@ -48,7 +48,9 @@
           "description": "Pi thinking level for the default model, clamped to that model's capabilities."
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "deprecated": true,
+      "description": "Deprecated and ignored. Fresh sessions use the first configured cycle mode. Removed on explicit mode saves."
     },
     "modeUseThinkingBorderColors": {
       "type": "boolean",
@@ -76,6 +78,13 @@
       },
       "additionalProperties": false
     },
+    "deletedModes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Global mode names hidden by this project configuration."
+    },
     "modes": {
       "type": "object",
       "patternProperties": {
@@ -89,17 +98,25 @@
               "type": "string"
             },
             "thinkingLevel": {
-              "enum": [
-                "off",
-                "minimal",
-                "low",
-                "medium",
-                "high",
-                "xhigh",
-                "max"
+              "anyOf": [
+                {
+                  "enum": [
+                    "off",
+                    "minimal",
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                  ],
+                  "x-control": "select",
+                  "description": "Pi thinking level for this mode, clamped to the selected model's capabilities."
+                },
+                {
+                  "type": "null"
+                }
               ],
-              "x-control": "select",
-              "description": "Pi thinking level for this mode, clamped to the selected model's capabilities."
+              "description": "Pi thinking level for this mode; null clears an inherited project value."
             },
             "color": {
               "type": "string",
@@ -160,7 +177,7 @@
         }
       },
       "default": {},
-      "description": "Named model-mode specifications keyed by mode ID."
+      "description": "Named model modes in cycle order. The first configured mode is used on fresh startup and /new; resumed sessions keep their selection."
     }
   }
 }

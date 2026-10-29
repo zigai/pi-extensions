@@ -13,18 +13,17 @@ import {
     modeSpec,
     orderedModeNames,
     shouldApplyDefaultModel,
-    type DefaultModelSpec,
     type ModesFile,
     type ModeSpec,
 } from "./modes.ts";
-import { getMtimeMs, ModesStore } from "./modes-store.ts";
+import { ModesStore } from "./modes-store.ts";
 import type { SettingsReadContext } from "./settings.ts";
 
 type ModeControllerPi = Pick<ExtensionAPI, "getThinkingLevel" | "setThinkingLevel" | "setModel">;
 
 export type ModeRuntime = {
     filePath: string;
-    fileMtimeMs: number | null;
+    fileRevision: string | null;
     baseline: ModesFile | null;
     data: ModesFile;
     lastRealMode: string;
@@ -39,7 +38,7 @@ function errorMessage(cause: unknown): string {
 export class ModeController {
     private readonly runtime: ModeRuntime = {
         filePath: "",
-        fileMtimeMs: null,
+        fileRevision: null,
         baseline: null,
         data: { version: 1, currentMode: "default", modes: {} },
         lastRealMode: "default",
@@ -48,6 +47,7 @@ export class ModeController {
 
     private sessionGeneration = 0;
     private selectionRevision = 0;
+    private legacyDefaultNoticeShown = false;
 
     // Only the setModel call's own events are suppressed, not concurrent user choices.
     private readonly modelSelection = new AsyncLocalStorage<boolean>();
@@ -139,18 +139,18 @@ export class ModeController {
             cwd: ctx.cwd,
             projectTrusted: ctx.isProjectTrusted(),
         });
-        const mtimeMs = await getMtimeMs(filePath);
+        const fileRevision = await this.store.getRevision(filePath);
 
         if (generation !== this.sessionGeneration) return;
 
         const filePathChanged = this.runtime.filePath !== filePath;
-        if (filePathChanged || this.runtime.fileMtimeMs !== mtimeMs) {
+        if (filePathChanged || this.runtime.fileRevision !== fileRevision) {
             const loaded = await this.store.load(filePath, fallbackMode);
 
             if (generation !== this.sessionGeneration) return;
 
             this.runtime.filePath = filePath;
-            this.runtime.fileMtimeMs = mtimeMs;
+            this.runtime.fileRevision = fileRevision;
             ensureDefaultModeEntries(loaded, fallbackMode);
             this.runtime.data = loaded;
             this.runtime.baseline = cloneModesFile(loaded);
@@ -192,7 +192,7 @@ export class ModeController {
             if (saved !== null) {
                 this.runtime.data = saved.data;
                 this.runtime.baseline = cloneModesFile(saved.data);
-                this.runtime.fileMtimeMs = saved.mtimeMs;
+                this.runtime.fileRevision = await this.store.getRevision(this.runtime.filePath);
             }
         } catch (cause: unknown) {
             if (ctx.hasUI) {
@@ -215,11 +215,13 @@ export class ModeController {
         return this.customOverlay ?? this.getCurrentSelection();
     }
 
-    async applyMode(ctx: ExtensionContext, mode: string): Promise<void> {
+    async applyMode(ctx: ExtensionContext, mode: string): Promise<boolean> {
         const generation = this.sessionGeneration;
+        const initialRevision = this.selectionRevision;
         await this.ensure(ctx);
 
-        if (generation !== this.sessionGeneration) return;
+        if (generation !== this.sessionGeneration || initialRevision !== this.selectionRevision)
+            return false;
 
         if (mode === CUSTOM_MODE_NAME) {
             this.selectionRevision += 1;
@@ -228,20 +230,18 @@ export class ModeController {
             this.onSelection?.(this.runtime.currentMode);
 
             if (ctx.hasUI) this.requestEditorRender?.();
-            return;
+            return false;
         }
 
         const spec = modeSpec(this.runtime.data.modes, mode);
         if (spec === undefined) {
             if (ctx.hasUI) ctx.ui.notify(`Unknown mode: ${mode}`, "warning");
-            return;
+            return false;
         }
 
         const revision = ++this.selectionRevision;
 
-        this.runtime.currentMode = mode;
-        this.runtime.lastRealMode = mode;
-        this.customOverlay = null;
+        this.lastObservedModel = { provider: ctx.model?.provider, modelId: ctx.model?.id };
 
         let modelApplied = true;
 
@@ -267,7 +267,7 @@ export class ModeController {
                 );
 
                 if (generation !== this.sessionGeneration || revision !== this.selectionRevision)
-                    return;
+                    return false;
 
                 if (!modelApplied && ctx.hasUI) {
                     ctx.ui.notify(
@@ -278,7 +278,16 @@ export class ModeController {
             }
         }
 
-        if (spec.thinkingLevel !== undefined) this.pi.setThinkingLevel(spec.thinkingLevel);
+        if (modelApplied) {
+            this.runtime.currentMode = mode;
+            this.runtime.lastRealMode = mode;
+            this.customOverlay = null;
+            if (spec.provider !== undefined && spec.modelId !== undefined) {
+                this.lastObservedModel = { provider: spec.provider, modelId: spec.modelId };
+            }
+
+            if (spec.thinkingLevel !== undefined) this.pi.setThinkingLevel(spec.thinkingLevel);
+        }
 
         if (!modelApplied) {
             this.runtime.currentMode = CUSTOM_MODE_NAME;
@@ -288,6 +297,7 @@ export class ModeController {
         this.onSelection?.(this.runtime.currentMode);
 
         if (ctx.hasUI) this.requestEditorRender?.();
+        return modelApplied;
     }
 
     async storeSelection(ctx: ExtensionContext, mode: string, selection: ModeSpec): Promise<void> {
@@ -311,9 +321,33 @@ export class ModeController {
         await this.persist(ctx);
     }
 
-    async setDefaultModel(ctx: ExtensionContext, spec: DefaultModelSpec): Promise<void> {
-        this.runtime.data.defaultModel = spec;
-        await this.persist(ctx);
+    async moveModeToFirst(ctx: ExtensionContext, name: string): Promise<void> {
+        await this.ensure(ctx);
+
+        const spec = modeSpec(this.runtime.data.modes, name);
+        if (name === CUSTOM_MODE_NAME || spec === undefined) {
+            throw new Error(`Unknown cycle mode: ${name}`);
+        }
+
+        const before = this.runtime.data.modes;
+        const reordered = {
+            [name]: spec,
+            ...Object.fromEntries(Object.entries(before).filter(([key]) => key !== name)),
+        };
+        if (orderedModeNames(reordered)[0] !== name) {
+            throw new Error("Integer-like mode names sort first; rename them before reordering.");
+        }
+
+        this.runtime.data.modes = reordered;
+
+        try {
+            await this.persist(ctx);
+        } catch (cause: unknown) {
+            this.runtime.data.modes = before;
+            throw cause;
+        }
+
+        this.requestEditorRender?.();
     }
 
     async renameMode(ctx: ExtensionContext, oldName: string, newName: string): Promise<void> {
@@ -398,15 +432,21 @@ export class ModeController {
 
     async handleSessionActivated(ctx: ExtensionContext, event: SessionStartEvent): Promise<void> {
         const generation = this.sessionGeneration;
+        const revision = this.selectionRevision;
         await this.ensure(ctx);
 
-        if (generation !== this.sessionGeneration) return;
+        if (generation !== this.sessionGeneration || revision !== this.selectionRevision) return;
 
-        if (shouldApplyDefaultModel(event, ctx.sessionManager.getEntries())) {
-            await this.applyConfiguredDefaultModel(ctx);
+        const first = orderedModeNames(this.runtime.data.modes).at(0);
+        if (
+            shouldApplyDefaultModel(event, ctx.sessionManager.getEntries()) &&
+            this.runtime.data.hasConfiguredModes !== false &&
+            first !== undefined
+        ) {
+            this.notifyLegacyDefault(ctx, first);
+            await this.applyMode(ctx, first);
+            return;
         }
-
-        if (generation !== this.sessionGeneration) return;
 
         this.lastObservedModel = { provider: ctx.model?.provider, modelId: ctx.model?.id };
         this.customOverlay = null;
@@ -427,6 +467,26 @@ export class ModeController {
         this.onSelection?.(this.runtime.currentMode);
 
         if (ctx.hasUI) this.requestEditorRender?.();
+    }
+
+    private notifyLegacyDefault(ctx: ExtensionContext, first: string): void {
+        const legacy = this.runtime.data.defaultModel;
+        const startup = modeSpec(this.runtime.data.modes, first);
+        if (
+            !ctx.hasUI ||
+            this.legacyDefaultNoticeShown ||
+            legacy === undefined ||
+            (legacy.provider === startup?.provider &&
+                legacy.modelId === startup.modelId &&
+                legacy.thinkingLevel === startup.thinkingLevel)
+        )
+            return;
+
+        this.legacyDefaultNoticeShown = true;
+        ctx.ui.notify(
+            `Startup now uses the first cycle mode "${first}". The legacy defaultModel setting is ignored and will be removed when mode settings are saved.`,
+            "info",
+        );
     }
 
     async handleModelSelect(
@@ -463,41 +523,5 @@ export class ModeController {
             modelId: ctx.model?.id,
             thinkingLevel: this.pi.getThinkingLevel(),
         };
-    }
-
-    private async applyConfiguredDefaultModel(ctx: ExtensionContext): Promise<void> {
-        const generation = this.sessionGeneration;
-        const spec = this.runtime.data.defaultModel;
-        if (spec === undefined) return;
-
-        const model = ctx.modelRegistry.find(spec.provider, spec.modelId);
-        if (model === undefined) {
-            if (ctx.hasUI) {
-                ctx.ui.notify(
-                    `Default model references unknown model ${spec.provider}/${spec.modelId}`,
-                    "warning",
-                );
-            }
-
-            return;
-        }
-
-        const revision = ++this.selectionRevision;
-        const applied = await this.modelSelection.run(true, async () => this.pi.setModel(model));
-
-        if (generation !== this.sessionGeneration || revision !== this.selectionRevision) return;
-
-        if (!applied) {
-            if (ctx.hasUI) {
-                ctx.ui.notify(
-                    `No API key available for ${spec.provider}/${spec.modelId}`,
-                    "warning",
-                );
-            }
-
-            return;
-        }
-
-        if (spec.thinkingLevel !== undefined) this.pi.setThinkingLevel(spec.thinkingLevel);
     }
 }
