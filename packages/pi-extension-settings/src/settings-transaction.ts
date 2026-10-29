@@ -1,6 +1,5 @@
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
-import { isDeepStrictEqual } from "node:util";
 
 import lockfile from "proper-lockfile";
 import type { TObject, TSchema } from "typebox";
@@ -11,8 +10,10 @@ import {
     cloneJson,
     formatJson,
     isJsonObject,
+    isJsonArray,
     JsonValueSchema,
     type JsonObject,
+    type JsonValue,
 } from "./json-value.ts";
 import { Value } from "./typebox-runtime.ts";
 import type { ExtensionSettingsPaths } from "./paths.ts";
@@ -28,6 +29,34 @@ import {
 } from "./settings-layer.ts";
 import { mergeSettings } from "./settings-merge.ts";
 import { createSettingsRevision, type PiSettingsRevision } from "./settings-revision.ts";
+
+// Compare validated encoded JSON trees, not decoded codec values. Record key order can be
+// meaningful to consumers (for example a mode cycle), even when all property values are equal.
+function equalEncodedSettings(left: JsonValue | undefined, right: JsonValue | undefined): boolean {
+    if (Object.is(left, right)) return true;
+
+    if (isJsonArray(left) && isJsonArray(right)) {
+        return (
+            left.length === right.length &&
+            left.every((value, index) => equalEncodedSettings(value, right[index]))
+        );
+    }
+
+    if (isJsonObject(left) && isJsonObject(right)) {
+        const leftKeys = Object.keys(left);
+        const rightKeys = Object.keys(right);
+
+        return (
+            leftKeys.length === rightKeys.length &&
+            leftKeys.every(
+                (key, index) =>
+                    key === rightKeys[index] && equalEncodedSettings(left[key], right[key]),
+            )
+        );
+    }
+
+    return false;
+}
 
 export type PiSettingsUpdateScope = "global" | "project";
 export type PiSettingsUpdateIssue = SettingsValidationIssue;
@@ -376,7 +405,7 @@ async function runSettingsTransaction<Schema extends TObject>(
         ]);
     }
 
-    if (isDeepStrictEqual(currentLayer.settings, nextLayer)) {
+    if (equalEncodedSettings(currentLayer.settings, nextLayer)) {
         return { status: "unchanged", revision };
     }
 

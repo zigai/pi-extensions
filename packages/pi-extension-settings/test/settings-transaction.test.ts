@@ -362,6 +362,44 @@ describe("settings transactions", () => {
         expect(await readFile(setup.loaded.globalConfigPath, "utf8")).toBe(customFormatting);
     });
 
+    it("publishes encoded record order changes even when values are equal", async () => {
+        const definition = defineExtensionSettings({
+            id: "pi-ordered",
+            title: "Ordered",
+            description: "Settings with ordered records.",
+            schema: Type.Object(
+                {
+                    modes: Type.Record(
+                        Type.String(),
+                        Type.Object({ enabled: Type.Boolean() }, { additionalProperties: false }),
+                        {
+                            default: {},
+                            description: "Mode cycle order.",
+                        },
+                    ),
+                },
+                { additionalProperties: false },
+            ),
+        });
+        const setup = await definitionSetup(definition);
+        await writeFile(
+            setup.loaded.globalConfigPath,
+            formatJson({
+                modes: { first: { enabled: true }, second: { enabled: false } },
+            }),
+        );
+        const result = await updatePiExtensionSettings(definition, setup.context, {
+            scope: "global",
+            update: (current) => ({
+                ...current,
+                modes: { second: { enabled: false }, first: { enabled: true } },
+            }),
+        });
+        expect(result.status).toBe("updated");
+        const persisted = await readFile(setup.loaded.globalConfigPath, "utf8");
+        expect(persisted.indexOf('"second"')).toBeLessThan(persisted.indexOf('"first"'));
+    });
+
     it("supports mutating the supplied clone and deleting layer properties", async () => {
         const setup = await testSetup();
         const result = await updatePiExtensionSettings(setup.definition, setup.context, {

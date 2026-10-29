@@ -95,6 +95,6 @@ if (result.status !== "updated" && result.status !== "unchanged") {
 }
 ```
 
-The synchronous callback receives the latest encoded layer and runs once while the settings file is locked. The package validates the returned layer by itself and after resolution, then publishes it atomically. Invalid existing files and invalid updates remain untouched. Project updates require a trusted project and may create its missing settings file.
+The synchronous callback receives the latest encoded layer and runs once while the settings file is locked. The package validates the returned layer by itself and after resolution, then publishes it atomically. Intentional JSON object-key reordering counts as a change, even when every property value is unchanged, so ordered records such as mode cycles survive a save. Invalid existing files and invalid updates remain untouched. Project updates require a trusted project and may create its missing settings file.
 
 For an editor based on a previously loaded snapshot, pass `globalRevision` or `projectRevision` as `expectedRevision`. A stale revision returns `conflict`. Omit it for semantic updates that should apply to the latest valid layer.
