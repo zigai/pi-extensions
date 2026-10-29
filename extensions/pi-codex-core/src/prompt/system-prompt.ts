@@ -42,7 +42,6 @@ const CODEX_PROMPT_PATHS_BY_MODEL = new Map<string, string>([
 ]);
 
 const cachedCodexPromptsByPath = new Map<string, string>();
-const CODEX_PERSONALITY_PLACEHOLDER = "{{ personality }}";
 const PI_DEFAULT_PROMPT_START =
     "You are an expert coding assistant operating inside pi, a coding agent harness.";
 
@@ -133,7 +132,9 @@ function renderCodexPrompt(
             : personality === "pragmatic"
               ? readPromptFile(GPT_5_5_PRAGMATIC_PERSONALITY_PATH)
               : "";
-    return prompt.replace(CODEX_PERSONALITY_PLACEHOLDER, personalityPrompt).trim();
+    return prompt
+        .replace(readPromptFile(GPT_5_5_FRIENDLY_PERSONALITY_PATH), personalityPrompt)
+        .trim();
 }
 
 function readPromptFile(promptPath: string): string {

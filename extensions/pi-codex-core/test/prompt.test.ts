@@ -62,7 +62,7 @@ test("codex prompt mode inherits structured Pi prompt sections", () => {
     });
 
     assert.match(prompt, /^You are Codex, an agent based on GPT-5/);
-    assert.match(prompt, /# Destructive Actions/);
+    assert.match(prompt, /# Destructive actions/);
     assert.match(prompt, /Never repurpose `\$HOME`, `\$home`, or `\$CODEX_HOME`/);
     assert.doesNotMatch(prompt, /You are an expert coding assistant operating inside pi/);
     assert.doesNotMatch(prompt, /Codex CLI/);
@@ -175,7 +175,7 @@ test("selects Codex prompts by active GPT model and preserves Pi mode", () => {
 
     assert.equal(sol, terra);
     assert.equal(terra, luna);
-    assert.match(sol, /# Destructive Actions/);
+    assert.match(sol, /# Destructive actions/);
     assert.match(gpt55, /## Engineering judgment/);
     assert.match(gpt55, /You are a deeply pragmatic, effective software engineer/);
     assert.match(gpt55, /# Using skills/);
@@ -279,6 +279,7 @@ test("adapts Astra code-mode and question guidance to active Pi capabilities", (
     assert.match(questionPrompt, /Elapsed time is not an answer or approval/);
     assert.match(questionPrompt, /Batch independent searches and reads using Pi's tool interface/);
     assert.match(questionPrompt, /`command` argument/);
+    assert.match(questionPrompt, /explicitly-invoked skill or plugin/);
     assert.doesNotMatch(
         questionPrompt,
         /functions\.request_user_input_async|Promise\.allSettled|When calling `functions\.exec`|exec_command/,
@@ -353,19 +354,19 @@ test("bundled Codex prompts match the pinned upstream content", async () => {
         ],
         [
             new URL("../src/prompt/codex-gpt-6-astra.md", import.meta.url),
-            "152dfaeeb552876190962be1c12c93d426840ff12691f648261554a7675a6698",
+            "35bd51b5f577cb7b24cd5f4629e49e37cb724ab57754ce6f8f202001635bab8a",
         ],
         [
             new URL("../src/prompt/codex-gpt-5.6-sol.md", import.meta.url),
-            "cbefa6b0bede0e332d957fca70ccacf9f12f4c0ecdf81b819e5cbe1a3b16e265",
+            "a91357a1cd2727a0be06d461248d6e3a7274746e38108f548a3adf2cc2430415",
         ],
         [
             new URL("../src/prompt/codex-gpt-5.6-terra-luna.md", import.meta.url),
-            "cbefa6b0bede0e332d957fca70ccacf9f12f4c0ecdf81b819e5cbe1a3b16e265",
+            "a91357a1cd2727a0be06d461248d6e3a7274746e38108f548a3adf2cc2430415",
         ],
         [
             new URL("../src/prompt/codex-gpt-5.5.md", import.meta.url),
-            "c13cc50bc068912608769224bf2c5ffcb5f534856fd631f3df0ef72a8a3108a4",
+            "2351631dfc5644dc5a45eaaca4139475bd02810ee6cb792d058b551559b3242e",
         ],
         [
             new URL("../src/prompt/codex-gpt-5.5-personality-friendly.md", import.meta.url),
