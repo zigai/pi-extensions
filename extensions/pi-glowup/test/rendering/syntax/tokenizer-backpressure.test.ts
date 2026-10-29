@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process";
 import { Worker } from "node:worker_threads";
 import { expect, it, vi } from "vitest";
 import { createSyntaxTokenizer } from "../../../src/rendering/syntax/tokenizer.ts";
@@ -136,6 +137,373 @@ it("settles running and queued jobs on shutdown without restarting", async () =>
         expect(await worker.compactPython("later")).toBeUndefined();
     } finally {
         await worker.dispose();
+    }
+});
+
+it("fails queued work and shutdown when worker termination does not settle", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let markStalled: () => void = () => {};
+    const stalled = new Promise<void>((resolve) => {
+        markStalled = resolve;
+    });
+    let release: () => void = () => {};
+    let stopped: Promise<number> | undefined;
+    let workers = 0;
+    const worker = createSyntaxTokenizer(undefined, {
+        maxJobs: 2,
+        maxBytes: 1024,
+        reportWarning: undefined,
+        waitForDisposals: async () => {},
+        createWorker: () => {
+            workers += 1;
+            const current = controlledWorker(markStalled);
+            const terminate = current.terminate.bind(current);
+            current.terminate = async () => {
+                const pending = new Promise<number>((resolve, reject) => {
+                    release = () => {
+                        stopped = terminate();
+                        void stopped.then(resolve, reject);
+                    };
+                });
+
+                return pending;
+            };
+
+            return current;
+        },
+    });
+    const reasons: string[] = [];
+    try {
+        const slow = worker.compactPython("slow");
+        await stalled;
+        const short = worker.compactPython("short", {
+            onUnavailable: (reason) => {
+                reasons.push(reason);
+            },
+        });
+        vi.advanceTimersToNextTimer();
+        expect(await slow).toBeUndefined();
+        await vi.advanceTimersToNextTimerAsync();
+        expect(reasons).toEqual(["cleanup-timeout"]);
+        expect(await short).toBeUndefined();
+        await expect(worker.dispose()).rejects.toThrow(/cleanup/i);
+        expect(workers).toBe(1);
+    } finally {
+        release();
+
+        if (stopped !== undefined) await stopped;
+        await Promise.allSettled([worker.dispose()]);
+        vi.useRealTimers();
+    }
+});
+
+it("lets the process exit after reporting unconfirmed worker cleanup", async () => {
+    const tokenizerUrl = new URL("../../../src/rendering/syntax/tokenizer.ts", import.meta.url)
+        .href;
+    const source = `
+        import { Worker } from "node:worker_threads";
+        import { createSyntaxTokenizer } from ${JSON.stringify(tokenizerUrl)};
+        let markRunning;
+        const running = new Promise((resolve) => { markRunning = resolve; });
+        const tokenizer = createSyntaxTokenizer(undefined, {
+            maxJobs: 2, maxBytes: 1024, reportWarning: undefined,
+            waitForDisposals: async () => {},
+            createWorker: () => {
+                const worker = new Worker(\`const { parentPort } = require("node:worker_threads");
+                    parentPort.on("message", (request) => {
+                        if (request.type === "initialize") parentPort.postMessage({ type: "ready" });
+                        else { parentPort.postMessage({ id: -1, lines: [] }); while (true) {} }
+                    });\`, { eval: true, execArgv: [] });
+                worker.on("message", (message) => { if (message.id === -1) markRunning(); });
+                worker.terminate = () => new Promise(() => {});
+                return worker;
+            },
+        });
+        const work = tokenizer.compactPython("slow");
+        await running;
+        const timers = new Map();
+        const clear = globalThis.clearTimeout;
+        let next = 0;
+        globalThis.setTimeout = (callback) => { const id = ++next; timers.set(id, callback); return id; };
+        globalThis.clearTimeout = (id) => {
+            if (typeof id === "number") timers.delete(id);
+            else clear(id);
+        };
+        const closing = tokenizer.dispose();
+        for (const callback of timers.values()) callback();
+        await work;
+        try { await closing; process.exitCode = 1; }
+        catch (error) {
+            if (!(error instanceof Error) || !error.message.includes("cleanup")) throw error;
+            console.log("cleanup unconfirmed");
+        }
+    `;
+    const output = await new Promise<string>((resolve, reject) => {
+        execFile(
+            process.execPath,
+            ["--input-type=module", "--eval", source],
+            { timeout: 10_000 },
+            (error, stdout) => {
+                if (error === null) resolve(stdout);
+                else reject(new Error("Worker probe failed", { cause: error }));
+            },
+        );
+    });
+    expect(output.trim()).toBe("cleanup unconfirmed");
+});
+
+it("fails without starting a worker when prior disposal never settles", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let release: () => void = () => {};
+    const previous = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    let workers = 0;
+    const reasons: string[] = [];
+    const worker = createSyntaxTokenizer(undefined, {
+        maxJobs: 2,
+        maxBytes: 1024,
+        reportWarning: undefined,
+        waitForDisposals: async () => previous,
+        createWorker: () => {
+            workers += 1;
+
+            return controlledWorker(() => {});
+        },
+    });
+    try {
+        const pending = worker.compactPython("short", {
+            onUnavailable: (reason) => {
+                reasons.push(reason);
+            },
+        });
+        await Promise.resolve();
+        vi.advanceTimersToNextTimer();
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(reasons).toEqual(["cleanup-timeout"]);
+        expect(await pending).toBeUndefined();
+        await expect(worker.dispose()).rejects.toThrow(/cleanup/i);
+        expect(workers).toBe(0);
+    } finally {
+        release();
+        await Promise.allSettled([worker.dispose()]);
+        vi.useRealTimers();
+    }
+});
+
+it("quarantines a worker when termination rejects", async () => {
+    let markStalled: () => void = () => {};
+    const stalled = new Promise<void>((resolve) => {
+        markStalled = resolve;
+    });
+    let stopped: Promise<number> | undefined;
+    let workers = 0;
+    const worker = createSyntaxTokenizer(undefined, {
+        maxJobs: 2,
+        maxBytes: 1024,
+        reportWarning: undefined,
+        waitForDisposals: async () => {},
+        createWorker: () => {
+            workers += 1;
+            const current = controlledWorker(markStalled);
+            const terminate = current.terminate.bind(current);
+            current.terminate = async () => {
+                stopped = terminate();
+                return Promise.reject(new Error("termination failed"));
+            };
+
+            return current;
+        },
+    });
+    const controller = new AbortController();
+    const reasons: string[] = [];
+    try {
+        const slow = worker.compactPython("slow", { signal: controller.signal });
+        await stalled;
+        const short = worker.compactPython("short", {
+            onUnavailable: (reason) => {
+                reasons.push(reason);
+            },
+        });
+        controller.abort();
+        expect(await slow).toBeUndefined();
+        expect(await short).toBeUndefined();
+        expect(reasons).toEqual(["cleanup-failed"]);
+        await expect(worker.dispose()).rejects.toThrow(/cleanup/i);
+        expect(workers).toBe(1);
+    } finally {
+        if (stopped !== undefined) await stopped;
+        await Promise.allSettled([worker.dispose()]);
+    }
+});
+
+it("fails when a previous disposal rejects", async () => {
+    const reasons: string[] = [];
+    let workers = 0;
+    const worker = createSyntaxTokenizer(undefined, {
+        maxJobs: 2,
+        maxBytes: 1024,
+        reportWarning: undefined,
+        waitForDisposals: async () => {
+            throw new Error("previous cleanup failed");
+        },
+        createWorker: () => {
+            workers += 1;
+
+            return controlledWorker(() => {});
+        },
+    });
+    try {
+        expect(
+            await worker.compactPython("short", {
+                onUnavailable: (reason) => {
+                    reasons.push(reason);
+                },
+            }),
+        ).toBeUndefined();
+
+        expect(reasons).toEqual(["cleanup-failed"]);
+        expect(workers).toBe(0);
+        await expect(worker.dispose()).rejects.toThrow(/cleanup/i);
+    } finally {
+        await Promise.allSettled([worker.dispose()]);
+    }
+});
+
+it("reports startup timeout and allows a later request to recover", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let markOnline: () => void = () => {};
+    const online = new Promise<void>((resolve) => {
+        markOnline = resolve;
+    });
+    let markExit: () => void = () => {};
+    const exited = new Promise<void>((resolve) => {
+        markExit = resolve;
+    });
+    let workers = 0;
+    const reasons: string[] = [];
+    const worker = createSyntaxTokenizer(undefined, {
+        maxJobs: 2,
+        maxBytes: 1024,
+        reportWarning: undefined,
+        waitForDisposals: async () => {},
+        createWorker: () => {
+            workers += 1;
+            if (workers > 1) return controlledWorker(() => {});
+
+            const current = new Worker(
+                'require("node:worker_threads").parentPort.on("message", () => {});',
+                { eval: true },
+            );
+            current.once("online", markOnline);
+            current.once("exit", markExit);
+
+            return current;
+        },
+    });
+    try {
+        const pending = worker.compactPython("first", {
+            onUnavailable: (reason) => {
+                reasons.push(reason);
+            },
+        });
+        await online;
+        vi.advanceTimersToNextTimer();
+        expect(await pending).toBeUndefined();
+        expect(reasons).toEqual(["startup-timeout"]);
+        expect(
+            await worker.compactPython("early", {
+                onUnavailable: (reason) => {
+                    reasons.push(reason);
+                },
+            }),
+        ).toBeUndefined();
+
+        expect(reasons).toEqual(["startup-timeout", "startup-cooldown"]);
+        expect(workers).toBe(1);
+        await exited;
+        await new Promise<void>((resolve) => {
+            setImmediate(resolve);
+        });
+        vi.advanceTimersToNextTimer();
+        expect(workers).toBe(1);
+        expect(await worker.compactPython("later")).toEqual(["later"]);
+        expect(workers).toBe(2);
+    } finally {
+        await Promise.allSettled([worker.dispose()]);
+        vi.useRealTimers();
+    }
+});
+
+it("permits a capacity owner to register again after startup recovery", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let markOnline: () => void = () => {};
+    const online = new Promise<void>((resolve) => {
+        markOnline = resolve;
+    });
+    let markExit: () => void = () => {};
+    const exited = new Promise<void>((resolve) => {
+        markExit = resolve;
+    });
+    let markStalled: () => void = () => {};
+    const stalled = new Promise<void>((resolve) => {
+        markStalled = resolve;
+    });
+    let workers = 0;
+    let retries = 0;
+    const retry = () => {
+        retries += 1;
+    };
+
+    const worker = createSyntaxTokenizer(undefined, {
+        maxJobs: 1,
+        maxBytes: 1024,
+        reportWarning: undefined,
+        waitForDisposals: async () => {},
+        createWorker: () => {
+            workers += 1;
+            if (workers > 1) return controlledWorker(markStalled);
+
+            const current = new Worker(
+                'require("node:worker_threads").parentPort.on("message", () => {});',
+                { eval: true },
+            );
+            current.once("online", markOnline);
+            current.once("exit", markExit);
+
+            return current;
+        },
+    });
+    const controller = new AbortController();
+    try {
+        const first = worker.compactPython("first");
+        await online;
+        expect(
+            await worker.compactPython("waiting", { retryWhenCapacityAvailable: retry }),
+        ).toBeUndefined();
+
+        vi.advanceTimersToNextTimer();
+        expect(await first).toBeUndefined();
+        expect(retries).toBe(0);
+        await exited;
+        await new Promise<void>((resolve) => {
+            setImmediate(resolve);
+        });
+        vi.advanceTimersToNextTimer();
+        const slow = worker.compactPython("slow", { signal: controller.signal });
+        await stalled;
+        expect(
+            await worker.compactPython("later", { retryWhenCapacityAvailable: retry }),
+        ).toBeUndefined();
+
+        controller.abort();
+        expect(await slow).toBeUndefined();
+        await Promise.resolve();
+        expect(retries).toBe(1);
+    } finally {
+        await worker.dispose();
+        vi.useRealTimers();
     }
 });
 

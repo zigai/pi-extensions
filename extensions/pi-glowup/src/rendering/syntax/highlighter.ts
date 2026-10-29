@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { stripVTControlCharacters } from "node:util";
+import type { Worker } from "node:worker_threads";
+import { reportExtensionDiagnostic } from "@zigai/pi-extension-internals";
 import type { CreateHighlighterFactory, HighlighterGeneric } from "shiki";
 import { normalizedCodeLines } from "../../text-boundaries.ts";
 import type { DiffSection } from "../diff/text-diff.ts";
@@ -124,6 +126,7 @@ type SyntaxState =
           readonly theme: LoadedSyntaxTheme;
           readonly highlighter: HighlighterGeneric<string, string>;
           readonly tokenizer: ReturnType<typeof createSyntaxTokenizer>;
+          readonly reportWarning: SyntaxWarningReporter;
           readonly loadedLanguages: Set<string>;
           readonly dynamicLanguages: Set<string>;
       };
@@ -176,8 +179,11 @@ let highlightOwners = new WeakMap<() => void, HighlightOwner>();
 let highlightSources = new WeakMap<() => void, HighlightSource>();
 const pendingHighlights = new Map<string, Promise<string[]>>();
 const timedOutUnownedHighlights = new Set<string>();
+
+let unownedRetryBudgetExhausted = false;
 const highlightControllers = new Set<AbortController>();
 const tokenizerDisposals = new Set<Promise<void>>();
+let tokenizerCleanupFailure: Error | undefined;
 const highlightCompletionListeners = new Set<() => void>();
 const activeHighlights = new Set<Promise<unknown>>();
 const completedUnownedHighlights = new Map<string, WeakRef<string[]>>();
@@ -219,6 +225,7 @@ export type SyntaxInitializationOptions = {
     readonly preloadLanguages?: readonly string[];
     readonly projectLanguageDetection?: SyntaxProjectLanguageDetectionOptions;
     readonly reportWarning?: SyntaxWarningReporter;
+    readonly createWorker?: ((url: URL) => Worker) | undefined;
 };
 
 /** Initializes the central Shiki highlighter once during extension startup. */
@@ -429,10 +436,18 @@ export function highlightSyntaxCode(
         return unowned;
     }
 
-    if (owned === undefined && timedOutUnownedHighlights.has(key) && !pendingHighlights.has(key)) {
-        transitionHighlightRequest(request, "failed", "worker-timeout");
-        recordSyntaxHighlight(code, language, normalizedLanguage, "timeout");
-        return normalizedCodeLines(code);
+    if (owned === undefined && !pendingHighlights.has(key)) {
+        if (timedOutUnownedHighlights.has(key)) {
+            transitionHighlightRequest(request, "failed", "worker-timeout");
+            recordSyntaxHighlight(code, language, normalizedLanguage, "timeout");
+            return normalizedCodeLines(code);
+        }
+
+        if (unownedRetryBudgetExhausted) {
+            transitionHighlightRequest(request, "failed", "unowned-retry-budget-exhausted");
+            recordSyntaxHighlight(code, language, normalizedLanguage, "retry-budget-exhausted");
+            return normalizedCodeLines(code);
+        }
     }
 
     void highlightSyntaxCodeAsync(code, normalizedLanguage, options, request);
@@ -750,9 +765,7 @@ export async function compactPythonStructuralBlankRows(
         maxJobs: CACHE_LIMIT,
         maxBytes: MAX_CACHE_BYTES,
         reportWarning: options.reportWarning,
-        async waitForDisposals() {
-            await Promise.all(tokenizerDisposals);
-        },
+        waitForDisposals: waitForTokenizerDisposals,
     });
 
     const lines = await pythonTokenizer.compactPython(code, options);
@@ -888,22 +901,29 @@ export async function highlightSyntaxCodeAsync(
                 }
 
                 if (lines === undefined) {
-                    if (unavailable?.reason === "timeout") {
+                    const reason = unavailable?.reason;
+                    if (reason === "timeout") {
                         if (owner !== undefined) owner.timedOut.add(key);
-                        else {
-                            if (timedOutUnownedHighlights.size >= CACHE_LIMIT) {
-                                const oldest = timedOutUnownedHighlights.values().next().value;
-                                if (oldest !== undefined) timedOutUnownedHighlights.delete(oldest);
-                            }
-
+                        else if (timedOutUnownedHighlights.size < CACHE_LIMIT)
                             timedOutUnownedHighlights.add(key);
+                        else if (!timedOutUnownedHighlights.has(key)) {
+                            if (!unownedRetryBudgetExhausted) {
+                                unownedRetryBudgetExhausted = true;
+                                state.reportWarning(
+                                    "[pi-glowup] Automatic unowned syntax highlighting is suspended after repeated timeouts; reload to retry",
+                                );
+                            }
                         }
 
                         finishHighlightJob(diagnosticJob(), "failed", "worker-timeout");
-                    } else if (unavailable?.reason !== "backpressure") {
+                    } else if (reason === "startup-timeout" || reason === "startup-cooldown") {
+                        finishHighlightJob(diagnosticJob(), "failed", `worker-${reason}`);
+                    } else if (reason === "cleanup-timeout" || reason === "cleanup-failed") {
+                        finishHighlightJob(diagnosticJob(), "failed", `worker-${reason}`);
+                    } else if (reason !== "backpressure") {
                         finishHighlightJob(
                             diagnosticJob(),
-                            unavailable?.reason ?? "failed",
+                            reason ?? "failed",
                             "backend-unavailable",
                         );
                     }
@@ -1123,6 +1143,7 @@ function clearSyntaxColors(reason = "cache-clear", preserveReady = false): void 
     highlightControllers.clear();
     pendingHighlights.clear();
     timedOutUnownedHighlights.clear();
+    unownedRetryBudgetExhausted = false;
     completedUnownedHighlights.clear();
     highlightedCodeCache.clear();
     highlightedCodeCacheBytes = 0;
@@ -1204,9 +1225,16 @@ export async function disposeSyntaxHighlighting(): Promise<void> {
         pythonTokenizer = undefined;
     }
 
-    await Promise.allSettled(tokenizerDisposals);
-    syntaxRenderingVersion += 1;
-    notifySyntaxStateListeners("uninitialized");
+    try {
+        const outcomes = await Promise.allSettled(tokenizerDisposals);
+        if (outcomes.some((outcome) => outcome.status === "rejected"))
+            tokenizerCleanupFailure ??= new Error("Syntax worker cleanup did not complete");
+
+        ensureTokenizerCleanup();
+    } finally {
+        syntaxRenderingVersion += 1;
+        notifySyntaxStateListeners("uninitialized");
+    }
 }
 
 type SyntaxThemeSource =
@@ -1269,12 +1297,29 @@ function disposeReadySyntaxState(state: SyntaxState | undefined): void {
     }
 }
 
+function ensureTokenizerCleanup(): void {
+    if (tokenizerCleanupFailure !== undefined) throw tokenizerCleanupFailure;
+}
+
+async function waitForTokenizerDisposals(): Promise<void> {
+    ensureTokenizerCleanup();
+    await Promise.all(tokenizerDisposals);
+    ensureTokenizerCleanup();
+}
+
 function disposeTokenizer(tokenizer: ReturnType<typeof createSyntaxTokenizer>): void {
     const disposal = tokenizer.dispose();
     tokenizerDisposals.add(disposal);
-    void disposal.finally(() => {
-        tokenizerDisposals.delete(disposal);
-    });
+    void disposal.then(
+        () => {
+            tokenizerDisposals.delete(disposal);
+        },
+        () => {
+            tokenizerDisposals.delete(disposal);
+            tokenizerCleanupFailure ??= new Error("Syntax worker cleanup did not complete");
+            recordRenderError("syntax.worker-cleanup", tokenizerCleanupFailure);
+        },
+    );
 }
 
 function disposedSyntaxState(config: SyntaxConfig): SyntaxState {
@@ -1319,10 +1364,10 @@ async function initializeSyntaxHighlightingOnce(
                 maxJobs: CACHE_LIMIT,
                 maxBytes: MAX_CACHE_BYTES,
                 reportWarning: options.reportWarning,
-                async waitForDisposals() {
-                    await Promise.all(tokenizerDisposals);
-                },
+                waitForDisposals: waitForTokenizerDisposals,
+                createWorker: options.createWorker,
             }),
+            reportWarning: options.reportWarning ?? reportExtensionDiagnostic,
             loadedLanguages: new Set(highlighter.getLoadedLanguages()),
             dynamicLanguages: new Set(),
         };
@@ -1403,7 +1448,12 @@ type SyntaxHighlightOutcome =
     | "failed"
     | "cancelled"
     | "backpressure"
-    | "timeout";
+    | "timeout"
+    | "startup-timeout"
+    | "startup-cooldown"
+    | "cleanup-timeout"
+    | "cleanup-failed"
+    | "retry-budget-exhausted";
 
 function errorMessage(cause: unknown): string {
     if (cause instanceof Error) return cause.message;

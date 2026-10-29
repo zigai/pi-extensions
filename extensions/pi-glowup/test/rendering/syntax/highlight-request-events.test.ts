@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { stripVTControlCharacters } from "node:util";
+import { Worker } from "node:worker_threads";
 import Type from "typebox";
 import { Value } from "typebox/value";
 import {
@@ -241,6 +242,160 @@ describe("optional syntax request events", () => {
             );
 
             expect(highlightSyntaxCode(source, "typescript").join("\n")).toContain("\u001b[");
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("reports startup timeout without automatically resubmitting the owner", async () => {
+        let markOnline: () => void = () => {};
+        const online = new Promise<void>((resolve) => {
+            markOnline = resolve;
+        });
+        let markExit: () => void = () => {};
+        const exited = new Promise<void>((resolve) => {
+            markExit = resolve;
+        });
+        let workers = 0;
+        await initializeSyntaxHighlighting(
+            {},
+            {
+                preloadLanguages: ["typescript"],
+                createWorker: () => {
+                    workers += 1;
+                    if (workers > 1)
+                        return new Worker(
+                            `const { parentPort } = require("node:worker_threads");
+                            parentPort.on("message", (request) => {
+                                if (request.type === "initialize") parentPort.postMessage({ type: "ready" });
+                                else parentPort.postMessage({ id: request.id, lines: ["\\x1b[31m" + request.code + "\\x1b[39m"] });
+                            });`,
+                            { eval: true },
+                        );
+
+                    const current = new Worker(
+                        'require("node:worker_threads").parentPort.on("message", () => {});',
+                        { eval: true },
+                    );
+                    current.once("online", markOnline);
+                    current.once("exit", markExit);
+
+                    return current;
+                },
+            },
+        );
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+        const invalidate = () => {};
+        try {
+            highlightSyntaxCode(source, "typescript", { invalidate });
+            await online;
+            vi.advanceTimersToNextTimer();
+            await settleSyntaxHighlights();
+            expect(terminals().map((fields) => fields.reason)).toEqual(["worker-startup-timeout"]);
+            expect(highlightSyntaxCode(source, "typescript", { invalidate })).toEqual([source]);
+            await settleSyntaxHighlights();
+            expect(terminals().map((fields) => fields.reason)).toEqual([
+                "worker-startup-timeout",
+                "worker-startup-cooldown",
+            ]);
+
+            expect(workers).toBe(1);
+            await exited;
+            await new Promise<void>((resolve) => {
+                setImmediate(resolve);
+            });
+            vi.advanceTimersToNextTimer();
+            const recovered = await highlightSyntaxCodeAsync(source, "typescript", { invalidate });
+            expect(recovered.join("\n")).toContain("\u001b[");
+            expect(recovered.map(stripVTControlCharacters)).toEqual([source]);
+
+            expect(workers).toBe(2);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("visibly suspends automatic unowned work after the bounded timeout budget", async () => {
+        const warnings: string[] = [];
+        await initializeSyntaxHighlighting(
+            {},
+            {
+                preloadLanguages: ["typescript"],
+                reportWarning: (message) => {
+                    warnings.push(message);
+                },
+                createWorker: () =>
+                    new Worker(
+                        `const { parentPort } = require("node:worker_threads");
+                        parentPort.on("message", (request) => {
+                            if (request.type === "initialize") parentPort.postMessage({ type: "ready" });
+                            else if (request.code === "const healthy = 1;")
+                                parentPort.postMessage({ id: request.id, lines: ["\\x1b[31m" + request.code + "\\x1b[39m"] });
+                        });`,
+                        { eval: true },
+                    ),
+            },
+        );
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+        let markRunning: () => void = () => {};
+        configureRenderDiagnostics((event, fields) => {
+            const current = fields();
+            sink(event, () => current);
+
+            if (event === "syntax_request" && current.state === "running") markRunning();
+        });
+        try {
+            for (let index = 0; index < 101; index += 1) {
+                const running = new Promise<void>((resolve) => {
+                    markRunning = resolve;
+                });
+                highlightSyntaxCode(`const item${index} = ${index};`, "typescript");
+                await running;
+                vi.advanceTimersToNextTimer();
+                await settleSyntaxHighlights();
+            }
+
+            const submitted = requests().filter((fields) => fields.state === "running").length;
+            expect(submitted).toBe(101);
+            expect(highlightSyntaxCode("const item0 = 0;", "typescript")).toEqual([
+                "const item0 = 0;",
+            ]);
+
+            expect(highlightSyntaxCode("const unseen = 1;", "typescript")).toEqual([
+                "const unseen = 1;",
+            ]);
+
+            expect(
+                terminals().some((fields) => fields.reason === "unowned-retry-budget-exhausted"),
+            ).toBe(true);
+            await settleSyntaxHighlights();
+            expect(requests().filter((fields) => fields.state === "running")).toHaveLength(
+                submitted,
+            );
+
+            expect(warnings).toContainEqual(
+                expect.stringContaining("unowned syntax highlighting is suspended"),
+            );
+
+            const explicit = await highlightSyntaxCodeAsync("const healthy = 1;", "typescript");
+            expect(explicit.join("\n")).toContain("\u001b[");
+            expect(explicit.map(stripVTControlCharacters)).toEqual(["const healthy = 1;"]);
+
+            const owned = await highlightSyntaxCodeAsync("const healthy = 1;", "typescript", {
+                invalidate: () => {},
+                cache: false,
+            });
+            expect(owned.join("\n")).toContain("\u001b[");
+            expect(owned.map(stripVTControlCharacters)).toEqual(["const healthy = 1;"]);
+
+            clearSyntaxHighlightCache();
+            expect(highlightSyntaxCode("const healthy = 1;", "typescript")).toEqual([
+                "const healthy = 1;",
+            ]);
+            await settleSyntaxHighlights();
+            const recovered = highlightSyntaxCode("const healthy = 1;", "typescript");
+            expect(recovered.join("\n")).toContain("\u001b[");
+            expect(recovered.map(stripVTControlCharacters)).toEqual(["const healthy = 1;"]);
         } finally {
             vi.useRealTimers();
         }

@@ -17,6 +17,7 @@ declare global {
 const WORKER_START_LIMIT_MS = 30_000;
 const WORKER_JOB_LIMIT_MS = 60_000;
 const WORKER_CONTENTION_LIMIT_MS = 10_000;
+const WORKER_CLEANUP_LIMIT_MS = 10_000;
 
 type Work = {
     readonly request: TokenizeRequest;
@@ -28,7 +29,16 @@ type Work = {
     readonly onState: TokenizeCancellation["onState"];
 };
 
-export type TokenizeUnavailableReason = "backpressure" | "failed" | "cancelled" | "timeout";
+export type TokenizeUnavailableReason =
+    | "backpressure"
+    | "failed"
+    | "cancelled"
+    | "timeout"
+    | "startup-timeout"
+    | "startup-cooldown"
+    | "cleanup-timeout"
+    | "cleanup-failed";
+
 type TokenizeUnavailableListener = (reason: TokenizeUnavailableReason, error?: string) => void;
 
 type TokenizeCancellation = {
@@ -48,7 +58,7 @@ export function createSyntaxTokenizer(
         readonly maxBytes: number;
         readonly reportWarning: ((message: string) => void) | undefined;
         readonly waitForDisposals: () => Promise<void>;
-        readonly createWorker?: (url: URL) => Worker;
+        readonly createWorker?: ((url: URL) => Worker) | undefined;
     },
 ) {
     const queue: Work[] = [];
@@ -61,6 +71,16 @@ export function createSyntaxTokenizer(
         for (const wake of capacityWaiters) wake();
         capacityWaiters.clear();
     }
+
+    function clearCapacityRetries(): void {
+        for (const reference of capacityRetries) {
+            const retry = reference.deref();
+            if (retry !== undefined) registeredRetries.delete(retry);
+        }
+
+        capacityRetries.clear();
+    }
+
     let capacityNotificationScheduled = false;
 
     function scheduleCapacityNotification(): void {
@@ -86,7 +106,7 @@ export function createSyntaxTokenizer(
             }
         });
     }
-    const terminations = new Set<Promise<number>>();
+    const terminations = new Set<Promise<"complete" | "timeout" | "failed">>();
     let active: Work | undefined;
     let worker: Worker | undefined;
     let ready = false;
@@ -95,6 +115,10 @@ export function createSyntaxTokenizer(
     let bytes = 0;
     let disposed = false;
     let failed = false;
+    let failureReason: TokenizeUnavailableReason = "failed";
+    let cleanupFailure: "timeout" | "failed" | undefined;
+    let startupPaused = false;
+    let startupRetry: ReturnType<typeof setTimeout> | undefined;
     let warnedTimeout = false;
     let deadline: ReturnType<typeof setTimeout> | undefined;
     let contentionDeadline: ReturnType<typeof setTimeout> | undefined;
@@ -150,6 +174,41 @@ export function createSyntaxTokenizer(
         scheduleCapacityNotification();
     }
 
+    async function waitForCleanup(
+        pending: Promise<unknown>,
+    ): Promise<"complete" | "timeout" | "failed"> {
+        return new Promise((resolve) => {
+            const timer = setTimeout(() => resolve("timeout"), WORKER_CLEANUP_LIMIT_MS);
+
+            void pending.then(
+                () => {
+                    clearTimeout(timer);
+                    resolve("complete");
+                },
+                () => {
+                    clearTimeout(timer);
+                    resolve("failed");
+                },
+            );
+        });
+    }
+
+    function failCleanup(reason: "timeout" | "failed"): void {
+        if (cleanupFailure !== undefined) return;
+
+        cleanupFailure = reason;
+
+        let unavailable: TokenizeUnavailableReason = "cleanup-failed";
+        if (reason === "timeout") unavailable = "cleanup-timeout";
+
+        if (failed) failureReason = unavailable;
+        else fail(unavailable);
+
+        options.reportWarning?.(
+            "[pi-glowup] Syntax worker cleanup did not complete; restart to retry highlighting",
+        );
+    }
+
     function stopWorker(): void {
         clearDeadline();
 
@@ -159,37 +218,60 @@ export function createSyntaxTokenizer(
 
         if (previous === undefined) return;
 
-        const termination = previous.terminate();
+        previous.unref();
+
+        let termination: Promise<"complete" | "timeout" | "failed">;
+        try {
+            termination = waitForCleanup(previous.terminate());
+        } catch {
+            failCleanup("failed");
+            return;
+        }
+
         terminations.add(termination);
-        void termination
-            .then(() => {
-                terminations.delete(termination);
-                dispatch();
-            })
-            .catch(() => {
-                terminations.delete(termination);
-                fail();
-            });
+        void termination.then((result) => {
+            terminations.delete(termination);
+
+            if (result === "complete") dispatch();
+            else failCleanup(result);
+        });
     }
 
-    function fail(): void {
+    function fail(reason: TokenizeUnavailableReason = "failed"): void {
         if (failed || disposed) return;
 
         failed = true;
-        capacityRetries.clear();
+        failureReason = reason;
+        clearCapacityRetries();
         wakeCapacityWaiters();
 
-        if (active !== undefined) finish(active, undefined);
+        if (active !== undefined) finish(active, undefined, reason);
         active = undefined;
 
-        for (const work of queue.splice(0)) finish(work, undefined);
+        for (const work of queue.splice(0)) finish(work, undefined, reason);
         stopWorker();
-        options.reportWarning?.("[pi-glowup] Syntax worker failed; reload to retry highlighting");
+
+        if (reason === "failed")
+            options.reportWarning?.(
+                "[pi-glowup] Syntax worker failed; reload to retry highlighting",
+            );
     }
 
     async function startWorker(): Promise<void> {
         try {
-            await options.waitForDisposals();
+            let previous: Promise<void>;
+            try {
+                previous = options.waitForDisposals();
+            } catch {
+                failCleanup("failed");
+                return;
+            }
+
+            const prior = await waitForCleanup(previous);
+            if (prior !== "complete") {
+                failCleanup(prior);
+                return;
+            }
 
             const initial = queue[0];
             if (disposed || failed || initial === undefined) return;
@@ -247,7 +329,21 @@ export function createSyntaxTokenizer(
             };
 
             deadline = setTimeout(() => {
-                if (worker === current && !ready) fail();
+                if (worker !== current || ready) return;
+
+                startupPaused = true;
+                startupRetry = setTimeout(() => {
+                    startupPaused = false;
+                    startupRetry = undefined;
+                }, WORKER_START_LIMIT_MS);
+                clearCapacityRetries();
+                stopWorker();
+
+                for (const work of queue.splice(0)) finish(work, undefined, "startup-timeout");
+                wakeCapacityWaiters();
+                options.reportWarning?.(
+                    "[pi-glowup] Syntax worker startup timed out; a later request can retry",
+                );
             }, WORKER_START_LIMIT_MS);
             current.postMessage(initialization);
         } catch (cause: unknown) {
@@ -318,12 +414,17 @@ export function createSyntaxTokenizer(
         const size = Buffer.byteLength(request.code, "utf8");
 
         if (disposed || failed) {
-            cancellation.onUnavailable?.("failed", "syntax worker unavailable");
+            cancellation.onUnavailable?.(failureReason, "syntax worker unavailable");
             return undefined;
         }
 
         if (cancellation.signal?.aborted === true) {
             cancellation.onUnavailable?.("cancelled");
+            return undefined;
+        }
+
+        if (startupPaused) {
+            cancellation.onUnavailable?.("startup-cooldown");
             return undefined;
         }
 
@@ -419,7 +520,9 @@ export function createSyntaxTokenizer(
 
     async function dispose(): Promise<void> {
         disposed = true;
-        capacityRetries.clear();
+
+        if (startupRetry !== undefined) clearTimeout(startupRetry);
+        clearCapacityRetries();
         wakeCapacityWaiters();
 
         if (active !== undefined) finish(active, undefined, "cancelled");
@@ -428,9 +531,12 @@ export function createSyntaxTokenizer(
         for (const work of queue.splice(0)) finish(work, undefined, "cancelled");
         stopWorker();
 
-        const closing: Array<Promise<number | void>> = [...terminations];
+        const closing: Array<Promise<unknown>> = [...terminations];
         if (starting !== undefined) closing.push(starting);
-        await Promise.allSettled(closing);
+        await Promise.all(closing);
+
+        if (cleanupFailure !== undefined)
+            throw new Error(`Syntax worker cleanup ${cleanupFailure}`);
     }
 
     return { tokenize, compactPython, dispose };
