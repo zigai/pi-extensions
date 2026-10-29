@@ -9,6 +9,7 @@ import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { configureRenderDiagnostics } from "../../../../src/diagnostics/render-events.ts";
 import type { DebugLogFields } from "../../../../src/diagnostics/logger.ts";
 import { renderScriptCall } from "../../../../src/tools/built-in/bash/script-renderer.ts";
+import { parseScriptInvocation } from "../../../../src/tools/built-in/bash/invocation.ts";
 import {
     createCommandScriptFormatter,
     formatScriptInvocation,
@@ -201,6 +202,40 @@ describe("script formatter settings", () => {
             formatScriptInvocation({ ...invocation, language: "typescript" }, formatter),
         ).resolves.toEqual({ ...invocation, language: "typescript" });
         expect(warnings).toEqual(["[pi-glowup] typescript display formatter exited with status 2"]);
+    });
+
+    it.each([
+        ["deno eval --ext=tsx", "tsx"],
+        ["deno eval --ext tsx", "tsx"],
+        ["deno eval --ext=jsx", "jsx"],
+        ["deno eval --ext jsx", "jsx"],
+        ["deno run --ext=tsx -", "tsx"],
+        ["deno run --ext tsx -", "tsx"],
+        ["deno run --ext=jsx -", "jsx"],
+        ["deno run --ext jsx -", "jsx"],
+    ])("formats Deno %s using its declared %s grammar", async (launcher, language) => {
+        const executable = join(
+            dirname(createRequire(import.meta.url).resolve("oxfmt/package.json")),
+            "bin",
+            "oxfmt",
+        );
+        const formatter = createCommandScriptFormatter(
+            parseScriptFormatterCommandsValue({
+                javascript: { kind: "javascript", command: [executable] },
+                typescript: { kind: "typescript", command: [executable] },
+            }),
+        );
+        const code = 'const view=<article role="note">Ready</article>;';
+        let command = `${launcher} '${code}'`;
+        if (launcher.includes(" run ")) command = `${launcher} <<'CODE'\n${code}\nCODE`;
+
+        const invocation = parseScriptInvocation(command);
+        expect(invocation?.language).toBe(language);
+
+        if (invocation === undefined) throw new Error("Expected a script invocation");
+
+        const formatted = await formatScriptInvocation(invocation, formatter);
+        expect(formatted.code).toBe('const view = <article role="note">Ready</article>;');
     });
 
     it("reports an unavailable configured formatter once without exposing source", async () => {
