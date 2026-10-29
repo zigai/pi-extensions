@@ -16,6 +16,13 @@ const rendererStateSchema = Type.Object(
 type SectionExpansion = Static<typeof expansionSchema>;
 type Section = "call" | "result";
 
+const sectionComponents = new WeakMap<Component, Component>();
+
+export function sectionContent(component: Component | undefined): Component | undefined {
+    if (component === undefined) return undefined;
+    return sectionComponents.get(component) ?? component;
+}
+
 type SectionContext = {
     readonly state?: unknown;
     readonly expanded: boolean;
@@ -37,19 +44,19 @@ function expansionState(context: SectionContext): SectionExpansion | undefined {
 export function renderExpandableSection(
     context: SectionContext,
     section: Section,
-    render: (expanded: boolean) => Component,
+    render: (expanded: boolean, probe: boolean) => Component,
 ): Component {
     const expansion = expansionState(context);
     const expanded = expansion?.[section] ?? context.expanded;
-    const component = render(expanded);
+    const component = render(expanded, false);
     const invalidate = context.invalidate;
     if (expansion === undefined || invalidate === undefined) return component;
 
     const region = new MouseRegion(component, (event) => {
         if (event.type !== "click" || event.button !== "left") return undefined;
 
-        const collapsedLines = render(false).render(event.width);
-        const expandedLines = render(true).render(event.width);
+        const collapsedLines = render(false, true).render(event.width);
+        const expandedLines = render(true, true).render(event.width);
         if (
             collapsedLines.length === expandedLines.length &&
             collapsedLines.every((line, index) => line === expandedLines[index])
@@ -64,6 +71,7 @@ export function renderExpandableSection(
     });
 
     inheritSyntaxComponent(region, component);
+    sectionComponents.set(region, component);
 
     return region;
 }

@@ -1,13 +1,14 @@
+import type { Component } from "@earendil-works/pi-tui";
+import { observeHighlightComponentRender } from "../../diagnostics/highlight-requests.ts";
 import { normalizeSyntaxLanguage, syntaxLanguageFromFile } from "./language.ts";
 import {
-    getLoadedSyntaxHighlighterForLanguage,
+    cachedSyntaxCode,
     highlightSyntaxCode,
     highlightSyntaxCodeAsync,
     observeSyntaxHighlightSource,
-    loadSyntaxLanguageIfReady,
-    onSyntaxHighlightingStateChange,
+    scheduleSyntaxLanguageLoad,
+    type SyntaxHighlightOptions,
 } from "./highlighter.ts";
-import { recordRenderError } from "../../diagnostics/render-events.ts";
 
 export type CodeOutputSyntax = {
     readonly language?: string;
@@ -17,21 +18,14 @@ export type CodeOutputSyntax = {
 };
 
 const MAX_STRUCTURED_OUTPUT_DETECTION_CHARS = 64 * 1024;
-const pendingCodeOutputSyntaxLoads = new Map<string, Set<() => void>>();
-const activeCodeOutputSyntaxLoads = new Map<string, Promise<boolean>>();
 
-onSyntaxHighlightingStateChange((status) => {
-    if (status === "ready") {
-        for (const language of pendingCodeOutputSyntaxLoads.keys()) {
-            requestPendingCodeOutputSyntaxLoad(language);
-        }
-
-        return;
-    }
-
-    pendingCodeOutputSyntaxLoads.clear();
-    activeCodeOutputSyntaxLoads.clear();
-});
+export function renderSyntaxComponent(
+    component: Component,
+    invalidate: () => void,
+    width: number,
+): string[] {
+    return observeHighlightComponentRender(component, invalidate, width);
+}
 
 /** Highlights code-like output when a language or path is known; otherwise returns normalized plain lines. */
 export function highlightCodeOutput(text: string, syntax: CodeOutputSyntax | undefined): string[] {
@@ -42,12 +36,18 @@ export function highlightCodeOutput(text: string, syntax: CodeOutputSyntax | und
     });
 }
 
+export function cachedCodeOutput(text: string, syntax: CodeOutputSyntax): string[] | undefined {
+    const language = syntax.language ?? syntaxLanguageFromFile(syntax.path, text);
+    return cachedSyntaxCode(text, language, { cache: syntax.cache, invalidate: syntax.invalidate });
+}
+
 /** Schedules async loading for path/language hints so later sync renders can highlight them. */
 export function scheduleCodeOutputSyntaxLoad(
     syntax: CodeOutputSyntax | undefined,
     invalidate: (() => void) | undefined,
     content?: string,
     current?: () => boolean,
+    options?: Pick<SyntaxHighlightOptions, "invalidateOnComplete">,
 ): void {
     if (invalidate === undefined) {
         return;
@@ -63,78 +63,18 @@ export function scheduleCodeOutputSyntaxLoad(
         return;
     }
 
-    const refresh = (): void => {
-        if (isCurrent !== undefined && !isCurrent()) return;
+    if (isCurrent !== undefined && !isCurrent()) return;
 
-        if (content === undefined) {
-            invalidate();
-            return;
-        }
+    scheduleSyntaxLanguageLoad(normalizedLanguage, invalidate, content, {
+        cache: syntax?.cache,
+        ...options,
+    });
 
+    if (content !== undefined)
         void highlightSyntaxCodeAsync(content, normalizedLanguage, {
             invalidate,
             cache: syntax?.cache,
-        });
-    };
-    if (getLoadedSyntaxHighlighterForLanguage(normalizedLanguage) !== undefined) {
-        if (content !== undefined) refresh();
-        return;
-    }
-
-    const pendingInvalidations = pendingCodeOutputSyntaxLoads.get(normalizedLanguage);
-    if (pendingInvalidations !== undefined) {
-        pendingInvalidations.add(refresh);
-        requestPendingCodeOutputSyntaxLoad(normalizedLanguage);
-        return;
-    }
-
-    const invalidations = new Set([refresh]);
-    pendingCodeOutputSyntaxLoads.set(normalizedLanguage, invalidations);
-    requestPendingCodeOutputSyntaxLoad(normalizedLanguage);
-}
-
-function requestPendingCodeOutputSyntaxLoad(language: string): void {
-    if (activeCodeOutputSyntaxLoads.has(language)) {
-        return;
-    }
-
-    const invalidations = pendingCodeOutputSyntaxLoads.get(language);
-    if (invalidations === undefined) {
-        return;
-    }
-
-    const loaded = getLoadedSyntaxHighlighterForLanguage(language);
-    if (loaded !== undefined) {
-        pendingCodeOutputSyntaxLoads.delete(language);
-
-        for (const invalidate of invalidations) {
-            invalidate();
-        }
-
-        return;
-    }
-
-    const loading = loadSyntaxLanguageIfReady(language);
-    activeCodeOutputSyntaxLoads.set(language, loading);
-    void loading
-        .then((loaded) => {
-            if (loaded && pendingCodeOutputSyntaxLoads.get(language) === invalidations) {
-                pendingCodeOutputSyntaxLoads.delete(language);
-
-                for (const invalidatePendingPreview of invalidations) {
-                    invalidatePendingPreview();
-                }
-            }
-        })
-        .catch((cause: unknown) => {
-            recordRenderError("syntax.language-load", cause);
-
-            if (pendingCodeOutputSyntaxLoads.get(language) === invalidations)
-                pendingCodeOutputSyntaxLoads.delete(language);
-        })
-        .finally(() => {
-            if (activeCodeOutputSyntaxLoads.get(language) === loading)
-                activeCodeOutputSyntaxLoads.delete(language);
+            ...options,
         });
 }
 

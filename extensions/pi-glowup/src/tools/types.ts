@@ -21,6 +21,7 @@ export type ThirdPartyToolRenderContext = Omit<GlowupCallContext, "toolName" | "
     readonly streamCode?: CodePreview;
     readonly streamKey?: string;
     readonly streamPhase?: "call" | "result";
+    readonly renderProbe?: boolean;
     readonly contentComplete?: boolean;
     readonly phase?: GlowupExecutionPhase;
     readonly args: JsonValue | undefined;
@@ -70,6 +71,7 @@ export type ThirdPartyToolRendererPlugin = {
 /** Policy for third-party and generic compatibility rendering. */
 export type ThirdPartyToolRenderingOptions = {
     readonly enabled?: boolean;
+    readonly isStreamingCall?: (toolCallId: string) => boolean;
 
     /** Exact full or base tool names, also supported by JSON configuration. */
     readonly preserveTools?: ReadonlyArray<string>;

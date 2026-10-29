@@ -3,6 +3,7 @@ import { reportExtensionDiagnostic } from "@zigai/pi-extension-internals";
 import { createHash } from "node:crypto";
 import type { Readable, Writable } from "node:stream";
 import type { ScriptInvocation } from "./invocation.ts";
+import type { EmbeddedProgram } from "./embedded-programs.ts";
 import { jsonObjectParser, type JsonValue } from "../../../json-value.ts";
 import { stringParser } from "../../../json-scalar.ts";
 import { Value } from "typebox/value";
@@ -27,6 +28,7 @@ export type ScriptBlockFormatterInput = {
     readonly language: string;
     readonly code: string;
     readonly targetWidth?: number;
+
     /** Columns before the first row, for programs embedded after a command prefix. */
     readonly firstLineOffset?: number;
 };
@@ -35,6 +37,7 @@ export type ScriptBlockFormatterOptions = {
     readonly signal?: AbortSignal;
     readonly targetWidth?: number;
     readonly diagnostics?: ScriptFormatDiagnostics;
+    readonly programs?: readonly EmbeddedProgram[];
 };
 
 export type ScriptBlockFormatter = ((
@@ -52,12 +55,10 @@ export type ScriptFormatterParseOptions = {
     readonly reportWarning?: ScriptFormatterWarningReporter;
 };
 
-const FORMATTER_TIMEOUT_MS = 1_000;
+const FORMATTER_TIMEOUT_MS = 5_000;
 const FORMATTER_TERMINATION_GRACE_MS = 250;
 const FORMATTER_MAX_BUFFER = 1024 * 1024;
-const FORMATTER_MAX_INPUT_BYTES = 64 * 1024;
 const MAX_CONCURRENT_FORMATTERS = 2;
-const MAX_QUEUED_FORMATTERS = 20;
 const MAX_FORMATTER_CACHE_ENTRIES = 300;
 const MAX_FORMATTER_CACHE_BYTES = 4 * 1024 * 1024;
 const MAX_DIAGNOSTIC_STDERR_CHARS = 600;
@@ -70,10 +71,8 @@ type ScriptFormatOutcome =
     | "failed"
     | "timeout"
     | "output-limit"
-    | "input-limit"
     | "missing-executable"
     | "cancelled"
-    | "queue-full"
     | "no-profile";
 
 type FormatterRun = {
@@ -92,12 +91,18 @@ type FormatAttempt = FormatterRun & {
 
 type FormatterQueueEntry = {
     readonly signal: AbortSignal | undefined;
+    readonly visible: boolean;
+    readonly queuedAt: number;
     readonly resolve: (release: (() => void) | undefined) => void;
     abort: (() => void) | undefined;
 };
 
 let activeFormatterCount = 0;
 const queuedFormatters: FormatterQueueEntry[] = [];
+
+function cancelled(cause: unknown, signal: AbortSignal | undefined): boolean {
+    return signal?.aborted === true || (cause instanceof Error && cause.name === "AbortError");
+}
 
 function reportFormatterWarning(options: ScriptFormatterParseOptions, message: string): void {
     options.reportWarning?.(`[pi-glowup] ${message}`);
@@ -229,6 +234,9 @@ async function runFormatterCommand(
                   COLUMNS: String(targetWidth),
               };
     const env = { ...process.env, ...widthEnv };
+    const inputBytes = Buffer.byteLength(input, "utf8");
+    const timeoutMs = FORMATTER_TIMEOUT_MS + Math.ceil(inputBytes / 1024) * 100;
+    const outputBudget = Math.max(FORMATTER_MAX_BUFFER, inputBytes * 64);
 
     // Formatter stderr is read only for the private debug log; otherwise it stays ignored.
     const captureStderr = renderDiagnosticsEnabled();
@@ -258,9 +266,13 @@ async function runFormatterCommand(
         } catch (cause: unknown) {
             release();
 
-            recordRenderError("formatter.spawn", cause, options.diagnostics?.toolCallId);
+            if (cancelled(cause, options.signal)) {
+                resolve({ output: undefined, outcome: "cancelled" });
+                return;
+            }
 
-            if (options.signal?.aborted !== true) reportFailure("could not start");
+            recordRenderError("formatter.spawn", cause, options.diagnostics?.toolCallId);
+            reportFailure("could not start");
             resolve({ output: undefined, outcome: "failed" });
 
             return;
@@ -301,8 +313,8 @@ async function runFormatterCommand(
         };
 
         const timeout = setTimeout(
-            () => fail(`timed out after ${FORMATTER_TIMEOUT_MS} ms`, "timeout"),
-            FORMATTER_TIMEOUT_MS,
+            () => fail(`timed out after ${timeoutMs} ms`, "timeout"),
+            timeoutMs,
         );
         timeout.unref();
 
@@ -311,8 +323,8 @@ async function runFormatterCommand(
             if (settled) return;
 
             stdoutBytes += Buffer.byteLength(chunk, "utf8");
-            if (stdoutBytes > FORMATTER_MAX_BUFFER) {
-                fail(`output exceeded ${FORMATTER_MAX_BUFFER} bytes`, "output-limit");
+            if (stdoutBytes > outputBudget) {
+                fail(`output exceeded ${outputBudget} bytes`, "output-limit");
                 return;
             }
 
@@ -399,13 +411,11 @@ async function acquireFormatterSlot(
         return Promise.resolve(releaseFormatterSlot);
     }
 
-    if (queuedFormatters.length >= MAX_QUEUED_FORMATTERS) {
-        return Promise.resolve(undefined);
-    }
-
     return new Promise((resolve) => {
         const entry: FormatterQueueEntry = {
             signal: options.signal,
+            visible: options.targetWidth !== undefined,
+            queuedAt: performance.now(),
             resolve,
             abort: undefined,
         };
@@ -431,7 +441,19 @@ function releaseFormatterSlot(): void {
 
 function startQueuedFormatters(): void {
     while (activeFormatterCount < MAX_CONCURRENT_FORMATTERS) {
-        const entry = queuedFormatters.shift();
+        // Prefer the newest measured (visible) preview, but age queued history so
+        // a steady stream of viewport changes cannot starve older work.
+        let index = 0;
+        if (performance.now() - (queuedFormatters[0]?.queuedAt ?? 0) < 1_000) {
+            for (let candidate = queuedFormatters.length - 1; candidate >= 0; candidate -= 1) {
+                if (queuedFormatters[candidate]?.visible === true) {
+                    index = candidate;
+                    break;
+                }
+            }
+        }
+
+        const [entry] = queuedFormatters.splice(index, 1);
         if (entry === undefined) {
             return;
         }
@@ -550,7 +572,7 @@ export function createCommandScriptFormatter(
         return undefined;
     };
 
-    const formatScriptBlock = async (
+    const runScriptBlock = async (
         input: ScriptBlockFormatterInput,
         options: ScriptBlockFormatterOptions,
     ): Promise<FormatAttempt> => {
@@ -566,10 +588,6 @@ export function createCommandScriptFormatter(
             profileKind: command.kind,
             ...(targetWidth !== undefined && { targetWidth }),
         };
-
-        if (Buffer.byteLength(input.code, "utf8") > FORMATTER_MAX_INPUT_BYTES) {
-            return { output: undefined, outcome: "input-limit", ...described };
-        }
 
         const effectiveOptions: ScriptBlockFormatterOptions =
             targetWidth === undefined ? options : { ...options, targetWidth };
@@ -588,6 +606,7 @@ export function createCommandScriptFormatter(
 
         if (command.kind === "awk" || command.kind === "jq") {
             const [executable, ...baseArgs] = filterFormatterCommand(command);
+
             if (executable === undefined)
                 return { output: undefined, outcome: "missing-executable", ...described };
 
@@ -598,10 +617,7 @@ export function createCommandScriptFormatter(
                 async (args, stdin): Promise<FormatterRun> => {
                     const slot = await acquireFormatterSlot(effectiveOptions);
                     if (slot === undefined) {
-                        if (effectiveOptions.signal?.aborted === true)
-                            return { output: undefined, outcome: "cancelled" };
-
-                        return { output: undefined, outcome: "queue-full" };
+                        return { output: undefined, outcome: "cancelled" };
                     }
 
                     return runFormatterCommand(
@@ -661,10 +677,7 @@ export function createCommandScriptFormatter(
 
         const release = await acquireFormatterSlot(effectiveOptions);
         if (release === undefined) {
-            if (effectiveOptions.signal?.aborted === true)
-                return { output: undefined, outcome: "cancelled", ...described };
-
-            return { output: undefined, outcome: "queue-full", ...described };
+            return { output: undefined, outcome: "cancelled", ...described };
         }
 
         const completed = cache.get(cacheKey);
@@ -683,10 +696,11 @@ export function createCommandScriptFormatter(
         } catch (cause: unknown) {
             release();
 
-            recordRenderError("formatter.prepare", cause, options.diagnostics?.toolCallId);
+            if (cancelled(cause, effectiveOptions.signal))
+                return { output: undefined, outcome: "cancelled", ...described };
 
-            if (effectiveOptions.signal?.aborted !== true)
-                reportFailure(input.language, "profile could not be prepared");
+            recordRenderError("formatter.prepare", cause, options.diagnostics?.toolCallId);
+            reportFailure(input.language, "profile could not be prepared");
 
             return { output: undefined, outcome: "failed", ...described };
         }
@@ -758,16 +772,100 @@ export function createCommandScriptFormatter(
         return { ...run, ...described, output: formatted, outcome };
     };
 
-    const formatter: ScriptBlockFormatter = async (input, options = {}) => {
-        if (!renderDiagnosticsEnabled()) return (await formatScriptBlock(input, options)).output;
+    // Consumers own their cancellation independently; shared work stops only when
+    // no renderer still needs it. Each consumer still records its own diagnostics.
+    const pending = new Map<
+        string,
+        {
+            readonly controller: AbortController;
+            readonly result: Promise<FormatAttempt>;
+            consumers: number;
+        }
+    >();
+    const formatScriptBlock = async (
+        input: ScriptBlockFormatterInput,
+        options: ScriptBlockFormatterOptions,
+    ): Promise<FormatAttempt> => {
+        if (options.signal?.aborted === true)
+            return Promise.resolve({ output: undefined, outcome: "cancelled" });
 
+        const key = JSON.stringify([
+            input.language,
+            input.targetWidth ?? options.targetWidth,
+            input.firstLineOffset ?? 0,
+            input.code,
+        ]);
+        let work = pending.get(key);
+        if (work === undefined) {
+            const controller = new AbortController();
+            work = {
+                controller,
+                result: runScriptBlock(input, { ...options, signal: controller.signal }),
+                consumers: 0,
+            };
+            pending.set(key, work);
+
+            const owner = work;
+            const forget = (): void => {
+                if (pending.get(key) === owner) pending.delete(key);
+            };
+
+            void work.result.then(forget, forget);
+        }
+
+        const owner = work;
+        owner.consumers += 1;
+
+        return new Promise((resolve, reject) => {
+            let settled = false;
+            const finish = (): boolean => {
+                if (settled) return false;
+
+                settled = true;
+                options.signal?.removeEventListener("abort", abort);
+                owner.consumers -= 1;
+                if (owner.consumers === 0) {
+                    owner.controller.abort();
+
+                    if (pending.get(key) === owner) pending.delete(key);
+                }
+
+                return true;
+            };
+
+            const abort = (): void => {
+                if (finish()) resolve({ output: undefined, outcome: "cancelled" });
+            };
+
+            options.signal?.addEventListener("abort", abort, { once: true });
+            void owner.result.then(
+                (result) => {
+                    if (finish()) resolve(result);
+                },
+                (cause: unknown) => {
+                    if (finish()) reject(cause instanceof Error ? cause : new Error(String(cause)));
+                },
+            );
+        });
+    };
+
+    const formatter: ScriptBlockFormatter = async (input, options = {}) => {
         const started = performance.now();
         let attempt: FormatAttempt;
         try {
             attempt = await formatScriptBlock(input, options);
         } catch (cause: unknown) {
-            recordScriptFormat(input, options, { output: undefined, outcome: "failed" }, started);
-            throw cause;
+            if (cancelled(cause, options.signal))
+                attempt = { output: undefined, outcome: "cancelled" };
+            else {
+                recordScriptFormat(
+                    input,
+                    options,
+                    { output: undefined, outcome: "failed" },
+                    started,
+                );
+                throw cause;
+            }
         }
 
         recordScriptFormat(input, options, attempt, started);
@@ -794,7 +892,10 @@ export async function formatScriptInvocation(
             options,
         );
     } catch (cause: unknown) {
+        if (cancelled(cause, options.signal)) return invocation;
+
         recordRenderError("formatter.invocation", cause, options.diagnostics?.toolCallId);
+
         return invocation;
     }
 

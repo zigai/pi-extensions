@@ -1,6 +1,10 @@
 import type { Component } from "@earendil-works/pi-tui";
 import type { CodePreview } from "../../rendering/streaming/presentation.ts";
-import { scheduleCodeOutputSyntaxLoad } from "../../rendering/syntax/code-component.ts";
+import {
+    renderSyntaxComponent,
+    scheduleCodeOutputSyntaxLoad,
+} from "../../rendering/syntax/code-component.ts";
+import { observeSyntaxHighlightSource } from "../../rendering/syntax/highlighter.ts";
 import {
     createSyntaxComponent,
     inheritSyntaxComponent,
@@ -53,6 +57,7 @@ export type WriteCallContext = {
     readonly toolCallId?: string;
     readonly streamCode?: CodePreview;
     readonly sourceLineCount?: number;
+    readonly syntaxSource?: string;
     readonly waitingForCode?: boolean;
     readonly isError: boolean;
     readonly isPartial: boolean;
@@ -492,7 +497,7 @@ class StreamingWritePreviewComponent implements Component {
     }
 
     render(width: number): string[] {
-        return this.rendered.render(width);
+        return renderSyntaxComponent(this.rendered, this.input.invalidate, width);
     }
 
     invalidate(): void {
@@ -517,11 +522,18 @@ class StreamingWritePreviewComponent implements Component {
             ...context,
             invalidate,
             sourceLineCount: countContentLines(content),
+            syntaxSource: content,
             waitingForCode: display.length === 0 && content.length > 0,
             lastComponent: this.preview,
         });
 
-        return this.preview.render(width);
+        const lines = this.preview.render(width);
+        const current = observeSyntaxHighlightSource(content, invalidate);
+        scheduleCodeOutputSyntaxLoad({ path }, invalidate, content, current, {
+            invalidateOnComplete: false,
+        });
+
+        return lines;
     }
 }
 
@@ -584,6 +596,7 @@ export function renderWriteCallPreview(
 
                 return new StreamingWritePreviewComponent(update);
             },
+            content,
         );
     }
 
@@ -613,7 +626,11 @@ export function renderWriteCallPreview(
         return new PartialWriteCallPreviewComponent(update);
     }
 
-    scheduleCodeOutputSyntaxLoad({ path }, context.invalidate, content);
+    let current: (() => boolean) | undefined;
+    if (context.invalidate !== undefined)
+        current = observeSyntaxHighlightSource(context.syntaxSource ?? content, context.invalidate);
+
+    scheduleCodeOutputSyntaxLoad({ path }, context.invalidate, content, current);
 
     const added = context.sourceLineCount ?? countContentLines(content);
     const boundedContent = boundedWriteContentPreview(

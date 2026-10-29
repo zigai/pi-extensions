@@ -1,3 +1,4 @@
+import { Text } from "@earendil-works/pi-tui";
 import { queryObjects } from "node:v8";
 import { setImmediate } from "node:timers/promises";
 import { describe, expect, expectTypeOf, it } from "vitest";
@@ -11,6 +12,7 @@ import { jsonValueParser, type JsonValue } from "../../src/json-value.ts";
 import { stringField } from "../../src/unknown-values.ts";
 import { createNativeBashFeature } from "../../src/tools/built-in/bash/preview.ts";
 import { renderWriteCallPreview } from "../../src/tools/built-in/write-preview.ts";
+import { createSyntaxComponent } from "../../src/rendering/syntax/component-owner.ts";
 import { disposeSyntaxHighlighting } from "../../src/rendering/syntax/highlighter.ts";
 import type { ThirdPartyToolRendererPlugin, ThirdPartyToolResult } from "../../src/tools/types.ts";
 import {
@@ -272,7 +274,7 @@ describe("tool execution patches", () => {
         },
     );
 
-    it("observes ready generic rows before renderer selection without replacing their renderer", () => {
+    it("observes incomplete generic rows without replacing their renderer", () => {
         const prototype = createPrototype();
         const observed: object[] = [];
         installBuiltInToolRendererPatch(
@@ -291,17 +293,17 @@ describe("tool execution patches", () => {
             argsComplete: false,
         };
         expect(prototype.hasRendererDefinition.call(instance)).toBe(false);
-        expect(observed).toEqual([]);
+        expect(observed).toEqual([instance]);
         instance.argsComplete = true;
         expect(prototype.hasRendererDefinition.call(instance)).toBe(false);
-        expect(observed).toEqual([instance]);
+        expect(observed).toEqual([instance, instance]);
         expect(
             prototype.getCallRenderer.call(instance)?.({}, plainTheme, renderContext).render(80),
         ).toEqual(["existing renderer"]);
 
         configureBuiltInToolRendererPatch(false, undefined, prototype);
         prototype.hasRendererDefinition.call(instance);
-        expect(observed).toHaveLength(2);
+        expect(observed).toHaveLength(3);
     });
 
     it.each([
@@ -396,6 +398,76 @@ describe("tool execution patches", () => {
 
         expect(prototype.getRenderShell.call(customInstance)).toBe("default");
     });
+
+    it.each(["built-in", "third-party"])(
+        "distinguishes live and historical resultless %s calls without completing execution",
+        (kind) => {
+            const prototype = createPrototype();
+            let streaming = true;
+            const received: Array<{ complete: boolean; partial: boolean; result: unknown }> = [];
+            const component = { render: () => ["call"], invalidate: noop };
+            if (kind === "built-in") {
+                installBuiltInToolRendererPatch(
+                    {
+                        isStreamingCall: () => streaming,
+                        renderCall: (_name, _args, _theme, context) => {
+                            received.push({
+                                complete: context.argsComplete,
+                                partial: context.isPartial,
+                                result: context.result,
+                            });
+                            return component;
+                        },
+                        renderResult: () => undefined,
+                    },
+                    prototype,
+                );
+            } else {
+                installThirdPartyToolRendererPatch(
+                    {
+                        isStreamingCall: () => streaming,
+                        renderers: [
+                            {
+                                name: "argument-state",
+                                matches: () => true,
+                                createRenderer: () => ({
+                                    renderCall: (_args, _theme, context) => {
+                                        received.push({
+                                            complete: context.argsComplete,
+                                            partial: context.isPartial,
+                                            result: context.result,
+                                        });
+                                        return component;
+                                    },
+                                    renderResult: () => component,
+                                }),
+                            },
+                        ],
+                    },
+                    prototype,
+                );
+            }
+            let toolName = "custom_tool";
+            if (kind === "built-in") toolName = "bash";
+            const instance = { toolName };
+            const context = {
+                ...renderContext,
+                argsComplete: false,
+                isPartial: true,
+                executionStarted: false,
+                state: {},
+                invalidate: noop,
+            };
+            const renderer = prototype.getCallRenderer.call(instance);
+            renderer?.({}, plainTheme, context);
+            streaming = false;
+            renderer?.({}, plainTheme, context);
+            expect(received).toEqual([
+                { complete: false, partial: true, result: undefined },
+                { complete: true, partial: true, result: undefined },
+            ]);
+        },
+    );
 
     it("passes persisted results to restored built-in call renderers", () => {
         const prototype = createPrototype();
@@ -1320,19 +1392,326 @@ describe("tool execution patches", () => {
         expect(updated?.render(80).join("\n")).toContain("second");
     });
 
+    it("preserves a delegated renderer owner through composed getter wrappers", () => {
+        const prototype = createPrototype();
+        let components = 0;
+        let resultRenders = 0;
+        installThirdPartyToolRendererPatch(
+            {
+                renderers: [
+                    {
+                        name: "delegated-read",
+                        matches: (name) => name === "read",
+                        createRenderer: () => ({
+                            renderCall: () => ({ render: () => [], invalidate: noop }),
+                            renderResult: (_result, _options, _theme, context) => {
+                                resultRenders += 1;
+
+                                return createSyntaxComponent(
+                                    context.lastComponent,
+                                    context.invalidate,
+                                    (_invalidate, previous) => {
+                                        if (previous !== undefined) return previous;
+
+                                        components += 1;
+
+                                        return {
+                                            render: () => ["retained delegated output"],
+                                            invalidate: noop,
+                                        };
+                                    },
+                                );
+                            },
+                        }),
+                    },
+                ],
+            },
+            prototype,
+        );
+
+        installBuiltInToolRendererPatch(
+            { renderCall: () => undefined, renderResult: () => undefined },
+            prototype,
+        );
+
+        const instance = { toolName: "read", toolDefinition: {} };
+        const result = { content: [] };
+        const context = { ...renderContext, args: {}, state: {}, invalidate: noop };
+        let previous: FakeComponent | undefined;
+
+        for (const expanded of [false, true, true]) {
+            previous = prototype.getResultRenderer.call(instance)?.(
+                result,
+                { expanded, isPartial: false },
+                plainTheme,
+                { ...context, expanded, lastComponent: previous },
+            );
+            expect(previous?.render(80)).toEqual(["retained delegated output"]);
+        }
+
+        expect(resultRenders).toBe(2);
+        expect(components).toBe(1);
+    });
+
+    it("keeps Glowup-owned output cached when an unused native renderer changes", () => {
+        const prototype = createPrototype();
+        prototype.getCallRenderer = () => () => ({ render: () => ["unused"], invalidate: noop });
+        prototype.getResultRenderer = () => () => ({ render: () => ["unused"], invalidate: noop });
+        let calls = 0;
+        let results = 0;
+        const component = { render: () => ["owned output"], invalidate: noop };
+        installBuiltInToolRendererPatch(
+            {
+                renderCall: () => {
+                    calls += 1;
+
+                    return component;
+                },
+                renderResult: () => {
+                    results += 1;
+
+                    return component;
+                },
+            },
+            prototype,
+        );
+
+        const instance = { toolName: "read", toolDefinition: {} };
+
+        const args = {};
+        const result = { content: [] };
+        const context = { ...renderContext, args, state: {}, invalidate: noop };
+
+        for (let repaint = 0; repaint < 3; repaint += 1) {
+            expect(
+                prototype.getCallRenderer.call(instance)?.(args, plainTheme, context).render(80),
+            ).toEqual(["owned output"]);
+
+            expect(
+                prototype.getResultRenderer
+                    .call(instance)?.(
+                        result,
+                        { expanded: false, isPartial: false },
+                        plainTheme,
+                        context,
+                    )
+                    .render(80),
+            ).toEqual(["owned output"]);
+        }
+
+        expect(calls).toBe(1);
+        expect(results).toBe(1);
+    });
+
+    it.each(["call", "result"] as const)(
+        "refreshes an unchanged completed %s when a native renderer becomes available",
+        (slot) => {
+            const prototype = createPrototype();
+            let available = false;
+            const component = { render: () => ["native available"], invalidate: noop };
+            const callRenderer: FakeCallRenderer = () => component;
+            const resultRenderer: FakeResultRenderer = () => component;
+            prototype.getCallRenderer = () => {
+                if (available) return callRenderer;
+                return undefined;
+            };
+            prototype.getResultRenderer = () => {
+                if (available) return resultRenderer;
+                return undefined;
+            };
+            installBuiltInToolRendererPatch(
+                { renderCall: () => undefined, renderResult: () => undefined },
+                prototype,
+            );
+            const instance = { toolName: "read", toolDefinition: {} };
+            const args = { path: "picture.png" };
+            const result = { content: [] };
+            const context = { ...renderContext, args, state: {}, invalidate: noop };
+            const render = () => {
+                if (slot === "call")
+                    return prototype.getCallRenderer.call(instance)?.(args, plainTheme, context);
+
+                return prototype.getResultRenderer.call(instance)?.(
+                    result,
+                    { expanded: false, isPartial: false },
+                    plainTheme,
+                    context,
+                );
+            };
+            expect(render()?.render(80)).toEqual([]);
+            available = true;
+            expect(render()?.render(80)).toEqual(["native available"]);
+            available = false;
+            expect(render()?.render(80)).toEqual([]);
+        },
+    );
+
+    it.each(["call", "result"] as const)(
+        "does not freeze a native %s when its renderer is replaced at the same arguments",
+        (slot) => {
+            const prototype = createPrototype();
+            const first = { render: () => ["first native"], invalidate: noop };
+            const second = { render: () => ["second native"], invalidate: noop };
+            let callRenderer: FakeCallRenderer = () => first;
+            let resultRenderer: FakeResultRenderer = () => first;
+            prototype.getCallRenderer = () => callRenderer;
+            prototype.getResultRenderer = () => resultRenderer;
+            installBuiltInToolRendererPatch(
+                { renderCall: () => undefined, renderResult: () => undefined },
+                prototype,
+            );
+            const instance = { toolName: "read", toolDefinition: {} };
+            const args = { path: "picture.png" };
+            const result = { content: [] };
+            const context = { ...renderContext, args, state: {}, invalidate: noop };
+            const render = () => {
+                if (slot === "call")
+                    return prototype.getCallRenderer.call(instance)?.(args, plainTheme, context);
+
+                return prototype.getResultRenderer.call(instance)?.(
+                    result,
+                    { expanded: false, isPartial: false },
+                    plainTheme,
+                    context,
+                );
+            };
+            expect(render()?.render(80)).toEqual(["first native"]);
+            callRenderer = () => second;
+            resultRenderer = () => second;
+            expect(render()?.render(80)).toEqual(["second native"]);
+        },
+    );
+
+    it.each([false, true])(
+        "keeps native component ownership after replacement with partial=%s",
+        (partial) => {
+            class NativeLabel {
+                private label = "";
+
+                setLabel(value: string): void {
+                    this.label = value;
+                }
+
+                render(): string[] {
+                    return [this.label];
+                }
+
+                invalidate(): void {}
+            }
+
+            const prototype = createPrototype();
+            const first = new Text("first", 0, 0);
+            let callRenderer: FakeCallRenderer = () => first;
+            let resultRenderer: FakeResultRenderer = () => first;
+            prototype.getCallRenderer = () => callRenderer;
+            prototype.getResultRenderer = () => resultRenderer;
+            installBuiltInToolRendererPatch(
+                { renderCall: () => undefined, renderResult: () => undefined },
+                prototype,
+            );
+            const instance = { toolName: "read", toolDefinition: {} };
+            const args = { path: "picture.png" };
+            const result = { content: [] };
+            const context = {
+                ...renderContext,
+                args,
+                argsComplete: !partial,
+                isPartial: partial,
+                state: {},
+                invalidate: noop,
+            };
+            const firstCall = prototype.getCallRenderer.call(instance)?.(args, plainTheme, context);
+            const firstResult = prototype.getResultRenderer.call(instance)?.(
+                result,
+                { expanded: false, isPartial: partial },
+                plainTheme,
+                context,
+            );
+            const previous: Array<unknown> = [];
+            const next = (lastComponent: FakeComponent | undefined) => {
+                previous.push(lastComponent);
+                const component = lastComponent ?? new NativeLabel();
+                if (!(component instanceof NativeLabel))
+                    throw new TypeError("Expected a native label");
+
+                component.setLabel("replacement");
+
+                return component;
+            };
+            callRenderer = (_args, _theme, ctx) => next(ctx.lastComponent);
+            resultRenderer = (_result, _options, _theme, ctx) => next(ctx.lastComponent);
+            const completedContext = {
+                ...context,
+                expanded: true,
+                argsComplete: true,
+                isPartial: false,
+            };
+            const call = prototype.getCallRenderer.call(instance)?.(args, plainTheme, {
+                ...completedContext,
+                lastComponent: firstCall,
+            });
+            const renderedResult = prototype.getResultRenderer.call(instance)?.(
+                result,
+                { expanded: true, isPartial: false },
+                plainTheme,
+                { ...completedContext, lastComponent: firstResult },
+            );
+            expect(call?.render(80)).toEqual(["replacement"]);
+            expect(renderedResult?.render(80)).toEqual(["replacement"]);
+            expect(previous).toEqual([undefined, undefined]);
+        },
+    );
+
+    it("refreshes completed third-party output when its tool definition changes", () => {
+        const prototype = createPrototype();
+        installThirdPartyToolRendererPatch(undefined, prototype);
+        const instance = { toolName: "inventory", toolDefinition: { label: "First inventory" } };
+        const args = { query: "items" };
+        const context = { ...renderContext, args, state: {}, invalidate: noop };
+        const render = () =>
+            prototype.getCallRenderer
+                .call(instance)?.(args, plainTheme, context)
+                .render(80)
+                .join("\n");
+        expect(render()).toContain("First inventory");
+        instance.toolDefinition = { label: "Second inventory" };
+        expect(render()).toContain("Second inventory");
+    });
+
     it.each([false, true])("preserves original renderer reuse with partial=%s", (isPartial) => {
         const prototype = createPrototype();
-        const previous = { render: () => ["reused original"], invalidate: noop };
-        prototype.getCallRenderer = () => (_args, _theme, context) =>
-            context.lastComponent ?? previous;
-        prototype.getResultRenderer = () => (_result, _options, _theme, context) =>
-            context.lastComponent ?? previous;
+        const calls: Array<unknown> = [];
+        const results: Array<unknown> = [];
+        const originalCall: FakeCallRenderer = (_args, _theme, context) => {
+            calls.push(context.lastComponent);
+            const component = context.lastComponent ?? new Text("", 0, 0);
+            if (!(component instanceof Text)) throw new Error("Expected native text");
+
+            component.setText("native call");
+
+            return component;
+        };
+
+        const originalResult: FakeResultRenderer = (_result, options, _theme, context) => {
+            results.push(context.lastComponent);
+            const component = context.lastComponent ?? new Text("", 0, 0);
+            if (!(component instanceof Text)) throw new Error("Expected native text");
+
+            let label = "native result";
+            if (options.expanded) label = "expanded result";
+            component.setText(label);
+
+            return component;
+        };
+
+        prototype.getCallRenderer = () => originalCall;
+        prototype.getResultRenderer = () => originalResult;
         installBuiltInToolRendererPatch(
             { renderCall: () => undefined, renderResult: () => undefined },
             prototype,
         );
         const instance: FakeToolExecutionInstance = {
-            toolName: "bash",
+            toolName: "read",
             builtInToolDefinition: {},
         };
         const context = {
@@ -1341,19 +1720,94 @@ describe("tool execution patches", () => {
             cwd: "/workspace",
             invalidate: noop,
             state: {},
-            lastComponent: { render: () => ["previous original"], invalidate: noop },
         };
 
-        const callComponent = prototype.getCallRenderer.call(instance)?.({}, plainTheme, context);
-        const resultComponent = prototype.getResultRenderer.call(instance)?.(
-            { content: [] },
+        const args = {};
+        const result = { content: [] };
+
+        const firstCall = prototype.getCallRenderer.call(instance)?.(args, plainTheme, context);
+        const firstResult = prototype.getResultRenderer.call(instance)?.(
+            result,
             { expanded: false, isPartial },
             plainTheme,
             context,
         );
+        const callComponent = prototype.getCallRenderer.call(instance)?.(args, plainTheme, {
+            ...context,
+            expanded: true,
+            lastComponent: firstCall,
+        });
+        const resultComponent = prototype.getResultRenderer.call(instance)?.(
+            result,
+            { expanded: true, isPartial },
+            plainTheme,
+            { ...context, expanded: true, lastComponent: firstResult },
+        );
 
-        expect(callComponent?.render(80)).toEqual(["previous original"]);
-        expect(resultComponent?.render(80)).toEqual(["previous original"]);
+        expect(callComponent?.render(80).map((line) => line.trimEnd())).toEqual(["native call"]);
+        expect(resultComponent?.render(80).map((line) => line.trimEnd())).toEqual([
+            "expanded result",
+        ]);
+
+        expect(calls[0]).toBeUndefined();
+        expect(results[0]).toBeUndefined();
+        expect(calls[1]).toBeInstanceOf(Text);
+        expect(results[1]).toBeInstanceOf(Text);
+        expect(calls[1]).not.toBe(results[1]);
+    });
+
+    it("isolates native fallbacks from custom components and other rows", () => {
+        const prototype = createPrototype();
+        const previous: Array<unknown> = [];
+        const originalResult: FakeResultRenderer = (_result, _options, _theme, context) => {
+            previous.push(context.lastComponent);
+            const component = context.lastComponent ?? new Text("", 0, 0);
+            if (!(component instanceof Text)) throw new Error("Expected native text");
+
+            component.setText("image note");
+
+            return component;
+        };
+        prototype.getResultRenderer = () => originalResult;
+        let useFallback = false;
+        installBuiltInToolRendererPatch(
+            {
+                renderCall: () => undefined,
+                renderResult: () => {
+                    if (useFallback) return undefined;
+
+                    return { render: () => ["custom text result"], invalidate: noop };
+                },
+            },
+            prototype,
+        );
+        const instance = { toolName: "read", builtInToolDefinition: {} };
+        const context = { ...renderContext, cwd: "/workspace", invalidate: noop, state: {} };
+        const render = (row: FakeToolExecutionInstance, lastComponent?: FakeComponent) =>
+            prototype.getResultRenderer.call(row)?.(
+                { content: [] },
+                { expanded: true, isPartial: false },
+                plainTheme,
+                { ...context, lastComponent },
+            );
+        const custom = render(instance);
+        useFallback = true;
+        const native = render(instance, custom);
+        expect(native?.render(80).map((line) => line.trimEnd())).toEqual(["image note"]);
+        useFallback = false;
+        const customAgain = render(instance, native);
+        useFallback = true;
+        expect(
+            render(instance, customAgain)
+                ?.render(80)
+                .map((line) => line.trimEnd()),
+        ).toEqual(["image note"]);
+
+        expect(previous[0]).toBeUndefined();
+        expect(previous[1]).toBeInstanceOf(Text);
+
+        render({ toolName: "read", builtInToolDefinition: {} }, native);
+        expect(previous[2]).toBeUndefined();
     });
 
     it("does not cache streaming rows", () => {

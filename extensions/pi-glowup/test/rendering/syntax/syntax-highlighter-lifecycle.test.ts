@@ -2,11 +2,12 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
+import { Worker } from "node:worker_threads";
 import type { Component } from "@earendil-works/pi-tui";
 import type { HighlighterGeneric } from "shiki";
 import Type from "typebox";
 import { Value } from "typebox/value";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderScriptCall } from "../../../src/tools/built-in/bash/script-renderer.ts";
 import { renderBashCommandCall } from "../../../src/tools/built-in/bash/renderer.ts";
 import { renderGlowupOutput } from "../../../src/rendering/output.ts";
@@ -97,6 +98,319 @@ async function waitForCondition(condition: () => boolean): Promise<void> {
 describe("syntax highlighter lifecycle", () => {
     afterEach(async () => {
         await disposeSyntaxHighlighting();
+    });
+
+    it("reports incomplete shutdown and prevents replacement after unconfirmed cleanup", async () => {
+        vi.resetModules();
+        const isolated = await import("../../../src/rendering/syntax/highlighter.ts");
+        let markRunning: () => void = () => {};
+        const running = new Promise<void>((resolve) => {
+            markRunning = resolve;
+        });
+        let release: () => void = () => {};
+        let stopped: Promise<number> | undefined;
+        let workers = 0;
+        const warnings: string[] = [];
+        await isolated.initializeSyntaxHighlighting(
+            {},
+            {
+                preloadLanguages: ["typescript"],
+                reportWarning: (message) => {
+                    warnings.push(message);
+                },
+                createWorker: () => {
+                    workers += 1;
+                    const current = new Worker(
+                        `const { parentPort } = require("node:worker_threads");
+                        parentPort.on("message", (request) => {
+                            if (request.type === "initialize") parentPort.postMessage({ type: "ready" });
+                            else parentPort.postMessage({ id: -1, lines: [] });
+                        });`,
+                        { eval: true },
+                    );
+                    current.on("message", (response: { id?: number }) => {
+                        if (response.id === -1) markRunning();
+                    });
+                    const terminate = current.terminate.bind(current);
+                    current.terminate = async () =>
+                        new Promise<number>((resolve, reject) => {
+                            release = () => {
+                                stopped = terminate();
+                                void stopped.then(resolve, reject);
+                            };
+                        });
+
+                    return current;
+                },
+            },
+        );
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+        try {
+            const pending = isolated.highlightSyntaxCodeAsync("const first = 1;", "typescript");
+            await running;
+            const shutdown = expect(isolated.disposeSyntaxHighlighting()).rejects.toThrow(
+                /cleanup/i,
+            );
+            vi.advanceTimersToNextTimer();
+            await shutdown;
+            expect(await pending).toEqual(["const first = 1;"]);
+            expect(warnings).toContainEqual(expect.stringContaining("cleanup did not complete"));
+            await isolated.initializeSyntaxHighlighting(
+                {},
+                {
+                    preloadLanguages: ["typescript"],
+                    createWorker: () => {
+                        workers += 1;
+                        return new Worker("", { eval: true });
+                    },
+                },
+            );
+            expect(
+                await isolated.highlightSyntaxCodeAsync("const later = 2;", "typescript"),
+            ).toEqual(["const later = 2;"]);
+
+            expect(workers).toBe(1);
+            await expect(isolated.disposeSyntaxHighlighting()).rejects.toThrow(/cleanup/i);
+        } finally {
+            release();
+
+            if (stopped !== undefined) await stopped;
+            await Promise.allSettled([isolated.disposeSyntaxHighlighting()]);
+            vi.useRealTimers();
+        }
+    });
+
+    it.each([initializeSyntaxHighlighting, refreshSyntaxHighlighting])(
+        "colors every direct request made before initialization with %s",
+        async (initialize) => {
+            const sources = ['print("first")', 'print("second")'];
+            const rendered: string[][] = [];
+            const redraws = sources.map((source, index) => () => {
+                rendered[index] = highlightSyntaxCode(source, "python", {
+                    invalidate: redraws[index],
+                });
+            });
+            for (const redraw of redraws) redraw();
+            expect(rendered).toEqual(sources.map((source) => [source]));
+
+            await initialize({}, { preloadLanguages: ["python"] });
+            await settleSyntaxHighlights();
+
+            expect(rendered.every((lines) => lines.join("\n").includes("\u001b["))).toBe(true);
+            expect(rendered.map((lines) => lines.map(stripVTControlCharacters).join("\n"))).toEqual(
+                sources,
+            );
+        },
+    );
+
+    it("loads a direct request's missing language once and colors every waiting owner", async () => {
+        let releaseLoad: (() => void) | undefined;
+        let loads = 0;
+
+        const blocked = new Promise<void>((resolve) => {
+            releaseLoad = resolve;
+        });
+        await initializeSyntaxHighlighting(
+            {},
+            {
+                createHighlighter: async () =>
+                    fakeHighlighter({
+                        loadedLanguages: ["markdown"],
+                        async loadLanguage() {
+                            loads += 1;
+                            await blocked;
+                        },
+                    }),
+            },
+        );
+        const invalidations = [0, 0];
+        const redraws = invalidations.map((_count, index) => () => {
+            invalidations[index] = (invalidations[index] ?? 0) + 1;
+        });
+        highlightSyntaxCode('const first = "one";', "javascript", { invalidate: redraws[0] });
+        await highlightSyntaxCodeAsync('const second = "two";', "javascript", {
+            invalidate: redraws[1],
+        });
+        expect(loads).toBe(1);
+        releaseLoad?.();
+        await settleSyntaxHighlights();
+        expect(invalidations).toEqual([1, 1]);
+
+        for (const [index, code] of ['const first = "one";', 'const second = "two";'].entries())
+            expect(
+                highlightSyntaxCode(code, "javascript", { invalidate: redraws[index] }).join("\n"),
+            ).toContain("\u001b[");
+    });
+
+    it("rejects superseded and aborted readiness requests without losing current owners", async () => {
+        let obsoleteInvalidations = 0;
+        const obsolete = () => {
+            obsoleteInvalidations += 1;
+        };
+
+        const controller = new AbortController();
+        let abortedInvalidations = 0;
+        highlightSyntaxCode('print("obsolete")', "python", { invalidate: obsolete });
+        observeSyntaxHighlightSource("replacement", obsolete);
+        highlightSyntaxCode('print("aborted")', "python", {
+            signal: controller.signal,
+            invalidate: () => {
+                abortedInvalidations += 1;
+            },
+        });
+
+        controller.abort();
+        let currentInvalidations = 0;
+        highlightSyntaxCode('print("current")', "python", {
+            invalidate: () => {
+                currentInvalidations += 1;
+            },
+        });
+        await refreshSyntaxHighlighting({}, { preloadLanguages: [] });
+        await settleSyntaxHighlights();
+        expect(obsoleteInvalidations).toBe(0);
+        expect(abortedInvalidations).toBe(0);
+        expect(currentInvalidations).toBe(1);
+    });
+
+    it("drops disposed readiness requests before a new initialization", async () => {
+        let invalidations = 0;
+        highlightSyntaxCode('print("old")', "python", {
+            invalidate: () => {
+                invalidations += 1;
+            },
+        });
+        await disposeSyntaxHighlighting();
+        await initializeSyntaxHighlighting({}, { preloadLanguages: ["python"] });
+        await settleSyntaxHighlights();
+        expect(invalidations).toBe(0);
+    });
+
+    it("does not let a broken readiness invalidation prevent other previews from coloring", async () => {
+        scheduleCodeOutputSyntaxLoad({ language: "python" }, () => {
+            throw new Error("invalid component");
+        });
+        let invalidations = 0;
+        highlightSyntaxCode('print("current")', "python", {
+            invalidate: () => {
+                invalidations += 1;
+            },
+        });
+        await initializeSyntaxHighlighting({}, { preloadLanguages: ["python"] });
+        await settleSyntaxHighlights();
+        expect(invalidations).toBe(1);
+    });
+
+    it.each(["python", "javascript"])(
+        "colors a completed standalone %s preview initially rendered before startup",
+        async (language) => {
+            let code = 'console.log("ready");';
+            if (language === "python") code = 'print("ready")';
+
+            let invalidations = 0;
+            const component = renderScriptCall(
+                plainTheme,
+                { label: "Code", language, code },
+                {
+                    state: "success",
+                    expanded: false,
+                    invalidate: () => {
+                        invalidations += 1;
+                    },
+                },
+            );
+            expect(codeText(component.render(120))).not.toContain("\u001b[");
+            await refreshSyntaxHighlighting({}, { preloadLanguages: [] });
+            await settleSyntaxHighlights();
+            expect(invalidations).toBeGreaterThan(0);
+            const colored = codeText(component.render(120));
+            expect(colored).toContain("\u001b[");
+            expect(stripVTControlCharacters(colored)).toContain(code);
+        },
+    );
+
+    it.each([initializeSyntaxHighlighting, refreshSyntaxHighlighting])(
+        "does not revive readiness work explicitly cleared before initialization with %s",
+        async (initialize) => {
+            let invalidations = 0;
+            const invalidate = () => {
+                invalidations += 1;
+            };
+
+            const source = 'print("owned")';
+            highlightSyntaxCode(source, "python", { invalidate });
+            clearSyntaxHighlightCache();
+            await initialize({}, { preloadLanguages: ["python"] });
+            await settleSyntaxHighlights();
+            expect(invalidations).toBe(0);
+            expect(syntaxHighlightCacheStats()).toEqual({ entries: 0, bytes: 0 });
+
+            highlightSyntaxCode(source, "python", { invalidate });
+            await settleSyntaxHighlights();
+            expect(invalidations).toBe(1);
+        },
+    );
+
+    it("does not revive readiness work cleared while a language is loading", async () => {
+        await initializeSyntaxHighlighting({}, { preloadLanguages: [] });
+        let invalidations = 0;
+        const invalidate = () => {
+            invalidations += 1;
+        };
+
+        const source = 'print("owned")';
+        highlightSyntaxCode(source, "python", { invalidate });
+        clearSyntaxHighlightCache();
+        await settleSyntaxHighlights();
+        expect(invalidations).toBe(0);
+        expect(syntaxHighlightCacheStats()).toEqual({ entries: 0, bytes: 0 });
+
+        highlightSyntaxCode(source, "python", { invalidate });
+        await settleSyntaxHighlights();
+        expect(invalidations).toBe(1);
+    });
+
+    it("does not resubmit old capacity work when replacement preserves the source owner", async () => {
+        await initializeSyntaxHighlighting({}, { preloadLanguages: ["python"] });
+        const replacement = await fakeHighlighter({ loadedLanguages: ["python"] });
+        let invalidations = 0;
+        const invalidate = () => {
+            invalidations += 1;
+        };
+
+        const source = 'print("owned")';
+
+        await reinitializeSyntaxHighlighting(
+            {},
+            {
+                preloadLanguages: ["python"],
+                createHighlighter: async () => {
+                    const capacity = new AbortController();
+                    highlightSyntaxCode('print("accepted")', "python", { invalidate });
+                    highlightSyntaxCode('print("cancelled")', "python", {
+                        signal: capacity.signal,
+                    });
+
+                    for (let index = 0; index < 98; index += 1)
+                        highlightSyntaxCode(`print("occupied_${index}")`, "python");
+
+                    highlightSyntaxCode(source, "python", { invalidate });
+                    capacity.abort();
+
+                    // Deliver the retry while its owner's accepted request still occupies a slot.
+                    await Promise.resolve();
+
+                    return replacement;
+                },
+            },
+        );
+        await settleSyntaxHighlights();
+        expect(invalidations).toBe(0);
+        expect(syntaxHighlightCacheStats()).toEqual({ entries: 0, bytes: 0 });
+
+        highlightSyntaxCode(source, "python", { invalidate });
+        await settleSyntaxHighlights();
+        expect(invalidations).toBe(1);
     });
 
     it.each(["preserve", "always"] as const)(
@@ -190,7 +504,7 @@ describe("syntax highlighter lifecycle", () => {
         current.render(100);
         await settleSyntaxHighlights();
 
-        expect(invalidations).toBe(2);
+        expect(invalidations).toBe(3);
         current.invalidate();
         const lines = current.render(100);
         expect(lines[0]).not.toBe(stripVTControlCharacters(lines[0] ?? ""));

@@ -1,3 +1,4 @@
+import { setImmediate } from "node:timers/promises";
 import { createStreamingPresentation } from "../rendering/streaming/content-presentation.ts";
 import {
     presentGlowupContent,
@@ -110,9 +111,11 @@ function thirdPartyToolRenderingOptions(
     config: GlowupConfig,
     codemodePreview: NonNullable<ThirdPartyToolRenderingOptions["codemodePreview"]>,
     streamCode: CodePreview,
+    isStreamingCall: (toolCallId: string) => boolean,
 ): ThirdPartyToolRenderingOptions {
     const preservedFromEnv = process.env[PRESERVE_TOOLS_ENV];
     const options: ThirdPartyToolRenderingOptions = {
+        isStreamingCall,
         labelMode: config.toolLabels.mode,
         mutationSettings: config.mutations,
         codemodePreview,
@@ -172,6 +175,15 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
     }));
     let streamingPolicy: { dispose(): void } | undefined;
     const streamCode: CodePreview = (input) => presentGlowupContent({ ...input, kind: "code" });
+    const streamingToolCallIds = new Set<string>();
+    const isStreamingCall = (toolCallId: string): boolean => streamingToolCallIds.has(toolCallId);
+    const finishToolArguments = (
+        ctx: ExtensionContext,
+        completed = [...streamingToolCallIds],
+    ): void => {
+        for (const toolCallId of completed) streamingToolCallIds.delete(toolCallId);
+        for (const toolCallId of completed) refreshToolRows(ctx, toolCallId);
+    };
 
     const edit = createNativeEditFeature();
     const bash = createNativeBashFeature(
@@ -203,7 +215,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
 
     let restoreAbort: AbortController | undefined;
     let stopObservingRendering: (() => void) | undefined;
-    const clearSessionState = (): void => {
+    const clearSessionState = async (): Promise<void> => {
         assistantStreaming?.dispose();
         assistantStreaming = undefined;
         streamingPolicy?.dispose();
@@ -215,6 +227,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         stopObservingRendering = undefined;
         clearProtocolRenderingState();
         clearToolRows();
+        streamingToolCallIds.clear();
         restoreAbort?.abort();
         restoreAbort = undefined;
         edit.clear();
@@ -224,6 +237,8 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         exploration.clear();
         clearQueuedDiffHighlights();
         resetRenderDiagnostics();
+
+        return bash.settled();
     };
 
     const reportWarning = (message: string): void => reportExtensionDiagnostic(message);
@@ -285,7 +300,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         configureThirdPartyToolRendererPatch(
             true,
             config.patches.thirdPartyToolRenderers
-                ? thirdPartyToolRenderingOptions(config, codemode, streamCode)
+                ? thirdPartyToolRenderingOptions(config, codemode, streamCode, isStreamingCall)
                 : { enabled: false },
         );
 
@@ -305,12 +320,27 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
             mutationSettings: config.mutations,
             recordRender: recordBuiltInRender,
         });
-        const renderingOptions = thirdPartyToolRenderingOptions(config, codemode, streamCode);
+        const renderingOptions = thirdPartyToolRenderingOptions(
+            config,
+            codemode,
+            streamCode,
+            isStreamingCall,
+        );
 
         configureBuiltInToolRendererPatch(true, {
+            isStreamingCall,
             observeRow: (row, toolCallId, toolName) => {
                 observeToolRow(row);
-                explorationGroups.observeRow(row, toolCallId, isExplorationToolName(toolName));
+                // Boundaries must follow completed argument order, not constructor order.
+                // Still retain incomplete rows so message/turn end can release held previews.
+                if (
+                    row.argsComplete === true ||
+                    row.executionStarted === true ||
+                    row.result !== undefined ||
+                    !isStreamingCall(toolCallId)
+                ) {
+                    explorationGroups.observeRow(row, toolCallId, isExplorationToolName(toolName));
+                }
             },
             renderCall(toolName, args, theme, context) {
                 const renderer = selectedGlowupPresentation().createRenderer(
@@ -410,6 +440,34 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
     extensionLoadedRecorded = config.debugLog.enabled;
 
     installExplorationSession(pi, exploration);
+
+    // Extension message events arrive before Pi creates/updates their tool rows.
+    pi.on("message_start", (event, ctx) => {
+        if (event.message.role !== "assistant") return;
+
+        finishToolArguments(ctx);
+        for (const block of event.message.content) {
+            if (block.type === "toolCall") streamingToolCallIds.add(block.id);
+        }
+    });
+    pi.on("message_update", (event) => {
+        if (event.message.role !== "assistant") return;
+
+        for (const block of event.message.content) {
+            if (block.type === "toolCall") streamingToolCallIds.add(block.id);
+        }
+    });
+    pi.on("message_end", (event, ctx) => {
+        if (event.message.role === "assistant") finishToolArguments(ctx);
+    });
+    pi.on("agent_end", async (_event, ctx) => {
+        const generation = sessionGeneration;
+        const completed = [...streamingToolCallIds];
+        // Final publication may still be queued from the last argument render.
+        // Rebuild after that microtask batch, not inside its pending completion.
+        await setImmediate();
+        if (generation === sessionGeneration) finishToolArguments(ctx, completed);
+    });
 
     // Only mutation calls wait for asynchronous preimage capture.
     pi.on("tool_call", (event, ctx): Promise<void> | undefined => {
@@ -599,7 +657,10 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
             ...diagnosticSnapshot(),
         }));
 
-        clearSessionState();
+        await clearSessionState();
+
+        if (currentGeneration !== sessionGeneration) return;
+
         await codeStreams.dispose();
 
         if (currentGeneration !== sessionGeneration) return;
@@ -669,6 +730,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
 
     pi.on("session_tree", (_event, ctx) => {
         codeStreams.clear();
+        finishToolArguments(ctx);
         restoreAbort?.abort();
         restoreBashPreviews(ctx);
     });
@@ -682,7 +744,8 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         debugLogger.record("turn_start", diagnosticSnapshot);
     });
 
-    pi.on("turn_end", () => {
+    pi.on("turn_end", (_event, ctx) => {
+        finishToolArguments(ctx);
         debugLogger.record("turn_end", diagnosticSnapshot);
     });
 
@@ -694,7 +757,8 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
             ...diagnosticSnapshot(),
         }));
 
-        clearSessionState();
+        const cleanup = clearSessionState();
+
         syntax.cancel();
         configureAssistantSeparatorPatch(false);
         configureWorkingWidgetSpacingPatch(false);
@@ -702,6 +766,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         configureMarkdownSyntaxPatch(false);
         configureBuiltInToolRendererPatch(false);
         configureThirdPartyToolRendererPatch(false);
+        await cleanup;
         await syntax.settle();
         await assistantActivation;
         await codeStreams.dispose();

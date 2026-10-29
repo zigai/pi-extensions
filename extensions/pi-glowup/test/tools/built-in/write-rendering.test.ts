@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { queryObjects } from "node:v8";
 import {
+    configureRenderDiagnostics,
+    diagnosticCodeHash,
+} from "../../../src/diagnostics/render-events.ts";
+import type { DebugLogFields } from "../../../src/diagnostics/logger.ts";
+import {
     initializeSyntaxHighlighting,
     settleSyntaxHighlights,
     disposeSyntaxHighlighting,
@@ -49,6 +54,89 @@ const defaultAppearance = {
 
 describe("write rendering", () => {
     beforeEach(() => configureRenderingAppearance(defaultAppearance));
+
+    it("keeps a write source revision stable when its formatted display changes width", async () => {
+        const entries: Array<{ event: string; fields: DebugLogFields }> = [];
+        const source = "const value=1;";
+        const wide = "const value = 1;";
+        const invalidate = () => {};
+        try {
+            await initializeSyntaxHighlighting({}, { preloadLanguages: ["typescript"] });
+            configureRenderDiagnostics((event, fields) => {
+                entries.push({ event, fields: fields() });
+            });
+            const component = renderWriteCallPreview(
+                { path: "sample.ts", content: source },
+                plainTheme,
+                {
+                    toolCallId: "write-source",
+                    isPartial: false,
+                    argsComplete: true,
+                    isError: false,
+                    expanded: false,
+                    invalidate,
+                    streamCode: ({ targetWidth }) => {
+                        if (targetWidth !== undefined && targetWidth > 80) return wide;
+                        return source;
+                    },
+                },
+            );
+            component.render(120);
+            component.render(60);
+            await settleSyntaxHighlights();
+            const starts = entries.filter(
+                ({ event, fields }) => event === "syntax_request" && fields.state === "requested",
+            );
+            const first = starts.find(({ fields }) => fields.codeHash === diagnosticCodeHash(wide));
+            const sameOwner = starts.filter(
+                ({ fields }) => fields.ownerId === first?.fields.ownerId,
+            );
+            expect(sameOwner.map(({ fields }) => fields.revision)).toEqual([1, 1]);
+            expect(sameOwner.map(({ fields }) => fields.codeHash)).toEqual([
+                diagnosticCodeHash(wide),
+                diagnosticCodeHash(source),
+            ]);
+        } finally {
+            configureRenderDiagnostics(undefined);
+            await disposeSyntaxHighlighting();
+        }
+    });
+
+    it("highlights the complete large write source behind a collapsed streamed preview", async () => {
+        const entries: Array<{ event: string; fields: DebugLogFields }> = [];
+        const source = `const visible = 1;\n${"const row = 2;\n".repeat(10)}/* ${"x".repeat(45 * 1024)} */`;
+        try {
+            await initializeSyntaxHighlighting({}, { preloadLanguages: ["typescript"] });
+            configureRenderDiagnostics((event, fields) => {
+                entries.push({ event, fields: fields() });
+            });
+            const component = renderWriteCallPreview(
+                { path: "sample.ts", content: source },
+                plainTheme,
+                {
+                    toolCallId: "large-write",
+                    isPartial: false,
+                    argsComplete: true,
+                    isError: false,
+                    expanded: false,
+                    invalidate: () => {},
+                    streamCode: ({ source: input }) => input.split("\n").slice(0, 8).join("\n"),
+                },
+            );
+            component.render(100);
+            await settleSyntaxHighlights();
+            const terminals = entries.filter(
+                ({ event, fields }) =>
+                    event === "syntax_request" &&
+                    fields.codeHash === diagnosticCodeHash(source) &&
+                    fields.terminal === true,
+            );
+            expect(terminals.map(({ fields }) => fields.state)).toEqual(["completed"]);
+        } finally {
+            configureRenderDiagnostics(undefined);
+            await disposeSyntaxHighlighting();
+        }
+    });
 
     it("releases old components while statement-mode write previews remain live", () => {
         class ObsoletePreview implements Component {

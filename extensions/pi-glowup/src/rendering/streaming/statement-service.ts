@@ -1,7 +1,8 @@
 import { Worker } from "node:worker_threads";
 import { reportExtensionDiagnostic } from "@zigai/pi-extension-internals";
 import { MAX_SCRIPT_PREVIEW_ENTRIES } from "../../tools/built-in/bash/preview-store.ts";
-import type { StatementRequest, StatementResponse } from "./statement-worker.ts";
+import type { StatementResponse, WorkerRequest, WorkerResponse } from "./statement-worker.ts";
+import type { EmbeddedProgram } from "../../tools/built-in/bash/embedded-programs.ts";
 import { recordRenderError } from "../../diagnostics/render-events.ts";
 
 declare global {
@@ -11,9 +12,9 @@ declare global {
 }
 
 type Job = {
-    readonly request: StatementRequest;
+    readonly request: WorkerRequest;
     readonly signal: AbortSignal;
-    readonly resolve: (response: StatementResponse | undefined) => void;
+    readonly resolve: (response: WorkerResponse | undefined) => void;
     readonly cancel: () => void;
 };
 
@@ -27,7 +28,7 @@ export function createStatementService() {
     let failed = false;
     let stopping: Promise<number> | undefined;
 
-    function finish(job: Job, response: StatementResponse | undefined): void {
+    function finish(job: Job, response: WorkerResponse | undefined): void {
         job.signal.removeEventListener("abort", job.cancel);
         job.resolve(response);
     }
@@ -83,7 +84,7 @@ export function createStatementService() {
                     if (worker === current) fail();
                 });
 
-                current.on("message", (response: StatementResponse) => {
+                current.on("message", (response: WorkerResponse) => {
                     if (worker !== current || active?.request.id !== response.id) return;
 
                     const completed = active;
@@ -127,13 +128,52 @@ export function createStatementService() {
                 const job: Job = {
                     request: { id: ++nextId, source, language, complete },
                     signal,
-                    resolve,
+                    resolve: (response) => {
+                        if (response === undefined || !("kind" in response)) resolve(response);
+                        else resolve(undefined);
+                    },
                     cancel: () => {
                         const index = queue.indexOf(job);
                         if (index >= 0) queue.splice(index, 1);
 
                         // Active parsing cannot be interrupted, but the caller need not wait
                         // for it and its response cannot publish into a newer generation.
+                        finish(job, undefined);
+                    },
+                };
+
+                signal.addEventListener("abort", job.cancel, { once: true });
+                queue.push(job);
+                dispatch();
+            });
+        },
+        async extract(source: string, signal: AbortSignal): Promise<EmbeddedProgram[] | undefined> {
+            if (disposed || failed || signal.aborted) return undefined;
+            return new Promise((resolve) => {
+                const job: Job = {
+                    request: { id: ++nextId, kind: "embedded", source },
+                    signal,
+                    resolve: (response) => {
+                        if (response !== undefined && "kind" in response) {
+                            resolve(response.programs);
+                        } else {
+                            if (response !== undefined && "error" in response) {
+                                recordRenderError(
+                                    "bash.embedded-extraction",
+                                    new Error(response.error),
+                                );
+
+                                reportExtensionDiagnostic(
+                                    "[pi-glowup] Embedded Bash program extraction failed.",
+                                );
+                            }
+
+                            resolve(undefined);
+                        }
+                    },
+                    cancel: () => {
+                        const index = queue.indexOf(job);
+                        if (index >= 0) queue.splice(index, 1);
                         finish(job, undefined);
                     },
                 };

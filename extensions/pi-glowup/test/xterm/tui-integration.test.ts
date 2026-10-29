@@ -32,6 +32,7 @@ import { getGlowupGlobalConfigPath } from "../../src/config/load.ts";
 import { buildPierreDiffPayload } from "../../src/rendering/diff/payload.ts";
 import {
     initializeSyntaxHighlighting,
+    highlightSyntaxCode,
     loadSyntaxLanguageIfReady,
     onSyntaxHighlightComplete,
     settleSyntaxHighlights,
@@ -506,7 +507,7 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
             tool.updateResult({ content: [], isError: false });
             tool.updateArgs({ command: command(source) });
             const initial = tool.render(100).join("\n");
-            expect(initial).toContain(firstLine);
+            expect(stripVTControlCharacters(initial)).toContain(firstLine);
             expect(stripVTControlCharacters(initial)).toContain(header);
 
             let completions = 0;
@@ -584,6 +585,11 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
         tool.setArgsComplete();
         tool.updateResult({ content: [], isError: false });
         tool.render(100);
+        await vi.waitFor(() => {
+            tool.invalidate();
+            expect(stripVTControlCharacters(tool.render(100).join("\n"))).toContain(firstLine);
+        });
+
         // Settle the real statement worker separately from the real syntax worker.
         await presentGlowupSnapshot({
             key: "xterm:statement-worker-barrier",
@@ -610,6 +616,7 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
             activeTui.addChild(new LinesComponent(["AFTER_STATEMENT_SYNTAX"]));
             activeTui.start();
             await pendingTerminal.settle();
+
             for (let repaint = 0; repaint < 3; repaint += 1) {
                 tool.invalidate();
                 expect(tool.render(100)).toEqual(settled);
@@ -620,6 +627,7 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
                     codeForegrounds(pendingTerminal.requireRowContaining(firstLine), firstLine)
                         .size,
                 ).toBeGreaterThan(1);
+
                 expect(completions).not.toHaveBeenCalled();
             }
 
@@ -641,6 +649,7 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
         const command = (source: string) => `python - <<'PY'\n${source}\nPY`;
         const pendingTerminal = new VirtualTerminal(100, 24);
         const activeTui = createTui(pendingTerminal);
+        await extension?.startAssistantToolCall("bash", "streamed-native-syntax");
         const tool = new ToolExecutionComponent(
             "bash",
             "streamed-native-syntax",
@@ -652,7 +661,14 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
         );
         const initialSource = `${firstLine}\nprint(streamed_native_marker)`;
         tool.updateArgs({ command: command(initialSource) });
+        await vi.waitFor(() => {
+            tool.invalidate();
+            const text = stripVTControlCharacters(tool.render(100).join("\n"));
+            expect(text).toContain(firstLine);
+            expect(text).not.toMatch(/\n\s*PY\s*$/u);
+        });
         await settleSyntaxHighlights();
+        tool.invalidate();
         const initialRow = tool
             .render(100)
             .find((line) => stripVTControlCharacters(line).includes(firstLine));
@@ -696,7 +712,106 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
         pendingTerminal.assertRowsFitWidth();
     });
 
-    it("renders independently formatted Python try suites through completion, expansion and resize", async () => {
+    it.each(["stationary", "measured"])(
+        "recovers completed formatted Python colors at the same narrow width (%s)",
+        async (driving) => {
+            await installExtension({
+                streaming: { prose: "paragraph", code: "statement" },
+                scriptPreview: {
+                    formatters: {
+                        python: {
+                            kind: "command",
+                            command: [
+                                process.execPath,
+                                "-e",
+                                "let source='';process.stdin.on('data',chunk=>source+=chunk);process.stdin.on('end',()=>process.stdout.write(Number(process.argv[1])<100?source.replace(/(replacements = \\{)(.*)(\\})/,(_all,head,body,tail)=>head+'\\n    '+body.replaceAll(', ',',\\n    ')+'\\n'+tail):source));",
+                                "{width}",
+                            ],
+                        },
+                    },
+                },
+            });
+            await initializeSyntaxHighlighting(process.env, {
+                preloadLanguages: ["bash", "python"],
+            });
+            for (let index = 0; index < 140; index += 1)
+                highlightSyntaxCode(`print("invented_history_${index}")`, "python");
+            let initialColumns = 80;
+            if (driving === "measured") initialColumns = 200;
+            const pendingTerminal = new VirtualTerminal(initialColumns, 40);
+            const activeTui = createTui(pendingTerminal);
+            const source = [
+                "from pathlib import Path",
+                "",
+                'replacements = {"first/invented/template.py": "alpha", "second/invented/template.py": "beta", "third/invented/template.py": "gamma"}',
+                "for filename, label in replacements.items():",
+                "    path = Path(filename)",
+                "    text = path.read_text()",
+                '    text = text.replace("old value", label)',
+                "    path.write_text(text)",
+                'print("finished")',
+            ].join("\n");
+            const command = `python3 - <<'PY'\n${source}\nPY`;
+            const tool = new ToolExecutionComponent(
+                "bash",
+                "invented-narrow-recovery",
+                { command },
+                undefined,
+                createBashToolDefinition(cwd),
+                activeTui,
+                cwd,
+            );
+            tool.setArgsComplete();
+            tool.updateResult({ content: [], isError: false });
+            terminal = pendingTerminal;
+            tui = activeTui;
+            activeTui.addChild(new LinesComponent(["BEFORE_NARROW_RECOVERY"]));
+            activeTui.addChild(tool);
+            activeTui.addChild(new LinesComponent(["AFTER_NARROW_RECOVERY"]));
+            activeTui.start();
+
+            for (const expanded of [false, true, false]) {
+                tool.setExpanded(expanded);
+                for (const columns of [80, 120, 200, 80]) {
+                    let terminalColumns = columns;
+                    if (driving === "measured") terminalColumns = 200;
+                    pendingTerminal.resize(terminalColumns, 40);
+                    for (let pass = 0; pass < 3; pass += 1) {
+                        tool.render(columns);
+                        await pendingTerminal.settle();
+                        await presentGlowupSnapshot({
+                            key: "xterm:narrow-recovery-barrier",
+                            kind: "prose",
+                            source: "",
+                            complete: true,
+                        });
+                        await vi.waitUntil(() => getScriptFormatterWorkload().active === 0);
+                        await settleSyntaxHighlights();
+                        // A repaint must not need a forced tool/component invalidation to get colors.
+                        activeTui.requestRender();
+                    }
+                    await pendingTerminal.settle();
+                    const raw = tool.render(columns);
+                    const code = "replacements = {";
+                    const measuredRow = raw.find((line) =>
+                        stripVTControlCharacters(line).includes(code),
+                    );
+                    expect(measuredRow).toMatch(/\u001b\[38;2;/u);
+                    const row = pendingTerminal.requireRowContaining(code);
+                    expect(codeForegrounds(row, code).size).toBeGreaterThan(1);
+                    expect(codeForegrounds(row, code)).not.toContain("default");
+                    pendingTerminal.assertUniqueTranscriptMarkers(
+                        "$ python3 - <<'PY'",
+                        "BEFORE_NARROW_RECOVERY",
+                        "AFTER_NARROW_RECOVERY",
+                    );
+                    pendingTerminal.assertRowsFitWidth();
+                }
+            }
+        },
+    );
+
+    it("renders completed Python blocks through completion, expansion and resize", async () => {
         await installExtension({
             streaming: { prose: "paragraph", code: "statement" },
             scriptPreview: {
@@ -706,7 +821,7 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
                         command: [
                             process.execPath,
                             "-e",
-                            "let code='';process.stdin.on('data',chunk=>code+=chunk);process.stdin.on('end',()=>{if(/begin\\ntry:/u.test(code)&&!code.includes('finally:\\n    pass')){process.exitCode=2;return;}process.stdout.write(code.replaceAll('value=','value = '));})",
+                            "let code='';process.stdin.on('data',chunk=>code+=chunk);process.stdin.on('end',()=>{if(!code.startsWith('try:\\n')||!code.includes('except ValueError:\\n')){process.exitCode=2;return;}process.stdout.write(code.replaceAll('\\n value=','\\n    value = '));})",
                         ],
                     },
                 },
@@ -741,13 +856,24 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
                 source: "",
                 complete: true,
             });
+            await vi.waitUntil(async () => {
+                tool.invalidate();
+                activeTui.requestRender();
+                await pendingTerminal.settle();
+
+                if (columns !== 80) return pendingTerminal.screenText().includes("value=1");
+                return pendingTerminal.screenText().includes("value = 1");
+            });
             tool.invalidate();
             activeTui.requestRender();
             await pendingTerminal.settle();
             const screen = pendingTerminal.screenText();
-            expect(screen).toContain(
-                "\n  try:\n      value = 1\n  except ValueError:\n      value = 2",
-            );
+            if (columns === 80)
+                expect(screen).toContain(
+                    "\n  try:\n      value = 1\n  except ValueError:\n      value = 2",
+                );
+            else expect(screen).toContain("\n  try:\n   value=1\n  except ValueError:\n   value=2");
+
             expect(screen).not.toContain("finally:");
             expect(screen).not.toContain("__glowup_");
             expect(screen).not.toContain("display formatter");
@@ -936,6 +1062,64 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
         await vi.waitUntil(() => getScriptFormatterWorkload().active === 0);
     });
 
+    it("keeps native image read results reusable through expansion and resize", async () => {
+        const pendingTerminal = new VirtualTerminal(100, 24);
+        const activeTui = createTui(pendingTerminal);
+        const definition = createReadToolDefinition(cwd);
+        const nativeResult = vi.spyOn(definition, "renderResult");
+        const tool = new ToolExecutionComponent(
+            "read",
+            "image-read",
+            { path: "image.png" },
+            { showImages: false },
+            definition,
+            activeTui,
+            cwd,
+        );
+        tool.setArgsComplete();
+        tool.updateResult({
+            content: [
+                { type: "text", text: "Image dimensions: 8 by 8" },
+                { type: "image", data: "", mimeType: "image/png" },
+            ],
+            isError: false,
+        });
+
+        activeTui.addChild(new LinesComponent(["BEFORE_IMAGE_READ"]));
+        activeTui.addChild(tool);
+        activeTui.addChild(new LinesComponent(["AFTER_IMAGE_READ"]));
+        terminal = pendingTerminal;
+        tui = activeTui;
+        activeTui.start();
+        await pendingTerminal.settle();
+        expect(pendingTerminal.screenText()).not.toContain("Image dimensions");
+
+        for (const columns of [100, 55, 120]) {
+            tool.setExpanded(true);
+            pendingTerminal.resize(columns, 24);
+            activeTui.requestRender();
+            await pendingTerminal.settle();
+            pendingTerminal.assertUniqueTranscriptMarkers(
+                "Image dimensions: 8 by 8",
+                "BEFORE_IMAGE_READ",
+                "AFTER_IMAGE_READ",
+            );
+            pendingTerminal.assertRowsFitWidth();
+            const settled = pendingTerminal.interpretedRows();
+            tool.invalidate();
+            activeTui.requestRender();
+            await pendingTerminal.settle();
+            expect(pendingTerminal.interpretedRows()).toEqual(settled);
+            tool.setExpanded(false);
+            activeTui.requestRender();
+            await pendingTerminal.settle();
+            expect(pendingTerminal.screenText()).not.toContain("Image dimensions");
+        }
+
+        expect(nativeResult).toHaveBeenCalled();
+        expect(nativeResult.mock.results.every((result) => result.type === "return")).toBe(true);
+    });
+
     it.each(["small", "above-shared-cache-budget"])(
         "repaints completed native read syntax at the same width without an expansion toggle (%s)",
         async (size) => {
@@ -1020,6 +1204,7 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
     );
 
     it("interprets apply_patch streaming, shrinking, rewriting, and completion without stale cells", async () => {
+        await extension?.startAssistantToolCall("apply_patch", "call-xterm-stream");
         const pendingTerminal = new VirtualTerminal(100, 28);
         const activeTui = createTui(pendingTerminal);
         activeTui.setClearOnShrink(true);

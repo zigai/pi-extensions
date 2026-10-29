@@ -1,9 +1,11 @@
+import { stripVTControlCharacters } from "node:util";
 import { hasNonWhitespaceText, truncateUtf8ByGrapheme } from "../text-boundaries.ts";
 import { type GlowupRenderTheme, muted, dim } from "./theme.ts";
 import { truncateToWidth, type Component } from "@earendil-works/pi-tui";
 import {
     type CodeOutputSyntax,
     highlightCodeOutput,
+    cachedCodeOutput,
     scheduleCodeOutputSyntaxLoad,
 } from "./syntax/code-component.ts";
 import { syntaxLanguageFromFile } from "./syntax/language.ts";
@@ -49,6 +51,7 @@ type CollapsedTextPreview =
     | {
           readonly isEmpty: false;
           readonly lines: ReadonlyArray<string>;
+          readonly sourceIndices: ReadonlyArray<number | undefined>;
       };
 
 type RetainedOutput =
@@ -68,7 +71,7 @@ export function collapsedPreviewLinesFromText(
     omittedHint: string,
 ): CollapsedTextPreview {
     if (mode === "hidden") {
-        return { isEmpty: false, lines: [] };
+        return { isEmpty: false, lines: [], sourceIndices: [] };
     }
 
     const normalized = normalizeOutputText(text);
@@ -86,16 +89,17 @@ export function collapsedPreviewLinesFromText(
     );
     const headCount = mode === "headTail" ? Math.ceil(lineBudget / 2) : lineBudget;
     const tailCount = mode === "headTail" ? Math.floor(lineBudget / 2) : 0;
-    const headLines: string[] = [];
-    const tailLines: string[] = [];
-    let allLines: string[] | undefined = [];
+    const headLines: Array<{ line: string; index: number }> = [];
+    const tailLines: Array<{ line: string; index: number }> = [];
+    let allLines: Array<{ line: string; index: number }> | undefined = [];
     let pendingBlankLineCount = 0;
+    let pendingBlankStart = 0;
     let pendingBlankLineSamples: string[] = [];
     let lineCount = 0;
     let sawContent = false;
 
-    const consumeLine = (line: string): void => {
-        const previewLine = detachedPreviewLine(line, lineByteBudget);
+    const consumeLine = (line: string, index: number): void => {
+        const previewLine = { line: detachedPreviewLine(line, lineByteBudget), index };
         lineCount += 1;
 
         if (headLines.length < headCount) {
@@ -121,16 +125,17 @@ export function collapsedPreviewLinesFromText(
 
     const flushPendingBlankLines = (): void => {
         for (let index = 0; index < pendingBlankLineCount; index += 1) {
-            consumeLine(pendingBlankLineSamples[index] ?? "");
+            consumeLine(pendingBlankLineSamples[index] ?? "", pendingBlankStart + index);
         }
 
         pendingBlankLineCount = 0;
         pendingBlankLineSamples = [];
     };
 
-    visitPhysicalLines(normalized, (line) => {
+    visitPhysicalLines(normalized, (line, index) => {
         if (!hasNonWhitespaceText(line)) {
             if (sawContent) {
+                if (pendingBlankLineCount === 0) pendingBlankStart = index;
                 pendingBlankLineCount += 1;
 
                 if (pendingBlankLineSamples.length < lineBudget) {
@@ -150,7 +155,7 @@ export function collapsedPreviewLinesFromText(
             flushPendingBlankLines();
         }
 
-        consumeLine(line);
+        consumeLine(line, index);
     });
 
     if (lineCount === 0) {
@@ -158,25 +163,35 @@ export function collapsedPreviewLinesFromText(
     }
 
     if (lineCount <= retainedLineBudget) {
-        return { isEmpty: false, lines: allLines };
+        return {
+            isEmpty: false,
+            lines: allLines.map(({ line }) => line),
+            sourceIndices: allLines.map(({ index }) => index),
+        };
     }
 
     if (mode === "head") {
         return {
             isEmpty: false,
             lines: [
-                ...headLines,
+                ...headLines.map(({ line }) => line),
                 `${omittedLinesLabel(lineCount - headLines.length)} (${omittedHint})`,
             ],
+            sourceIndices: [...headLines.map(({ index }) => index), undefined],
         };
     }
 
     return {
         isEmpty: false,
         lines: [
-            ...headLines,
+            ...headLines.map(({ line }) => line),
             `${omittedLinesLabel(lineCount - headLines.length - tailLines.length)} (${omittedHint})`,
-            ...tailLines,
+            ...tailLines.map(({ line }) => line),
+        ],
+        sourceIndices: [
+            ...headLines.map(({ index }) => index),
+            undefined,
+            ...tailLines.map(({ index }) => index),
         ],
     };
 }
@@ -312,8 +327,9 @@ function reportRetainedOutput(
     });
 }
 
-function visitPhysicalLines(text: string, visit: (line: string) => void): void {
+function visitPhysicalLines(text: string, visit: (line: string, index: number) => void): void {
     let lineStart = 0;
+    let lineIndex = 0;
     for (let index = 0; index <= text.length; index += 1) {
         if (index < text.length) {
             const charCode = text.charCodeAt(index);
@@ -322,7 +338,7 @@ function visitPhysicalLines(text: string, visit: (line: string) => void): void {
             }
         }
 
-        visit(text.slice(lineStart, index));
+        visit(text.slice(lineStart, index), lineIndex++);
 
         if (
             index < text.length &&
@@ -411,6 +427,7 @@ export type GlowupOutputRenderOptions = {
     readonly noOutputLabel?: string | null;
     readonly omittedHint?: string;
     readonly syntax?: CodeOutputSyntax;
+    readonly syntaxSource?: string;
     readonly invalidate?: (() => void) | undefined;
 };
 
@@ -449,12 +466,26 @@ export function renderGlowupOutput(
 
     reportRetainedOutput(retained, text, mode);
 
+    let scheduleFull: (() => void) | undefined;
+    let fullCode: string | undefined;
+    let currentSource: (() => boolean) | undefined;
     if (syntax?.invalidate !== undefined) {
-        let source = "";
-        if (retained.kind === "expanded") source = retained.text;
-        else if (!retained.preview.isEmpty) source = retained.preview.lines.join("\n");
+        const source = text ?? "";
+        fullCode = source;
+        if (source.includes("\r")) fullCode = normalizeOutputText(source);
 
-        observeSyntaxHighlightSource(source, syntax.invalidate);
+        const current = observeSyntaxHighlightSource(
+            options.syntaxSource ?? source,
+            syntax.invalidate,
+        );
+        currentSource = current;
+
+        const ownedSyntax = syntax;
+        const invalidate = syntax.invalidate;
+        const content = fullCode;
+
+        scheduleFull = () =>
+            scheduleCodeOutputSyntaxLoad(ownedSyntax, invalidate, content, current);
     }
 
     return makeComponent((width) => {
@@ -479,7 +510,10 @@ export function renderGlowupOutput(
             retained.kind === "collapsed" &&
             visible.some(isPreviewMetaLine) &&
             (syntax?.language?.toLowerCase() === "json" || /\.jsonc?$/iu.test(syntax?.path ?? ""));
-        if (syntax !== undefined && !suppressTruncatedJsonHighlighting) {
+        let sourceCurrent = true;
+        if (currentSource !== undefined) sourceCurrent = currentSource();
+
+        if (syntax !== undefined && !suppressTruncatedJsonHighlighting && sourceCurrent) {
             const language = syntax.language ?? syntaxLanguageFromFile(syntax.path, rawLines[0]);
             let loadSyntax = syntax;
             if (language !== undefined) loadSyntax = { ...syntax, language };
@@ -487,12 +521,31 @@ export function renderGlowupOutput(
             scheduleCodeOutputSyntaxLoad(loadSyntax, syntax.invalidate);
         }
 
-        const displayLines =
-            syntax === undefined || suppressTruncatedJsonHighlighting
-                ? visible
-                : retained.kind === "expanded"
-                  ? [...trimEdgeBlankLines(highlightCodeOutput(retained.text, syntax))]
-                  : highlightPreviewLines(visible, syntax);
+        let displayLines: ReadonlyArray<string> = visible;
+
+        if (syntax !== undefined && sourceCurrent) {
+            if (retained.kind === "expanded") {
+                displayLines = trimEdgeBlankLines(highlightCodeOutput(retained.text, syntax));
+            } else if (!retained.preview.isEmpty) {
+                let complete: ReadonlyArray<string> | undefined;
+                if (fullCode !== undefined) {
+                    const cached = cachedCodeOutput(fullCode, syntax);
+                    if (cached !== undefined)
+                        complete = highlightFullPreview(
+                            retained.preview,
+                            cached,
+                            syntax,
+                            !suppressTruncatedJsonHighlighting,
+                        );
+                }
+
+                if (complete !== undefined) displayLines = complete;
+                else if (!suppressTruncatedJsonHighlighting)
+                    displayLines = highlightPreviewLines(visible, syntax);
+            }
+        }
+
+        scheduleFull?.();
 
         const wrappedLines: WrappedPreviewLine[] = [];
         for (const [index, line] of displayLines.entries()) {
@@ -537,6 +590,38 @@ export function renderGlowupOutput(
             theme,
         });
     });
+}
+
+function highlightFullPreview(
+    preview: Extract<CollapsedTextPreview, { isEmpty: false }>,
+    full: ReadonlyArray<string>,
+    syntax: CodeOutputSyntax,
+    highlightUnmatched: boolean,
+): string[] {
+    const lines: string[] = [];
+    const unmatched: number[] = [];
+    for (const [index, plain] of preview.lines.entries()) {
+        if (isPreviewMetaLine(plain)) {
+            lines.push(plain);
+            continue;
+        }
+
+        const sourceIndex = preview.sourceIndices[index];
+        let colored: string | undefined;
+        if (sourceIndex !== undefined) colored = full[sourceIndex];
+
+        if (colored === undefined || stripVTControlCharacters(colored) !== plain) {
+            unmatched.push(index);
+            lines.push(plain);
+        } else lines.push(colored);
+    }
+
+    if (unmatched.length === 0 || !highlightUnmatched) return lines;
+
+    const fallback = highlightPreviewLines(preview.lines, syntax);
+    for (const index of unmatched) lines[index] = fallback[index] ?? lines[index] ?? "";
+
+    return lines;
 }
 
 function highlightPreviewLines(

@@ -5,11 +5,11 @@ import type {
     ScriptBlockFormatterInput,
     ScriptBlockFormatterOptions,
 } from "../../tools/built-in/bash/formatter.ts";
-import { formatEmbeddedHeredocs } from "./embedded-heredocs.ts";
-import { formatEmbeddedFilterPrograms, hasFormattableFilterProgram } from "./embedded-filters.ts";
+import { formatEmbeddedPrograms } from "./embedded-programs.ts";
 import { formatCodeUnit } from "./code-unit.ts";
 import { MAX_SCRIPT_PREVIEW_ENTRIES } from "../../tools/built-in/bash/preview-store.ts";
 import { createStatementService } from "./statement-service.ts";
+import type { EmbeddedProgram } from "../../tools/built-in/bash/embedded-programs.ts";
 import type { StatementUnit } from "./statement-worker.ts";
 import {
     recordRenderError,
@@ -28,6 +28,7 @@ export type CodeStreamInput = {
     readonly formatter?: ScriptBlockFormatter | undefined;
     readonly targetWidth?: number | undefined;
     readonly invalidate?: (() => void) | undefined;
+    readonly signal?: AbortSignal | undefined;
 
     /** Owning tool call for diagnostics; statement and block events carry it. */
     readonly toolCallId?: string | undefined;
@@ -63,6 +64,10 @@ type Entry = {
     running: boolean;
 };
 
+function sourceAborted(input: CodeStreamInput): boolean {
+    return input.signal?.aborted === true;
+}
+
 function languageFor(input: CodeStreamInput): string {
     let value = input.language;
     if (value === undefined || value.trim().length === 0) value = extname(input.path ?? "");
@@ -77,9 +82,39 @@ function languageFor(input: CodeStreamInput): string {
 }
 
 function embeddedOptions(input: CodeStreamInput, signal: AbortSignal): ScriptBlockFormatterOptions {
-    if (input.toolCallId === undefined) return { signal };
+    if (input.toolCallId === undefined && input.diagnostics === undefined) return { signal };
 
-    return { signal, diagnostics: { toolCallId: input.toolCallId } };
+    return {
+        signal,
+        diagnostics: {
+            ...(input.toolCallId !== undefined && { toolCallId: input.toolCallId }),
+            ...input.diagnostics,
+        },
+    };
+}
+
+function programsForUnit(
+    programs: readonly EmbeddedProgram[],
+    start: number,
+    end: number,
+): EmbeddedProgram[] {
+    const included = new Map<EmbeddedProgram, EmbeddedProgram>();
+    for (const program of programs) {
+        if (program.start < start || program.end > end) continue;
+
+        if (program.parent !== undefined) {
+            const parent = included.get(program.parent);
+            if (parent !== undefined) included.set(program, { ...program, parent });
+        } else {
+            included.set(program, {
+                ...program,
+                localStart: program.localStart - start,
+                localEnd: program.localEnd - start,
+            });
+        }
+    }
+
+    return [...included.values()];
 }
 
 /** Display-only snapshots. No formatted text is written back to tool input or model history. */
@@ -97,18 +132,19 @@ export function createCodeStreamStore(): CodeStreamStore {
         options: ScriptBlockFormatterOptions = {},
     ): Promise<string> {
         if (disposed || formatter === undefined) return input.code;
-        if (!input.code.includes("<<") && !hasFormattableFilterProgram(input.code, formatter))
-            return input.code;
 
         let signal = externalController.signal;
         if (options.signal !== undefined) signal = AbortSignal.any([signal, options.signal]);
 
-        const operation = formatEmbeddedHeredocs(input, formatter, parser, {
-            ...options,
-            signal,
-        }).then(async (code) =>
-            formatEmbeddedFilterPrograms({ ...input, code }, formatter, { ...options, signal }),
-        );
+        const operation = (async () => {
+            let programs = options.programs;
+            programs ??= await parser.extract(input.code, signal);
+            if (programs === undefined || signal.aborted) return input.code;
+            return formatEmbeddedPrograms(input, formatter, parser, programs, {
+                ...options,
+                signal,
+            });
+        })();
         const job = operation.then(
             () => {},
             () => {},
@@ -150,30 +186,39 @@ export function createCodeStreamStore(): CodeStreamStore {
         if (input.mode === "block") {
             if (!input.complete) return;
 
+            let source = input.source;
+            if (entry.language === "bash")
+                source = await formatEmbedded(
+                    {
+                        label: "Bash",
+                        language: "bash",
+                        code: input.source,
+                        ...(input.targetWidth !== undefined && { targetWidth: input.targetWidth }),
+                    },
+                    input.formatter,
+                    embeddedOptions(input, signal),
+                );
+
             const unit: StatementUnit = {
                 start: 0,
-                end: input.source.length,
+                end: source.length,
                 format: true,
                 indent: "",
                 kind: "block",
             };
-            let formatted = await formatCodeUnit(input, entry.language, unit, signal, "");
-            if (entry.language === "bash")
-                formatted = {
-                    ...formatted,
-                    text: await formatEmbedded(
-                        {
-                            label: "Bash",
-                            language: "bash",
-                            code: formatted.text,
-                            ...(input.targetWidth !== undefined && {
-                                targetWidth: input.targetWidth,
-                            }),
-                        },
-                        input.formatter,
-                        embeddedOptions(input, signal),
-                    ),
-                };
+            const formatted = await formatCodeUnit(
+                {
+                    ...input,
+                    source,
+                    diagnostics: { ...input.diagnostics, segmentCode: input.source },
+                },
+                entry.language,
+                unit,
+                signal,
+                "",
+            );
+
+            if (input.targetWidth !== entry.input.targetWidth) return;
 
             publish(entry, formatted.text, input.source.length, true);
 
@@ -195,6 +240,7 @@ export function createCodeStreamStore(): CodeStreamStore {
         // partial example or grammar mismatch must not raise session warnings
         // (again on every resize); the parser retains unformatted source spans.
 
+        const programs = response.programs ?? [];
         let display = initialDisplay;
         let consumed = entry.consumed;
         let lastKind = entry.lastKind;
@@ -212,25 +258,46 @@ export function createCodeStreamStore(): CodeStreamStore {
             if (unit.start < consumed) {
                 display += input.source.slice(consumed, unit.end);
             } else {
-                let formatted = await formatCodeUnit(input, entry.language, unit, signal, indent);
-                if (entry.language === "bash")
-                    formatted = {
-                        ...formatted,
-                        text: await formatEmbedded(
-                            {
-                                label: "Bash",
-                                language: "bash",
-                                code: formatted.text,
-                                ...(input.targetWidth !== undefined && {
-                                    targetWidth: input.targetWidth,
-                                }),
-                            },
-                            input.formatter,
-                            embeddedOptions(input, signal),
-                        ),
-                    };
+                let formatted;
+                if (entry.language === "bash") {
+                    const original = input.source.slice(unit.start, unit.end);
+                    const source = await formatEmbedded(
+                        {
+                            label: "Bash",
+                            language: "bash",
+                            code: original,
+                            ...(input.targetWidth !== undefined && {
+                                targetWidth: input.targetWidth,
+                            }),
+                        },
+                        input.formatter,
+                        {
+                            ...embeddedOptions(input, signal),
+                            programs: programsForUnit(programs, unit.start, unit.end),
+                        },
+                    );
+                    const parsed = await parser.parse(source, "bash", true, signal);
+                    if (parsed === undefined || "error" in parsed || parsed.malformed) {
+                        formatted = { text: original };
+                    } else {
+                        const literals = parsed.units.flatMap((part) => part.literals ?? []);
 
-                if (!current(entry)) return;
+                        formatted = await formatCodeUnit(
+                            {
+                                ...input,
+                                source,
+                                diagnostics: { ...input.diagnostics, segmentCode: original },
+                            },
+                            entry.language,
+                            { ...unit, start: 0, end: source.length, literals },
+                            signal,
+                            indent,
+                        );
+                    }
+                } else
+                    formatted = await formatCodeUnit(input, entry.language, unit, signal, indent);
+
+                if (!current(entry) || input.targetWidth !== entry.input.targetWidth) return;
 
                 if (unit.body !== undefined && formatted.bodyIndent !== undefined)
                     entry.indents.set(unit.body, formatted.bodyIndent);
@@ -283,22 +350,34 @@ export function createCodeStreamStore(): CodeStreamStore {
         entry.running = true;
 
         const job = (async (): Promise<void> => {
-            let visible = display;
+            try {
+                let visible = display;
 
-            while (current(entry)) {
-                const input = entry.input;
-                await run(entry, visible);
+                while (current(entry)) {
+                    const input = entry.input;
+                    await run(entry, visible);
 
-                if (entry.input.source === input.source && entry.input.complete === input.complete)
-                    return;
+                    if (entry.input.targetWidth !== input.targetWidth) {
+                        entry.consumed = 0;
+                        entry.indents.clear();
+                        entry.lastKind = "";
+                        entry.atomic = true;
+                        visible = "";
+                        continue;
+                    }
 
-                visible = entry.display;
-            }
-        })()
-            .catch((cause: unknown) => {
-                recordRenderError("code-stream.run", cause, entry.input.toolCallId);
+                    if (
+                        entry.input.source === input.source &&
+                        entry.input.complete === input.complete
+                    )
+                        return;
 
+                    visible = entry.display;
+                }
+            } catch (cause: unknown) {
                 if (!current(entry)) return;
+
+                recordRenderError("code-stream.run", cause, entry.input.toolCallId);
 
                 reportExtensionDiagnostic(
                     "[pi-glowup] Code stream processing failed; unfinished code is held until completion.",
@@ -306,10 +385,12 @@ export function createCodeStreamStore(): CodeStreamStore {
 
                 if (entry.input.complete)
                     publish(entry, entry.input.source, entry.input.source.length, true);
-            })
-            .finally(() => {
+            } finally {
+                // Publish idle in the same continuation as the final input check.
+                // Otherwise a late update can see running=true after the loop exited.
                 entry.running = false;
-            });
+            }
+        })();
 
         jobs.add(job);
         void job.then(() => jobs.delete(job));
@@ -329,7 +410,10 @@ export function createCodeStreamStore(): CodeStreamStore {
 
     return {
         get(input): string {
-            if (disposed) return "";
+            if (input.toolCallId !== undefined && input.complete && input.mode === "statement")
+                input = { ...input, mode: "block" };
+
+            if (disposed || sourceAborted(input)) return "";
 
             const previous = entries.get(input.key);
             if (input.mode === "token") {
@@ -339,10 +423,28 @@ export function createCodeStreamStore(): CodeStreamStore {
             }
 
             const language = languageFor(input);
+            if (
+                previous !== undefined &&
+                previous.running &&
+                previous.input.mode === input.mode &&
+                previous.input.formatter === input.formatter &&
+                previous.input.signal === input.signal &&
+                previous.language === language &&
+                previous.input.path === input.path &&
+                previous.input.source === input.source &&
+                previous.input.complete === input.complete
+            ) {
+                // Width updates replace the pending target, not the running formatter.
+                // Its last published display remains visible until the latest width settles.
+                previous.input = input;
+                return previous.display;
+            }
+
             const reusable =
                 previous !== undefined &&
                 previous.input.mode === input.mode &&
                 previous.input.formatter === input.formatter &&
+                previous.input.signal === input.signal &&
                 previous.input.targetWidth === input.targetWidth &&
                 previous.language === language &&
                 previous.input.path === input.path;
@@ -378,7 +480,7 @@ export function createCodeStreamStore(): CodeStreamStore {
                 input.source.startsWith(previous.input.source) &&
                 (input.source === previous.input.source || !previous.input.complete) &&
                 previous.language === language &&
-                previous.input.mode === input.mode
+                (previous.input.mode === input.mode || input.complete)
             ) {
                 // A resize/profile change rebuilds from individual units, retaining the old
                 // ready display until replacement units become available.
@@ -401,6 +503,23 @@ export function createCodeStreamStore(): CodeStreamStore {
 
             entries.delete(input.key);
             entries.set(input.key, entry);
+
+            const retire = (): void => {
+                if (entries.get(entry.input.key) === entry) entries.delete(entry.input.key);
+                entry.controller.abort();
+            };
+
+            input.signal?.addEventListener("abort", retire, {
+                once: true,
+                signal: entry.controller.signal,
+            });
+
+            // An earlier owner's cancellation may synchronously retire this source
+            // while get() replaces its entry. Do not miss an already-fired abort.
+            if (sourceAborted(input)) {
+                retire();
+                return "";
+            }
 
             while (entries.size > MAX_SCRIPT_PREVIEW_ENTRIES) {
                 const oldest = entries.keys().next().value;

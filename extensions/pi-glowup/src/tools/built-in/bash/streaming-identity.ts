@@ -1,4 +1,9 @@
-import { parseScriptInvocation, type ScriptInvocation } from "./invocation.ts";
+import {
+    parseScriptInvocation,
+    scriptInvocationFromPrograms,
+    type ScriptInvocation,
+} from "./invocation.ts";
+import type { EmbeddedProgram } from "./embedded-programs.ts";
 
 /** Keeps the first confidently detected interpreter identity stable for one tool call. */
 export class StreamingScriptIdentityStore {
@@ -6,8 +11,15 @@ export class StreamingScriptIdentityStore {
 
     constructor(private readonly maxEntries: number = 300) {}
 
-    resolve(toolCallId: string, command: string): ScriptInvocation | undefined {
-        const parsed = parseScriptInvocation(command);
+    resolve(
+        toolCallId: string,
+        command: string,
+        programs?: readonly EmbeddedProgram[],
+    ): ScriptInvocation | undefined {
+        let parsed: ScriptInvocation | undefined;
+        if (programs === undefined) parsed = parseScriptInvocation(command);
+        else parsed = scriptInvocationFromPrograms(programs, true);
+
         if (parsed === undefined || parsed.label === "Bash") {
             return undefined;
         }
@@ -43,6 +55,10 @@ export class StreamingScriptIdentityStore {
 
     has(toolCallId: string): boolean {
         return this.identities.has(toolCallId);
+    }
+
+    forget(toolCallId: string): void {
+        this.identities.delete(toolCallId);
     }
 
     clear(): void {

@@ -1,7 +1,18 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, onTestFinished } from "vitest";
+import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
+import {
+    configureRenderDiagnostics,
+    diagnosticCodeHash,
+} from "../../src/diagnostics/render-events.ts";
+import type { DebugLogFields } from "../../src/diagnostics/logger.ts";
+import { createCodeStreamStore } from "../../src/rendering/streaming/code-stream.ts";
+import {
+    disposeSyntaxHighlighting,
+    initializeSyntaxHighlighting,
+} from "../../src/rendering/syntax/highlighter.ts";
 import { createCodemodePreview } from "../../src/tools/external/codemode.ts";
 import {
     createCommandScriptFormatter,
@@ -1229,6 +1240,190 @@ describe("third-party tool renderers", () => {
 
         expect(rendered).toContain("questions: 1 item");
         expect(rendered).not.toContain("questions: 1 items");
+    });
+
+    it("joins completed streamed Codemode blocks to their analysis without scheduling another preview", async () => {
+        const events: Array<{ event: string; fields: DebugLogFields }> = [];
+        configureRenderDiagnostics((event, fields) => {
+            events.push({ event, fields: fields() });
+        });
+
+        onTestFinished(() => configureRenderDiagnostics(undefined));
+        const formatter = createCommandScriptFormatter(
+            parseScriptFormatterCommandsValue({
+                javascript: {
+                    kind: "command",
+                    command: [process.execPath, "-e", "process.stdin.pipe(process.stdout)"],
+                },
+            }),
+        );
+        const store = createCodeStreamStore();
+        const preview = createCodemodePreview(() => formatter);
+        const renderer = createThirdPartyToolRenderer("codemode", {
+            codemodePreview: preview,
+            streamCode: (input) => store.get({ ...input, mode: "statement", formatter }),
+        });
+        const code = "const first=1;\nconst second=2;";
+        const context = { ...renderContext, toolCallId: "complete-code", argsComplete: true };
+        try {
+            renderer.renderCall({ code }, plainTheme, context).render(80);
+            await store.settled();
+            const analyses = events.filter((entry) => entry.event === "script_analysis");
+            expect(analyses).toHaveLength(1);
+            expect(analyses[0]?.fields).toMatchObject({
+                toolCallId: "complete-code",
+                segments: [
+                    expect.objectContaining({
+                        language: "javascript",
+                        codeHash: diagnosticCodeHash(code),
+                        formattable: true,
+                    }),
+                ],
+            });
+            const formats = events.filter((entry) => entry.event === "script_format");
+            expect(formats).toHaveLength(1);
+            expect(formats[0]?.fields).toMatchObject({
+                toolCallId: "complete-code",
+                stage: "block",
+                segmentHash: diagnosticCodeHash(code),
+                outcome: "unchanged",
+            });
+        } finally {
+            preview.clear();
+            await store.dispose();
+        }
+    });
+
+    it("records the formatted code actually selected by a Codemode component", async () => {
+        const events: Array<{ event: string; fields: DebugLogFields }> = [];
+        const executable = join(
+            dirname(createRequire(import.meta.url).resolve("oxfmt/package.json")),
+            "bin",
+            "oxfmt",
+        );
+        const formatter = createCommandScriptFormatter(
+            parseScriptFormatterCommandsValue({
+                javascript: { kind: "javascript", command: [executable] },
+            }),
+        );
+        const preview = createCodemodePreview(() => formatter);
+        const renderer = createThirdPartyToolRenderer("codemode", { codemodePreview: preview });
+        const code = "const total=1;\nconsole.log(total);";
+        let resolveReady: () => void = () => {};
+        const ready = new Promise<void>((resolve) => {
+            resolveReady = resolve;
+        });
+        const context = {
+            ...renderContext,
+            toolCallId: "formatted-code",
+            args: { code },
+            argsComplete: true,
+            isPartial: false,
+            expanded: false,
+            result: { content: [] },
+            invalidate: () => {
+                const lines = renderer.renderCall({ code }, plainTheme, context).render(100);
+                if (stripVTControlCharacters(lines.join("\n")).includes("const total = 1;"))
+                    resolveReady();
+            },
+        };
+        try {
+            await initializeSyntaxHighlighting({}, { preloadLanguages: ["javascript"] });
+            configureRenderDiagnostics((event, fields) => {
+                events.push({ event, fields: fields() });
+            });
+
+            renderer.renderCall({ code }, plainTheme, context).render(100);
+            await ready;
+            const formatted = Value.Parse(
+                Type.String(),
+                preview.get(context.toolCallId, code, {
+                    contentWidth: 96,
+                    completed: true,
+                    expanded: false,
+                }),
+            );
+            expect(formatted).toContain("const total = 1;");
+            const sourceHash = createHash("sha256").update(code).digest("hex").slice(0, 16);
+            const outputHash = createHash("sha256").update(formatted).digest("hex").slice(0, 16);
+            const renderSchema = Type.Object({
+                ownerId: Type.String(),
+                revision: Type.Number(),
+                formats: Type.Array(
+                    Type.Object({
+                        ownerId: Type.Union([Type.String(), Type.Null()]),
+                        revision: Type.Number(),
+                        state: Type.String(),
+                        sourceHash: Type.String(),
+                        outputHash: Type.Optional(Type.String()),
+                    }),
+                ),
+            });
+            const renders = events
+                .filter(({ event }) => event === "syntax_component_render")
+                .map(({ fields }) => Value.Parse(renderSchema, fields));
+            expect(
+                renders.some((rendered) =>
+                    rendered.formats.some(
+                        (format) =>
+                            format.state === "ready" &&
+                            format.sourceHash === sourceHash &&
+                            format.outputHash === outputHash &&
+                            format.ownerId === rendered.ownerId &&
+                            format.revision === rendered.revision,
+                    ),
+                ),
+            ).toBe(true);
+        } finally {
+            configureRenderDiagnostics(undefined);
+            preview.clear();
+            await disposeSyntaxHighlighting();
+        }
+    });
+
+    it("coalesces Codemode resize targets and retains the last ready preview", async () => {
+        const widths: Array<number | undefined> = [];
+        const signals: AbortSignal[] = [];
+        let release = () => {};
+        const gate = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        const previews = createCodemodePreview();
+        previews.schedule({
+            toolCallId: "resize-code",
+            code: "const value=1;",
+            completed: true,
+            isCurrent: () => true,
+            invalidate: () => {},
+            formatter: async (_input, options) => {
+                widths.push(options?.targetWidth);
+
+                if (options?.signal !== undefined) signals.push(options.signal);
+                if (widths.length === 1) await gate;
+                return `width${options?.targetWidth}`;
+            },
+        });
+        const read = (width: number) =>
+            previews.get("resize-code", "const value=1;", {
+                contentWidth: width,
+                completed: true,
+                expanded: false,
+            });
+        try {
+            read(80);
+            await vi.waitUntil(() => widths.length === 1);
+            read(40);
+            read(60);
+            expect(signals[0]?.aborted).toBe(false);
+            release();
+            await vi.waitUntil(() => read(60) === "width60");
+            expect(widths).toEqual([80, 60]);
+            expect(read(100)).toBe("width60");
+            await vi.waitUntil(() => read(100) === "width100");
+        } finally {
+            release();
+            previews.clear();
+        }
     });
 
     it("publishes Codemode decoration only after completion, uses content width, and expands original source", async () => {
