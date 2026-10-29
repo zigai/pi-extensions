@@ -1295,6 +1295,50 @@ describe("Glowup rendering helpers", () => {
         expect(rendered).toMatch(/… \+7 lines/u);
     });
 
+    it.each(["", "\n", "\r\n", "\n  \n"])(
+        "counts only hidden script lines with silent imports and trailing whitespace %j",
+        (ending) => {
+            const code =
+                [
+                    "import math",
+                    "",
+                    "alpha = 1",
+                    "bravo = 2",
+                    "charlie = 3",
+                    "delta = 4",
+                    "echo = 5",
+                    "foxtrot = 6",
+                    "golf = 7",
+                    "hotel = 8",
+                    "india = 9",
+                    "juliet = 10",
+                ].join("\n") + ending;
+            const invocation = { label: "Python", language: "python", code };
+            const collapsed = renderScriptCall(plainTheme, invocation, {
+                state: "success",
+                expanded: false,
+                maxCodePreviewLines: 4,
+                omittedHint: "hint",
+            })
+                .render(120)
+                .join("\n");
+            const expanded = renderScriptCall(plainTheme, invocation, {
+                state: "success",
+                expanded: true,
+                maxCodePreviewLines: 4,
+            })
+                .render(120)
+                .join("\n");
+
+            expect(collapsed).toContain("delta = 4");
+            expect(collapsed).not.toContain("echo = 5");
+            expect(collapsed).not.toContain("import math");
+            expect(collapsed).toContain("… +6 lines (hint)");
+            expect(expanded).toContain("import math");
+            expect(expanded).toContain("juliet = 10");
+        },
+    );
+
     it("keeps Python imports when the complete short script fits", () => {
         const invocation = parseScriptInvocation(
             "python - <<'PY'\nimport ast\nfrom pathlib import Path\n\nprint(Path('.'))\nPY",

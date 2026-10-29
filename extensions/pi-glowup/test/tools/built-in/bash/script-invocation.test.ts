@@ -144,6 +144,45 @@ describe("embedded program extraction", () => {
         },
     );
 
+    it.each([
+        ["ts", "typescript"],
+        ["mts", "typescript"],
+        ["cts", "typescript"],
+        ["tsx", "tsx"],
+        ["js", "javascript"],
+        ["mjs", "javascript"],
+        ["cjs", "javascript"],
+        ["jsx", "jsx"],
+    ])("uses Deno's declared %s extension for inline and stdin programs", (ext, language) => {
+        for (const option of [`--ext=${ext}`, `--ext ${ext}`]) {
+            const inline = `deno eval ${option} 'value'`;
+            expect(programs(inline)).toEqual([
+                { language, origin: "inline", source: "'value'", code: "value" },
+            ]);
+            const heredoc = `deno run ${option} - <<'CODE'\nvalue\nCODE`;
+            expect(programs(heredoc)).toEqual([
+                { language, origin: "heredoc", source: "value\n", code: "value\n" },
+            ]);
+            const piped = `cat <<'CODE' | deno run ${option} -\nvalue\nCODE`;
+            expect(programs(piped)).toEqual([
+                { language, origin: "heredoc", source: "value\n", code: "value\n" },
+            ]);
+        }
+    });
+
+    it.each([
+        `deno eval --ext="$KIND" 'value'`,
+        `deno eval --ext "$KIND" 'value'`,
+        `deno eval --ext=unknown 'value'`,
+        `deno eval --ext= 'value'`,
+        `deno run --ext="$KIND" - <<'CODE'\nvalue\nCODE`,
+        `deno run --ext "$KIND" - <<'CODE'\nvalue\nCODE`,
+        `deno run --ext=unknown - <<'CODE'\nvalue\nCODE`,
+        `cat <<'CODE' | deno run --ext "$KIND" -\nvalue\nCODE`,
+    ])("does not guess Deno's dynamic or invalid extension: %s", (source) => {
+        expect(programs(source)).toEqual([]);
+    });
+
     it.each(["tsx file.ts", "bun run file.ts", "deno run file.ts", "deno eval '1'"])(
         "does not treat a TypeScript program's stdin data as source: %s",
         (launcher) => {

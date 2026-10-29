@@ -964,12 +964,9 @@ function createScriptCallComponent(
         if (softWrapTruncated || (viewClipped && !hasTailOmission)) {
             let marker = "… preview truncated";
             if (!softWrapTruncated) {
+                const content = preview.code.trim();
                 let lines = 1;
-                for (
-                    let at = preview.code.indexOf("\n");
-                    at >= 0;
-                    at = preview.code.indexOf("\n", at + 1)
-                )
+                for (let at = content.indexOf("\n"); at >= 0; at = content.indexOf("\n", at + 1))
                     lines++;
 
                 const omitted = Math.max(0, lines - shownLines);

@@ -350,11 +350,18 @@ function commandIndex(words: readonly Word[]): number {
     return index;
 }
 
+function denoExtension(value: string | undefined): string | undefined {
+    if (value === "tsx" || value === "jsx") return value;
+    if (value === "ts" || value === "mts" || value === "cts") return "typescript";
+    if (value === "js" || value === "mjs" || value === "cjs") return "javascript";
+    return undefined;
+}
+
 function inlineIndex(
     words: readonly Word[],
     index: number,
     kind: string,
-): { index: number; offset: number } | undefined {
+): { index: number; offset: number; language?: string } | undefined {
     const flags = new Set<string>();
     if (kind === "python" || kind === "bash") flags.add("-c");
 
@@ -390,25 +397,38 @@ function inlineIndex(
         if (value === undefined) return undefined;
 
         if (value === "eval" && basename(words[index]) === "deno") {
+            let declaredLanguage: string | undefined;
             for (let next = i + 1; next < words.length; next++) {
                 const option = staticWord(words[next]);
                 if (option === undefined) return undefined;
 
-                if (option === "--") return { index: next + 1, offset: 0 };
+                if (option === "--")
+                    return {
+                        index: next + 1,
+                        offset: 0,
+                        ...(declaredLanguage !== undefined && { language: declaredLanguage }),
+                    };
 
-                if (option === "--ext") {
-                    next++;
+                if (option === "--ext" || option.startsWith("--ext=")) {
+                    if (declaredLanguage !== undefined) return undefined;
+
+                    let extension = option.slice("--ext=".length);
+                    if (option === "--ext") extension = staticWord(words[++next]) ?? "";
+                    declaredLanguage = denoExtension(extension);
+                    if (declaredLanguage === undefined) return undefined;
                     continue;
                 }
-
-                if (option.startsWith("--ext=")) continue;
 
                 if (["-p", "--print", "-q", "--quiet", "--no-check", "--check"].includes(option))
                     continue;
 
                 if (option.startsWith("-")) return undefined;
 
-                return { index: next, offset: 0 };
+                return {
+                    index: next,
+                    offset: 0,
+                    ...(declaredLanguage !== undefined && { language: declaredLanguage }),
+                };
             }
 
             return undefined;
@@ -525,20 +545,36 @@ function filterIndex(words: readonly Word[], index: number, kind: string): numbe
     return explicit;
 }
 
-function stdinSource(words: readonly Word[], index: number, kind: string | undefined): boolean {
+function stdinLanguage(
+    words: readonly Word[],
+    index: number,
+    kind: string | undefined,
+): string | undefined {
     if (kind === "typescript") {
         const name = basename(words[index]);
         let start = index + 1;
+        let declaredLanguage: string | undefined;
+
         if (name === "deno" || name === "bun") {
             if (staticWord(words[start]) === "run") start++;
-            else if (name === "deno") return false;
+            else if (name === "deno") return undefined;
         }
 
         for (let i = start; i < words.length; i++) {
             const value = staticWord(words[i]);
-            if (value === undefined) return false;
+            if (value === undefined) return undefined;
 
-            if (value === "-") return true;
+            if (value === "-") return declaredLanguage ?? kind;
+
+            if (name === "deno" && (value === "--ext" || value.startsWith("--ext="))) {
+                if (declaredLanguage !== undefined) return undefined;
+
+                let extension = value.slice("--ext=".length);
+                if (value === "--ext") extension = staticWord(words[++i]) ?? "";
+                declaredLanguage = denoExtension(extension);
+                if (declaredLanguage === undefined) return undefined;
+                continue;
+            }
 
             if (
                 [
@@ -569,13 +605,13 @@ function stdinSource(words: readonly Word[], index: number, kind: string | undef
             )
                 continue;
 
-            return false;
+            return undefined;
         }
 
-        return false;
+        return undefined;
     }
 
-    if (kind !== "python" && kind !== "javascript" && kind !== "bash") return false;
+    if (kind !== "python" && kind !== "javascript" && kind !== "bash") return undefined;
 
     const withValues = new Set([
         "-W",
@@ -590,9 +626,13 @@ function stdinSource(words: readonly Word[], index: number, kind: string | undef
     ]);
     for (let i = index + 1; i < words.length; i++) {
         const value = staticWord(words[i]);
-        if (value === undefined) return false;
-        if (value === "-") return true;
-        if (value === "--") return words[i + 1] === undefined || staticWord(words[i + 1]) === "-";
+        if (value === undefined) return undefined;
+        if (value === "-") return kind;
+
+        if (value === "--") {
+            if (words[i + 1] === undefined || staticWord(words[i + 1]) === "-") return kind;
+            return undefined;
+        }
 
         if (
             value === "-c" ||
@@ -605,12 +645,12 @@ function stdinSource(words: readonly Word[], index: number, kind: string | undef
             (kind === "bash" && /^-[a-zA-Z]*c[a-zA-Z]*$/u.test(value)) ||
             !value.startsWith("-")
         )
-            return false;
+            return undefined;
 
         if (withValues.has(value)) i++;
     }
 
-    return true;
+    return kind;
 }
 
 function affectsStdout(redirect: Redirect): boolean {
@@ -935,10 +975,11 @@ export function extractEmbeddedPrograms(input: string, syntax?: ParsedScript): E
 
                         const index = commandIndex(words);
                         const kind = language(basename(words[index]));
-                        if (kind !== undefined && stdinSource(words, index, kind))
+                        const inputLanguage = stdinLanguage(words, index, kind);
+                        if (inputLanguage !== undefined)
                             pipedSources.set(left, {
-                                language: kind,
-                                label: label(basename(words[index]), kind),
+                                language: inputLanguage,
+                                label: label(basename(words[index]), inputLanguage),
                             });
                     }
 
@@ -1067,6 +1108,7 @@ export function extractEmbeddedPrograms(input: string, syntax?: ParsedScript): E
                         const selection = inlineIndex(words, index, kind);
                         programIndex = selection?.index;
                         offset = selection?.offset ?? 0;
+                        kind = selection?.language ?? kind;
                     } else if (name === "ssh") {
                         const host = afterOptions(words, index + 1, name);
                         programIndex = host + 1;
@@ -1221,16 +1263,17 @@ export function extractEmbeddedPrograms(input: string, syntax?: ParsedScript): E
                     let hereKind: string | undefined;
                     let standaloneLabel: string | undefined;
                     let origin: "heredoc" | "file-heredoc" = "heredoc";
-                    if (stdinSource(words, index, kind)) {
-                        hereKind = kind;
+                    const inputLanguage = stdinLanguage(words, index, kind);
+
+                    if (inputLanguage !== undefined) {
+                        hereKind = inputLanguage;
 
                         if (
-                            kind !== undefined &&
-                            kind !== "bash" &&
+                            inputLanguage !== "bash" &&
                             node === standaloneCommand &&
                             root?.type === "Command"
                         )
-                            standaloneLabel = label(name, kind);
+                            standaloneLabel = label(name, inputLanguage);
                     } else if (
                         name === "cat" &&
                         words
