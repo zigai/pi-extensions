@@ -1,5 +1,14 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { installTableRendering, type TableStyle } from "./table-patch.ts";
+import {
+    clearHeadingFolds,
+    createHeadingGroup,
+    type HeadingHistory,
+    foldableMarkdown,
+    installHeadingRendering,
+    prepareHeadingGroup,
+    resetHeadingFolds,
+} from "./heading-rendering.ts";
 import { Markdown, MouseRegion, type Component } from "@earendil-works/pi-tui";
 import {
     installLinkedRenderPatch,
@@ -29,6 +38,29 @@ import {
 
 const MARKDOWN_FENCES_PATCH_KEY = Symbol.for("zigai.pi-ui-tweaks.markdown-fences-patched");
 const SCOPE = "pi-response-renderer";
+
+type ContentSnapshot = { kind: string; value: string; appendable: boolean };
+
+function snapshotContent(message: AssistantMessage): ContentSnapshot[] {
+    return message.content.map((item) => {
+        if (item.type === "text") return { kind: item.type, value: item.text, appendable: true };
+        if (item.type === "thinking")
+            return { kind: item.type, value: item.thinking, appendable: true };
+        return { kind: item.type, value: JSON.stringify(item), appendable: false };
+    });
+}
+
+function contentIsAppendOnly(previous: ContentSnapshot[], current: ContentSnapshot[]): boolean {
+    if (current.length < previous.length) return false;
+    return previous.every((item, index) => {
+        const next = current[index];
+        if (next === undefined || next.kind !== item.kind) return false;
+        if (next.value === item.value) return true;
+        return (
+            index === previous.length - 1 && item.appendable && next.value.startsWith(item.value)
+        );
+    });
+}
 
 type RenderFrame = {
     readonly width: number;
@@ -167,6 +199,13 @@ async function patchMarkdownFences(owner: symbol): Promise<MarkdownFencesPatchRe
     };
     const markdownFrames = new WeakMap<Markdown, MarkdownFrame>();
     const assistantFrames = new WeakMap<AssistantMessageComponentInstance, RenderFrame>();
+    const folds = new WeakMap<AssistantMessageComponentInstance, Map<number, Set<number>>>();
+    const contentSnapshots = new WeakMap<AssistantMessageComponentInstance, ContentSnapshot[]>();
+    const headingHistories = new WeakMap<AssistantMessageComponentInstance, HeadingHistory>();
+    const headingGroups = new WeakMap<
+        AssistantMessageComponentInstance,
+        ReturnType<typeof createHeadingGroup>
+    >();
 
     patch.markdownInvalidatePatch = installLinkedMethodPatch(
         Markdown.prototype,
@@ -218,6 +257,11 @@ async function patchMarkdownFences(owner: symbol): Promise<MarkdownFencesPatchRe
                 this: AssistantMessageComponentInstance,
                 width: number,
             ): string[] {
+                const headingGroup = headingGroups.get(this);
+                if (headingGroup !== undefined) {
+                    prepareHeadingGroup(headingGroup, width);
+                    resetHeadingFolds(headingGroup);
+                }
                 const source = predecessor.call(this, width);
                 const frame = assistantFrames.get(this);
                 if (frame !== undefined && sameRenderFrame(frame, width, source))
@@ -239,6 +283,25 @@ async function patchMarkdownFences(owner: symbol): Promise<MarkdownFencesPatchRe
                 isStreaming?: boolean,
             ): void {
                 const contentContainer = this.contentContainer;
+                let blocks = folds.get(this);
+                if (blocks === undefined) {
+                    blocks = new Map();
+                    folds.set(this, blocks);
+                }
+                const snapshot = snapshotContent(message);
+                const previous = contentSnapshots.get(this);
+                if (previous !== undefined && !contentIsAppendOnly(previous, snapshot)) {
+                    clearHeadingFolds(blocks);
+                }
+                contentSnapshots.set(this, snapshot);
+                let history = headingHistories.get(this);
+                if (history === undefined) {
+                    history = {};
+                    headingHistories.set(this, history);
+                }
+                let blockIndex = 0;
+                const headingGroup = createHeadingGroup(blocks, history);
+                headingGroups.set(this, headingGroup);
                 let childPatch: { dispose(): void } | undefined;
                 if (contentContainer !== undefined) {
                     childPatch = installLinkedMethodPatch(
@@ -252,7 +315,20 @@ async function patchMarkdownFences(owner: symbol): Promise<MarkdownFencesPatchRe
                                 component: Component,
                             ): void {
                                 hideAssistantMarkdownFences(patch, component);
-                                addChild.call(this, component);
+                                if (component instanceof Markdown) {
+                                    let collapsed = blocks.get(blockIndex);
+                                    if (collapsed === undefined) {
+                                        collapsed = new Set();
+                                        blocks.set(blockIndex, collapsed);
+                                    }
+                                    blockIndex += 1;
+                                    addChild.call(
+                                        this,
+                                        foldableMarkdown(component, collapsed, headingGroup),
+                                    );
+                                } else {
+                                    addChild.call(this, component);
+                                }
                             },
                     );
                 }
@@ -269,15 +345,17 @@ async function patchMarkdownFences(owner: symbol): Promise<MarkdownFencesPatchRe
 }
 
 export async function installResponseRendering({
-    tableHeaderColor = "#5CCCCC",
     nativeTableBorderStyle = "dim",
+    accent,
 }: Partial<TableStyle> = {}) {
     const owner = Symbol();
     const markdown = await patchMarkdownFences(owner);
+    const headings = installHeadingRendering();
     let tables: ReturnType<typeof installTableRendering>;
     try {
-        tables = installTableRendering({ tableHeaderColor, nativeTableBorderStyle });
+        tables = installTableRendering({ nativeTableBorderStyle, accent });
     } catch (cause: unknown) {
+        headings?.dispose();
         if (markdown !== undefined) restoreMarkdownFencesPatch(markdown, owner);
         throw cause;
     }
@@ -293,6 +371,7 @@ export async function installResponseRendering({
             try {
                 tables?.dispose();
             } finally {
+                headings?.dispose();
                 if (markdown !== undefined) restoreMarkdownFencesPatch(markdown, owner);
             }
         },

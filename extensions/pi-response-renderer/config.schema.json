@@ -30,12 +30,6 @@
       ],
       "default": "dim",
       "description": "Border style for native assistant tables: normal or dim."
-    },
-    "tableHeaderColor": {
-      "type": "string",
-      "default": "#5CCCCC",
-      "pattern": "^#[0-9a-fA-F]{6}$",
-      "description": "Color of table headers and their underline."
     }
   }
 }

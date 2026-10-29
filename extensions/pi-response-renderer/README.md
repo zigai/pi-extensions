@@ -10,7 +10,8 @@ It applies a few small rendering tweaks:
 - collapses paragraph gaps without squeezing tables or headings
 - removes italic ANSI styling from assistant message output
 - keeps thinking text monochrome, with bold inline code and no code-block syntax colors
-- renders tables with teal headers, open column gaps and segmented row rules
+- styles headings by their relative level and folds sections when clicked in fullscreen
+- renders tables with accent-colored headers, open column gaps and segmented row rules
 
 ## Install
 
@@ -45,14 +46,12 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-response-render
 | --- | --- | --- | --- |
 | `tableRenderer` | string | `"codex"` | Selected table renderer: codex, native, or an extension-registered name. |
 | `nativeTableBorderStyle` | `normal` \| `dim` | `"dim"` | Border style for native assistant tables: normal or dim. |
-| `tableHeaderColor` | string | `"#5CCCCC"` | Color of table headers and their underline. |
 
 ```json
 {
   "$schema": "./schemas/pi-response-renderer.schema.json",
   "tableRenderer": "codex",
-  "nativeTableBorderStyle": "dim",
-  "tableHeaderColor": "#5CCCCC"
+  "nativeTableBorderStyle": "dim"
 }
 ```
 <!-- pi-extension-settings:end -->

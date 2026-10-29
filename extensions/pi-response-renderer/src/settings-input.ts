@@ -12,11 +12,6 @@ export const settingsSchema = Type.Object(
             default: "dim",
             description: "Border style for native assistant tables: normal or dim.",
         }),
-        tableHeaderColor: Type.String({
-            default: "#5CCCCC",
-            pattern: "^#[0-9a-fA-F]{6}$",
-            description: "Color of table headers and their underline.",
-        }),
     },
     { additionalProperties: false },
 );

@@ -2,6 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerExtensionDiagnostics } from "@zigai/pi-extension-internals";
 import { installResponseRendering } from "./response-rendering.ts";
 import { loadResponseRendererSettings } from "./settings.ts";
+import { unwrapTableFences } from "./table-fence-normalization.ts";
 import {
     selectTableRenderer,
     observeTableRendering,
@@ -17,6 +18,12 @@ export {
 } from "./table-rendering.ts";
 
 export default function assistantRenderingExtension(pi: ExtensionAPI): void {
+    pi.registerMarkdownTransformer((markdown, context) => {
+        if (context.messageType === "assistant") return unwrapTableFences(markdown);
+
+        return markdown;
+    });
+
     let generation = 0;
     let inFlight: Promise<void> = Promise.resolve();
     let active: Awaited<ReturnType<typeof installResponseRendering>> | undefined;
@@ -43,7 +50,10 @@ export default function assistantRenderingExtension(pi: ExtensionAPI): void {
                 for (const diagnostic of loaded.diagnostics)
                     ctx.ui.notify(diagnostic.message, diagnostic.severity);
 
-                const handle = await installResponseRendering(loaded.settings);
+                const handle = await installResponseRendering({
+                    ...loaded.settings,
+                    accent: (text) => ctx.ui.theme.fg("accent", text),
+                });
                 if (current !== generation) {
                     handle.dispose();
                     return;

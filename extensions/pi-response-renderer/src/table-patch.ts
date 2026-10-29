@@ -13,10 +13,9 @@ import {
 import { tableRenderingState } from "./table-rendering.ts";
 import type { ResponseRendererSettings } from "./settings.ts";
 
-export type TableStyle = Pick<
-    ResponseRendererSettings,
-    "tableHeaderColor" | "nativeTableBorderStyle"
->;
+export type TableStyle = Pick<ResponseRendererSettings, "nativeTableBorderStyle"> & {
+    accent?: (text: string) => string;
+};
 
 function dimNativeTableBorders(lines: string[]): string[] {
     const top = lines.at(0);
@@ -136,6 +135,7 @@ export function installTableRendering(settings: TableStyle) {
 function createTablePatch(host: TableHost, settings: TableStyle) {
     const revisions = new WeakMap<TableHost, number>();
     const widths = new WeakMap<TableHost, number>();
+    const accentSamples = new WeakMap<TableHost, string>();
     const affected = new WeakSet<TableHost>();
     const instances = new Set<WeakRef<TableHost>>();
     const collected = new FinalizationRegistry<WeakRef<TableHost>>((reference) => {
@@ -195,12 +195,13 @@ function createTablePatch(host: TableHost, settings: TableStyle) {
                     ),
                     align: parsed.align,
                     width,
-                    header: (text) =>
-                        styleText(
-                            text,
-                            { fg: parseColor(policy().tableHeaderColor), bold: true },
-                            "truecolor",
-                        ),
+                    header: (text) => {
+                        const accent = policy().accent;
+                        if (accent !== undefined) {
+                            return styleText(accent(text), { bold: true }, "truecolor");
+                        }
+                        return styleText(text, { bold: true }, "truecolor");
+                    },
                     rule: (text) => styleText(text, { fg: parseColor("#555555") }, "truecolor"),
                 });
 
@@ -228,6 +229,12 @@ function createTablePatch(host: TableHost, settings: TableStyle) {
         undefined,
         (predecessor) =>
             function (this: TableHost, width) {
+                const accent = settings.accent;
+                const sample = accent?.("\u0000") ?? "";
+                if (accentSamples.get(this) !== sample) {
+                    this.invalidate();
+                    accentSamples.set(this, sample);
+                }
                 const revision = tableRenderingState().revision;
                 if (revisions.get(this) !== revision) {
                     this.invalidate();
@@ -245,6 +252,7 @@ function createTablePatch(host: TableHost, settings: TableStyle) {
 
     return {
         update(next: TableStyle): void {
+            settings = next;
             table.update(next);
             invalidate();
         },
