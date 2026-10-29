@@ -84,9 +84,9 @@ test("the captured OSC/SGR nesting colors visible URL glyphs, not just a prefix"
 });
 
 test("real user rendering keeps mention and URL glyph colors in both patch orders", async () => {
+    const originalCapabilities = getCapabilities();
+    setCapabilityOverrides({ hyperlinks: true, trueColor: true });
     initTheme("dark", false);
-    const originalHyperlinks = getCapabilities().hyperlinks;
-    setCapabilityOverrides({ hyperlinks: true });
     const targets = await loadMessageHighlightTargets();
     assert.ok(targets);
     const shutdownHandlers: Array<() => void> = [];
@@ -145,6 +145,6 @@ test("real user rendering keeps mention and URL glyph colors in both patch order
         }
     } finally {
         for (const shutdown of shutdownHandlers) shutdown();
-        setCapabilityOverrides({ hyperlinks: originalHyperlinks });
+        setCapabilityOverrides(originalCapabilities);
     }
 });
