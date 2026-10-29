@@ -4,6 +4,7 @@ import {
     type ChainCompletionSource,
 } from "./chain-autocomplete.ts";
 import { parseMentions } from "./chain-syntax.ts";
+import { installUserMentionRendering } from "./message-rendering.ts";
 import { applyMentionEditor, createMentionContinuation } from "./editor.ts";
 import {
     createMentionExpansion,
@@ -99,6 +100,8 @@ function createHub(ctx: ExtensionContext): MentionHub {
     let pendingText = "";
     let editor: ReturnType<typeof applyMentionEditor> | undefined;
     let autocompleteInstalled = false;
+    let autocompleteToken: { active: boolean } | undefined;
+    let messageRendering: ReturnType<typeof installUserMentionRendering> | undefined;
     let autocomplete: ReturnType<typeof createChainAutocompleteProvider> | undefined;
     let activeWarmups = 0;
     const pendingWarmups: SourceRuntime[] = [];
@@ -160,74 +163,126 @@ function createHub(ctx: ExtensionContext): MentionHub {
             runtimes.set(registration.id, runtime);
             sources.push(source);
 
-            if (ctx.hasUI && !autocompleteInstalled) {
-                autocompleteInstalled = true;
-                editor = applyMentionEditor(ctx, {
-                    key: Symbol.for("zigai.pi-mention-anything.engine.editor"),
-                    continuation,
-                    onTextChange: (text) => {
-                        selections.reconcile(text);
-                        autocomplete?.reconcile(text);
-                    },
-                    onSubmitText: (text) => hub.input(text),
-                    isMentionContext: (line) =>
-                        parseMentions(line, sources).some((span) => span.end === line.length),
-                    colorLine: (line) => {
-                        let colored = "";
-                        let offset = 0;
-                        for (const span of parseMentions(line, sources)) {
-                            colored += line.slice(offset, span.start);
-
-                            let color: "accent" | "warning" = "accent";
-                            if (!span.complete || unresolved.has(span.sourceId)) color = "warning";
-                            colored += ctx.ui.theme.fg(color, line.slice(span.start, span.end));
-                            offset = span.end;
+            let startedUi = false;
+            try {
+                if (ctx.hasUI && !autocompleteInstalled) {
+                    startedUi = true;
+                    autocompleteInstalled = true;
+                    messageRendering = installUserMentionRendering(sources, () => {
+                        try {
+                            const sentinel = "\u0000";
+                            const styled = ctx.ui.theme.fg("accent", sentinel);
+                            const end = styled.indexOf(sentinel);
+                            if (end < 0) return "";
+                            return styled.slice(0, end);
+                        } catch {
+                            return "";
                         }
-
-                        return colored + line.slice(offset);
-                    },
-                });
-                ctx.ui.addAutocompleteProvider((current) => {
-                    autocomplete?.dispose();
-                    autocomplete = createChainAutocompleteProvider({
-                        current,
-                        sources,
-                        onContinue: () => continuation.request(),
-                        resolveSelected: (sourceId, segments, start) =>
-                            selections
-                                .snapshot(ui.getEditorText())
-                                .find(
-                                    (snapshot) =>
-                                        snapshot.sourceId === sourceId &&
-                                        snapshot.start === start &&
-                                        segments.every(
-                                            (segment, index) =>
-                                                snapshot.path[index]?.segment === segment,
-                                        ),
-                                )
-                                ?.path.slice(0, segments.length),
-                        onState: (sourceId, status) => {
-                            if (status === "ready") unresolved.delete(sourceId);
-                            else unresolved.add(sourceId);
+                    });
+                    editor = applyMentionEditor(ctx, {
+                        key: Symbol.for("zigai.pi-mention-anything.engine.editor"),
+                        continuation,
+                        onTextChange: (text) => {
+                            selections.reconcile(text);
+                            autocomplete?.reconcile(text);
                         },
-                        onSelection: (selection) => {
-                            selections.record(selection, selection.editorText);
-                            runtimes
-                                .get(selection.sourceId)
-                                ?.history.recordSelection(
-                                    JSON.stringify(selection.path.map((candidate) => candidate.id)),
-                                );
+                        onSubmitText: (text) => hub.input(text),
+                        isMentionContext: (line) =>
+                            parseMentions(line, sources).some((span) => span.end === line.length),
+                        colorLine: (line) => {
+                            let colored = "";
+                            let offset = 0;
+                            for (const span of parseMentions(line, sources)) {
+                                colored += line.slice(offset, span.start);
+
+                                let color: "accent" | "warning" = "accent";
+                                if (!span.complete || unresolved.has(span.sourceId))
+                                    color = "warning";
+                                colored += ctx.ui.theme.fg(color, line.slice(span.start, span.end));
+                                offset = span.end;
+                            }
+
+                            return colored + line.slice(offset);
                         },
                     });
+                    const token = { active: true };
+                    autocompleteToken = token;
+                    ctx.ui.addAutocompleteProvider((current) => {
+                        if (!token.active) return current;
+                        autocomplete?.dispose();
+                        autocomplete = createChainAutocompleteProvider({
+                            current,
+                            sources,
+                            onContinue: () => continuation.request(),
+                            resolveSelected: (sourceId, segments, start) =>
+                                selections
+                                    .snapshot(ui.getEditorText())
+                                    .find(
+                                        (snapshot) =>
+                                            snapshot.sourceId === sourceId &&
+                                            snapshot.start === start &&
+                                            segments.every(
+                                                (segment, index) =>
+                                                    snapshot.path[index]?.segment === segment,
+                                            ),
+                                    )
+                                    ?.path.slice(0, segments.length),
+                            onState: (sourceId, status) => {
+                                if (status === "ready") unresolved.delete(sourceId);
+                                else unresolved.add(sourceId);
+                            },
+                            onSelection: (selection) => {
+                                selections.record(selection, selection.editorText);
+                                runtimes
+                                    .get(selection.sourceId)
+                                    ?.history.recordSelection(
+                                        JSON.stringify(
+                                            selection.path.map((candidate) => candidate.id),
+                                        ),
+                                    );
+                            },
+                        });
 
-                    return autocomplete;
-                });
+                        return autocomplete;
+                    });
+                }
+
+                pendingWarmups.push(runtime);
+                warmNext();
+
+                return handle;
+            } catch (cause) {
+                handles.delete(handle);
+                runtimes.delete(runtime.id);
+                const index = sources.indexOf(source);
+                if (index !== -1) sources.splice(index, 1);
+                if (startedUi) {
+                    autocompleteInstalled = false;
+                    if (autocompleteToken !== undefined) autocompleteToken.active = false;
+                    autocompleteToken = undefined;
+                    try {
+                        autocomplete?.dispose();
+                    } catch {
+                        // Continue rolling back the remaining resources.
+                    }
+                    autocomplete = undefined;
+                    try {
+                        editor?.dispose();
+                    } catch {
+                        // Preserve the setup failure while still removing the render patch.
+                    }
+                    editor = undefined;
+                    messageRendering?.dispose();
+                    messageRendering = undefined;
+                }
+                if (runtimes.size === 0) {
+                    if (getOwnDataDescriptor(ui, MENTION_HUB)?.value === hub) {
+                        Reflect.deleteProperty(ui, MENTION_HUB);
+                    }
+                }
+                void runtime.controller.dispose().catch(() => {});
+                throw cause;
             }
-
-            pendingWarmups.push(runtime);
-            warmNext();
-
-            return handle;
         },
         async remove(handle: symbol): Promise<void> {
             const runtime = handles.get(handle);
@@ -238,21 +293,33 @@ function createHub(ctx: ExtensionContext): MentionHub {
 
             const index = sources.indexOf(runtime.source);
             if (index !== -1) sources.splice(index, 1);
-            await Promise.all([runtime.controller.dispose(), runtime.history.flush()]);
-
-            if (runtimes.size === 0) {
-                autocomplete?.dispose();
-                autocomplete = undefined;
-                editor?.dispose();
-                editor = undefined;
-                expansion.clear();
-                selections.clear();
-
-                if (
-                    getOwnDataDescriptor(ui, MENTION_HUB)?.value === hub &&
-                    !Reflect.deleteProperty(ui, MENTION_HUB)
-                ) {
-                    throw new TypeError("Unable to remove the shared mention hub");
+            try {
+                await Promise.all([runtime.controller.dispose(), runtime.history.flush()]);
+            } finally {
+                if (runtimes.size === 0) {
+                    autocompleteInstalled = false;
+                    if (autocompleteToken !== undefined) autocompleteToken.active = false;
+                    autocompleteToken = undefined;
+                    try {
+                        autocomplete?.dispose();
+                    } finally {
+                        autocomplete = undefined;
+                        try {
+                            editor?.dispose();
+                        } finally {
+                            editor = undefined;
+                            messageRendering?.dispose();
+                            messageRendering = undefined;
+                            expansion.clear();
+                            selections.clear();
+                            if (
+                                getOwnDataDescriptor(ui, MENTION_HUB)?.value === hub &&
+                                !Reflect.deleteProperty(ui, MENTION_HUB)
+                            ) {
+                                throw new TypeError("Unable to remove the shared mention hub");
+                            }
+                        }
+                    }
                 }
             }
         },

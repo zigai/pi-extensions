@@ -8,7 +8,7 @@ Custom mention pickers for Pi, from simple lists to chained selections. Availabl
 pi install npm:@zigai/pi-mention-anything
 ```
 
-Selections become mentions in the editor and expand into context for the model. Chained selections open successive pickers.
+Selections become mentions in the editor and expand into context for the model. Chained selections open successive pickers. Sent user messages color complete mentions using the currently registered sources and their trigger and separator syntax; this also applies to session history when rendered text can be aligned safely with the original. The text itself is not changed.
 
 <!-- pi-extension-settings:start -->
 ## Configuration

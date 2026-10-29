@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import { test, vi } from "vitest";
 import { setImmediate as nextTurn } from "node:timers/promises";
 
+import { UserMessageComponent } from "@earendil-works/pi-coding-agent";
+import type { AutocompleteProvider } from "@earendil-works/pi-tui";
 import type { ContextEvent } from "@earendil-works/pi-coding-agent";
 
+import type { MentionEditorContext } from "../src/editor.ts";
 import { createListProvider } from "../src/list-provider.ts";
 import {
     registerMention,
@@ -18,7 +21,7 @@ type HostEvent = {
 
 type HostContext = {
     readonly cwd: string;
-    readonly hasUI: false;
+    readonly hasUI: boolean;
     readonly ui: { notify(message: string): void };
     isProjectTrusted(): boolean;
 };
@@ -48,7 +51,7 @@ function isContextResult(value: unknown): value is { readonly messages: ContextE
     );
 }
 
-function host(ui?: HostContext["ui"]): Host {
+function host(ui?: HostContext["ui"], hasUI = false): Host {
     const handlers = new Map<string, unknown[]>();
     const pi: MentionExtensionApi = {
         on(event, handler) {
@@ -61,7 +64,7 @@ function host(ui?: HostContext["ui"]): Host {
     };
     const ctx: HostContext = {
         cwd: process.cwd(),
-        hasUI: false,
+        hasUI,
         isProjectTrusted: () => true,
         ui: ui ?? { notify() {} },
     };
@@ -325,4 +328,124 @@ test("session reset disposes the previous provider before recreating it", async 
     assert.deepEqual(lifecycle, ["create", "dispose", "create"]);
     await app.emit("session_shutdown", {});
     assert.deepEqual(lifecycle, ["create", "dispose", "create", "dispose"]);
+});
+
+test("failed editor or autocomplete installation rolls back its render patch and allows retry", async () => {
+    for (const failure of ["editor", "autocomplete"] as const) {
+        let editorFactory: Parameters<MentionEditorContext["ui"]["setEditorComponent"]>[0];
+        let shouldFail = true;
+        let installedWrapper:
+            | ((provider: AutocompleteProvider) => AutocompleteProvider)
+            | undefined;
+        let disposed = 0;
+        const ui = {
+            notify() {},
+            getEditorComponent() {
+                return editorFactory;
+            },
+            setEditorComponent(
+                factory: Parameters<MentionEditorContext["ui"]["setEditorComponent"]>[0],
+            ) {
+                if (failure === "editor" && shouldFail) throw new Error("editor failure");
+                editorFactory = factory;
+            },
+            addAutocompleteProvider(
+                factory: (provider: AutocompleteProvider) => AutocompleteProvider,
+            ) {
+                installedWrapper = factory;
+                if (failure === "autocomplete" && shouldFail)
+                    throw new Error("autocomplete failure");
+            },
+            getEditorText: () => "",
+            theme: { fg: (_color: string, text: string) => text },
+        };
+        const app = host(ui, true);
+        registerMention(app.pi, {
+            id: "example",
+            configuration: () => ({ trigger: "%" }),
+            provider: () => ({
+                ...createListProvider(async () => []),
+                async dispose() {
+                    disposed++;
+                },
+            }),
+        });
+        const original = UserMessageComponent.prototype.render;
+        await assert.rejects(app.emit("session_start", {}), new RegExp(`${failure} failure`));
+        await nextTurn();
+        assert.equal(UserMessageComponent.prototype.render, original);
+        assert.equal(editorFactory, undefined);
+        assert.equal(disposed, 1);
+        if (installedWrapper) {
+            const base: AutocompleteProvider = {
+                getSuggestions: async () => null,
+                applyCompletion: (lines, cursorLine, cursorCol) => ({
+                    lines,
+                    cursorLine,
+                    cursorCol,
+                }),
+            };
+            assert.equal(installedWrapper(base), base);
+        }
+        shouldFail = false;
+        await app.emit("session_start", {});
+        assert.notEqual(UserMessageComponent.prototype.render, original);
+        await app.emit("session_shutdown", {});
+        assert.equal(UserMessageComponent.prototype.render, original);
+    }
+});
+
+test("failed multi-source startup rolls back only registrations owned by that caller", async () => {
+    const app = host();
+    const disposed: string[] = [];
+    const registration = (id: string, trigger: string) => ({
+        id,
+        configuration: () => ({ trigger }),
+        provider: () => ({
+            ...createListProvider(async () => []),
+            async dispose() {
+                disposed.push(id);
+            },
+        }),
+    });
+    registerMention(app.pi, registration("existing", "a:"));
+    registerMentionSources(app.pi, () => [
+        registration("temporary", "b:"),
+        registration("duplicate", "a:"),
+    ]);
+    await assert.rejects(app.emit("session_start", {}), /unique IDs and triggers/);
+    assert.deepEqual(disposed, ["temporary"]);
+    await app.emit("session_shutdown", {});
+    assert.deepEqual(disposed, ["temporary", "existing"]);
+});
+
+test("provider cleanup failure still restores the message render patch", async () => {
+    let editorFactory: Parameters<MentionEditorContext["ui"]["setEditorComponent"]>[0];
+    const ui = {
+        notify() {},
+        getEditorComponent: () => editorFactory,
+        setEditorComponent: (
+            factory: Parameters<MentionEditorContext["ui"]["setEditorComponent"]>[0],
+        ) => {
+            editorFactory = factory;
+        },
+        addAutocompleteProvider() {},
+        theme: { fg: (_color: string, text: string) => text },
+    };
+    const app = host(ui, true);
+    registerMention(app.pi, {
+        id: "failing-cleanup",
+        configuration: () => ({ trigger: "%" }),
+        provider: () => ({
+            ...createListProvider(async () => []),
+            async dispose() {
+                throw new Error("cleanup failure");
+            },
+        }),
+    });
+    const original = UserMessageComponent.prototype.render;
+    await app.emit("session_start", {});
+    assert.notEqual(UserMessageComponent.prototype.render, original);
+    await app.emit("session_shutdown", {});
+    assert.equal(UserMessageComponent.prototype.render, original);
 });

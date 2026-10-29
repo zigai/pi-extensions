@@ -53,7 +53,16 @@ export function registerMentionSources(
         if (registrations.length === 0) return;
 
         hub = sharedHub(ctx);
-        for (const registration of registrations) owned.push(hub.add(registration));
+        try {
+            for (const registration of registrations) owned.push(hub.add(registration));
+        } catch (cause) {
+            const previous = hub;
+            hub = undefined;
+            const handles = owned;
+            owned = [];
+            await Promise.allSettled(handles.map((handle) => previous.remove(handle)));
+            throw cause;
+        }
     });
 
     pi.on("input", (event) => {
