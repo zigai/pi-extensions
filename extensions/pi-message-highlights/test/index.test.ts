@@ -87,7 +87,7 @@ test("factory is inert; session activation loads once and shutdown restores rend
     expect(host.loads()).toBe(0);
     await host.start();
     expect(imports).toBe(1);
-    expect(target.assistantPrototype.render(80)[0]).not.toBe("https://example.com");
+    expect(target.userPrototype.render(80)[0]).not.toBe("https://example.com");
     host.settings.apply(host.ctx);
     expect(host.loads()).toBe(1);
     expect(host.notifications).toHaveLength(1);
@@ -154,6 +154,30 @@ test("headless settings diagnostics are suppressed and cached until reset", asyn
     expect(host.loads()).toBe(1);
     expect(host.notifications).toEqual([]);
     await host.shutdown();
+});
+
+test("rendering survives a stale session after another extension wraps the renderer", async () => {
+    const target = targets();
+    const original = target.userPrototype.render;
+    const host = harness(async () => target);
+    await host.start();
+
+    const previous = target.userPrototype.render;
+    target.userPrototype.render = function (width) {
+        return previous.call(this, width);
+    };
+    await host.shutdown();
+    Object.defineProperty(host.ctx, "hasUI", {
+        get() {
+            throw new Error("stale session");
+        },
+    });
+
+    try {
+        expect(target.userPrototype.render(80).join("")).toContain("https://example.com");
+    } finally {
+        target.userPrototype.render = original;
+    }
 });
 
 test("reset disposes the active patch before a replacement load completes", async () => {

@@ -1,12 +1,20 @@
-import { Container, Editor, MouseRegion } from "@earendil-works/pi-tui";
+import { AssistantMessageComponent, UserMessageComponent } from "@earendil-works/pi-coding-agent";
+import { Container, Editor, Markdown, MouseRegion, Text } from "@earendil-works/pi-tui";
 import {
     installLinkedRenderPatch,
     type LinkedMethodPatchHandle,
 } from "@zigai/pi-extension-internals";
 
 import { highlightEditorRenderLines, type EditorHighlightTarget } from "./editor-highlighting.ts";
-import { highlightMessageLines, type HighlightStyles } from "./highlight-text.ts";
+import {
+    highlightMessageLines,
+    highlightWebLinkLabelLines,
+    highlightFallbackMarkdownLinkLabels,
+    type HighlightStyles,
+} from "./highlight-text.ts";
 import { buildHighlightStyles, type HighlightTheme } from "./highlight-styles.ts";
+import { Type } from "typebox";
+import { Value } from "typebox/value";
 import type { MessageHighlightsConfig } from "./settings.ts";
 
 const MESSAGE_HIGHLIGHTS_PATCH_KEY = Symbol.for("zigai.pi-message-highlights.patched");
@@ -35,59 +43,13 @@ type EditorHighlightPrototype = RenderablePrototype & {
     getText?: (() => string) | undefined;
 };
 
-function isObjectIdentity(value: unknown): value is object {
-    return (typeof value === "object" && value !== null) || typeof value === "function";
-}
-
-type UnknownModuleDescriptor = Omit<PropertyDescriptor, "value"> & {
-    readonly value: unknown;
-};
-
-function isUnknownModuleDescriptor(
-    descriptor: PropertyDescriptor | undefined,
-): descriptor is UnknownModuleDescriptor {
-    return descriptor !== undefined && Object.hasOwn(descriptor, "value");
-}
-
-/* oxlint-disable antislop/no-unknown-parameters -- This is the parser boundary for a private Pi module namespace. */
-function parseMessageComponent(
-    module: unknown,
-    exportName: "AssistantMessageComponent" | "UserMessageComponent",
-): RenderablePrototype | undefined {
-    if (!isObjectIdentity(module)) return undefined;
-
-    const descriptor = Object.getOwnPropertyDescriptor(module, exportName);
-    if (!isUnknownModuleDescriptor(descriptor)) return undefined;
-
-    const component = descriptor.value;
-    if (
-        !isObjectIdentity(component) ||
-        !("prototype" in component) ||
-        !isObjectIdentity(component.prototype) ||
-        !("render" in component.prototype) ||
-        typeof component.prototype.render !== "function"
-    ) {
-        return undefined;
-    }
-    // SAFETY: The only consumed method is callable; its private receiver signature is fixed
-    // by the pinned Pi version and exercised by package integration tests.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Callable private render signature verified above.
-    return component.prototype as RenderablePrototype;
-}
-/* oxlint-enable antislop/no-unknown-parameters */
-
-function getEditorPrototype(): RenderablePrototype {
-    return Editor.prototype;
-}
-
 export async function loadMessageHighlightTargets(): Promise<MessageHighlightTargets | undefined> {
-    // Use Pi's public exports: private dist subpaths can be different classes from the live UI.
-    const module: unknown = await import("@earendil-works/pi-coding-agent");
-    const assistantPrototype = parseMessageComponent(module, "AssistantMessageComponent");
-    const userPrototype = parseMessageComponent(module, "UserMessageComponent");
-    if (assistantPrototype === undefined || userPrototype === undefined) return undefined;
-
-    return { assistantPrototype, userPrototype, editorPrototype: getEditorPrototype() };
+    // Static imports use Pi's extension-loader aliases, so these are the live UI classes.
+    return {
+        assistantPrototype: AssistantMessageComponent.prototype,
+        userPrototype: UserMessageComponent.prototype,
+        editorPrototype: Editor.prototype,
+    };
 }
 
 function isEditorHighlightTarget(
@@ -112,6 +74,7 @@ function patchRenderablePrototype(
 function patchAssistantPrototype(
     prototype: RenderablePrototype,
     getStyles: HighlightStylesProvider,
+    thinking: { active: number },
 ): RenderPatchHandle {
     return installLinkedRenderPatch(
         prototype,
@@ -123,7 +86,12 @@ function patchAssistantPrototype(
                     !("contentContainer" in this) ||
                     !(this.contentContainer instanceof Container)
                 ) {
-                    return highlightMessageLines(predecessor.call(this, width), getStyles());
+                    thinking.active += 1;
+                    try {
+                        return predecessor.call(this, width);
+                    } finally {
+                        thinking.active -= 1;
+                    }
                 }
 
                 const patches: RenderPatchHandle[] = [];
@@ -133,9 +101,31 @@ function patchAssistantPrototype(
                         let styles = getStyles();
                         if (child instanceof MouseRegion) {
                             styles = { url: "\u001b[1m", filepath: "\u001b[1m" };
+                            const thinkingStyles = styles;
+                            const renderable: RenderablePrototype = child;
+                            patches.push(
+                                installLinkedRenderPatch(
+                                    renderable,
+                                    (render) =>
+                                        function (
+                                            this: RenderableInstance,
+                                            width: number,
+                                        ): string[] {
+                                            thinking.active += 1;
+                                            try {
+                                                return highlightMessageLines(
+                                                    render.call(this, width),
+                                                    thinkingStyles,
+                                                );
+                                            } finally {
+                                                thinking.active -= 1;
+                                            }
+                                        },
+                                ),
+                            );
+                        } else {
+                            patches.push(patchRenderablePrototype(child, () => styles));
                         }
-
-                        patches.push(patchRenderablePrototype(child, () => styles));
                     }
 
                     return predecessor.call(this, width);
@@ -187,9 +177,45 @@ export function installMessageHighlightPatch(
     let disposed = false;
     const getStyles = () => buildHighlightStyles(getTheme(), currentConfig);
     const patches: RenderPatchHandle[] = [];
+    const thinking = { active: 0 };
 
     try {
-        patches.push(patchAssistantPrototype(targets.assistantPrototype, getStyles));
+        const webPrototypes: RenderablePrototype[] = [Text.prototype, Markdown.prototype];
+        for (const prototype of webPrototypes) {
+            patches.push(
+                installLinkedRenderPatch(
+                    prototype,
+                    (predecessor) =>
+                        function (this: RenderableInstance, width: number): string[] {
+                            const lines = predecessor.call(this, width);
+                            if (thinking.active > 0) return lines;
+                            const styles = getStyles();
+                            const urlOnly = { url: styles.url, filepath: "" };
+                            let result = highlightWebLinkLabelLines(
+                                highlightMessageLines(lines, urlOnly),
+                                styles.url,
+                            );
+                            if (this instanceof Markdown) {
+                                const descriptor = Object.getOwnPropertyDescriptor(this, "text");
+                                if (
+                                    descriptor !== undefined &&
+                                    Object.hasOwn(descriptor, "value")
+                                ) {
+                                    const source: unknown = descriptor.value;
+                                    if (Value.Check(Type.String(), source))
+                                        result = highlightFallbackMarkdownLinkLabels(
+                                            result,
+                                            source,
+                                            styles.url,
+                                        );
+                                }
+                            }
+                            return result;
+                        },
+                ),
+            );
+        }
+        patches.push(patchAssistantPrototype(targets.assistantPrototype, getStyles, thinking));
         patches.push(patchRenderablePrototype(targets.userPrototype, getStyles));
 
         const editorPatch = patchEditorPrototype(targets.editorPrototype, getStyles);

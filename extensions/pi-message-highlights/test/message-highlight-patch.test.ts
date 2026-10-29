@@ -5,7 +5,7 @@ import { DEFAULT_MESSAGE_HIGHLIGHTS_CONFIG } from "../src/settings.ts";
 
 test("rendering reads the current theme after theme changes", () => {
     const assistantPrototype = { render: (_width: number) => ["https://example.com"] };
-    const userPrototype = { render: (_width: number) => [] };
+    const userPrototype = { render: (_width: number) => ["https://example.com"] };
     const editorPrototype = { render: (_width: number) => [] };
     const original = assistantPrototype.render;
     let color = "31";
@@ -18,9 +18,9 @@ test("rendering reads the current theme after theme changes", () => {
         }),
     );
     try {
-        expect(assistantPrototype.render(80).join(" ")).toContain("\u001b[31m");
+        expect(userPrototype.render(80).join(" ")).toContain("\u001b[31m");
         color = "34";
-        expect(assistantPrototype.render(80).join(" ")).toContain("\u001b[34m");
+        expect(userPrototype.render(80).join(" ")).toContain("\u001b[34m");
     } finally {
         patch.dispose();
     }
@@ -47,9 +47,9 @@ test("reinstall updates current policy without stacking; disposal preserves succ
     );
     expect(same).toBe(patch);
     expect(assistantPrototype.render).toBe(installed);
-    expect(assistantPrototype.render(80).join("\n")).not.toContain("38;");
+    expect(userPrototype.render(80).join("\n")).not.toContain("38;");
     patch.update(DEFAULT_MESSAGE_HIGHLIGHTS_CONFIG);
-    expect(assistantPrototype.render(80).join("\n")).toContain("38;");
+    expect(userPrototype.render(80).join("\n")).toContain("38;");
     const successor = installLinkedRenderPatch(
         assistantPrototype,
         (previous) =>

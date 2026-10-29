@@ -40,6 +40,8 @@ export function registerMessageHighlights(
         if (activation !== undefined) return activation;
 
         const config = settings.apply(ctx);
+        let ui: MessageHighlightSettingsContext["ui"] | undefined;
+        if (ctx.hasUI) ui = ctx.ui;
         const activeGeneration = generation;
 
         activation = (async () => {
@@ -47,9 +49,9 @@ export function registerMessageHighlights(
             if (activeGeneration !== generation || targets === undefined) return;
 
             patch = installMessageHighlightPatch(targets, config, () => {
-                if (!ctx.hasUI) return undefined;
+                if (ui === undefined) return undefined;
                 try {
-                    return ctx.ui.theme;
+                    return ui.theme;
                 } catch {
                     // Early renders can precede theme initialization. Retry on the next render.
                     return undefined;

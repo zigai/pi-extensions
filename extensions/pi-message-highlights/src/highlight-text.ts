@@ -375,7 +375,7 @@ function addRange(
     style: string,
 ): void {
     const text = trimMatchEnd(rawText, kind);
-    if (text.length === 0) return;
+    if (text.length === 0 || style.length === 0) return;
 
     const end = start + text.length;
     addHighlightRange(ranges, { start, end, style });
@@ -661,4 +661,70 @@ export function getStylePrefix(styleFn: (text: string) => string): string {
     const sentinelIndex = styled.indexOf(sentinel);
     if (sentinelIndex < 0) return "";
     return styled.slice(0, sentinelIndex);
+}
+
+/** Color OSC 8 web-link labels, carrying hyperlink state across rendered lines. */
+export function highlightWebLinkLabelLines(lines: readonly string[], style: string): string[] {
+    if (!style) return [...lines];
+    let active = false;
+    return lines.map((line) => {
+        const { tokens } = tokenizeAnsi(line);
+        const ranges: HighlightRange[] = [];
+        for (const token of tokens) {
+            if (token.kind === "text") {
+                if (active)
+                    addHighlightRange(ranges, {
+                        start: token.plainStart,
+                        end: token.plainEnd,
+                        style,
+                    });
+                continue;
+            }
+            if (!token.text.startsWith(`${ESC}]8;`)) continue;
+            const sequence = token.text.slice(4).replace(/(?:\x07|\x1b\\)$/, "");
+            const separator = sequence.indexOf(";");
+            if (separator < 0) continue;
+            const destination = sequence.slice(separator + 1);
+            active = /^https?:\/\//i.test(destination);
+        }
+        return highlightMessageLineRanges(line, ranges);
+    });
+}
+
+export function highlightWebLinkLabels(line: string, style: string): string {
+    return highlightWebLinkLabelLines([line], style)[0] ?? line;
+}
+
+/** Conservative fallback for a single uncomplicated inline Markdown web link. */
+export function highlightFallbackMarkdownLinkLabels(
+    lines: readonly string[],
+    source: string,
+    style: string,
+): string[] {
+    if (!style || /[`\\<>\n]/.test(source) || source.startsWith("    ") || source.includes("!["))
+        return [...lines];
+    const links = [...source.matchAll(/\[([^\[\]\n]+)\]\((https?:\/\/[^\s()]+)\)/g)];
+    if (links.length !== 1) return [...lines];
+    const label = links[0]?.[1];
+    const url = links[0]?.[2];
+    if (!label || !url || /[*_~]/.test(label)) return [...lines];
+    const target = `${label} (${url})`;
+    const matches: { index: number; start: number }[] = [];
+    for (const [index, line] of lines.entries()) {
+        const plain = plainTextFromAnsi(line);
+        let position = plain.indexOf(target);
+        while (position >= 0) {
+            matches.push({ index, start: position });
+            position = plain.indexOf(target, position + 1);
+        }
+    }
+    if (matches.length !== 1) return [...lines];
+    const match = matches[0];
+    if (match === undefined) return [...lines];
+    return lines.map((line, index) => {
+        if (index !== match.index) return line;
+        return highlightMessageLineRanges(line, [
+            { start: match.start, end: match.start + label.length, style },
+        ]);
+    });
 }
