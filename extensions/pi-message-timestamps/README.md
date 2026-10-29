@@ -1,6 +1,6 @@
 # Pi Message Timestamps
 
-Show timestamps on user and assistant messages without adding lines. Assistant timestamps show completion time; restored messages use their saved entry time.
+Show timestamps on user and assistant messages. Assistant messages reserve timestamp space while streaming, so completion does not re-wrap the text. User text wraps when needed to make room. Assistant timestamps show completion time; restored messages use their saved entry time.
 
 ```sh
 pi install npm:@zigai/pi-message-timestamps

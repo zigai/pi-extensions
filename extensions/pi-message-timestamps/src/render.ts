@@ -45,13 +45,20 @@ function tokenize(line: string): Token[] | undefined {
 export type TimestampRender = { lines: string[]; hit?: TimestampHit };
 export type TimestampHit = { x: number; y: number; width: number; renderWidth: number };
 
-/** Add a label to the first nonblank line without changing the number of lines. */
+export function isDivider(line: string, width: number): boolean {
+    const content = stripTerminalSequences(line).trim();
+    return /^─{2,}$/u.test(content) && visibleWidth(content) === width;
+}
+
+/** Add a label to the first message line without changing the number of lines. */
 export function renderTimestamp(lines: string[], width: number, label: string): TimestampRender {
     const unchanged = { lines };
 
     if (!label || !Number.isInteger(width) || width <= 0 || /\p{Cc}/u.test(label)) return unchanged;
 
-    const index = lines.findIndex((line) => stripTerminalSequences(line).trim().length > 0);
+    const index = lines.findIndex(
+        (line) => stripTerminalSequences(line).trim().length > 0 && !isDivider(line, width),
+    );
     if (index < 0) return unchanged;
 
     const line = lines.at(index);

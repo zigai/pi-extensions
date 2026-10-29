@@ -3,6 +3,7 @@ import * as sdk from "@earendil-works/pi-coding-agent";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
     Container,
+    Text,
     type TuiMouseEvent,
     type Component,
     stripTerminalSequences,
@@ -34,6 +35,24 @@ describe("message timestamp rendering", () => {
         );
 
         expect(renderTimestamp(["hello"], 11, "12:34").lines).toEqual(["hello"]);
+    });
+
+    it("keeps a divider intact and places the timestamp beside the message", () => {
+        const lines = ["\x1b[2m────────────\x1b[0m", "", "hello"];
+        const result = renderTimestamp(lines, 12, "12:34");
+        expect(result.lines.map(stripTerminalSequences)).toEqual([
+            "────────────",
+            "",
+            "hello 12:34 ",
+        ]);
+
+        expect(result.hit).toEqual({ x: 6, y: 2, width: 5, renderWidth: 12 });
+    });
+
+    it("timestamps a short message made of divider characters", () => {
+        expect(stripTerminalSequences(renderTimestamp(["────"], 16, "12:34").lines[0])).toBe(
+            "────      12:34 ",
+        );
     });
 
     it("retains backgrounds and OSC sequences in their original order", () => {
@@ -105,7 +124,11 @@ describe("session timestamp interaction", () => {
                 },
             },
         };
-        const pending: Component[] = [row, other, bare];
+        const long = new Text("alpha beta gamma delta", 0, 0);
+        const divider = new Container();
+        divider.addChild({ render: (width) => ["─".repeat(width)], invalidate: () => {} });
+        divider.addChild(new Text("alpha beta gamma delta", 0, 0));
+        const pending: Component[] = [row, other, bare, long, divider];
         Object.setPrototypeOf(host, prototype);
         Object.defineProperty(prototype, "addMessageToChat", {
             configurable: true,
@@ -123,6 +146,9 @@ describe("session timestamp interaction", () => {
         // SAFETY: This fixture supplies the only context members used by this controller.
         // oxlint-disable-next-line typescript/no-unsafe-type-assertion, antislop/no-chained-type-assertions -- The fixture intentionally implements only the exercised host boundary.
         const ctx = { sessionManager, ui: { notify() {} } } as unknown as ExtensionContext;
+        Object.defineProperty(ctx.ui, "theme", {
+            value: { bg: (_name: string, text: string) => text },
+        });
         const controller = new Timestamps(ctx, { enabled: true, format: "auto" });
         let successor: { dispose(): void } | undefined;
         try {
@@ -135,6 +161,23 @@ describe("session timestamp interaction", () => {
             host.addMessageToChat({ role: "user", timestamp });
             host.addMessageToChat({ role: "user", timestamp });
             host.addMessageToChat({ role: "user", timestamp });
+            host.addMessageToChat({ role: "user", timestamp });
+            const longLines = long.render(30).map(stripTerminalSequences);
+            expect(longLines[0]).toBe("alpha beta   01.01.2020 10:30 ");
+            expect(
+                longLines
+                    .slice(1)
+                    .map((line) => line.trim())
+                    .join(" "),
+            ).toBe("gamma delta");
+
+            host.addMessageToChat({ role: "user", timestamp });
+            const dividerLines = divider.render(30).map(stripTerminalSequences);
+            expect(dividerLines).toEqual([
+                "──────────────────────────────",
+                "alpha beta   01.01.2020 10:30 ",
+                "gamma delta                   ",
+            ]);
             const mouseMethod = Type.Object({
                 handleMouse: Type.Function([Type.Unknown()], Type.Unknown()),
             });

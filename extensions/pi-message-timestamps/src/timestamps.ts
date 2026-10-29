@@ -1,11 +1,11 @@
 import * as sdk from "@earendil-works/pi-coding-agent";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { TuiMouseEvent, TuiMouseEventResult } from "@earendil-works/pi-tui";
+import { visibleWidth, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
 import { installLinkedMethodPatch } from "@zigai/pi-extension-internals";
 import { Type, type StaticDecode } from "typebox";
 import { Value } from "typebox/value";
 import { formatTimestamp, type TimestampFormat } from "./format.ts";
-import { renderTimestamp, type TimestampHit } from "./render.ts";
+import { isDivider, renderTimestamp, type TimestampHit } from "./render.ts";
 import type { MessageTimestampsSettings } from "./settings.ts";
 
 const componentSchema = Type.Object({
@@ -30,8 +30,8 @@ const messageSchema = Type.Object({
     timestamp: Type.Number(),
 });
 
-const endSchema = Type.Object({
-    type: Type.Literal("message_end"),
+const assistantEventSchema = Type.Object({
+    type: Type.Union([Type.Literal("message_start"), Type.Literal("message_end")]),
     message: Type.Object({ role: Type.Literal("assistant") }),
 });
 
@@ -43,7 +43,7 @@ const markerKey = Symbol.for("zigai.pi-message-timestamps.host-patches");
 
 export class Timestamps {
     private readonly patches: { dispose(): void }[] = [];
-    private readonly rows = new WeakSet();
+    private readonly rows = new WeakMap<Component, { timestamp: Moment | undefined }>();
     private readonly completions = new WeakMap<object, number>();
     private readonly history = new WeakMap<object, string>();
     private readonly prototype: StaticDecode<typeof prototypeSchema>;
@@ -108,7 +108,7 @@ export class Timestamps {
                             if (!row) return;
 
                             const timestamp = timestampFor(message);
-                            if (timestamp !== undefined) attach(row, timestamp);
+                            if (timestamp !== undefined) attach(row, timestamp, message.role);
                         },
                 ),
             );
@@ -129,9 +129,19 @@ export class Timestamps {
 
                             await previous.call(this, event);
 
-                            if (!host || !streaming || !Value.Check(endSchema, event)) return;
+                            if (
+                                !host ||
+                                !matchHost(host) ||
+                                !Value.Check(assistantEventSchema, event)
+                            )
+                                return;
 
-                            complete(host, streaming, event.message, completed);
+                            if (event.type === "message_start") {
+                                const started = host.streamingComponent;
+                                if (started) attach(started, undefined, "assistant");
+                            } else if (streaming) {
+                                complete(host, streaming, event.message, completed);
+                            }
                         },
                 ),
             );
@@ -169,13 +179,13 @@ export class Timestamps {
     private complete(
         host: Host,
         streaming: Component,
-        message: StaticDecode<typeof endSchema>["message"],
+        message: StaticDecode<typeof assistantEventSchema>["message"],
         completed: number,
     ): void {
         if (this.disposed || !this.matchHost(host)) return;
 
         this.completions.set(message, completed);
-        this.attach(streaming, completed);
+        this.attach(streaming, completed, "assistant");
         host.ui.requestRender();
     }
 
@@ -222,13 +232,24 @@ export class Timestamps {
         this.host?.ui.requestRender();
     }
 
-    private attach(component: Component, timestamp: Moment): void {
-        if (this.rows.has(component)) return;
+    private attach(
+        component: Component,
+        timestamp: Moment | undefined,
+        role: "user" | "assistant",
+    ): void {
+        const existing = this.rows.get(component);
+        if (existing !== undefined) {
+            existing.timestamp = timestamp;
+            return;
+        }
 
+        const row = { timestamp };
         let hit: TimestampHit | undefined;
+        let assistantLayout: { width: number; contentWidth: number } | undefined;
         const currentFormat = () => this.format;
         const isDisposed = () => this.disposed;
         const cycle = () => this.cycle();
+        const background = (padding: string) => this.ctx.ui.theme.bg("userMessageBg", padding);
 
         // The proxy supplies an absent predecessor without modifying the component first.
         // Linked disposal therefore restores a genuinely absent method, even under successors.
@@ -269,14 +290,61 @@ export class Timestamps {
                 "render",
                 (previous) =>
                     function (width) {
-                        const lines = previous.call(this, width);
-                        if (isDisposed()) return lines;
+                        if (isDisposed()) return previous.call(this, width);
 
-                        const rendered = renderTimestamp(
-                            lines,
-                            width,
-                            formatTimestamp(timestamp, currentFormat()),
-                        );
+                        // A pending row reserves the same gutter as its completion label.
+                        // Never lay out already-visible thinking at a new width just to
+                        // attach a timestamp when message_end arrives.
+                        const label = formatTimestamp(row.timestamp ?? Date.now(), currentFormat());
+                        const contentWidth = width - visibleWidth(label) - 2;
+                        let layoutWidth = width;
+
+                        if (role === "assistant") {
+                            if (contentWidth > 0) layoutWidth = contentWidth;
+                            assistantLayout = { width, contentWidth: layoutWidth };
+                        }
+
+                        let lines = previous.call(this, layoutWidth);
+                        if (layoutWidth < width) {
+                            lines = lines.map((line) => {
+                                if (!isDivider(line, layoutWidth)) return line;
+
+                                return line.replace(
+                                    /─{2,}/u,
+                                    (divider) => divider + "─".repeat(width - layoutWidth),
+                                );
+                            });
+                        }
+
+                        if (row.timestamp === undefined) {
+                            hit = undefined;
+                            return lines;
+                        }
+
+                        let rendered = renderTimestamp(lines, width, label);
+                        if (role === "user" && !rendered.hit && contentWidth > 0) {
+                            let wrapped = previous.call(this, contentWidth);
+
+                            wrapped = wrapped.map((line, index) => {
+                                const original = lines.at(index);
+                                if (
+                                    original !== undefined &&
+                                    isDivider(original, width) &&
+                                    isDivider(line, contentWidth)
+                                )
+                                    return original;
+
+                                return line;
+                            });
+                            wrapped = wrapped.map((line) => {
+                                const padding = Math.max(0, width - visibleWidth(line));
+                                return line + background(" ".repeat(padding));
+                            });
+
+                            rendered = renderTimestamp(wrapped, width, label);
+                            if (!rendered.hit) rendered = { lines: previous.call(this, width) };
+                        }
+
                         hit = rendered.hit;
                         return rendered.lines;
                     },
@@ -302,6 +370,13 @@ export class Timestamps {
                                 return { handled: true };
                             }
 
+                            if (!isDisposed() && assistantLayout?.width === event.width) {
+                                return previous.call(component, {
+                                    ...event,
+                                    width: assistantLayout.contentWidth,
+                                });
+                            }
+
                             return previous.call(component, event);
                         },
                 );
@@ -311,7 +386,7 @@ export class Timestamps {
             }
 
             this.patches.push(renderPatch, mousePatch);
-            this.rows.add(component);
+            this.rows.set(component, row);
         } catch {
             if (!this.warned) {
                 this.warned = true;
