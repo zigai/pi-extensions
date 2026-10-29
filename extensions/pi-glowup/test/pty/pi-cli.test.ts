@@ -499,6 +499,76 @@ describe("actual Pi CLI in a real PTY", () => {
         45_000,
     );
 
+    it("shows a restored Bash command after leading blank lines", async () => {
+        const fixture = createFixtureWorkspace();
+        fixtures.push(fixture);
+        const source = readFileSync(fixture.sessionPath, "utf8").trimEnd();
+        const usage = {
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 0,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        };
+        const restored = [
+            {
+                type: "message",
+                id: "00000008",
+                parentId: "00000007",
+                timestamp: "2026-07-15T12:00:08.000Z",
+                message: {
+                    role: "assistant",
+                    content: [
+                        {
+                            type: "toolCall",
+                            id: "blank-bash",
+                            name: "bash",
+                            arguments: { command: `${"\n".repeat(12)}printf 'visible-command'` },
+                        },
+                    ],
+                    api: "pty-offline",
+                    provider: "pty-offline",
+                    model: "deterministic",
+                    usage,
+                    stopReason: "toolUse",
+                    timestamp: 1784116808000,
+                },
+            },
+            {
+                type: "message",
+                id: "00000009",
+                parentId: "00000008",
+                timestamp: "2026-07-15T12:00:09.000Z",
+                message: {
+                    role: "toolResult",
+                    toolCallId: "blank-bash",
+                    toolName: "bash",
+                    content: [{ type: "text", text: "result-marker" }],
+                    isError: false,
+                    timestamp: 1784116809000,
+                },
+            },
+        ];
+        writeFileSync(
+            fixture.sessionPath,
+            `${source}\n${restored.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+        );
+        const pi = new PiPtyProcess(launchOptions(fixture, { sessionPath: fixture.sessionPath }));
+        try {
+            const frame = await pi.waitForFrame(
+                (current) => current.text.includes("result-marker"),
+                PTY_TIMEOUT_MS,
+            );
+            expect(frame.text).toContain("printf");
+        } catch (cause: unknown) {
+            await pi.writeFailureArtifacts("leading-blank-bash", cause);
+            throw cause;
+        } finally {
+            await pi.stop();
+        }
+    }, 45_000);
+
     it("formats a restored Node call in the real transcript", async () => {
         const fixture = createFixtureWorkspace();
         fixtures.push(fixture);

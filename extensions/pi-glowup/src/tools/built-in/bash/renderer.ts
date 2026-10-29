@@ -195,6 +195,9 @@ function renderScriptInvocation(
     options: BashCommandRenderOptions,
 ): Component {
     if (pureScript.language === "bash") {
+        if (!options.expanded)
+            pureScript = { ...pureScript, code: pureScript.code.replace(/^[ \t\n]+/u, "") };
+
         let programs;
         if (options.embeddedPrograms !== undefined)
             programs = options.embeddedPrograms(pureScript.code, options.invalidate) ?? [];
@@ -223,6 +226,7 @@ export function renderBashCommandCall(
     options: BashCommandRenderOptions,
 ): Component {
     if (options.logicalSource === undefined) options = { ...options, logicalSource: command };
+    if (!options.expanded) command = command.replace(/^[ \t\n]+/u, "");
 
     if (options.pureScriptOverride !== undefined) {
         return renderScriptInvocation(theme, options.pureScriptOverride, options);

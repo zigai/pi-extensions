@@ -98,6 +98,21 @@ describe("streaming Bash layout", () => {
         expect(rows(component, 100)).toEqual(["$ alpha && beta"]);
     });
 
+    it("shows the command while the first streamed statement is pending", async () => {
+        const store = createCodeStreamStore();
+        const command = "echo 'unfinished";
+        const streamCode: CodePreview = (input) => store.get({ ...input, mode: "statement" });
+        const component = await render(command, streamCode, { argsComplete: false });
+        try {
+            rows(component);
+            await store.settled();
+            component.invalidate();
+            expect(rows(component).join("\n")).toContain("echo");
+        } finally {
+            await store.dispose();
+        }
+    });
+
     it("lays out only published statements, leaving an unfinished tail hidden", async () => {
         const store = createCodeStreamStore();
         const command = "first; second; echo 'UNFINISHED";

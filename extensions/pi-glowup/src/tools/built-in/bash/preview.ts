@@ -1,4 +1,4 @@
-import type { Component } from "@earendil-works/pi-tui";
+import { truncateToWidth, type Component } from "@earendil-works/pi-tui";
 import { createSyntaxComponent } from "../../../rendering/syntax/component-owner.ts";
 import { createEmbeddedProgramService, type EmbeddedProgramLookup } from "./embedded-service.ts";
 import {
@@ -204,13 +204,27 @@ function renderStreamingScriptCall(
                             toolCallId,
                         });
 
-                    // Statement publication and shell layout are independent: lay out only
-                    // the published snapshot, never expose the unfinished source tail.
+                    let displayedInvocation = { ...currentInvocation, code };
+                    if (code.trim().length === 0 && currentInvocation.launcher === undefined) {
+                        const firstLine = command.replace(/^[ \t\n]+/u, "").split("\n", 1)[0] ?? "";
+                        if (firstLine.length > 0) {
+                            displayedInvocation = {
+                                label: "Bash",
+                                language: "bash",
+                                code: truncateToWidth(
+                                    `${firstLine} …`,
+                                    Math.max(1, width - 2),
+                                    "…",
+                                ),
+                            };
+                        }
+                    }
+
                     const preview = renderBashCommandCall(theme, code, {
                         ...options,
                         expanded,
                         invalidate: renderState.invalidate,
-                        pureScriptOverride: { ...currentInvocation, code },
+                        pureScriptOverride: displayedInvocation,
                         lastComponent: renderState.preview,
                     });
 
