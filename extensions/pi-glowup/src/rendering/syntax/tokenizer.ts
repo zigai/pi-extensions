@@ -39,14 +39,27 @@ export type TokenizeUnavailableReason =
     | "cleanup-timeout"
     | "cleanup-failed";
 
+type CapacityRetry = {
+    readonly retry: WeakRef<() => void>;
+    readonly signal: AbortSignal | undefined;
+    readonly isNeeded: WeakRef<() => boolean> | undefined;
+    readonly cancel: () => void;
+};
+
 type TokenizeUnavailableListener = (reason: TokenizeUnavailableReason, error?: string) => void;
+
+function isAborted(signal: AbortSignal | undefined): boolean {
+    return signal?.aborted === true;
+}
 
 type TokenizeCancellation = {
     readonly signal?: AbortSignal;
     readonly retryWhenCapacityAvailable?: (() => void) | undefined;
+    readonly isCapacityRetryNeeded?: (() => boolean) | undefined;
 
     /** Explains an undefined result for diagnostics. */
     readonly onUnavailable?: TokenizeUnavailableListener | undefined;
+
     /** Reports actual queue admission and worker dispatch, never an intention. */
     readonly onState?: ((state: "queued" | "running") => void) | undefined;
 };
@@ -62,8 +75,9 @@ export function createSyntaxTokenizer(
     },
 ) {
     const queue: Work[] = [];
+
     // Backpressure retains weak renderer handles, never over-budget source jobs.
-    const capacityRetries = new Set<WeakRef<() => void>>();
+    const capacityRetries = new Set<CapacityRetry>();
     const registeredRetries = new WeakSet<() => void>();
     const capacityWaiters = new Set<() => void>();
 
@@ -72,30 +86,41 @@ export function createSyntaxTokenizer(
         capacityWaiters.clear();
     }
 
-    function clearCapacityRetries(): void {
-        for (const reference of capacityRetries) {
-            const retry = reference.deref();
-            if (retry !== undefined) registeredRetries.delete(retry);
-        }
+    function removeCapacityRetry(entry: CapacityRetry): void {
+        capacityRetries.delete(entry);
+        entry.signal?.removeEventListener("abort", entry.cancel);
 
-        capacityRetries.clear();
+        const retry = entry.retry.deref();
+        if (retry !== undefined) registeredRetries.delete(retry);
+    }
+
+    function clearCapacityRetries(): void {
+        for (const entry of capacityRetries) removeCapacityRetry(entry);
     }
 
     let capacityNotificationScheduled = false;
 
     function scheduleCapacityNotification(): void {
-        if (disposed || failed || capacityRetries.size === 0 || capacityNotificationScheduled)
+        if (
+            disposed ||
+            startupPaused ||
+            capacityRetries.size === 0 ||
+            capacityNotificationScheduled
+        )
             return;
+
         capacityNotificationScheduled = true;
         queueMicrotask(() => {
             capacityNotificationScheduled = false;
-            if (disposed || failed) return;
+
+            if (disposed || startupPaused) return;
+
             const retries = [...capacityRetries];
-            capacityRetries.clear();
-            for (const reference of retries) {
-                const retry = reference.deref();
-                if (retry === undefined) continue;
-                registeredRetries.delete(retry);
+            for (const entry of retries) {
+                const retry = entry.retry.deref();
+                removeCapacityRetry(entry);
+
+                if (retry === undefined || !capacityRetryNeeded(entry)) continue;
                 try {
                     retry();
                 } catch (cause: unknown) {
@@ -106,6 +131,7 @@ export function createSyntaxTokenizer(
             }
         });
     }
+
     const terminations = new Set<Promise<"complete" | "timeout" | "failed">>();
     let active: Work | undefined;
     let worker: Worker | undefined;
@@ -147,15 +173,34 @@ export function createSyntaxTokenizer(
         dispatch();
     }
 
+    function capacityRetryNeeded(entry: CapacityRetry): boolean {
+        if (entry.signal?.aborted === true) return false;
+        if (entry.isNeeded === undefined) return true;
+        return entry.isNeeded.deref()?.() === true;
+    }
+
+    function hasWaitingDemand(): boolean {
+        for (const entry of capacityRetries) {
+            if (entry.retry.deref() === undefined || !capacityRetryNeeded(entry))
+                removeCapacityRetry(entry);
+        }
+
+        return queue.length > 0 || capacityWaiters.size > 0 || capacityRetries.size > 0;
+    }
+
     function protectQueuedWork(): void {
         const work = active;
         if (work === undefined || contentionDeadline !== undefined) return;
 
-        contentionDeadline = setTimeout(() => timeout(work), WORKER_CONTENTION_LIMIT_MS);
+        contentionDeadline = setTimeout(() => {
+            contentionDeadline = undefined;
+
+            if (hasWaitingDemand()) timeout(work);
+        }, WORKER_CONTENTION_LIMIT_MS);
     }
 
     function releaseContention(): void {
-        if (queue.length > 0) return;
+        if (hasWaitingDemand()) return;
         if (contentionDeadline !== undefined) clearTimeout(contentionDeadline);
         contentionDeadline = undefined;
     }
@@ -242,8 +287,12 @@ export function createSyntaxTokenizer(
 
         failed = true;
         failureReason = reason;
-        clearCapacityRetries();
+        startupPaused = false;
+
+        if (startupRetry !== undefined) clearTimeout(startupRetry);
+        startupRetry = undefined;
         wakeCapacityWaiters();
+        scheduleCapacityNotification();
 
         if (active !== undefined) finish(active, undefined, reason);
         active = undefined;
@@ -335,8 +384,8 @@ export function createSyntaxTokenizer(
                 startupRetry = setTimeout(() => {
                     startupPaused = false;
                     startupRetry = undefined;
+                    scheduleCapacityNotification();
                 }, WORKER_START_LIMIT_MS);
-                clearCapacityRetries();
                 stopWorker();
 
                 for (const work of queue.splice(0)) finish(work, undefined, "startup-timeout");
@@ -398,7 +447,7 @@ export function createSyntaxTokenizer(
             worker.ref();
             deadline = setTimeout(() => timeout(work), WORKER_JOB_LIMIT_MS);
 
-            if (queue.length > 0) protectQueuedWork();
+            if (hasWaitingDemand()) protectQueuedWork();
             worker.postMessage(work.request);
             work.onState?.("running");
         } catch (cause: unknown) {
@@ -436,12 +485,37 @@ export function createSyntaxTokenizer(
         ) {
             cancellation.onUnavailable?.("backpressure");
 
+            if (isAborted(cancellation.signal)) return enqueue(request, cancellation);
+
             const retry = cancellation.retryWhenCapacityAvailable;
             if (retry !== undefined) {
                 if (!registeredRetries.has(retry)) {
                     registeredRetries.add(retry);
-                    capacityRetries.add(new WeakRef(retry));
+
+                    const isNeeded = cancellation.isCapacityRetryNeeded;
+                    let signal = cancellation.signal;
+                    let needed: WeakRef<() => boolean> | undefined;
+                    if (isNeeded !== undefined) {
+                        signal = undefined;
+                        needed = new WeakRef(isNeeded);
+                    }
+
+                    const entry: CapacityRetry = {
+                        retry: new WeakRef(retry),
+                        signal,
+                        isNeeded: needed,
+                        cancel: () => {
+                            removeCapacityRetry(entry);
+                            releaseContention();
+                        },
+                    };
+
+                    capacityRetries.add(entry);
+                    signal?.addEventListener("abort", entry.cancel, { once: true });
                 }
+
+                protectQueuedWork();
+
                 return undefined;
             }
 
@@ -450,11 +524,15 @@ export function createSyntaxTokenizer(
                 const wake = (): void => {
                     cancellation.signal?.removeEventListener("abort", wake);
                     capacityWaiters.delete(wake);
+                    releaseContention();
                     resolve();
                 };
+
                 capacityWaiters.add(wake);
                 cancellation.signal?.addEventListener("abort", wake, { once: true });
+                protectQueuedWork();
             });
+
             return enqueue(request, cancellation);
         }
 

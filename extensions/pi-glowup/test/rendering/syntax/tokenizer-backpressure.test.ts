@@ -17,7 +17,7 @@ function controlledWorker(onStall: () => void): Worker {
         `const { parentPort } = require("node:worker_threads");
         parentPort.on("message", (request) => {
             if (request.type === "initialize") parentPort.postMessage({ type: "ready" });
-            else if (request.code === "slow") {
+            else if (request.code.startsWith("slow")) {
                 parentPort.postMessage({ type: "ready" });
                 parentPort.postMessage({ id: -1, lines: [] });
                 while (true) {}
@@ -99,6 +99,238 @@ it("resumes a backpressured request after an oversized stalled job", async () =>
         expect(resumed).toBeDefined();
         expect(await slow).toBeUndefined();
         expect(await resumed).toEqual(["short"]);
+    } finally {
+        await worker.dispose();
+        vi.useRealTimers();
+    }
+});
+
+it("resumes a tiny JavaScript request waiting behind an oversized source", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let running: () => void = () => {};
+    const stalled = new Promise<void>((resolve) => {
+        running = resolve;
+    });
+    const worker = createSyntaxTokenizer(
+        { name: "test", settings: [] },
+        {
+            maxJobs: 100,
+            maxBytes: 512 * 1024,
+            reportWarning: undefined,
+            waitForDisposals: async () => {},
+            createWorker: () => controlledWorker(running),
+        },
+    );
+    const slowReasons: string[] = [];
+    const shortReasons: string[] = [];
+    try {
+        const slow = worker.tokenize(`slow${"x".repeat(512 * 1024)}`, "javascript", false, {
+            onUnavailable: (reason) => {
+                slowReasons.push(reason);
+            },
+        });
+        await stalled;
+        const short = worker.tokenize("const value = 1;", "javascript", false, {
+            onUnavailable: (reason) => {
+                shortReasons.push(reason);
+            },
+        });
+        await vi.advanceTimersByTimeAsync(10_001);
+        expect(slowReasons).toEqual(["timeout"]);
+        expect(await slow).toBeUndefined();
+        expect(await short).toEqual(["const value = 1;"]);
+        expect(shortReasons).toEqual(["backpressure"]);
+    } finally {
+        await worker.dispose();
+        vi.useRealTimers();
+    }
+});
+
+it("resumes retry demand waiting behind an oversized source", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let running: () => void = () => {};
+    const stalled = new Promise<void>((resolve) => {
+        running = resolve;
+    });
+    const worker = createSyntaxTokenizer(
+        { name: "test", settings: [] },
+        {
+            maxJobs: 100,
+            maxBytes: 512 * 1024,
+            reportWarning: undefined,
+            waitForDisposals: async () => {},
+            createWorker: () => controlledWorker(running),
+        },
+    );
+    const slowReasons: string[] = [];
+    const controller = new AbortController();
+    let resumed: Promise<string[] | undefined> | undefined;
+    try {
+        const slow = worker.tokenize(`slow${"x".repeat(512 * 1024)}`, "javascript", false, {
+            onUnavailable: (reason) => {
+                slowReasons.push(reason);
+            },
+        });
+        await stalled;
+        expect(
+            await worker.tokenize("const value = 1;", "javascript", false, {
+                signal: controller.signal,
+                retryWhenCapacityAvailable: () => {
+                    resumed = worker.tokenize("const value = 1;", "javascript", false);
+                },
+            }),
+        ).toBeUndefined();
+        await vi.advanceTimersByTimeAsync(10_001);
+        expect(slowReasons).toEqual(["timeout"]);
+        expect(await slow).toBeUndefined();
+        expect(resumed).toBeDefined();
+        expect(await resumed).toEqual(["const value = 1;"]);
+    } finally {
+        controller.abort();
+        await worker.dispose();
+        vi.useRealTimers();
+    }
+});
+
+it("keeps shared retry demand when one waiting request is cancelled", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let running: () => void = () => {};
+    const stalled = new Promise<void>((resolve) => {
+        running = resolve;
+    });
+    const worker = createSyntaxTokenizer(
+        { name: "test", settings: [] },
+        {
+            maxJobs: 100,
+            maxBytes: 512 * 1024,
+            reportWarning: undefined,
+            waitForDisposals: async () => {},
+            createWorker: () => controlledWorker(running),
+        },
+    );
+    const slowReasons: string[] = [];
+    const first = new AbortController();
+    const second = new AbortController();
+    let resumed: Promise<string[] | undefined> | undefined;
+    const retry = () => {
+        resumed = worker.tokenize("const second = 2;", "javascript", false);
+    };
+
+    const isNeeded = () => !first.signal.aborted || !second.signal.aborted;
+    try {
+        const slow = worker.tokenize(`slow${"x".repeat(512 * 1024)}`, "javascript", false, {
+            onUnavailable: (reason) => {
+                slowReasons.push(reason);
+            },
+        });
+        await stalled;
+        await worker.tokenize("const first = 1;", "javascript", false, {
+            signal: first.signal,
+            retryWhenCapacityAvailable: retry,
+            isCapacityRetryNeeded: isNeeded,
+        });
+        await worker.tokenize("const second = 2;", "javascript", false, {
+            signal: second.signal,
+            retryWhenCapacityAvailable: retry,
+            isCapacityRetryNeeded: isNeeded,
+        });
+        first.abort();
+        await vi.advanceTimersByTimeAsync(10_001);
+        expect(slowReasons).toEqual(["timeout"]);
+        expect(await slow).toBeUndefined();
+        expect(resumed).toBeDefined();
+        expect(await resumed).toEqual(["const second = 2;"]);
+    } finally {
+        second.abort();
+        await worker.dispose();
+        vi.useRealTimers();
+    }
+});
+
+it("does not interrupt an oversized source after waiting demand is cancelled", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let running: () => void = () => {};
+    const stalled = new Promise<void>((resolve) => {
+        running = resolve;
+    });
+    const worker = createSyntaxTokenizer(
+        { name: "test", settings: [] },
+        {
+            maxJobs: 100,
+            maxBytes: 512 * 1024,
+            reportWarning: undefined,
+            waitForDisposals: async () => {},
+            createWorker: () => controlledWorker(running),
+        },
+    );
+    const reasons: string[] = [];
+    const controller = new AbortController();
+    try {
+        const slow = worker.tokenize(`slow${"x".repeat(512 * 1024)}`, "javascript", false, {
+            onUnavailable: (reason) => {
+                reasons.push(reason);
+            },
+        });
+        await stalled;
+        const short = worker.tokenize("const value = 1;", "javascript", false, {
+            signal: controller.signal,
+        });
+        controller.abort();
+        expect(await short).toBeUndefined();
+        await vi.advanceTimersByTimeAsync(10_001);
+        expect(reasons).toEqual([]);
+        await worker.dispose();
+        expect(await slow).toBeUndefined();
+        expect(reasons).toEqual(["cancelled"]);
+    } finally {
+        await worker.dispose();
+        vi.useRealTimers();
+    }
+});
+
+it("does not interrupt an oversized source after a retry demand is cancelled", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let running: () => void = () => {};
+    const stalled = new Promise<void>((resolve) => {
+        running = resolve;
+    });
+    const worker = createSyntaxTokenizer(
+        { name: "test", settings: [] },
+        {
+            maxJobs: 100,
+            maxBytes: 512 * 1024,
+            reportWarning: undefined,
+            waitForDisposals: async () => {},
+            createWorker: () => controlledWorker(running),
+        },
+    );
+    const reasons: string[] = [];
+    const controller = new AbortController();
+    const isNeeded = () => !controller.signal.aborted;
+    let retries = 0;
+    try {
+        const slow = worker.tokenize(`slow${"x".repeat(512 * 1024)}`, "javascript", false, {
+            onUnavailable: (reason) => {
+                reasons.push(reason);
+            },
+        });
+        await stalled;
+        expect(
+            await worker.tokenize("const value = 1;", "javascript", false, {
+                signal: controller.signal,
+                retryWhenCapacityAvailable: () => {
+                    retries += 1;
+                },
+                isCapacityRetryNeeded: isNeeded,
+            }),
+        ).toBeUndefined();
+
+        controller.abort();
+        await vi.advanceTimersByTimeAsync(10_001);
+        expect(reasons).toEqual([]);
+        expect(retries).toBe(0);
+        await worker.dispose();
+        expect(await slow).toBeUndefined();
     } finally {
         await worker.dispose();
         vi.useRealTimers();
@@ -436,6 +668,78 @@ it("reports startup timeout and allows a later request to recover", async () => 
     }
 });
 
+it("wakes current capacity demand after startup cooldown", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let markOnline: () => void = () => {};
+    const online = new Promise<void>((resolve) => {
+        markOnline = resolve;
+    });
+    let markExit: () => void = () => {};
+    const exited = new Promise<void>((resolve) => {
+        markExit = resolve;
+    });
+    let workers = 0;
+    let callbacks = 0;
+    let cancelledCallbacks = 0;
+    let resumed: Promise<string[] | undefined> | undefined;
+    const controller = new AbortController();
+    const retry = () => {
+        callbacks += 1;
+        resumed = worker.compactPython("waiting");
+    };
+
+    const obsoleteRetry = () => {
+        cancelledCallbacks += 1;
+    };
+
+    const worker = createSyntaxTokenizer(undefined, {
+        maxJobs: 1,
+        maxBytes: 1024,
+        reportWarning: undefined,
+        waitForDisposals: async () => {},
+        createWorker: () => {
+            workers += 1;
+            if (workers > 1) return controlledWorker(() => {});
+
+            const current = new Worker(
+                'require("node:worker_threads").parentPort.on("message", () => {});',
+                { eval: true },
+            );
+            current.once("online", markOnline);
+            current.once("exit", markExit);
+
+            return current;
+        },
+    });
+    try {
+        const first = worker.compactPython("first");
+        await online;
+        await worker.compactPython("waiting", { retryWhenCapacityAvailable: retry });
+        await worker.compactPython("obsolete", {
+            signal: controller.signal,
+            retryWhenCapacityAvailable: obsoleteRetry,
+        });
+        vi.advanceTimersToNextTimer();
+        expect(await first).toBeUndefined();
+        controller.abort();
+        await exited;
+        await new Promise<void>((resolve) => {
+            setImmediate(resolve);
+        });
+        expect(callbacks).toBe(0);
+        expect(workers).toBe(1);
+        await vi.advanceTimersToNextTimerAsync();
+        expect(callbacks).toBe(1);
+        expect(cancelledCallbacks).toBe(0);
+        expect(resumed).toBeDefined();
+        expect(await resumed).toEqual(["waiting"]);
+        expect(workers).toBe(2);
+    } finally {
+        await worker.dispose();
+        vi.useRealTimers();
+    }
+});
+
 it("permits a capacity owner to register again after startup recovery", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     let markOnline: () => void = () => {};
@@ -490,7 +794,8 @@ it("permits a capacity owner to register again after startup recovery", async ()
         await new Promise<void>((resolve) => {
             setImmediate(resolve);
         });
-        vi.advanceTimersToNextTimer();
+        await vi.advanceTimersToNextTimerAsync();
+        expect(retries).toBe(1);
         const slow = worker.compactPython("slow", { signal: controller.signal });
         await stalled;
         expect(
@@ -500,7 +805,7 @@ it("permits a capacity owner to register again after startup recovery", async ()
         controller.abort();
         expect(await slow).toBeUndefined();
         await Promise.resolve();
-        expect(retries).toBe(1);
+        expect(retries).toBe(2);
     } finally {
         await worker.dispose();
         vi.useRealTimers();
@@ -516,7 +821,7 @@ it("coalesces repeated capacity requests for one owner", async () => {
     try {
         const occupied = worker.compactPython("first = 1");
         const rejected = await Promise.all(
-            Array.from({ length: 20 }, () =>
+            Array.from({ length: 20 }, async () =>
                 worker.compactPython("later = 2", { retryWhenCapacityAvailable }),
             ),
         );
@@ -635,6 +940,7 @@ it("admits oversized sources alone and then resumes smaller requests", async () 
         expect(
             await worker.compactPython("later = 2", { retryWhenCapacityAvailable }),
         ).toBeUndefined();
+
         expect(await pending).toEqual(large.split("\n"));
         expect(resumed).toBeDefined();
         expect(await resumed).toEqual(["later = 2"]);

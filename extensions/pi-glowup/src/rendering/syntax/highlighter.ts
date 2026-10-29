@@ -158,6 +158,7 @@ type HighlightOwner = {
     previousResults: ReadonlyMap<string, HighlightedSource>;
     version: number;
     readonly retryWhenCapacityAvailable: () => void;
+    readonly isCapacityRetryNeeded: () => boolean;
     readonly retryWhenReady: (language: SyntaxLanguage) => void;
     readonly readyRequests: Map<SyntaxLanguage, Map<string | undefined, SyntaxHighlightOptions>>;
 
@@ -177,7 +178,7 @@ type HighlightOwner = {
 let bracketPairColoringEnabled = true;
 let highlightOwners = new WeakMap<() => void, HighlightOwner>();
 let highlightSources = new WeakMap<() => void, HighlightSource>();
-const pendingHighlights = new Map<string, Promise<string[]>>();
+const pendingHighlights = new Map<string, { promise: Promise<string[]>; automatic: boolean }>();
 const timedOutUnownedHighlights = new Set<string>();
 
 let unownedRetryBudgetExhausted = false;
@@ -450,7 +451,7 @@ export function highlightSyntaxCode(
         }
     }
 
-    void highlightSyntaxCodeAsync(code, normalizedLanguage, options, request);
+    void highlightSyntaxCodeAsync(code, normalizedLanguage, options, request, true);
 
     return pendingHighlightLines(code, normalizedLanguage, state.theme.name, owned);
 }
@@ -682,6 +683,20 @@ export function observeSyntaxHighlightSource(
             activeHighlights.add(retry);
         },
         capacityRequests: new Map(),
+        isCapacityRetryNeeded: () => {
+            if (highlightOwners.get(invalidate) !== owner || owner.controller.signal.aborted)
+                return false;
+
+            for (const request of owner.capacityRequests.values()) {
+                if (
+                    request.version === syntaxRenderingVersion &&
+                    request.options.signal?.aborted !== true
+                )
+                    return true;
+            }
+
+            return false;
+        },
         readyRequests: new Map(),
         retryWhenReady: (language) => {
             if (highlightOwners.get(invalidate) !== owner || owner.controller.signal.aborted)
@@ -780,6 +795,7 @@ export async function highlightSyntaxCodeAsync(
     language: string | undefined,
     options: SyntaxHighlightOptions = {},
     observation?: HighlightRequest,
+    automatic = false,
 ): Promise<string[]> {
     const state = syntaxState;
     const normalizedLanguage = normalizeSyntaxLanguage(language);
@@ -852,9 +868,12 @@ export async function highlightSyntaxCodeAsync(
 
     const signal = AbortSignal.any(signals);
     const pendingKey = owner === undefined && options.signal === undefined ? key : undefined;
-    let pending =
-        owner?.pending.get(key) ??
-        (pendingKey === undefined ? undefined : pendingHighlights.get(pendingKey));
+    let shared: { promise: Promise<string[]>; automatic: boolean } | undefined;
+    if (pendingKey !== undefined) shared = pendingHighlights.get(pendingKey);
+    if (shared !== undefined && automatic) shared.automatic = true;
+
+    const automaticUnowned = automatic && owner === undefined;
+    let pending = owner?.pending.get(key) ?? shared?.promise;
     if (pending === undefined) {
         highlightControllers.add(controller);
 
@@ -886,6 +905,7 @@ export async function highlightSyntaxCodeAsync(
             .tokenize(plainLines.join("\n"), normalizedLanguage, bracketPairColoringEnabled, {
                 signal,
                 retryWhenCapacityAvailable: owner?.retryWhenCapacityAvailable,
+                isCapacityRetryNeeded: owner?.isCapacityRetryNeeded,
                 onUnavailable,
                 onState: (phase) => highlightJobState(diagnosticJob(), phase),
             })
@@ -904,10 +924,13 @@ export async function highlightSyntaxCodeAsync(
                     const reason = unavailable?.reason;
                     if (reason === "timeout") {
                         if (owner !== undefined) owner.timedOut.add(key);
-                        else if (timedOutUnownedHighlights.size < CACHE_LIMIT)
-                            timedOutUnownedHighlights.add(key);
-                        else if (!timedOutUnownedHighlights.has(key)) {
-                            if (!unownedRetryBudgetExhausted) {
+                        else if (automaticUnowned || shared?.automatic === true) {
+                            if (timedOutUnownedHighlights.size < CACHE_LIMIT)
+                                timedOutUnownedHighlights.add(key);
+                            else if (
+                                !timedOutUnownedHighlights.has(key) &&
+                                !unownedRetryBudgetExhausted
+                            ) {
                                 unownedRetryBudgetExhausted = true;
                                 state.reportWarning(
                                     "[pi-glowup] Automatic unowned syntax highlighting is suspended after repeated timeouts; reload to retry",
@@ -934,7 +957,6 @@ export async function highlightSyntaxCodeAsync(
                 }
 
                 record("highlighted");
-                timedOutUnownedHighlights.delete(key);
 
                 const highlighted = normalizeHighlightedLineCount(lines, plainLines.length);
                 if (shouldCache) rememberHighlightedCode(key, highlighted);
@@ -985,7 +1007,10 @@ export async function highlightSyntaxCodeAsync(
 
                 if (pending !== undefined) activeHighlights.delete(pending);
 
-                if (pendingKey !== undefined && pendingHighlights.get(pendingKey) === pending)
+                if (
+                    pendingKey !== undefined &&
+                    pendingHighlights.get(pendingKey)?.promise === pending
+                )
                     pendingHighlights.delete(pendingKey);
 
                 if (owner !== undefined && owner.pending.get(key) === pending)
@@ -994,7 +1019,11 @@ export async function highlightSyntaxCodeAsync(
         bindHighlightJob(pending, job);
         activeHighlights.add(pending);
 
-        if (pendingKey !== undefined) pendingHighlights.set(pendingKey, pending);
+        if (pendingKey !== undefined) {
+            shared = { promise: pending, automatic: automaticUnowned };
+            pendingHighlights.set(pendingKey, shared);
+        }
+
         owner?.pending.set(key, pending);
     } else {
         let job = observedHighlightJob(pending);
@@ -1483,7 +1512,7 @@ function diagnoseHighlightRequest(
             pending = highlightOwners.get(options.invalidate)?.pending.get(key);
 
         if (options.invalidate === undefined && options.signal === undefined)
-            pending ??= pendingHighlights.get(key);
+            pending ??= pendingHighlights.get(key)?.promise;
     }
 
     let newIntention = newSubmission;

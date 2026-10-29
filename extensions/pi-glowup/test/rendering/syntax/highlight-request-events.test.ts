@@ -212,6 +212,77 @@ describe("optional syntax request events", () => {
         }
     });
 
+    it("resumes an owned request waiting behind an oversized source", async () => {
+        const slow = `const slow = "${"x".repeat(512 * 1024)}";`;
+        let markRunning: () => void = () => {};
+        const running = new Promise<void>((resolve) => {
+            markRunning = resolve;
+        });
+        let markCompleted: () => void = () => {};
+        const completed = new Promise<void>((resolve) => {
+            markCompleted = resolve;
+        });
+        await initializeSyntaxHighlighting(
+            {},
+            {
+                preloadLanguages: ["javascript"],
+                reportWarning: () => {},
+                createWorker: () =>
+                    new Worker(
+                        `const { parentPort } = require("node:worker_threads");
+                parentPort.on("message", (request) => {
+                    if (request.type === "initialize") parentPort.postMessage({ type: "ready" });
+                    else if (request.code.length < 1024)
+                        parentPort.postMessage({ id: request.id, lines: ["\\x1b[31m" + request.code + "\\x1b[39m"] });
+                });`,
+                        { eval: true },
+                    ),
+            },
+        );
+        configureRenderDiagnostics((event, fields) => {
+            const current = fields();
+            sink(event, () => current);
+
+            if (
+                event === "syntax_request" &&
+                current.state === "running" &&
+                current.bytes === Buffer.byteLength(slow)
+            )
+                markRunning();
+
+            if (event === "syntax_request" && current.state === "completed") markCompleted();
+        });
+
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+        const short = "const short = 2;";
+        const slowOwner = () => {};
+        const shortOwner = () => {};
+        const obsolete = new AbortController();
+        try {
+            highlightSyntaxCode(slow, "javascript", { invalidate: slowOwner });
+            await running;
+            highlightSyntaxCode("const obsolete = 1;", "javascript", {
+                invalidate: shortOwner,
+                signal: obsolete.signal,
+            });
+
+            expect(highlightSyntaxCode(short, "javascript", { invalidate: shortOwner })).toEqual([
+                short,
+            ]);
+
+            obsolete.abort();
+            await vi.advanceTimersByTimeAsync(10_001);
+            await completed;
+            const result = highlightSyntaxCode(short, "javascript", { invalidate: shortOwner });
+            expect(result.map(stripVTControlCharacters)).toEqual([short]);
+            expect(result.join("\n")).toContain("\u001b[");
+            expect(terminals().some((fields) => fields.reason === "worker-timeout")).toBe(true);
+            expect(requests().some((fields) => fields.state === "waiting-capacity")).toBe(true);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it("does not resubmit timed-out unowned renders but permits an explicit retry", async () => {
         await initializeSyntaxHighlighting({}, { preloadLanguages: ["typescript"] });
         vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
@@ -309,6 +380,249 @@ describe("optional syntax request events", () => {
             expect(recovered.join("\n")).toContain("\u001b[");
             expect(recovered.map(stripVTControlCharacters)).toEqual([source]);
 
+            expect(workers).toBe(2);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("does not spend the automatic timeout budget on explicit requests", async () => {
+        const warnings: string[] = [];
+        await initializeSyntaxHighlighting(
+            {},
+            {
+                preloadLanguages: ["javascript"],
+                reportWarning: (message) => {
+                    warnings.push(message);
+                },
+                createWorker: () =>
+                    new Worker(
+                        `const { parentPort } = require("node:worker_threads");
+                parentPort.on("message", (request) => {
+                    if (request.type === "initialize") parentPort.postMessage({ type: "ready" });
+                    else if (request.code === "const healthy = 1;")
+                        parentPort.postMessage({ id: request.id, lines: ["\\x1b[31m" + request.code + "\\x1b[39m"] });
+                });`,
+                        { eval: true },
+                    ),
+            },
+        );
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+        let markRunning: () => void = () => {};
+        configureRenderDiagnostics((event, fields) => {
+            const current = fields();
+            sink(event, () => current);
+
+            if (event === "syntax_request" && current.state === "running") markRunning();
+        });
+        try {
+            for (let index = 0; index < 101; index += 1) {
+                const running = new Promise<void>((resolve) => {
+                    markRunning = resolve;
+                });
+                const pending = highlightSyntaxCodeAsync(
+                    `const explicit${index} = ${index};`,
+                    "javascript",
+                );
+                await running;
+                vi.advanceTimersToNextTimer();
+                await pending;
+            }
+
+            expect(
+                warnings.some((message) => message.includes("unowned syntax highlighting")),
+            ).toBe(false);
+            const healthy = "const healthy = 1;";
+            highlightSyntaxCode(healthy, "javascript");
+            await settleSyntaxHighlights();
+            expect(highlightSyntaxCode(healthy, "javascript").join("\n")).toContain("\u001b[");
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("records an automatic timeout when it joins an explicit job", async () => {
+        await initializeSyntaxHighlighting(
+            {},
+            {
+                preloadLanguages: ["javascript"],
+                reportWarning: () => {},
+                createWorker: () =>
+                    new Worker(
+                        `const { parentPort } = require("node:worker_threads");
+                parentPort.on("message", (request) => {
+                    if (request.type === "initialize") parentPort.postMessage({ type: "ready" });
+                });`,
+                        { eval: true },
+                    ),
+            },
+        );
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+        let markRunning: () => void = () => {};
+        const running = new Promise<void>((resolve) => {
+            markRunning = resolve;
+        });
+        configureRenderDiagnostics((event, fields) => {
+            const current = fields();
+            sink(event, () => current);
+
+            if (event === "syntax_request" && current.state === "running") markRunning();
+        });
+        const code = "const shared = 1;";
+        try {
+            const explicit = highlightSyntaxCodeAsync(code, "javascript");
+            await running;
+            highlightSyntaxCode(code, "javascript");
+            vi.advanceTimersToNextTimer();
+            await explicit;
+            await settleSyntaxHighlights();
+            const count = requests().filter((fields) => fields.state === "running").length;
+            expect(highlightSyntaxCode(code, "javascript")).toEqual([code]);
+            await settleSyntaxHighlights();
+            expect(requests().filter((fields) => fields.state === "running")).toHaveLength(count);
+            expect(terminals().some((fields) => fields.reason === "worker-timeout")).toBe(true);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("keeps automatic timeout history after an explicit success", async () => {
+        const warnings: string[] = [];
+        let permitFirst = false;
+        await initializeSyntaxHighlighting(
+            {},
+            {
+                preloadLanguages: ["javascript"],
+                reportWarning: (message) => {
+                    warnings.push(message);
+                },
+                createWorker: () =>
+                    new Worker(
+                        `const { parentPort } = require("node:worker_threads");
+                const permitFirst = ${permitFirst};
+                parentPort.on("message", (request) => {
+                    if (request.type === "initialize") parentPort.postMessage({ type: "ready" });
+                    else if (permitFirst && request.code === "const item0 = 0;")
+                        parentPort.postMessage({ id: request.id, lines: ["\\x1b[31m" + request.code + "\\x1b[39m"] });
+                });`,
+                        { eval: true },
+                    ),
+            },
+        );
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+        let markRunning: () => void = () => {};
+        configureRenderDiagnostics((event, fields) => {
+            const current = fields();
+            sink(event, () => current);
+
+            if (event === "syntax_request" && current.state === "running") markRunning();
+        });
+        try {
+            for (let index = 0; index < 100; index += 1) {
+                const running = new Promise<void>((resolve) => {
+                    markRunning = resolve;
+                });
+                highlightSyntaxCode(`const item${index} = ${index};`, "javascript");
+                await running;
+                vi.advanceTimersToNextTimer();
+                await settleSyntaxHighlights();
+            }
+
+            permitFirst = true;
+            expect(
+                (
+                    await highlightSyntaxCodeAsync("const item0 = 0;", "javascript", {
+                        cache: false,
+                    })
+                ).join("\n"),
+            ).toContain("\u001b[");
+            const running = new Promise<void>((resolve) => {
+                markRunning = resolve;
+            });
+            highlightSyntaxCode("const item100 = 100;", "javascript");
+            await running;
+            vi.advanceTimersToNextTimer();
+            await settleSyntaxHighlights();
+            expect(warnings).toContainEqual(
+                expect.stringContaining("unowned syntax highlighting is suspended"),
+            );
+
+            highlightSyntaxCode("const unseen = 1;", "javascript");
+            expect(
+                terminals().some((fields) => fields.reason === "unowned-retry-budget-exhausted"),
+            ).toBe(true);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("recovers a backpressured owner after worker startup times out", async () => {
+        let markOnline: () => void = () => {};
+        const online = new Promise<void>((resolve) => {
+            markOnline = resolve;
+        });
+        let markExit: () => void = () => {};
+        const exited = new Promise<void>((resolve) => {
+            markExit = resolve;
+        });
+        let markCompleted: () => void = () => {};
+        const completed = new Promise<void>((resolve) => {
+            markCompleted = resolve;
+        });
+        let workers = 0;
+        await initializeSyntaxHighlighting(
+            {},
+            {
+                preloadLanguages: ["javascript"],
+                reportWarning: () => {},
+                createWorker: () => {
+                    workers += 1;
+                    let workerCode = `const { parentPort } = require("node:worker_threads");
+                    parentPort.on("message", (request) => {
+                        if (request.type === "initialize") parentPort.postMessage({ type: "ready" });
+                        else parentPort.postMessage({ id: request.id, lines: ["\\x1b[31m" + request.code + "\\x1b[39m"] });
+                    });`;
+                    if (workers === 1)
+                        workerCode =
+                            'require("node:worker_threads").parentPort.on("message", () => {});';
+
+                    const current = new Worker(workerCode, { eval: true });
+                    if (workers === 1) {
+                        current.once("online", markOnline);
+                        current.once("exit", markExit);
+                    }
+
+                    return current;
+                },
+            },
+        );
+        configureRenderDiagnostics((event, fields) => {
+            const current = fields();
+            sink(event, () => current);
+
+            if (event === "syntax_request" && current.state === "completed") markCompleted();
+        });
+
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+        const slow = `const slow = "${"x".repeat(512 * 1024)}";`;
+        const short = "const waiting = 1;";
+        const slowOwner = () => {};
+        const shortOwner = () => {};
+        try {
+            highlightSyntaxCode(slow, "javascript", { invalidate: slowOwner });
+            await online;
+            highlightSyntaxCode(short, "javascript", { invalidate: shortOwner });
+            await vi.advanceTimersToNextTimerAsync();
+            await exited;
+            expect(workers).toBe(1);
+            expect(terminals().some((fields) => fields.reason === "worker-startup-timeout")).toBe(
+                true,
+            );
+            await vi.advanceTimersToNextTimerAsync();
+            await completed;
+            const lines = highlightSyntaxCode(short, "javascript", { invalidate: shortOwner });
+            expect(lines.map(stripVTControlCharacters)).toEqual([short]);
+            expect(lines.join("\n")).toContain("\u001b[");
             expect(workers).toBe(2);
         } finally {
             vi.useRealTimers();
