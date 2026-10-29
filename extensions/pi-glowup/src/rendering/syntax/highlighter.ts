@@ -168,6 +168,9 @@ type HighlightOwner = {
             readonly code: string;
             readonly language: string | undefined;
             readonly options: SyntaxHighlightOptions;
+
+            // The composite must stay alive until capacity retry or cancellation.
+            readonly signal: AbortSignal;
             readonly version: number;
         }
     >;
@@ -894,7 +897,13 @@ export async function highlightSyntaxCodeAsync(
 
             if (reason === "backpressure") {
                 highlightJobState(diagnosticJob(), "waiting-capacity");
-                owner?.capacityRequests.set(key, { code, language, options, version: generation });
+                owner?.capacityRequests.set(key, {
+                    code,
+                    language,
+                    options,
+                    signal,
+                    version: generation,
+                });
             }
         };
 

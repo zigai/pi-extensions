@@ -43,6 +43,8 @@ type CapacityRetry = {
     readonly retry: WeakRef<() => void>;
     readonly signal: AbortSignal | undefined;
     readonly isNeeded: WeakRef<() => boolean> | undefined;
+    readonly signals: Set<WeakRef<AbortSignal>>;
+    readonly watchedSignals: WeakSet<AbortSignal>;
     readonly cancel: () => void;
 };
 
@@ -78,7 +80,7 @@ export function createSyntaxTokenizer(
 
     // Backpressure retains weak renderer handles, never over-budget source jobs.
     const capacityRetries = new Set<CapacityRetry>();
-    const registeredRetries = new WeakSet<() => void>();
+    const registeredRetries = new WeakMap<() => void, CapacityRetry>();
     const capacityWaiters = new Set<() => void>();
 
     function wakeCapacityWaiters(): void {
@@ -89,6 +91,9 @@ export function createSyntaxTokenizer(
     function removeCapacityRetry(entry: CapacityRetry): void {
         capacityRetries.delete(entry);
         entry.signal?.removeEventListener("abort", entry.cancel);
+
+        for (const reference of entry.signals)
+            reference.deref()?.removeEventListener("abort", entry.cancel);
 
         const retry = entry.retry.deref();
         if (retry !== undefined) registeredRetries.delete(retry);
@@ -483,15 +488,15 @@ export function createSyntaxTokenizer(
             queue.length + Number(active !== undefined) >= options.maxJobs ||
             (bytes > 0 && bytes + size > options.maxBytes)
         ) {
+            releaseContention();
             cancellation.onUnavailable?.("backpressure");
 
             if (isAborted(cancellation.signal)) return enqueue(request, cancellation);
 
             const retry = cancellation.retryWhenCapacityAvailable;
             if (retry !== undefined) {
-                if (!registeredRetries.has(retry)) {
-                    registeredRetries.add(retry);
-
+                let entry = registeredRetries.get(retry);
+                if (entry === undefined) {
                     const isNeeded = cancellation.isCapacityRetryNeeded;
                     let signal = cancellation.signal;
                     let needed: WeakRef<() => boolean> | undefined;
@@ -500,18 +505,44 @@ export function createSyntaxTokenizer(
                         needed = new WeakRef(isNeeded);
                     }
 
-                    const entry: CapacityRetry = {
+                    const current: CapacityRetry = {
                         retry: new WeakRef(retry),
                         signal,
                         isNeeded: needed,
+                        signals: new Set(),
+                        watchedSignals: new WeakSet(),
                         cancel: () => {
-                            removeCapacityRetry(entry);
+                            for (const reference of current.signals) {
+                                const watched = reference.deref();
+                                if (watched === undefined || watched.aborted)
+                                    current.signals.delete(reference);
+                            }
+
+                            if (needed === undefined) removeCapacityRetry(current);
                             releaseContention();
                         },
                     };
 
+                    entry = current;
+                    registeredRetries.set(retry, entry);
                     capacityRetries.add(entry);
                     signal?.addEventListener("abort", entry.cancel, { once: true });
+                }
+
+                const signal = cancellation.signal;
+
+                for (const reference of entry.signals) {
+                    if (reference.deref() === undefined) entry.signals.delete(reference);
+                }
+
+                if (
+                    entry.isNeeded !== undefined &&
+                    signal !== undefined &&
+                    !entry.watchedSignals.has(signal)
+                ) {
+                    entry.watchedSignals.add(signal);
+                    entry.signals.add(new WeakRef(signal));
+                    signal.addEventListener("abort", entry.cancel, { once: true });
                 }
 
                 protectQueuedWork();

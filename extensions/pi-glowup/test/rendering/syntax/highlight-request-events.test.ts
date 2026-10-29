@@ -283,6 +283,80 @@ describe("optional syntax request events", () => {
         }
     });
 
+    it("starts a fresh contention interval for a new owner after cancellation", async () => {
+        const slow = `const value = "${"x".repeat(512 * 1024)}";`;
+        let markRunning: () => void = () => {};
+        const running = new Promise<void>((resolve) => {
+            markRunning = resolve;
+        });
+        let markCompleted: () => void = () => {};
+        const completed = new Promise<void>((resolve) => {
+            markCompleted = resolve;
+        });
+        await initializeSyntaxHighlighting(
+            {},
+            {
+                preloadLanguages: ["javascript"],
+                reportWarning: () => {},
+                createWorker: () =>
+                    new Worker(
+                        `const { parentPort } = require("node:worker_threads");
+                parentPort.on("message", (request) => {
+                    if (request.type === "initialize") parentPort.postMessage({ type: "ready" });
+                    else if (request.code.length < 1024)
+                        parentPort.postMessage({ id: request.id, lines: ["\\x1b[31m" + request.code + "\\x1b[39m"] });
+                });`,
+                        { eval: true },
+                    ),
+            },
+        );
+        configureRenderDiagnostics((event, fields) => {
+            const current = fields();
+            sink(event, () => current);
+
+            if (
+                event === "syntax_request" &&
+                current.state === "running" &&
+                current.bytes === Buffer.byteLength(slow)
+            )
+                markRunning();
+
+            if (event === "syntax_request" && current.state === "completed") markCompleted();
+        });
+
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+        const slowOwner = () => {};
+        const firstOwner = () => {};
+        const secondOwner = () => {};
+        const cancelled = new AbortController();
+        const short = "const second = 2;";
+        try {
+            highlightSyntaxCode(slow, "javascript", { invalidate: slowOwner });
+            await running;
+            highlightSyntaxCode("const first = 1;", "javascript", {
+                invalidate: firstOwner,
+                signal: cancelled.signal,
+            });
+            await new Promise<void>((resolve) => {
+                setImmediate(resolve);
+            });
+            cancelled.abort();
+            await vi.advanceTimersByTimeAsync(9_000);
+            highlightSyntaxCode(short, "javascript", { invalidate: secondOwner });
+            await vi.advanceTimersByTimeAsync(1_000);
+            expect(terminals().some((fields) => fields.reason === "worker-timeout")).toBe(false);
+            await vi.advanceTimersByTimeAsync(9_000);
+            await completed;
+            const result = highlightSyntaxCode(short, "javascript", { invalidate: secondOwner });
+            expect(result.map(stripVTControlCharacters)).toEqual([short]);
+            expect(result.join("\n")).toContain("\u001b[");
+            expect(terminals().some((fields) => fields.reason === "worker-timeout")).toBe(true);
+        } finally {
+            cancelled.abort();
+            vi.useRealTimers();
+        }
+    });
+
     it("does not resubmit timed-out unowned renders but permits an explicit retry", async () => {
         await initializeSyntaxHighlighting({}, { preloadLanguages: ["typescript"] });
         vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });

@@ -247,6 +247,69 @@ it("keeps shared retry demand when one waiting request is cancelled", async () =
     }
 });
 
+it("gives new demand a fresh contention interval after cancellation", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let markRunning: () => void = () => {};
+    const running = new Promise<void>((resolve) => {
+        markRunning = resolve;
+    });
+    const worker = createSyntaxTokenizer(undefined, {
+        maxJobs: 2,
+        maxBytes: 1,
+        reportWarning: undefined,
+        waitForDisposals: async () => {},
+        createWorker: () => controlledWorker(markRunning),
+    });
+    const first = new AbortController();
+    const second = new AbortController();
+    const reasons: string[] = [];
+    let firstRetries = 0;
+    let resumed: Promise<string[] | undefined> | undefined;
+    const retryFirst = () => {
+        firstRetries += 1;
+    };
+
+    const retrySecond = () => {
+        resumed = worker.compactPython("second");
+    };
+
+    const firstNeeded = () => !first.signal.aborted;
+    const secondNeeded = () => !second.signal.aborted;
+    try {
+        const slow = worker.compactPython("slow", {
+            onUnavailable: (reason) => {
+                reasons.push(reason);
+            },
+        });
+        await running;
+        await worker.compactPython("first", {
+            signal: first.signal,
+            retryWhenCapacityAvailable: retryFirst,
+            isCapacityRetryNeeded: firstNeeded,
+        });
+        first.abort();
+        await vi.advanceTimersByTimeAsync(9_000);
+        await worker.compactPython("second", {
+            signal: second.signal,
+            retryWhenCapacityAvailable: retrySecond,
+            isCapacityRetryNeeded: secondNeeded,
+        });
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(reasons).toEqual([]);
+        expect(firstRetries).toBe(0);
+        await vi.advanceTimersByTimeAsync(9_000);
+        expect(reasons).toEqual(["timeout"]);
+        expect(await slow).toBeUndefined();
+        expect(resumed).toBeDefined();
+        expect(await resumed).toEqual(["second"]);
+    } finally {
+        first.abort();
+        second.abort();
+        await worker.dispose();
+        vi.useRealTimers();
+    }
+});
+
 it("does not interrupt an oversized source after waiting demand is cancelled", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     let running: () => void = () => {};
