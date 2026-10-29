@@ -10,3 +10,10 @@
 - Evidence: `test/runtime-key-matching.test.ts` calls the installed runtime, checks typed-key parity, uppercase aliases, repeated modifiers, matching/nonmatching input, and empty/trailing-plus/unrecognized identifiers. Scoped full-rule lint with unused directives as errors, repository typecheck, and package tests pass.
 
 No other assertion exceptions were introduced in this cleanup. Prototype patch hosts now expose methods/owned markers rather than asserting instance receiver state; existing runtime guards and patch lifecycle behavior are retained.
+
+## Model selector refresh renderer
+
+- Rule: `typescript(no-unsafe-type-assertion)`.
+- Site: `src/model-selector-refresh.ts`, the selector prototype adapter.
+- Constraint: Pi declares `updateList` and refresh fields private, despite their presence on the runtime prototype and instances. The adapter checks that the method exists, temporarily hides refresh status and recognized refresh errors while rendering, and preserves unrelated errors. The linked patch restores its predecessor on disposal.
+- Evidence: `test/model-selector-refresh.test.ts` exercises success, progress, failure, unrelated errors, and restoration; an isolated real Pi picker confirms the rendered result.

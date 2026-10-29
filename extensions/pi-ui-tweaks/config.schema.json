@@ -71,6 +71,113 @@
       "default": true,
       "description": "Highlight the selected model provider."
     },
+    "offPeakRules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "provider",
+          "model",
+          "schedule"
+        ],
+        "properties": {
+          "provider": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Exact physical Pi provider ID."
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Exact native model ID, not its display alias."
+          },
+          "openRouterBillingConfirmed": {
+            "type": "boolean",
+            "description": "For or only: you confirm OpenRouter billing (not BYOK) and no extension or proxy changes the configured routing."
+          },
+          "schedule": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "deepseek-direct"
+              },
+              {
+                "type": "string",
+                "const": "deepseek-reseller"
+              },
+              {
+                "type": "string",
+                "const": "command"
+              },
+              {
+                "type": "string",
+                "const": "glm"
+              },
+              {
+                "type": "string",
+                "const": "qwen"
+              },
+              {
+                "type": "string",
+                "const": "ali-qwen"
+              },
+              {
+                "type": "string",
+                "const": "ali-deepseek"
+              },
+              {
+                "type": "string",
+                "const": "mimo"
+              },
+              {
+                "type": "string",
+                "const": "or"
+              }
+            ],
+            "title": "OffPeakSchedule",
+            "description": "Selecting a schedule asserts the exact billing route, plan, region, endpoint, offer validity and no ineligible fallback. Only documented model IDs are accepted; or requires live OpenRouter metadata and verified Pi routing."
+          }
+        },
+        "additionalProperties": false,
+        "title": "OffPeakRule"
+      },
+      "default": [],
+      "description": "Opt in only after verifying the exact billing route, plan, model, endpoint, region and active offer. deepseek-reseller is OpenCode Go only; command is Command; glm is the Coding Plan; qwen is Alibaba Global PAYG; ali-qwen is eligible Alibaba personal Token Plan; ali-deepseek is eligible Alibaba PAYG or Token Plan; mimo is Token Plan. or requires verified OpenRouter routing and live endpoint metadata."
+    },
+    "deepseekHolidayCalendar": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "date",
+          "holiday"
+        ],
+        "properties": {
+          "date": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+            "description": "Beijing calendar date, YYYY-MM-DD."
+          },
+          "holiday": {
+            "type": "boolean",
+            "description": "True for a public holiday, false for a confirmed ordinary date."
+          }
+        },
+        "additionalProperties": false,
+        "title": "DeepSeekHolidayDate"
+      },
+      "default": [],
+      "description": "Authoritative Chinese public-holiday status by date for direct DeepSeek: true is a holiday, false is not. Unknown dates suppress predictions that depend on them. Keep dates current; reseller schedules do not use this calendar."
+    },
+    "pinnedModels": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "default": [],
+      "description": "Pinned models in display order, each as provider/native-model-id (including virtual model IDs); aliases and display names do not change the key."
+    },
     "inputPromptPrefix": {
       "type": "string",
       "minLength": 1,

@@ -45,6 +45,9 @@ test("loadUiTweaksSettings scaffolds missing global config and schema", async ()
             pasteCollapseExpandKey: null,
             pasteCollapseLineThreshold: 10,
             pasteCollapseUseToolExpandKey: true,
+            pinnedModels: [],
+            offPeakRules: [],
+            deepseekHolidayCalendar: [],
             preserveCompactionHistory: false,
             restoreContentAfterAutocompleteClose: true,
             refreshTmuxHyperlinks: true,
@@ -333,4 +336,30 @@ test("compact startup is opt-in and the master switch wins", () => {
         { label: "test", settings: { enabled: false, compactStartup: true } },
     ]);
     assert.equal(disabled.config.compactStartup, false);
+});
+
+test("off-peak rules are opt-in, exact, and disabled with the extension", () => {
+    const input = {
+        offPeakRules: [{ provider: "example", model: "model-a", schedule: "glm" }],
+        deepseekHolidayCalendar: [{ date: "2026-01-05", holiday: false }],
+    };
+    const enabled = resolveUiTweaksConfig([{ label: "test", settings: input }]);
+    assert.deepEqual(enabled.errors, []);
+    assert.deepEqual(enabled.config.offPeakRules, input.offPeakRules);
+    assert.deepEqual(enabled.config.deepseekHolidayCalendar, input.deepseekHolidayCalendar);
+    const disabled = resolveUiTweaksConfig([
+        { label: "test", settings: { ...input, enabled: false } },
+    ]);
+    assert.deepEqual(disabled.config.offPeakRules, []);
+    assert.deepEqual(disabled.config.deepseekHolidayCalendar, []);
+    const invalid = resolveUiTweaksConfig([
+        {
+            label: "test",
+            settings: {
+                offPeakRules: [{ provider: "example", model: "model-a", schedule: "unknown" }],
+            },
+        },
+    ]);
+    assert.notDeepEqual(invalid.errors, []);
+    assert.deepEqual(invalid.config.offPeakRules, []);
 });

@@ -39,6 +39,9 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-ui-tweaks.json`
 | `hideModelProviderHint` | boolean | `true` | Hide provider hints in the model selector. |
 | `hideSlashCommandSourceTags` | boolean | `true` | Hide source tags in slash-command completion. |
 | `highlightSelectedModelProvider` | boolean | `true` | Highlight the selected model provider. |
+| `offPeakRules` | [OffPeakRule](#settings-type-OffPeakRule)[] | `[]` | Opt in only after verifying the exact billing route, plan, model, endpoint, region and active offer. deepseek-reseller is OpenCode Go only; command is Command; glm is the Coding Plan; qwen is Alibaba Global PAYG; ali-qwen is eligible Alibaba personal Token Plan; ali-deepseek is eligible Alibaba PAYG or Token Plan; mimo is Token Plan. or requires verified OpenRouter routing and live endpoint metadata. |
+| `deepseekHolidayCalendar` | [DeepSeekHolidayDate](#settings-type-DeepSeekHolidayDate)[] | `[]` | Authoritative Chinese public-holiday status by date for direct DeepSeek: true is a holiday, false is not. Unknown dates suppress predictions that depend on them. Keep dates current; reseller schedules do not use this calendar. |
+| `pinnedModels` | string[] | `[]` | Pinned models in display order, each as provider/native-model-id (including virtual model IDs); aliases and display names do not change the key. |
 | `inputPromptPrefix` | string | `"> "` | Prefix displayed before input text. |
 | `mainScreenSynchronizedOutput` | boolean | `true` | Present regular-mode content and final cursor updates in one synchronized-output frame. |
 | `neutralBorderColor` | boolean | `true` | Use a neutral border color when Pi is idle. |
@@ -67,6 +70,9 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-ui-tweaks.json`
   "hideModelProviderHint": true,
   "hideSlashCommandSourceTags": true,
   "highlightSelectedModelProvider": true,
+  "offPeakRules": [],
+  "deepseekHolidayCalendar": [],
+  "pinnedModels": [],
   "inputPromptPrefix": "> ",
   "mainScreenSynchronizedOutput": true,
   "neutralBorderColor": true,
@@ -81,7 +87,115 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-ui-tweaks.json`
   "selectedOptionPrefix": "→ "
 }
 ```
+
+### Structural types
+
+<a id="settings-type-OffPeakRule"></a>
+
+#### OffPeakRule
+
+Additional fields are not allowed.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `provider` | string | Yes | Exact physical Pi provider ID. |
+| `model` | string | Yes | Exact native model ID, not its display alias. |
+| `openRouterBillingConfirmed` | boolean | No | For or only: you confirm OpenRouter billing (not BYOK) and no extension or proxy changes the configured routing. |
+| `schedule` | `deepseek-direct` \| `deepseek-reseller` \| `command` \| `glm` \| `qwen` \| `ali-qwen` \| `ali-deepseek` \| `mimo` \| `or` | Yes | Selecting a schedule asserts the exact billing route, plan, region, endpoint, offer validity and no ineligible fallback. Only documented model IDs are accepted; or requires live OpenRouter metadata and verified Pi routing. |
+
+<a id="settings-type-DeepSeekHolidayDate"></a>
+
+#### DeepSeekHolidayDate
+
+Additional fields are not allowed.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `date` | string | Yes | Beijing calendar date, YYYY-MM-DD. |
+| `holiday` | boolean | Yes | True for a public holiday, false for a confirmed ordinary date. |
 <!-- pi-extension-settings:end -->
+
+
+## Model picker peak indicators
+
+Indicators are disabled by default. Add an `offPeakRules` entry only after confirming the
+exact Pi provider ID, native model ID, account plan, endpoint, region, and current offer
+are eligible. Display aliases are not IDs. A mapping is your explicit eligibility assertion;
+this extension cannot inspect your billing plan, and providers can change or end offers.
+The following example is valid only when your OpenCode Go subscription allowance is active:
+
+```json
+{
+  "offPeakRules": [
+    { "provider": "opencode-go", "model": "deepseek-v4.1-flash", "schedule": "deepseek-reseller" }
+  ],
+  "deepseekHolidayCalendar": [
+    { "date": "2026-01-05", "holiday": false }
+  ]
+}
+```
+
+Supported rules use these **exact native model IDs** (terms reviewed 2026-10-28):
+
+| Schedule | Billing route and models | Off-peak UTC |
+| --- | --- | --- |
+| `deepseek-direct` | DeepSeek direct API: `deepseek-flash`, `deepseek-v4-pro`, `deepseek-v4-flash`, `deepseek-v4-flash-vision-exp` | Outside weekdays 01–04 and 06–10, plus verified Chinese public holidays |
+| `deepseek-reseller` | OpenCode Go/Go Plus: `opencode-go/deepseek-v4.1-flash`, `opencode-go/deepseek-v4-pro` | Outside weekdays 01–04 and 06–10 |
+| `command` | Command subscription or qualifying Provider API: `deepseek/deepseek-v4-pro`, `deepseek/deepseek-v4.1-flash`, `deepseek/deepseek-v4-flash`, `deepseek/deepseek-v4-flash-vision-exp`, `deepseek/deepseek-v4.1-flash-fast` | Outside weekdays 01–04 and 06–10 |
+| `glm` | Z.ai/BigModel Coding Plan: `glm-5.3`, `glm-5.3-flash` | Outside weekdays 06–10 |
+| `qwen` | Alibaba PAYG: `qwen3.7-plus`, Global deployment in Hong Kong, Frankfurt, Virginia or Tokyo | Daily 14–24 |
+| `ali-qwen` | Alibaba personal Token Plan in Beijing or Singapore: `qwen3.8-max`, `qwen3.8-flash` | Daily 14–24 |
+| `ali-deepseek` | Eligible Alibaba hosted PAYG (eligible deployment/region) or personal/team Token Plan (Beijing or Singapore): `deepseek-v4-pro-0813`, `deepseek-v4-flash-0731`, `deepseek-v4.1-flash`, `deepseek-v4.1-flash-1017` | Daily 14–24 |
+| `mimo` | Eligible Xiaomi Token Plan: `mimo-v2.6-pro`, `mimo-v2.6-flash` | Daily 16–24 |
+
+The table does not imply that every tier, region or endpoint is eligible. For example,
+Alibaba's Qwen token offer is personal-only; the Alibaba PAYG offer requires its eligible account, deployment and region, which the rule asserts rather than detects; MiMo PAYG and GLM ordinary API are not their
+respective plan routes. Command contract and ZDR tariffs can differ. OpenCode Go allowance
+exhaustion and PAYG overflow can change billing. Verify the actual route and promotion before
+opting in, and remove the rule if it changes. Rules assert eligibility; they do not observe
+account balances or actual subsequent request modifications. OpenRouter is the exception:
+its `or` rule checks configured routing and current public endpoint prices as described below.
+Qoder and Meoo app-only offers do not apply to Pi.
+The indicator reports only state and countdown, not a percentage; GLM legacy and current
+plans have different savings. Times are fixed UTC and the picker refreshes while open.
+
+### OpenRouter
+
+`or` supports only `openrouter/deepseek/deepseek-v4-pro-0813` and
+`openrouter/deepseek/deepseek-v4-flash-0731`, and
+`openrouter/deepseek/deepseek-v4.1-flash-1017`. Opt in with an exact rule such as:
+
+```json
+{ "provider": "openrouter", "model": "deepseek/deepseek-v4-pro-0813", "schedule": "or", "openRouterBillingConfirmed": true }
+```
+
+This confirmation is **your assertion**, not detected billing state: the request must use
+OpenRouter billing, not BYOK, and no proxy, other extension or account setting may change the
+configured routing. The extension reads the selected model's Pi `compat.openRouterRouting`;
+it requires `only` with one supported exact upstream tag and `allow_fallbacks: false`, the
+native OpenRouter HTTPS endpoint and the OpenAI-completions adapter. Nonempty model sampling
+parameters are rejected because Pi applies those arbitrary fields after routing. Supported upstream tags
+are `deepseek` (Pro-0813 or Flash-1017), `alibaba`, and `alibaba/us-east-1`. A broad tag matching more than
+one live endpoint is rejected. Configure routing separately in Pi; this rule does not change it.
+
+When such a model is selected, the picker fetches the public OpenRouter endpoint metadata
+without credentials. It shows a countdown only if the exact endpoint is available and its
+current UTC price overrides explicitly cover every minute, with input, output and cache-read
+prices lower during the expected window. Unknown conditions, incomplete data, timeout,
+ambiguous endpoints and network errors hide the indicator. Metadata is refreshed at least
+once per minute while selected; prices, availability or account routing can change between
+checks and the actual request. Do not configure OpenRouter under a custom provider alias as a
+creator route. See [provider selection](https://openrouter.ai/docs/guides/routing/provider-selection)
+and [price overrides](https://openrouter.ai/docs/guides/overview/models).
+
+For `deepseek-direct`, maintain `deepseekHolidayCalendar` from an authoritative Chinese
+public-holiday calendar: include each relevant Beijing date with `true` for a holiday and
+`false` for a confirmed non-holiday. The indicator is hidden whenever the current state or
+next transition depends on a missing date. Duplicate rules or duplicate calendar dates are
+also treated as ambiguous and hidden. A configured calendar is not updated automatically;
+review it regularly. No calendar is applied to reseller pricing without confirmation.
+
+Review current provider terms before configuring a rule: [DeepSeek API pricing](https://api-docs.deepseek.com/quick_start/pricing/), [OpenCode Go usage](https://opencode.ai/v2/docs/console/go/), [Command Code pricing](https://commandcode.ai/docs/resources/pricing-limits), [Alibaba Model Studio pricing](https://www.alibabacloud.com/help/en/model-studio/model-pricing), and [MiMo Token Plan](https://mimo.mi.com/docs/zh-CN/price/token-plan), [GLM Coding Plan](https://docs.z.ai/devpack/overview), and [Alibaba China personal Token Plan](https://help.aliyun.com/zh/model-studio/token-plan-personal-overview), [international personal Token Plan](https://www.alibabacloud.com/help/en/model-studio/token-plan-personal-overview), and [international team Token Plan](https://www.alibabacloud.com/help/en/model-studio/token-plan-team-overview).
 
 ## License
 

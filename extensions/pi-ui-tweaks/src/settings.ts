@@ -12,6 +12,8 @@ import {
     DEFAULT_PASTE_COLLAPSE_USE_TOOL_EXPAND_KEY,
     LoadedUiTweaksConfig,
     OptionalPasteCollapseExpandKeySchema,
+    PeakRuleSchema,
+    PeakHolidaySchema,
     UiTweaksConfig,
     UiTweaksSettings,
     UiTweaksSettingsSource,
@@ -43,6 +45,9 @@ const UiTweaksConfigSchema = Type.Object(
         hideModelProviderHint: Type.Optional(Type.Boolean()),
         hideSlashCommandSourceTags: Type.Optional(Type.Boolean()),
         highlightSelectedModelProvider: Type.Optional(Type.Boolean()),
+        offPeakRules: Type.Optional(Type.Array(PeakRuleSchema)),
+        deepseekHolidayCalendar: Type.Optional(Type.Array(PeakHolidaySchema)),
+        pinnedModels: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
         inputPromptPrefix: Type.Optional(Type.String({ minLength: 1 })),
         neutralBorderColor: Type.Optional(Type.Boolean()),
         mainScreenSynchronizedOutput: Type.Optional(Type.Boolean()),
@@ -71,6 +76,9 @@ const DEFAULT_UI_TWEAKS_CONFIG: UiTweaksConfig = {
     hideModelProviderHint: true,
     hideSlashCommandSourceTags: true,
     highlightSelectedModelProvider: true,
+    pinnedModels: [],
+    offPeakRules: [],
+    deepseekHolidayCalendar: [],
     inputPromptPrefix: "> ",
     neutralBorderColor: true,
     mainScreenSynchronizedOutput: true,
@@ -143,6 +151,9 @@ function buildUiTweaksConfig(settings: UiTweaksSettings): UiTweaksConfig {
             hideModelProviderHint: false,
             hideSlashCommandSourceTags: false,
             highlightSelectedModelProvider: false,
+            pinnedModels: [],
+            offPeakRules: [],
+            deepseekHolidayCalendar: [],
             inputPromptPrefix: DEFAULT_UI_TWEAKS_CONFIG.inputPromptPrefix,
             neutralBorderColor: false,
             mainScreenSynchronizedOutput: false,
@@ -182,6 +193,10 @@ function buildUiTweaksConfig(settings: UiTweaksSettings): UiTweaksConfig {
         highlightSelectedModelProvider:
             settings.highlightSelectedModelProvider ??
             DEFAULT_UI_TWEAKS_CONFIG.highlightSelectedModelProvider,
+        offPeakRules: settings.offPeakRules ?? DEFAULT_UI_TWEAKS_CONFIG.offPeakRules,
+        deepseekHolidayCalendar:
+            settings.deepseekHolidayCalendar ?? DEFAULT_UI_TWEAKS_CONFIG.deepseekHolidayCalendar,
+        pinnedModels: settings.pinnedModels ?? DEFAULT_UI_TWEAKS_CONFIG.pinnedModels,
         inputPromptPrefix: settings.inputPromptPrefix ?? DEFAULT_UI_TWEAKS_CONFIG.inputPromptPrefix,
         mainScreenSynchronizedOutput:
             settings.mainScreenSynchronizedOutput ??

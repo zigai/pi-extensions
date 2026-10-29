@@ -1,10 +1,61 @@
-import { Type } from "typebox";
+import { Type, type Static } from "typebox";
 
 export const DEFAULT_PASTE_COLLAPSE_ENABLED = true;
 export const DEFAULT_PASTE_COLLAPSE_LINE_THRESHOLD = 10;
 export const DEFAULT_PASTE_COLLAPSE_CHAR_THRESHOLD = 1000;
 export const DEFAULT_PASTE_COLLAPSE_EXPAND_KEY: string | null = null;
 export const DEFAULT_PASTE_COLLAPSE_USE_TOOL_EXPAND_KEY = true;
+
+export const PeakRuleSchema = Type.Object(
+    {
+        provider: Type.String({ minLength: 1, description: "Exact physical Pi provider ID." }),
+        model: Type.String({
+            minLength: 1,
+            description: "Exact native model ID, not its display alias.",
+        }),
+        openRouterBillingConfirmed: Type.Optional(
+            Type.Boolean({
+                description:
+                    "For or only: you confirm OpenRouter billing (not BYOK) and no extension or proxy changes the configured routing.",
+            }),
+        ),
+        schedule: Type.Union(
+            [
+                Type.Literal("deepseek-direct"),
+                Type.Literal("deepseek-reseller"),
+                Type.Literal("command"),
+                Type.Literal("glm"),
+                Type.Literal("qwen"),
+                Type.Literal("ali-qwen"),
+                Type.Literal("ali-deepseek"),
+                Type.Literal("mimo"),
+                Type.Literal("or"),
+            ],
+            {
+                title: "OffPeakSchedule",
+                description:
+                    "Selecting a schedule asserts the exact billing route, plan, region, endpoint, offer validity and no ineligible fallback. Only documented model IDs are accepted; or requires live OpenRouter metadata and verified Pi routing.",
+            },
+        ),
+    },
+    { additionalProperties: false, title: "OffPeakRule" },
+);
+
+export const PeakHolidaySchema = Type.Object(
+    {
+        date: Type.String({
+            pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+            description: "Beijing calendar date, YYYY-MM-DD.",
+        }),
+        holiday: Type.Boolean({
+            description: "True for a public holiday, false for a confirmed ordinary date.",
+        }),
+    },
+    { additionalProperties: false, title: "DeepSeekHolidayDate" },
+);
+
+export type PeakRule = Static<typeof PeakRuleSchema>;
+export type PeakHoliday = Static<typeof PeakHolidaySchema>;
 
 export type UiTweaksConfig = {
     readonly autocompleteAboveInput: boolean;
@@ -18,6 +69,9 @@ export type UiTweaksConfig = {
     readonly hideModelProviderHint: boolean;
     readonly hideSlashCommandSourceTags: boolean;
     readonly highlightSelectedModelProvider: boolean;
+    readonly pinnedModels: readonly string[];
+    readonly offPeakRules: readonly PeakRule[];
+    readonly deepseekHolidayCalendar: readonly PeakHoliday[];
     readonly inputPromptPrefix: string;
     readonly neutralBorderColor: boolean;
     readonly mainScreenSynchronizedOutput: boolean;
@@ -56,6 +110,9 @@ export type UiTweaksSettings = {
     hideModelProviderHint?: boolean;
     hideSlashCommandSourceTags?: boolean;
     highlightSelectedModelProvider?: boolean;
+    pinnedModels?: string[];
+    offPeakRules?: PeakRule[];
+    deepseekHolidayCalendar?: PeakHoliday[];
     inputPromptPrefix?: string;
     neutralBorderColor?: boolean;
     mainScreenSynchronizedOutput?: boolean;
@@ -131,6 +188,21 @@ export const extensionSettingsInput = {
             highlightSelectedModelProvider: Type.Boolean({
                 default: true,
                 description: "Highlight the selected model provider.",
+            }),
+            offPeakRules: Type.Array(PeakRuleSchema, {
+                default: [],
+                description:
+                    "Opt in only after verifying the exact billing route, plan, model, endpoint, region and active offer. deepseek-reseller is OpenCode Go only; command is Command; glm is the Coding Plan; qwen is Alibaba Global PAYG; ali-qwen is eligible Alibaba personal Token Plan; ali-deepseek is eligible Alibaba PAYG or Token Plan; mimo is Token Plan. or requires verified OpenRouter routing and live endpoint metadata.",
+            }),
+            deepseekHolidayCalendar: Type.Array(PeakHolidaySchema, {
+                default: [],
+                description:
+                    "Authoritative Chinese public-holiday status by date for direct DeepSeek: true is a holiday, false is not. Unknown dates suppress predictions that depend on them. Keep dates current; reseller schedules do not use this calendar.",
+            }),
+            pinnedModels: Type.Array(Type.String({ minLength: 1 }), {
+                default: [],
+                description:
+                    "Pinned models in display order, each as provider/native-model-id (including virtual model IDs); aliases and display names do not change the key.",
             }),
             inputPromptPrefix: Type.String({
                 minLength: 1,

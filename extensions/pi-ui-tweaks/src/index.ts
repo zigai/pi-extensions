@@ -17,6 +17,8 @@ import { installNeutralBorderColorPatch } from "./border-color.ts";
 import { installCompactStartupBootstrap, installCompactStartupPatch } from "./compact-startup.ts";
 import { installInputBorderPatch } from "./input-border.ts";
 import { installInputPromptPrefixPatch } from "./input-prompt-prefix.ts";
+import { installModelSelectorPeakPatch } from "./model-selector-peak.ts";
+import { installModelSelectorPinsPatch } from "./model-selector-pins.ts";
 import { installModelSelectorHintPatch } from "./model-selector-hint.ts";
 import { installModelSelectorProviderBadgePatch } from "./model-selector-provider-badge.ts";
 import { installModelStatusPatch } from "./model-status.ts";
@@ -101,6 +103,8 @@ async function installUiTweaks(
         collect(installInputBorderPatch(config));
         collect(installInputPromptPrefixPatch(config));
         collect(installModelSelectorHintPatch(config));
+        collect(installModelSelectorPinsPatch(config, () => ctx.ui.theme));
+        collect(installModelSelectorPeakPatch(config, () => ctx.ui.theme));
         collect(installModelStatusPatch(config));
 
         if (ctx.hasUI) collect(installCompactStartupPatch(config));
