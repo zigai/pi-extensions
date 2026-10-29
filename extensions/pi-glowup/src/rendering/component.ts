@@ -111,12 +111,82 @@ export function wrapStyledText(text: string, width: number): string[] {
     return wrapped.map((line) => truncateToWidth(`${indent}${line}`, safeWidth, ""));
 }
 
+function wrapAsciiLine(
+    line: string,
+    width: number,
+    firstPrefix: string,
+    continuationPrefix: string,
+): string[] | undefined {
+    if (
+        !Number.isInteger(width) ||
+        !/^[\x20-\x7e]*$/u.test(line) ||
+        !/^[\x20-\x7e]*$/u.test(firstPrefix) ||
+        !/^[\x20-\x7e]*$/u.test(continuationPrefix)
+    )
+        return undefined;
+
+    const prefixWidth = Math.max(firstPrefix.length, continuationPrefix.length);
+    if (width <= prefixWidth) return undefined;
+
+    const contentWidth = width - prefixWidth;
+    if (line.length <= contentWidth) return [firstPrefix + line];
+
+    const leading = /^ +(?=\S)/u.exec(line)?.[0].length ?? 0;
+    const indent = " ".repeat(Math.min(leading, contentWidth - 1));
+    const available = contentWidth - indent.length;
+    const content = line.slice(leading);
+    const wrapped: string[] = [];
+    let current = "";
+    let columns = 0;
+
+    for (const match of content.matchAll(/ +|[^ ]+/gu)) {
+        const token = match[0];
+        const space = token.startsWith(" ");
+        if (!space && token.length > available) {
+            if (current.length > 0) wrapped.push(current.trimEnd());
+
+            let offset = 0;
+            while (offset + available < token.length) {
+                wrapped.push(token.slice(offset, offset + available));
+                offset += available;
+            }
+
+            current = token.slice(offset);
+            columns = current.length;
+        } else if (columns + token.length > available && columns > 0) {
+            wrapped.push(current.trimEnd());
+            current = "";
+            columns = 0;
+            if (!space) {
+                current = token;
+                columns = token.length;
+            }
+        } else {
+            current += token;
+            columns += token.length;
+        }
+    }
+
+    if (current.length > 0) wrapped.push(current.trimEnd());
+    if (wrapped.length === 0) wrapped.push("");
+
+    return wrapped.map((segment, index) => {
+        let prefix = continuationPrefix;
+        if (index === 0) prefix = firstPrefix;
+
+        return prefix + indent + segment;
+    });
+}
+
 export function wrapSinglePhysicalLineWithContinuation(
     line: string,
     width: number,
     firstPrefix: string,
     continuationPrefix: string,
 ): string[] {
+    const ascii = wrapAsciiLine(line, width, firstPrefix, continuationPrefix);
+    if (ascii !== undefined) return ascii;
+
     const contentWidth = Math.max(
         1,
         width - Math.max(visibleWidth(firstPrefix), visibleWidth(continuationPrefix)),

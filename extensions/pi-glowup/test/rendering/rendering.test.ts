@@ -1,4 +1,5 @@
-import { visibleWidth } from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { fc } from "@fast-check/vitest";
 import { stripVTControlCharacters } from "node:util";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
@@ -18,7 +19,11 @@ import {
     renderGlowupExplore,
     renderMutationCall,
 } from "../../src/rendering/tool-header.ts";
-import { makeComponent } from "../../src/rendering/component.ts";
+import {
+    makeComponent,
+    wrapSinglePhysicalLineWithContinuation,
+    wrapStyledText,
+} from "../../src/rendering/component.ts";
 import { parseDiffSections } from "../../src/rendering/diff/text-diff.ts";
 import { parseScriptInvocation } from "../../src/tools/built-in/bash/invocation.ts";
 import { renderGlowupDiff } from "../../src/rendering/diff/text-renderer.ts";
@@ -62,6 +67,57 @@ function expectLinesWithinWidth(lines: ReadonlyArray<string>, width: number): vo
         expect(visibleWidth(line)).toBeLessThanOrEqual(width);
     }
 }
+
+describe("continuation wrapping", () => {
+    function reference(line: string, width: number, first: string, continuation: string): string[] {
+        const contentWidth = Math.max(
+            1,
+            width - Math.max(visibleWidth(first), visibleWidth(continuation)),
+        );
+
+        return wrapStyledText(line, contentWidth).map((segment, index) => {
+            let prefix = continuation;
+
+            if (index === 0) prefix = first;
+
+            return truncateToWidth(`${prefix}${segment}`, width, "");
+        });
+    }
+
+    it.each([
+        ["alpha beta gamma delta", 10, "$ ", "    "],
+        ["  alpha     beta  gamma  ", 12, "> ", "   "],
+        [`alpha ${"z".repeat(4096)}!`, 37, "$ ", "    "],
+        ["\u001b[31malpha beta gamma\u001b[0m", 8, "$ ", "  "],
+        ["界e\u0301 👩‍💻 abc def", 9, "$ ", "    "],
+        ["alpha\tbeta", 7, "$ ", "   "],
+        ["alpha beta", 3, "wide", "more"],
+    ])("matches Pi wrapping for %s at width %i", (line, width, first, continuation) => {
+        expect(wrapSinglePhysicalLineWithContinuation(line, width, first, continuation)).toEqual(
+            reference(line, width, first, continuation),
+        );
+    });
+
+    it("preserves word and indentation boundaries across ASCII inputs", () => {
+        fc.assert(
+            fc.property(
+                fc.array(fc.constantFrom("a", "Z", "0", " ", ".", "'", "/"), { maxLength: 180 }),
+                fc.integer({ min: 1, max: 30 }),
+                fc.integer({ min: 0, max: 5 }),
+                fc.integer({ min: 0, max: 5 }),
+                (parts, width, firstWidth, continuationWidth) => {
+                    const line = parts.join("");
+                    const first = ">".repeat(firstWidth);
+                    const continuation = " ".repeat(continuationWidth);
+                    expect(
+                        wrapSinglePhysicalLineWithContinuation(line, width, first, continuation),
+                    ).toEqual(reference(line, width, first, continuation));
+                },
+            ),
+            { seed: 0x51a7, numRuns: 500 },
+        );
+    });
+});
 
 describe("Glowup rendering helpers", () => {
     beforeEach(() => configureRenderingAppearance(classicAppearance));
