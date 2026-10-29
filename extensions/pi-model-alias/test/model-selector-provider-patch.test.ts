@@ -271,3 +271,25 @@ test("model selector patch matches the Pi 0.80.9 runtime prototype", () => {
         true,
     );
 });
+
+test("model selector preserves reordered selectable identities after formatting display names", () => {
+    const first = modelItem();
+    const second = { provider: "openai", id: "gpt-4", model: { provider: "openai", id: "gpt-4" } };
+    const target: ModelSelectorPrototype = {
+        allModels: [first, second],
+        scopedModelItems: [],
+        activeModels: [first, second],
+        filteredModels: [first, second],
+        selectedIndex: 0,
+        scope: "all",
+        loadModelsFromSnapshot() {},
+        filterModels() {},
+        updateList() {
+            target.filteredModels = [...target.filteredModels].reverse();
+        },
+    };
+    installModelSelectorProviderPatch(runtimeState("Provider"), target);
+    target.updateList();
+    assert.deepEqual(target.filteredModels, [second, first]);
+    assert.equal(target.filteredModels[0], second);
+});

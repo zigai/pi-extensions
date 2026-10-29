@@ -273,16 +273,20 @@ export function installModelSelectorProviderPatch(
             const originalFilteredModels = this.filteredModels;
             const settings = getSettings(this, patchState.state);
 
-            this.filteredModels = originalFilteredModels.map((item) => ({
-                ...item,
-                id: getModelDisplayId(item.model, settings),
-            }));
+            const originals = new Map<ModelSelectorItem, ModelSelectorItem>();
+            this.filteredModels = originalFilteredModels.map((item) => {
+                const displayed = { ...item, id: getModelDisplayId(item.model, settings) };
+                originals.set(displayed, item);
+                return displayed;
+            });
 
             try {
                 predecessor.call(this);
                 formatModelSelectorList(this, patchState.state);
             } finally {
-                this.filteredModels = originalFilteredModels;
+                this.filteredModels = this.filteredModels.map(
+                    (item) => originals.get(item) ?? item,
+                );
             }
         };
     });

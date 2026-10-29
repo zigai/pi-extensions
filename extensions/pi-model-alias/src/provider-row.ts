@@ -98,6 +98,9 @@ function setResponsiveProviderRow(
         return;
     }
 
+    const pinColumnKey = Symbol.for("zigai.model-selector-pin-column");
+    const hasInnerPinColumn =
+        pinColumnKey in component.render && component.render[pinColumnKey] === true;
     const originalRender = component.render.bind(component);
 
     component.render = function responsiveProviderRowRender(
@@ -106,7 +109,9 @@ function setResponsiveProviderRow(
     ): string[] {
         const currentLayout = providerRowLayoutByComponent.get(this);
         if (currentLayout !== undefined) {
-            setTextComponentValue(this, fitProviderRow(currentLayout, width));
+            let layoutWidth = width;
+            if (hasInnerPinColumn && width >= 6) layoutWidth -= 2;
+            setTextComponentValue(this, fitProviderRow(currentLayout, layoutWidth));
         }
 
         return originalRender(width);
