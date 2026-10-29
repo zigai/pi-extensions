@@ -14,6 +14,10 @@ declare global {
     }
 }
 
+const WORKER_START_LIMIT_MS = 30_000;
+const WORKER_JOB_LIMIT_MS = 60_000;
+const WORKER_CONTENTION_LIMIT_MS = 10_000;
+
 type Work = {
     readonly request: TokenizeRequest;
     readonly bytes: number;
@@ -24,7 +28,7 @@ type Work = {
     readonly onState: TokenizeCancellation["onState"];
 };
 
-export type TokenizeUnavailableReason = "backpressure" | "failed" | "cancelled";
+export type TokenizeUnavailableReason = "backpressure" | "failed" | "cancelled" | "timeout";
 type TokenizeUnavailableListener = (reason: TokenizeUnavailableReason, error?: string) => void;
 
 type TokenizeCancellation = {
@@ -44,6 +48,7 @@ export function createSyntaxTokenizer(
         readonly maxBytes: number;
         readonly reportWarning: ((message: string) => void) | undefined;
         readonly waitForDisposals: () => Promise<void>;
+        readonly createWorker?: (url: URL) => Worker;
     },
 ) {
     const queue: Work[] = [];
@@ -90,6 +95,46 @@ export function createSyntaxTokenizer(
     let bytes = 0;
     let disposed = false;
     let failed = false;
+    let warnedTimeout = false;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    let contentionDeadline: ReturnType<typeof setTimeout> | undefined;
+
+    function clearDeadline(): void {
+        if (deadline !== undefined) clearTimeout(deadline);
+        if (contentionDeadline !== undefined) clearTimeout(contentionDeadline);
+        deadline = undefined;
+        contentionDeadline = undefined;
+    }
+
+    function timeout(work: Work): void {
+        if (active !== work) return;
+
+        active = undefined;
+        stopWorker();
+        finish(work, undefined, "timeout");
+
+        if (!warnedTimeout) {
+            warnedTimeout = true;
+            options.reportWarning?.(
+                "[pi-glowup] Syntax work exceeded its time limit; the request was not completed",
+            );
+        }
+
+        dispatch();
+    }
+
+    function protectQueuedWork(): void {
+        const work = active;
+        if (work === undefined || contentionDeadline !== undefined) return;
+
+        contentionDeadline = setTimeout(() => timeout(work), WORKER_CONTENTION_LIMIT_MS);
+    }
+
+    function releaseContention(): void {
+        if (queue.length > 0) return;
+        if (contentionDeadline !== undefined) clearTimeout(contentionDeadline);
+        contentionDeadline = undefined;
+    }
 
     function finish(
         work: Work,
@@ -106,6 +151,8 @@ export function createSyntaxTokenizer(
     }
 
     function stopWorker(): void {
+        clearDeadline();
+
         const previous = worker;
         worker = undefined;
         ready = false;
@@ -147,10 +194,11 @@ export function createSyntaxTokenizer(
             const initial = queue[0];
             if (disposed || failed || initial === undefined) return;
 
-            const current = new Worker(
-                new URL(import.meta.glowupSyntaxWorker ?? "./tokenize-worker.ts", import.meta.url),
-                { execArgv: [] },
+            const url = new URL(
+                import.meta.glowupSyntaxWorker ?? "./tokenize-worker.ts",
+                import.meta.url,
             );
+            const current = options.createWorker?.(url) ?? new Worker(url, { execArgv: [] });
             worker = current;
             current.on("error", () => {
                 if (worker === current) fail();
@@ -164,12 +212,18 @@ export function createSyntaxTokenizer(
                 if (worker !== current) return;
 
                 if ("type" in response) {
+                    if (ready) return;
+
+                    clearDeadline();
                     ready = true;
                     dispatch();
+
                     return;
                 }
 
                 if (active?.request.id !== response.id) return;
+
+                clearDeadline();
 
                 const completed = active;
                 active = undefined;
@@ -191,6 +245,10 @@ export function createSyntaxTokenizer(
                 language,
                 theme,
             };
+
+            deadline = setTimeout(() => {
+                if (worker === current && !ready) fail();
+            }, WORKER_START_LIMIT_MS);
             current.postMessage(initialization);
         } catch (cause: unknown) {
             recordRenderError("syntax.worker-start", cause);
@@ -242,6 +300,9 @@ export function createSyntaxTokenizer(
 
         try {
             worker.ref();
+            deadline = setTimeout(() => timeout(work), WORKER_JOB_LIMIT_MS);
+
+            if (queue.length > 0) protectQueuedWork();
             worker.postMessage(work.request);
             work.onState?.("running");
         } catch (cause: unknown) {
@@ -307,8 +368,8 @@ export function createSyntaxTokenizer(
                 cancel: () => {
                     if (active === work) {
                         active = undefined;
-                        finish(work, undefined, "cancelled");
                         stopWorker();
+                        finish(work, undefined, "cancelled");
                         dispatch();
                         return;
                     }
@@ -316,6 +377,7 @@ export function createSyntaxTokenizer(
                     const index = queue.indexOf(work);
                     if (index >= 0) {
                         queue.splice(index, 1);
+                        releaseContention();
                         finish(work, undefined, "cancelled");
                     }
                 },
@@ -324,6 +386,8 @@ export function createSyntaxTokenizer(
             bytes += size;
             cancellation.signal?.addEventListener("abort", work.cancel, { once: true });
             queue.push(work);
+
+            if (active !== undefined) protectQueuedWork();
             work.onState?.("queued");
             dispatch();
         });

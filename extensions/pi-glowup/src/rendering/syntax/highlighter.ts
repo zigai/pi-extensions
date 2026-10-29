@@ -151,6 +151,7 @@ type HighlightOwner = {
     readonly source: string | readonly DiffSection[];
     readonly controller: AbortController;
     readonly results: Map<string, HighlightedSource>;
+    readonly timedOut: Set<string>;
     previousResults: ReadonlyMap<string, HighlightedSource>;
     version: number;
     readonly retryWhenCapacityAvailable: () => void;
@@ -174,6 +175,7 @@ let bracketPairColoringEnabled = true;
 let highlightOwners = new WeakMap<() => void, HighlightOwner>();
 let highlightSources = new WeakMap<() => void, HighlightSource>();
 const pendingHighlights = new Map<string, Promise<string[]>>();
+const timedOutUnownedHighlights = new Set<string>();
 const highlightControllers = new Set<AbortController>();
 const tokenizerDisposals = new Set<Promise<void>>();
 const highlightCompletionListeners = new Set<() => void>();
@@ -427,6 +429,12 @@ export function highlightSyntaxCode(
         return unowned;
     }
 
+    if (owned === undefined && timedOutUnownedHighlights.has(key) && !pendingHighlights.has(key)) {
+        transitionHighlightRequest(request, "failed", "worker-timeout");
+        recordSyntaxHighlight(code, language, normalizedLanguage, "timeout");
+        return normalizedCodeLines(code);
+    }
+
     void highlightSyntaxCodeAsync(code, normalizedLanguage, options, request);
 
     return pendingHighlightLines(code, normalizedLanguage, state.theme.name, owned);
@@ -567,6 +575,7 @@ function currentHighlightOwner(invalidate: (() => void) | undefined): HighlightO
     const owner = highlightOwners.get(invalidate);
     if (owner !== undefined && owner.version !== syntaxRenderingVersion) {
         owner.results.clear();
+        owner.timedOut.clear();
         owner.previousResults = new Map();
         owner.pending.clear();
         owner.capacityRequests.clear();
@@ -623,6 +632,7 @@ export function observeSyntaxHighlightSource(
         source,
         controller: new AbortController(),
         results: new Map(),
+        timedOut: new Set(),
         previousResults,
         version: syntaxRenderingVersion,
         retryWhenCapacityAvailable: () => {
@@ -815,6 +825,12 @@ export async function highlightSyntaxCodeAsync(
         return cached.lines;
     }
 
+    if (owner?.timedOut.has(key) === true) {
+        transitionHighlightRequest(request, "failed", "worker-timeout");
+        recordSyntaxHighlight(code, language, normalizedLanguage, "timeout");
+        return plainLines;
+    }
+
     const generation = syntaxRenderingVersion;
     const controller = new AbortController();
     const signals = [controller.signal];
@@ -872,12 +888,25 @@ export async function highlightSyntaxCodeAsync(
                 }
 
                 if (lines === undefined) {
-                    if (unavailable?.reason !== "backpressure")
+                    if (unavailable?.reason === "timeout") {
+                        if (owner !== undefined) owner.timedOut.add(key);
+                        else {
+                            if (timedOutUnownedHighlights.size >= CACHE_LIMIT) {
+                                const oldest = timedOutUnownedHighlights.values().next().value;
+                                if (oldest !== undefined) timedOutUnownedHighlights.delete(oldest);
+                            }
+
+                            timedOutUnownedHighlights.add(key);
+                        }
+
+                        finishHighlightJob(diagnosticJob(), "failed", "worker-timeout");
+                    } else if (unavailable?.reason !== "backpressure") {
                         finishHighlightJob(
                             diagnosticJob(),
                             unavailable?.reason ?? "failed",
                             "backend-unavailable",
                         );
+                    }
 
                     record(unavailable?.reason ?? "failed", unavailable?.error);
 
@@ -885,6 +914,7 @@ export async function highlightSyntaxCodeAsync(
                 }
 
                 record("highlighted");
+                timedOutUnownedHighlights.delete(key);
 
                 const highlighted = normalizeHighlightedLineCount(lines, plainLines.length);
                 if (shouldCache) rememberHighlightedCode(key, highlighted);
@@ -1092,6 +1122,7 @@ function clearSyntaxColors(reason = "cache-clear", preserveReady = false): void 
     for (const controller of highlightControllers) controller.abort();
     highlightControllers.clear();
     pendingHighlights.clear();
+    timedOutUnownedHighlights.clear();
     completedUnownedHighlights.clear();
     highlightedCodeCache.clear();
     highlightedCodeCacheBytes = 0;
@@ -1371,7 +1402,8 @@ type SyntaxHighlightOutcome =
     | "unavailable"
     | "failed"
     | "cancelled"
-    | "backpressure";
+    | "backpressure"
+    | "timeout";
 
 function errorMessage(cause: unknown): string {
     if (cause instanceof Error) return cause.message;

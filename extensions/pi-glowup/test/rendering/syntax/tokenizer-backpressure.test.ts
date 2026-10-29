@@ -1,4 +1,5 @@
-import { expect, it } from "vitest";
+import { Worker } from "node:worker_threads";
+import { expect, it, vi } from "vitest";
 import { createSyntaxTokenizer } from "../../../src/rendering/syntax/tokenizer.ts";
 
 function tokenizer() {
@@ -9,6 +10,134 @@ function tokenizer() {
         waitForDisposals: async () => {},
     });
 }
+
+function controlledWorker(onStall: () => void): Worker {
+    const worker = new Worker(
+        `const { parentPort } = require("node:worker_threads");
+        parentPort.on("message", (request) => {
+            if (request.type === "initialize") parentPort.postMessage({ type: "ready" });
+            else if (request.code === "slow") {
+                parentPort.postMessage({ type: "ready" });
+                parentPort.postMessage({ id: -1, lines: [] });
+                while (true) {}
+            }
+            else parentPort.postMessage({ id: request.id, lines: [request.code] });
+        });`,
+        { eval: true },
+    );
+    worker.on("message", (response: { id?: number }) => {
+        if (response.id === -1) onStall();
+    });
+
+    return worker;
+}
+
+it("terminates a stalled job and resumes queued work on a fresh worker", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let running: () => void = () => {};
+    const stalled = new Promise<void>((resolve) => {
+        running = resolve;
+    });
+    const worker = createSyntaxTokenizer(undefined, {
+        maxJobs: 2,
+        maxBytes: 1024,
+        reportWarning: undefined,
+        waitForDisposals: async () => {},
+        createWorker: () => controlledWorker(running),
+    });
+    const unavailable: string[] = [];
+    try {
+        const slow = worker.compactPython("slow", {
+            onUnavailable: (reason, error) => {
+                unavailable.push(`${reason}: ${error}`);
+            },
+        });
+        await stalled;
+        const short = worker.compactPython("short");
+        vi.advanceTimersToNextTimer();
+        await new Promise<void>((resolve) => {
+            setImmediate(resolve);
+        });
+        expect(unavailable).toEqual(["timeout: undefined"]);
+        expect(await slow).toBeUndefined();
+        expect(await short).toEqual(["short"]);
+        expect(await worker.compactPython("recovered")).toEqual(["recovered"]);
+    } finally {
+        await worker.dispose();
+        vi.useRealTimers();
+    }
+});
+
+it("resumes a backpressured request after an oversized stalled job", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let running: () => void = () => {};
+    const stalled = new Promise<void>((resolve) => {
+        running = resolve;
+    });
+    const worker = createSyntaxTokenizer(undefined, {
+        maxJobs: 2,
+        maxBytes: 1,
+        reportWarning: undefined,
+        waitForDisposals: async () => {},
+        createWorker: () => controlledWorker(running),
+    });
+    let resumed: Promise<string[] | undefined> | undefined;
+    try {
+        const slow = worker.compactPython("slow");
+        await stalled;
+        expect(
+            await worker.compactPython("short", {
+                retryWhenCapacityAvailable: () => {
+                    resumed = worker.compactPython("short");
+                },
+            }),
+        ).toBeUndefined();
+
+        vi.advanceTimersToNextTimer();
+        await Promise.resolve();
+        expect(resumed).toBeDefined();
+        expect(await slow).toBeUndefined();
+        expect(await resumed).toEqual(["short"]);
+    } finally {
+        await worker.dispose();
+        vi.useRealTimers();
+    }
+});
+
+it("settles running and queued jobs on shutdown without restarting", async () => {
+    let running: () => void = () => {};
+    const stalled = new Promise<void>((resolve) => {
+        running = resolve;
+    });
+    const worker = createSyntaxTokenizer(undefined, {
+        maxJobs: 2,
+        maxBytes: 1024,
+        reportWarning: undefined,
+        waitForDisposals: async () => {},
+        createWorker: () => controlledWorker(running),
+    });
+    const reasons: string[] = [];
+    try {
+        const slow = worker.compactPython("slow", {
+            onUnavailable: (reason) => {
+                reasons.push(reason);
+            },
+        });
+        await stalled;
+        const queued = worker.compactPython("short", {
+            onUnavailable: (reason) => {
+                reasons.push(reason);
+            },
+        });
+        await worker.dispose();
+        expect(await slow).toBeUndefined();
+        expect(await queued).toBeUndefined();
+        expect(reasons).toEqual(["cancelled", "cancelled"]);
+        expect(await worker.compactPython("later")).toBeUndefined();
+    } finally {
+        await worker.dispose();
+    }
+});
 
 it("coalesces repeated capacity requests for one owner", async () => {
     const worker = tokenizer();

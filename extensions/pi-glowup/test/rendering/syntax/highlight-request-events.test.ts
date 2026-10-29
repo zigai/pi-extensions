@@ -9,7 +9,7 @@ import {
     type Component,
 } from "@earendil-works/pi-tui";
 import { VirtualTerminal } from "../../support/virtual-terminal.ts";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DebugLogFields } from "../../../src/diagnostics/logger.ts";
 import { makeComponent } from "../../../src/rendering/component.ts";
 import { createSyntaxComponent } from "../../../src/rendering/syntax/component-owner.ts";
@@ -133,6 +133,117 @@ describe("optional syntax request events", () => {
         ]);
 
         expect(entries.some((entry) => entry.event === "syntax_request_use")).toBe(true);
+    });
+
+    it("reports a timeout without retrying the same owner and preserves other work", async () => {
+        const warnings: string[] = [];
+        await initializeSyntaxHighlighting(
+            {},
+            {
+                preloadLanguages: ["typescript"],
+                reportWarning: (message) => {
+                    warnings.push(message);
+                },
+            },
+        );
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+        let markRunning: () => void = () => {};
+        const running = new Promise<void>((resolve) => {
+            markRunning = resolve;
+        });
+        configureRenderDiagnostics((event, fields) => {
+            const current = fields();
+            sink(event, () => current);
+
+            if (event === "syntax_request" && current.state === "running") markRunning();
+        });
+        const slowOwner = () => {};
+        const shortOwner = () => {};
+        const slow = "const slow = 1;";
+        const short = "const short = 2;";
+        try {
+            const pending = highlightSyntaxCodeAsync(slow, "typescript", { invalidate: slowOwner });
+            await running;
+            const queued = highlightSyntaxCodeAsync(short, "typescript", {
+                invalidate: shortOwner,
+            });
+            vi.advanceTimersToNextTimer();
+            expect(await pending).toEqual([slow]);
+            expect((await queued).join("\n")).toContain("\u001b[");
+            expect(terminals().find((fields) => fields.reason === "worker-timeout")?.state).toBe(
+                "failed",
+            );
+
+            expect(warnings).toEqual([expect.stringContaining("exceeded its time limit")]);
+
+            const submitted = requests().filter((fields) => fields.state === "running").length;
+            expect(
+                await highlightSyntaxCodeAsync(slow, "typescript", { invalidate: slowOwner }),
+            ).toEqual([slow]);
+
+            expect(requests().filter((fields) => fields.state === "running")).toHaveLength(
+                submitted,
+            );
+
+            const anotherOwner = () => {};
+            expect(
+                (
+                    await highlightSyntaxCodeAsync(slow, "typescript", { invalidate: anotherOwner })
+                ).join("\n"),
+            ).toContain("\u001b[");
+
+            expect(
+                (
+                    await highlightSyntaxCodeAsync(slow, "typescript", { invalidate: slowOwner })
+                ).join("\n"),
+            ).toContain("\u001b[");
+
+            observeSyntaxHighlightSource("const current = 3;", slowOwner);
+            expect(
+                (
+                    await highlightSyntaxCodeAsync("const current = 3;", "typescript", {
+                        invalidate: slowOwner,
+                    })
+                ).join("\n"),
+            ).toContain("\u001b[");
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("does not resubmit timed-out unowned renders but permits an explicit retry", async () => {
+        await initializeSyntaxHighlighting({}, { preloadLanguages: ["typescript"] });
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+        let markRunning: () => void = () => {};
+        const running = new Promise<void>((resolve) => {
+            markRunning = resolve;
+        });
+        configureRenderDiagnostics((event, fields) => {
+            const current = fields();
+            sink(event, () => current);
+
+            if (event === "syntax_request" && current.state === "running") markRunning();
+        });
+        try {
+            expect(highlightSyntaxCode(source, "typescript")).toEqual([source]);
+            await running;
+            vi.advanceTimersToNextTimer();
+            await settleSyntaxHighlights();
+            const submitted = requests().filter((fields) => fields.state === "running").length;
+            expect(highlightSyntaxCode(source, "typescript")).toEqual([source]);
+            await settleSyntaxHighlights();
+            expect(requests().filter((fields) => fields.state === "running")).toHaveLength(
+                submitted,
+            );
+
+            expect((await highlightSyntaxCodeAsync(source, "typescript")).join("\n")).toContain(
+                "\u001b[",
+            );
+
+            expect(highlightSyntaxCode(source, "typescript").join("\n")).toContain("\u001b[");
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it("retains request identity across real capacity rejection and reentrant retry", async () => {
