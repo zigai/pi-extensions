@@ -1,3 +1,4 @@
+import { StringDecoder } from "../../schema-parsing.ts";
 import { truncateGraphemeText } from "../../glowup/text.ts";
 import {
     glowupWireArray as getArray,
@@ -16,7 +17,7 @@ import {
 const MAX_WEB_RUN_HIGHLIGHTS = 3;
 const COLLAPSED_SOURCE_LIMIT = 4;
 const EXPANDED_SOURCE_LIMIT = 100;
-const TITLE_URL_PATTERN = /^(?<title>.+?)\s+\((?<url>https?:\/\/[^)]+)\)$/u;
+const TITLE_URL_PATTERN = /^(?<title>.*?)\s*\((?<url>https?:\/\/[^)]+)\)$/u;
 const TOTAL_LINES_PATTERN = /Total lines:\s*(?<lines>\d+)/u;
 const CONTENT_TYPE_PATTERN = /Content type:\s*(?<type>[^;]+)/u;
 const SOURCE_PATTERN = /Source:\s*(?<source>[^;]+)/u;
@@ -28,9 +29,7 @@ type WebRunGlowupResult = GlowupWireToolResult;
 
 type SourceCollection = {
     readonly labels: string[];
-    readonly seenLabels: Set<string>;
     readonly maximum: number;
-    readonly sourceCountKnown: boolean;
     count: number;
 };
 
@@ -47,50 +46,100 @@ function compactQuotedText(value: string | undefined, maximum = 96): string | un
     return `"${truncateGraphemeText(compact, maximum)}"`;
 }
 
-function countedSummary(label: string, values: readonly unknown[] | undefined): string | undefined {
-    if (values === undefined || values.length === 0) return undefined;
+type TextNode = {
+    readonly kind: "text";
+    readonly text:
+        | string
+        | { readonly kind: "text"; readonly text: string; readonly tone: "url" | "muted" };
+};
 
-    const prefix = label.length > 0 ? `${label} ` : "";
-    const first = values[0];
-    const firstRecord = getRecord(first);
-    if (firstRecord) {
-        const query =
-            getString(firstRecord, "q") ??
-            getString(firstRecord, "ref_id") ??
-            getString(firstRecord, "url");
-        const quoted = compactQuotedText(query);
-        if (quoted !== undefined) {
-            return values.length === 1
-                ? `${prefix}${quoted}`
-                : `${prefix}${quoted} +${values.length - 1}`;
-        }
-    }
-
-    return `${prefix}${values.length}`;
+function styledText(text: string, tone?: "url" | "muted"): TextNode {
+    if (tone === undefined) return { kind: "text", text };
+    return { kind: "text", text: { kind: "text", text, tone } };
 }
 
-function summarizeArgs(args: WebRunGlowupArgs): string | undefined {
+function summarizeArgs(args: WebRunGlowupArgs, expanded: boolean): TextNode[] {
     const actions = [
-        { label: "search", values: getArray(args, "search_query") },
-        { label: "image", values: getArray(args, "image_query") },
-        { label: "open", values: getArray(args, "open") },
-        { label: "click", values: getArray(args, "click") },
-        { label: "find", values: getArray(args, "find") },
-        { label: "screenshot", values: getArray(args, "screenshot") },
-        { label: "finance", values: getArray(args, "finance") },
-        { label: "weather", values: getArray(args, "weather") },
-        { label: "sports", values: getArray(args, "sports") },
-        { label: "time", values: getArray(args, "time") },
-    ].filter((action) => action.values !== undefined && action.values.length > 0);
-    const parts = actions.flatMap((action) => {
-        const part = countedSummary(
-            actions.length === 1 && action.label === "search" ? "" : action.label,
-            action.values,
-        );
-        return part === undefined ? [] : [part];
-    });
-
-    return parts.length === 0 ? undefined : parts.join(" • ");
+        ["search", "search_query"],
+        ["image", "image_query"],
+        ["open", "open"],
+        ["click", "click"],
+        ["find", "find"],
+        ["screenshot", "screenshot"],
+        ["finance", "finance"],
+        ["weather", "weather"],
+        ["sports", "sports"],
+        ["time", "time"],
+    ] as const;
+    const active = actions.filter(([, key]) => (getArray(args, key)?.length ?? 0) > 0);
+    const nodes: TextNode[] = [];
+    const limit = expanded ? 10 : 2;
+    for (const [label, key] of active) {
+        const values = getArray(args, key) ?? [];
+        for (const value of values.slice(0, limit)) {
+            const record = getRecord(value);
+            if (!record) continue;
+            const first =
+                getString(record, "q") ??
+                getString(record, "ref_id") ??
+                getString(record, "ticker") ??
+                getString(record, "location") ??
+                getString(record, "league") ??
+                getString(record, "utc_offset");
+            const firstText = compactQuotedText(first) ?? "request";
+            const prefix = active.length === 1 && label === "search" ? "" : `${label} `;
+            const extra: string[] = [];
+            const fields = [
+                "pattern",
+                "id",
+                "lineno",
+                "pageno",
+                "type",
+                "market",
+                "fn",
+                "team",
+                "opponent",
+                "start",
+                "duration",
+                "date_from",
+                "date_to",
+                "num_games",
+                "locale",
+                "recency",
+            ];
+            for (const field of fields) {
+                const fieldValue = getString(record, field) ?? getNumber(record, field);
+                if (fieldValue === undefined) continue;
+                const formatted = truncateGraphemeText(
+                    String(fieldValue).replace(/\s+/gu, " "),
+                    80,
+                );
+                if (field === "id") extra.push(`#${formatted}`);
+                else extra.push(`${field}=${formatted}`);
+            }
+            const domains = getArray(record, "domains");
+            if (domains?.length)
+                extra.push(
+                    `domains=${domains
+                        .slice(0, 4)
+                        .flatMap((value) => {
+                            const decoded = StringDecoder.decode(value);
+                            return decoded === undefined ? [] : [decoded];
+                        })
+                        .map((v) => truncateGraphemeText(v, 60))
+                        .join(",")}`,
+                );
+            nodes.push(
+                styledText(`${prefix}${firstText}`, first?.startsWith("http") ? "url" : undefined),
+            );
+            if (extra.length) nodes.push(styledText(extra.join(" • "), "muted"));
+        }
+        if (values.length > limit)
+            nodes.push(styledText(`${label} … +${values.length - limit}`, "muted"));
+    }
+    const length = getString(args, "response_length");
+    if (length) nodes.push(styledText(`length=${truncateGraphemeText(length, 20)}`, "muted"));
+    return nodes;
 }
 
 function normalizeText(value: string): string {
@@ -125,12 +174,6 @@ function sourceLabel(value: string): string | undefined {
 function collectSource(line: string, collection: SourceCollection): void {
     const label = sourceLabel(line);
     if (label === undefined || label.length === 0) return;
-    if (collection.sourceCountKnown && collection.labels.length >= collection.maximum) return;
-
-    const key = label.toLowerCase();
-    if (collection.seenLabels.has(key)) return;
-
-    collection.seenLabels.add(key);
     collection.count += 1;
     if (collection.labels.length < collection.maximum) collection.labels.push(label);
 }
@@ -215,9 +258,7 @@ function inlineOutputSummary(
 
     const collection: SourceCollection = {
         labels: [],
-        seenLabels: new Set<string>(),
         maximum: context.expanded ? EXPANDED_SOURCE_LIMIT : COLLAPSED_SOURCE_LIMIT,
-        sourceCountKnown: sourceCount !== undefined,
         count: 0,
     };
     const highlights: HighlightCandidate[] = [];
@@ -229,10 +270,10 @@ function inlineOutputSummary(
         collectHighlight(line, highlights);
     }
 
-    const total = sourceCount ?? collection.count;
+    const total = Math.max(sourceCount ?? 0, collection.count);
     const details = [...collection.labels];
     const remaining = Math.max(0, total - details.length);
-    if (remaining > 0) details.push(`… +${remaining} sources`);
+    if (remaining > 0) details.push(`… +${remaining} source${remaining === 1 ? "" : "s"}`);
     if (context.expanded && metadata !== undefined) details.push(`metadata: ${metadata}`);
 
     if (context.expanded && highlights.length > 0) {
@@ -356,36 +397,49 @@ function webRunLabels(args: WebRunGlowupArgs) {
     return webResearchLabels();
 }
 
-function renderWebRunCall(args: WebRunGlowupArgs) {
-    const summary = summarizeArgs(args);
+function renderWebRunCall(args: WebRunGlowupArgs, context: GlowupWireCallContext) {
+    const children = summarizeArgs(args, context.expanded);
     const labels = webRunLabels(args);
+    if (children.length === 0) return { kind: "call" as const, labels };
+    if (children.length === 1) return { kind: "call" as const, labels, body: children[0] };
+    return { kind: "call" as const, labels, body: { kind: "stack" as const, children } };
+}
 
-    return summary === undefined
-        ? { kind: "call" as const, labels }
-        : { kind: "call" as const, labels, body: { kind: "text" as const, text: summary } };
+function styledResult(summary: string) {
+    const children = summary.split("\n").map((line) => {
+        const separator = line.indexOf(" — ");
+        if (separator >= 0)
+            return {
+                kind: "summary" as const,
+                rows: [
+                    {
+                        label: line.slice(0, separator),
+                        value: {
+                            kind: "text" as const,
+                            text: line.slice(separator + 3),
+                            tone: "url" as const,
+                        },
+                    },
+                ],
+            };
+        if (line.startsWith("metadata:") || line.startsWith("…")) return styledText(line, "muted");
+        return styledText(line);
+    });
+    return { kind: "stack" as const, children };
 }
 
 export const webRunGlowupRendering = {
     version: 3,
     parseArgs: parseGlowupWireArgs,
     parseResult: parseGlowupWireResult,
-    renderCall(args: WebRunGlowupArgs, _context: GlowupWireCallContext) {
-        return renderWebRunCall(args);
+    renderCall(args: WebRunGlowupArgs, context: GlowupWireCallContext) {
+        return renderWebRunCall(args, context);
     },
     renderResult(result: WebRunGlowupResult, context: GlowupWireResultContext<WebRunGlowupArgs>) {
+        if (context.isError) return undefined;
+
         const summary = summarizeResult(result, context);
 
-        return summary === undefined
-            ? undefined
-            : {
-                  kind: "output" as const,
-                  text: summary,
-                  preview: {
-                      mode: "head" as const,
-                      collapsedLines: COLLAPSED_SOURCE_LIMIT + 2,
-                      expandedLines: EXPANDED_SOURCE_LIMIT + 4,
-                  },
-                  noOutputLabel: null,
-              };
+        return summary === undefined ? undefined : styledResult(summary);
     },
 } as const;

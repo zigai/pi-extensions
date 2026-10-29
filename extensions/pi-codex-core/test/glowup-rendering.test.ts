@@ -34,6 +34,14 @@ function nodeText(node: GlowupWireValue | undefined): string {
     if (record.kind === "text") return inlineText(record.text);
     if (record.kind === "call") return nodeText(record.body);
     if (record.kind === "output") return StringDecoder.decode(record.text) ?? "";
+    if (record.kind === "summary" && Array.isArray(record.rows)) {
+        return record.rows
+            .map((row) => {
+                const item = parseGlowupWireRecord(row);
+                return `${inlineText(item?.label)} — ${inlineText(item?.value)}`;
+            })
+            .join("\n");
+    }
 
     if (record.kind === "stack" && Array.isArray(record.children)) {
         return record.children.map(nodeText).join("\n");
@@ -240,6 +248,138 @@ test("web_run adapter summarizes calls and bounded source results", () => {
     assert.match(expanded, /Ripgrep Crate — crates\.io\/crates\/ripgrep/u);
     assert.match(expanded, /GNU Grep — gnu\.org\/software\/grep/u);
     assert.doesNotMatch(expanded, /… \+2 sources/u);
+});
+
+test("web_run shows multiple action details and semantic result sources", () => {
+    const renderer = createWebRunTool({
+        getConfig: () => DEFAULT_CODEX_CORE_CONFIG,
+    }).glowupRendering;
+    const args = parseArgs(renderer, {
+        search_query: [
+            { q: "Pi docs", domains: ["pi.dev"], recency: 7 },
+            { q: "second query" },
+            { q: "third query" },
+        ],
+        open: [{ ref_id: "https://pi.dev/docs", lineno: 42 }],
+        find: [{ ref_id: "turn0view0", pattern: "renderCall" }],
+        click: [{ ref_id: "turn0view0", id: 12 }],
+        response_length: "long",
+    });
+    const collapsedNode = renderer.renderCall(args, completeContext);
+    const collapsed = nodeText(collapsedNode);
+    assert.match(collapsed, /Pi docs/u);
+    assert.match(collapsed, /second query/u);
+    assert.match(collapsed, /pi\.dev/u);
+    assert.match(collapsed, /recency.*7/u);
+    assert.match(collapsed, /https:\/\/pi\.dev\/docs/u);
+    assert.match(collapsed, /renderCall/u);
+    assert.match(collapsed, /#12/u);
+    assert.match(collapsed, /long/u);
+    assert.match(JSON.stringify(collapsedNode), /"tone":"url"/u);
+    assert.match(JSON.stringify(collapsedNode), /"tone":"muted"/u);
+    const expanded = nodeText(renderer.renderCall(args, { ...completeContext, expanded: true }));
+    assert.match(expanded, /third query/u);
+
+    const result = parseResult(renderer, {
+        content: [
+            {
+                type: "text",
+                text: 'Docs (https://pi.dev/docs)\nContent type: text/html; Source: open({"ref_id":"https://pi.dev/docs"}); Total lines: 42\nL1: # Documentation',
+            },
+        ],
+        details: { sourceCount: 1 },
+    });
+    const resultNode = renderer.renderResult(result, { ...completeContext, args });
+    assert.match(nodeText(resultNode), /Docs.*pi\.dev\/docs/u);
+    assert.match(JSON.stringify(resultNode), /"tone":"url"/u);
+    const expandedResult = renderer.renderResult(result, {
+        ...completeContext,
+        args,
+        expanded: true,
+    });
+    assert.match(JSON.stringify(expandedResult), /"tone":"muted"/u);
+    assert.equal(
+        renderer.renderResult(
+            parseResult(renderer, { content: [{ type: "text", text: "failure" }], details: {} }),
+            { ...completeContext, args, isError: true },
+        ),
+        undefined,
+    );
+});
+
+test("web_run retains specialized actions and bounds large calls", () => {
+    const renderer = createWebRunTool({
+        getConfig: () => DEFAULT_CODEX_CORE_CONFIG,
+    }).glowupRendering;
+    const args = parseArgs(renderer, {
+        finance: [{ ticker: "MSFT", type: "equity", market: "USA" }],
+        weather: [{ location: "London", duration: 3 }],
+        sports: [{ league: "nba", fn: "schedule", team: "GSW" }],
+        time: [{ utc_offset: "+09:00" }],
+        screenshot: [{ ref_id: "turn0view0", pageno: 2 }],
+        search_query: Array.from({ length: 100 }, (_, i) => ({
+            q: `query ${i} ${"x".repeat(500)}`,
+        })),
+    });
+    const collapsed = nodeText(renderer.renderCall(args, completeContext));
+    for (const value of [
+        "MSFT",
+        "equity",
+        "USA",
+        "London",
+        "duration=3",
+        "nba",
+        "schedule",
+        "GSW",
+        "+09:00",
+        "pageno=2",
+        "+98",
+    ])
+        assert.ok(collapsed.includes(value), value);
+    assert.ok(collapsed.length < 2000);
+    const expanded = nodeText(renderer.renderCall(args, { ...completeContext, expanded: true }));
+    assert.match(expanded, /query 9/u);
+    assert.match(expanded, /\+90/u);
+    assert.ok(expanded.length < 4000);
+});
+
+test("web_run counts raw source headers beyond capped details and preserves error fallback", () => {
+    const renderer = createWebRunTool({
+        getConfig: () => DEFAULT_CODEX_CORE_CONFIG,
+    }).glowupRendering;
+    const args = parseArgs(renderer, {});
+    const output = Array.from(
+        { length: 9 },
+        (_, index) => `Source ${index + 1} (https://example.org/${index + 1})`,
+    ).join("\n--------------------------------------------------------------------------------\n");
+    const result = parseResult(renderer, {
+        content: [{ type: "text", text: output }],
+        details: { sourceCount: 6 },
+    });
+    const collapsed = nodeText(renderer.renderResult(result, { ...completeContext, args }));
+    const expanded = nodeText(
+        renderer.renderResult(result, { ...completeContext, args, expanded: true }),
+    );
+    assert.match(collapsed, /9 sources/u);
+    assert.match(collapsed, /… \+5 sources/u);
+    assert.match(expanded, /9 sources/u);
+    assert.match(expanded, /Source 9/u);
+    assert.doesNotMatch(expanded, /6 sources/u);
+    const error = parseResult(renderer, {
+        content: [{ type: "text", text: "Could not search web" }],
+    });
+    assert.equal(
+        renderer.renderResult(error, { ...completeContext, args, isError: true }),
+        undefined,
+    );
+    const errorWithSources = parseResult(renderer, {
+        content: [{ type: "text", text: output }],
+        details: { sourceCount: 6 },
+    });
+    assert.equal(
+        renderer.renderResult(errorWithSources, { ...completeContext, args, isError: true }),
+        undefined,
+    );
 });
 
 test("web_run adapter keeps dense and huge result summaries bounded", () => {
