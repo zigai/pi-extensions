@@ -5,7 +5,7 @@ import Type from "typebox";
 import { Value } from "typebox/value";
 import { dirname, join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
-import { Theme } from "@earendil-works/pi-coding-agent";
+import { keyText, keyHint, Theme } from "@earendil-works/pi-coding-agent";
 import { format, type FormatConfig } from "oxfmt";
 import { TEST_THEME_BACKGROUND_COLORS, TEST_THEME_COLORS } from "../../../support/theme-colors.ts";
 import {
@@ -110,6 +110,8 @@ describe("script preview events", () => {
                 isError: false,
                 durationMs: undefined,
                 outputPad: 1,
+                keyText,
+                keyHint,
                 invalidate: () => {},
             };
             const render = (current: BuiltInRenderContext) =>
@@ -182,6 +184,14 @@ describe("script preview events", () => {
                 stage: string | undefined;
                 signal: AbortSignal | undefined;
             }> = [];
+            let reportFirst = () => {};
+            let reportOther = () => {};
+            const firstAttempt = new Promise<void>((resolve) => {
+                reportFirst = resolve;
+            });
+            const otherAttempt = new Promise<void>((resolve) => {
+                reportOther = resolve;
+            });
             const profiles = parseScriptFormatterCommandsValue({
                 javascript: { kind: "command", command: ["unused"] },
             });
@@ -195,6 +205,9 @@ describe("script preview events", () => {
                         stage: options.diagnostics?.stage,
                         signal: options.signal,
                     });
+
+                    if (input.code === "const first=1;") reportFirst();
+                    if (input.code === "const other=3;") reportOther();
 
                     if (
                         options.diagnostics?.stage === "statement" &&
@@ -234,6 +247,8 @@ describe("script preview events", () => {
                 isError: false,
                 durationMs: undefined,
                 outputPad: 1,
+                keyText,
+                keyHint,
                 invalidate: () => {},
             };
             const render = (current: BuiltInRenderContext, source = command) =>
@@ -265,9 +280,7 @@ describe("script preview events", () => {
                 oldComponent.render(80);
                 await bash.settled();
                 oldComponent.render(80);
-                await vi.waitUntil(() =>
-                    attempts.some((attempt) => attempt.code === "const first=1;"),
-                );
+                await firstAttempt;
                 const other = render(
                     { ...context, toolCallId: "other-call" },
                     "node -e 'const other=3;'",
@@ -275,9 +288,7 @@ describe("script preview events", () => {
                 other.render(80);
                 await bash.settled();
                 other.render(80);
-                await vi.waitUntil(() =>
-                    attempts.some((attempt) => attempt.code === "const other=3;"),
-                );
+                await otherAttempt;
                 const obsoleteBefore = obsoleteInvalidations;
                 let completed: ReturnType<typeof render> | undefined;
                 if (ending === "clear") bash.clear();
@@ -393,6 +404,8 @@ describe("script preview events", () => {
             isError: false,
             durationMs: undefined,
             outputPad: 1,
+            keyText,
+            keyHint,
             invalidate: () => {},
         };
         const render = (expanded = false, width = 80) =>
@@ -493,6 +506,8 @@ describe("script preview events", () => {
             isError: false,
             durationMs: undefined,
             outputPad: 1,
+            keyText,
+            keyHint,
             invalidate: () => {},
         };
         const render = (expanded = false) =>
@@ -572,6 +587,8 @@ describe("script preview events", () => {
             isError: false,
             durationMs: undefined,
             outputPad: 1,
+            keyText,
+            keyHint,
             invalidate: () => {},
         };
         const render = (expanded = false) =>
@@ -652,6 +669,8 @@ describe("script preview events", () => {
             isError: false,
             durationMs: undefined,
             outputPad: 1,
+            keyText,
+            keyHint,
             invalidate: () => finishInvalidation(),
         };
         const render = (width: number) =>
@@ -688,7 +707,7 @@ describe("script preview events", () => {
         expect(signals[0]?.aborted).toBe(false);
         release();
         await narrowed;
-        await vi.waitUntil(() => widths.length === 2);
+        await vi.waitUntil(() => render(44).includes("  console.log([\n"));
         expect(widths).toHaveLength(2);
         expect(signals.every((signal) => !signal.aborted)).toBe(true);
         expect(render(44)).toContain("  console.log([\n");
@@ -984,6 +1003,8 @@ describe("script render diagnostics", () => {
                 isError: false,
                 durationMs: undefined,
                 outputPad: 1,
+                keyText,
+                keyHint,
                 invalidate: () => {},
             };
             const render = () =>
@@ -1024,6 +1045,8 @@ describe("script render diagnostics", () => {
                 isError: false,
                 durationMs: undefined,
                 outputPad: 1,
+                keyText,
+                keyHint,
                 invalidate: () => {},
             };
             const render = () =>

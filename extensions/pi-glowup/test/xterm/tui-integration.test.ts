@@ -511,8 +511,13 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
             expect(stripVTControlCharacters(initial)).toContain(header);
 
             let completions = 0;
+            let reportCompletion = () => {};
+            const completion = new Promise<void>((resolve) => {
+                reportCompletion = resolve;
+            });
             const stopCounting = onSyntaxHighlightComplete(() => {
                 completions += 1;
+                reportCompletion();
             });
             try {
                 activeTui.addChild(new LinesComponent(["BEFORE_NATIVE_SYNTAX"]));
@@ -521,7 +526,8 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
                 terminal = pendingTerminal;
                 tui = activeTui;
                 activeTui.start();
-                await vi.waitUntil(() => completions > 0);
+                await completion;
+                expect(completions).toBeGreaterThan(0);
                 await pendingTerminal.settle();
 
                 expect(
