@@ -47,7 +47,6 @@ export class ModeController {
 
     private sessionGeneration = 0;
     private selectionRevision = 0;
-    private legacyDefaultNoticeShown = false;
 
     // Only the setModel call's own events are suppressed, not concurrent user choices.
     private readonly modelSelection = new AsyncLocalStorage<boolean>();
@@ -443,7 +442,6 @@ export class ModeController {
             this.runtime.data.hasConfiguredModes !== false &&
             first !== undefined
         ) {
-            this.notifyLegacyDefault(ctx, first);
             await this.applyMode(ctx, first);
             return;
         }
@@ -467,26 +465,6 @@ export class ModeController {
         this.onSelection?.(this.runtime.currentMode);
 
         if (ctx.hasUI) this.requestEditorRender?.();
-    }
-
-    private notifyLegacyDefault(ctx: ExtensionContext, first: string): void {
-        const legacy = this.runtime.data.defaultModel;
-        const startup = modeSpec(this.runtime.data.modes, first);
-        if (
-            !ctx.hasUI ||
-            this.legacyDefaultNoticeShown ||
-            legacy === undefined ||
-            (legacy.provider === startup?.provider &&
-                legacy.modelId === startup.modelId &&
-                legacy.thinkingLevel === startup.thinkingLevel)
-        )
-            return;
-
-        this.legacyDefaultNoticeShown = true;
-        ctx.ui.notify(
-            `Startup now uses the first cycle mode "${first}". The legacy defaultModel setting is ignored and will be removed when mode settings are saved.`,
-            "info",
-        );
     }
 
     async handleModelSelect(

@@ -59,6 +59,7 @@ async function createFixture(root: string, agentDir: string, config: StartupConf
     const runner = new ExtensionRunner(loaded.extensions, loaded.runtime, root, sessions, registry);
     const menus: { title: string; options: string[] }[] = [];
     const choices: (string | undefined)[] = [];
+    const notifications: string[] = [];
     runner.setUIContext(
         {
             ...runner.getUIContext(),
@@ -66,7 +67,9 @@ async function createFixture(root: string, agentDir: string, config: StartupConf
                 menus.push({ title, options: [...options] });
                 return choices.shift();
             },
-            notify: () => {},
+            notify: (message) => {
+                notifications.push(message);
+            },
         },
         "rpc",
     );
@@ -113,6 +116,7 @@ async function createFixture(root: string, agentDir: string, config: StartupConf
         configPath,
         menus,
         choices,
+        notifications,
         modelSelections,
         thinkingSelections,
         published,
@@ -166,6 +170,7 @@ test.each(["startup", "new"] as const)(
             assert.equal(f.ctx.model?.id, "first");
             assert.equal(f.controller.currentMode, "first");
             assert.deepEqual(f.published, ["first"]);
+            assert.deepEqual(f.notifications, []);
             assert.equal(await readFile(f.configPath, "utf8"), JSON.stringify(configured));
         });
     },
