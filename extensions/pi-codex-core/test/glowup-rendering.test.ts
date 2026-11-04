@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
+import { decodeGlowupNode } from "@zigai/pi-glowup/protocol";
+import { compactPresentation } from "@zigai/pi-glowup/presentation";
 
 import { DEFAULT_CODEX_CORE_CONFIG } from "../src/config/config.ts";
 import { parseGlowupWireRecord, type GlowupWireValue } from "../src/glowup/wire.ts";
@@ -9,7 +11,7 @@ import { createApplyPatchTool } from "../src/tools/apply-patch/tool.ts";
 import { createImagegenTool } from "../src/tools/imagegen.ts";
 import { createViewImageTool } from "../src/tools/view-image/tool.ts";
 import { createWebRunTool } from "../src/tools/web-run/tool.ts";
-import { testDouble } from "./helpers.ts";
+import { TEST_THEME, makeRenderContext, testDouble } from "./helpers.ts";
 
 const completeContext = {
     toolName: "tool",
@@ -34,6 +36,7 @@ function nodeText(node: GlowupWireValue | undefined): string {
     if (record.kind === "text") return inlineText(record.text);
     if (record.kind === "call") return nodeText(record.body);
     if (record.kind === "output") return StringDecoder.decode(record.text) ?? "";
+
     if (record.kind === "summary" && Array.isArray(record.rows)) {
         return record.rows
             .map((row) => {
@@ -189,242 +192,363 @@ test("passive patch preview preserves deletion-first ties, blank context, and mo
     ]);
 });
 
-test("web_run adapter summarizes calls and bounded source results", () => {
-    const renderer = createWebRunTool({
-        getConfig: () => DEFAULT_CODEX_CORE_CONFIG,
-    }).glowupRendering;
-    const args = parseArgs(renderer, { search_query: [{ q: "latest pi docs" }] });
-    assert.equal(renderer.parseArgs(null), undefined);
-    assert.equal("renderPartialCall" in renderer, false);
-    const call = renderer.renderCall(args, completeContext);
-    assert.equal(call.kind, "call");
-    assert.equal(call.labels.static, "Web Search");
-    assert.equal(nodeText(call), '"latest pi docs"');
-    assert.doesNotMatch(nodeText(call), /search search/u);
-
-    const operationLabels = [
-        [{ image_query: [{ q: "terminal UI" }] }, "Image Search"],
-        [{ open: [{ ref_id: "source-1" }] }, "Open Web"],
-        [{ click: [{ ref_id: "source-1", id: 2 }] }, "Web Click"],
-        [{ find: [{ ref_id: "source-1", pattern: "Renderer" }] }, "Web Find"],
-        [{ screenshot: [{ ref_id: "source-1", pageno: 0 }] }, "Web Screenshot"],
-        [{ finance: [{ ticker: "OPENAI", type: "equity" }] }, "Market Data"],
-        [{ weather: [{ location: "London" }] }, "Weather"],
-        [{ sports: [{ fn: "standings", league: "epl" }] }, "Sports"],
-        [{ time: [{ utc_offset: "+00:00" }] }, "Time"],
-        [{ search_query: [{ q: "Pi" }], open: [{ ref_id: "source-1" }] }, "Web Research"],
-    ] as const;
-    for (const [rawArgs, label] of operationLabels) {
-        const parsedArgs = parseArgs(renderer, rawArgs);
-        const node = renderer.renderCall(parsedArgs, completeContext);
-        const record = parseGlowupWireRecord(node);
-        const labels = parseGlowupWireRecord(record?.labels);
-        assert.ok(labels);
-        assert.equal(labels.static, label);
-    }
-
-    const output = [
-        "Ripgrep Benchmarks (https://ripgrep.dev/benchmarks)",
-        "Ripgrep Repository (https://github.com/BurntSushi/ripgrep)",
-        "Rust Regex (https://docs.rs/regex/latest/regex)",
-        "Grep Crate (https://docs.rs/grep/latest/grep)",
-        "Ripgrep Crate (https://crates.io/crates/ripgrep)",
-        "GNU Grep (https://www.gnu.org/software/grep/)",
-    ].join("\n");
-    const result = parseResult(renderer, {
-        content: [{ type: "text", text: output }],
-        details: { sourceCount: 6, fullOutputPath: "/tmp/private-web-run.txt" },
-    });
-    const collapsed = nodeText(renderer.renderResult(result, { ...completeContext, args }));
-    const expanded = nodeText(
-        renderer.renderResult(result, { ...completeContext, args, expanded: true }),
-    );
-
-    assert.match(collapsed, /6 sources/u);
-    assert.match(collapsed, /Grep Crate — docs\.rs\/grep\/latest\/grep/u);
-    assert.match(collapsed, /… \+2 sources/u);
-    assert.doesNotMatch(collapsed, /Ripgrep Crate/u);
-    assert.doesNotMatch(collapsed, /private-web-run/u);
-    assert.match(expanded, /Ripgrep Crate — crates\.io\/crates\/ripgrep/u);
-    assert.match(expanded, /GNU Grep — gnu\.org\/software\/grep/u);
-    assert.doesNotMatch(expanded, /… \+2 sources/u);
-});
-
-test("web_run shows multiple action details and semantic result sources", () => {
+test("web_run renders one semantic action line per request without result or option noise", () => {
     const renderer = createWebRunTool({
         getConfig: () => DEFAULT_CODEX_CORE_CONFIG,
     }).glowupRendering;
     const args = parseArgs(renderer, {
         search_query: [
-            { q: "Pi docs", domains: ["pi.dev"], recency: 7 },
+            { q: "release notes", domains: ["example.org"], recency: 7 },
             { q: "second query" },
             { q: "third query" },
         ],
-        open: [{ ref_id: "https://pi.dev/docs", lineno: 42 }],
-        find: [{ ref_id: "turn0view0", pattern: "renderCall" }],
+        open: [{ ref_id: "https://example.org/docs?version=2", lineno: 42 }],
         click: [{ ref_id: "turn0view0", id: 12 }],
+        find: [{ ref_id: "turn0view0", pattern: "render result" }],
         response_length: "long",
     });
-    const collapsedNode = renderer.renderCall(args, completeContext);
-    const collapsed = nodeText(collapsedNode);
-    assert.match(collapsed, /Pi docs/u);
-    assert.match(collapsed, /second query/u);
-    assert.match(collapsed, /pi\.dev/u);
-    assert.match(collapsed, /recency.*7/u);
-    assert.match(collapsed, /https:\/\/pi\.dev\/docs/u);
-    assert.match(collapsed, /renderCall/u);
-    assert.match(collapsed, /#12/u);
-    assert.match(collapsed, /long/u);
-    assert.match(JSON.stringify(collapsedNode), /"tone":"url"/u);
-    assert.match(JSON.stringify(collapsedNode), /"tone":"muted"/u);
-    const expanded = nodeText(renderer.renderCall(args, { ...completeContext, expanded: true }));
-    assert.match(expanded, /third query/u);
-
-    const result = parseResult(renderer, {
-        content: [
+    assert.equal(renderer.parseArgs(null), undefined);
+    const node = decodeGlowupNode(renderer.renderCall(args, completeContext));
+    assert.ok(node);
+    const rendered = compactPresentation
+        .renderNode(
+            node,
             {
-                type: "text",
-                text: 'Docs (https://pi.dev/docs)\nContent type: text/html; Source: open({"ref_id":"https://pi.dev/docs"}); Total lines: 42\nL1: # Documentation',
+                fg: (_token, value) => value,
+                bold: (value) => value,
             },
-        ],
-        details: { sourceCount: 1 },
-    });
-    const resultNode = renderer.renderResult(result, { ...completeContext, args });
-    assert.match(nodeText(resultNode), /Docs.*pi\.dev\/docs/u);
-    assert.match(JSON.stringify(resultNode), /"tone":"url"/u);
-    const expandedResult = renderer.renderResult(result, {
-        ...completeContext,
-        args,
-        expanded: true,
-    });
-    assert.match(JSON.stringify(expandedResult), /"tone":"muted"/u);
+            { ...completeContext, args: {} },
+            "static",
+        )
+        .render(200)
+        .join("\n");
     assert.equal(
+        rendered,
+        [
+            '• Searched the web for "release notes"',
+            '• Searched the web for "second query"',
+            '• Searched the web for "third query"',
+            "• Opened https://example.org/docs?version=2",
+            "• Clicked turn0view0#12",
+            '• Searched for "render result" in turn0view0',
+        ].join("\n"),
+    );
+    assert.doesNotMatch(rendered, /sources|recency|domains|length|lineno|42/u);
+    assert.deepEqual(
         renderer.renderResult(
-            parseResult(renderer, { content: [{ type: "text", text: "failure" }], details: {} }),
-            { ...completeContext, args, isError: true },
+            parseResult(renderer, {
+                content: [{ type: "text", text: "Source content that stays hidden" }],
+                details: { sourceCount: 20 },
+            }),
+            { ...completeContext, args },
         ),
-        undefined,
+        { kind: "empty" },
     );
 });
 
-test("web_run retains specialized actions and bounds large calls", () => {
+test("web_run highlights search queries with Pi accent while keeping URLs blue", () => {
     const renderer = createWebRunTool({
         getConfig: () => DEFAULT_CODEX_CORE_CONFIG,
     }).glowupRendering;
     const args = parseArgs(renderer, {
-        finance: [{ ticker: "MSFT", type: "equity", market: "USA" }],
-        weather: [{ location: "London", duration: 3 }],
-        sports: [{ league: "nba", fn: "schedule", team: "GSW" }],
-        time: [{ utc_offset: "+09:00" }],
-        screenshot: [{ ref_id: "turn0view0", pageno: 2 }],
-        search_query: Array.from({ length: 100 }, (_, i) => ({
-            q: `query ${i} ${"x".repeat(500)}`,
-        })),
+        search_query: [{ q: "docs" }, { q: "https://example.org/search-term" }],
+        image_query: [{ q: "https://example.org/image-term" }],
+        open: [{ ref_id: "https://example.org/docs" }],
+        click: [{ ref_id: "https://example.org/docs", id: 3 }],
+        find: [{ ref_id: "https://example.org/docs", pattern: "usage" }],
     });
-    const collapsed = nodeText(renderer.renderCall(args, completeContext));
-    for (const value of [
-        "MSFT",
-        "equity",
-        "USA",
-        "London",
-        "duration=3",
-        "nba",
-        "schedule",
-        "GSW",
-        "+09:00",
-        "pageno=2",
-        "+98",
-    ])
-        assert.ok(collapsed.includes(value), value);
-    assert.ok(collapsed.length < 2000);
-    const expanded = nodeText(renderer.renderCall(args, { ...completeContext, expanded: true }));
-    assert.match(expanded, /query 9/u);
-    assert.match(expanded, /\+90/u);
-    assert.ok(expanded.length < 4000);
+    const node = decodeGlowupNode(renderer.renderCall(args, completeContext));
+    assert.ok(node?.kind === "stack");
+    assert.deepEqual(
+        node.children.map((child) => child.kind === "call" && child.body),
+        [
+            { kind: "text", text: { kind: "text", text: '"docs"', tone: "accent" } },
+            {
+                kind: "text",
+                text: { kind: "text", text: '"https://example.org/search-term"', tone: "accent" },
+            },
+            {
+                kind: "text",
+                text: { kind: "text", text: '"https://example.org/image-term"', tone: "accent" },
+            },
+            { kind: "text", text: { kind: "text", text: "https://example.org/docs", tone: "url" } },
+            {
+                kind: "text",
+                text: { kind: "text", text: "https://example.org/docs#3", tone: "url" },
+            },
+            {
+                kind: "text",
+                text: { kind: "text", text: '"usage" in https://example.org/docs', tone: "url" },
+            },
+        ],
+    );
+
+    for (const expanded of [false, true]) {
+        const rendered = compactPresentation
+            .renderNode(
+                node,
+                {
+                    fg: (token, value) => `<${token}>${value}</${token}>`,
+                    bold: (value) => value,
+                },
+                { ...completeContext, args: {}, expanded },
+                "static",
+            )
+            .render(240)
+            .join("\n");
+        assert.match(rendered, /<accent>"docs"<\/accent>/u);
+        assert.match(rendered, /<accent>"https:\/\/example\.org\/search-term"<\/accent>/u);
+        assert.match(rendered, /<accent>"https:\/\/example\.org\/image-term"<\/accent>/u);
+        assert.match(rendered, /<mdLinkUrl>https:\/\/example\.org\/docs<\/mdLinkUrl>/u);
+    }
 });
 
-test("web_run counts raw source headers beyond capped details and preserves error fallback", () => {
+test("web_run keeps operation-specific lifecycle labels even in static label mode", () => {
     const renderer = createWebRunTool({
         getConfig: () => DEFAULT_CODEX_CORE_CONFIG,
     }).glowupRendering;
-    const args = parseArgs(renderer, {});
-    const output = Array.from(
-        { length: 9 },
-        (_, index) => `Source ${index + 1} (https://example.org/${index + 1})`,
-    ).join("\n--------------------------------------------------------------------------------\n");
-    const result = parseResult(renderer, {
-        content: [{ type: "text", text: output }],
-        details: { sourceCount: 6 },
-    });
-    const collapsed = nodeText(renderer.renderResult(result, { ...completeContext, args }));
-    const expanded = nodeText(
-        renderer.renderResult(result, { ...completeContext, args, expanded: true }),
-    );
-    assert.match(collapsed, /9 sources/u);
-    assert.match(collapsed, /… \+5 sources/u);
-    assert.match(expanded, /9 sources/u);
-    assert.match(expanded, /Source 9/u);
-    assert.doesNotMatch(expanded, /6 sources/u);
-    const error = parseResult(renderer, {
-        content: [{ type: "text", text: "Could not search web" }],
-    });
-    assert.equal(
-        renderer.renderResult(error, { ...completeContext, args, isError: true }),
-        undefined,
-    );
-    const errorWithSources = parseResult(renderer, {
-        content: [{ type: "text", text: output }],
-        details: { sourceCount: 6 },
-    });
-    assert.equal(
-        renderer.renderResult(errorWithSources, { ...completeContext, args, isError: true }),
-        undefined,
-    );
+    const cases = [
+        [
+            { search_query: [{ q: "release notes" }] },
+            "Search the web for",
+            "Searching the web for",
+            "Searched the web for",
+            "Web search failed for",
+        ],
+        [
+            { image_query: [{ q: "terminal UI" }] },
+            "Search images for",
+            "Searching images for",
+            "Searched images for",
+            "Image search failed for",
+        ],
+        [{ open: [{ ref_id: "source-1" }] }, "Open", "Opening", "Opened", "Failed to open"],
+        [
+            { click: [{ ref_id: "source-1", id: 2 }] },
+            "Click",
+            "Clicking",
+            "Clicked",
+            "Failed to click",
+        ],
+        [
+            { find: [{ ref_id: "source-1", pattern: "Renderer" }] },
+            "Search page for",
+            "Searching for",
+            "Searched for",
+            "Page search failed for",
+        ],
+        [
+            { screenshot: [{ ref_id: "source-1", pageno: 0 }] },
+            "Capture",
+            "Capturing",
+            "Captured",
+            "Failed to capture",
+        ],
+        [
+            { finance: [{ ticker: "ACME", type: "equity", market: "USA" }] },
+            "Fetch market data for",
+            "Fetching market data for",
+            "Fetched market data for",
+            "Failed to fetch market data for",
+        ],
+        [
+            { weather: [{ location: "London", duration: 3 }] },
+            "Check weather for",
+            "Checking weather for",
+            "Checked weather for",
+            "Failed to check weather for",
+        ],
+        [
+            { sports: [{ fn: "standings", league: "epl", team: "ABC" }] },
+            "Check sports",
+            "Checking sports",
+            "Checked sports",
+            "Failed to check sports",
+        ],
+        [
+            { time: [{ utc_offset: "+00:00" }] },
+            "Check time in",
+            "Checking time in",
+            "Checked time in",
+            "Failed to check time in",
+        ],
+    ] as const;
+    for (const [rawArgs, pending, running, completed, failed] of cases) {
+        const args = parseArgs(renderer, rawArgs);
+        for (const [phase, isError, expected] of [
+            ["pending", false, pending],
+            ["running", false, running],
+            ["complete", false, completed],
+            ["complete", true, failed],
+        ] as const) {
+            const node = parseGlowupWireRecord(
+                renderer.renderCall(args, { ...completeContext, phase, isError }),
+            );
+            const labels = parseGlowupWireRecord(node?.labels);
+            assert.ok(labels);
+            assert.equal(labels.static, expected);
+            assert.equal(labels.running, running);
+            assert.equal(labels.completed, completed);
+            assert.equal(labels.failed, failed);
+        }
+    }
 });
 
-test("web_run adapter keeps dense and huge result summaries bounded", () => {
+test("web_run expands readable source entries with blue URLs and explicit excerpt omissions", () => {
     const renderer = createWebRunTool({
         getConfig: () => DEFAULT_CODEX_CORE_CONFIG,
     }).glowupRendering;
-    const args = parseArgs(renderer, {});
-    const denseOutput = [
-        "API References | Shiki (https://shiki.style/api)",
-        'citeturn6view0 [wordlim: 200] Content type: text/html; Source: open({"ref_id":"https://shiki.style/api","lineno":null}); Total lines: 306',
-        "L0: Skip to content",
-        "L198: # API References",
-        "L199: ## `codeToHast`",
+    const args = parseArgs(renderer, { open: [{ ref_id: "https://example.org/docs" }] });
+    const rawOutput = [
+        "Docs (https://example.org/docs)",
+        "citeturn0view0 Content type: text/html; Total lines: 1000",
+        "L0: Menu",
+        "L1: Short",
+        "Unnumbered content must survive.",
+        ...Array.from({ length: 600 }, (_, i) => `L${i + 2}: Complete page line ${i + 2}`),
+        "Final unnumbered content.",
     ].join("\n");
-    const denseResult = parseResult(renderer, {
-        content: [{ type: "text", text: denseOutput }],
-        details: { sourceCount: 3, fullOutputPath: "/tmp/private.txt" },
+    const result = parseResult(renderer, {
+        content: [
+            { type: "text", text: rawOutput },
+            { type: "text", text: "Second text block." },
+        ],
     });
-    const dense = nodeText(renderer.renderResult(denseResult, { ...completeContext, args }));
-    assert.match(dense, /3 sources/u);
-    assert.match(dense, /API References \| Shiki — shiki\.style\/api/u);
-    assert.match(dense, /… \+2 sources/u);
-    assert.doesNotMatch(dense, /codeToHast/u);
-    assert.doesNotMatch(dense, /private\.txt/u);
-
-    const hugeOutput = Array.from(
-        { length: 1_000 },
-        (_value, index) =>
-            `Unique Source ${index + 1} (https://example.com/source-${index + 1})\nL${index + 1}: # Unique Highlight ${index + 1}`,
-    ).join("\n");
-    const hugeResult = parseResult(renderer, {
-        content: [{ type: "text", text: hugeOutput }],
-        details: { sourceCount: 1_000 },
-    });
-    const huge = nodeText(
-        renderer.renderResult(hugeResult, {
-            ...completeContext,
-            args,
-            expanded: true,
-        }),
+    const expanded = renderer.renderResult(result, { ...completeContext, args, expanded: true });
+    assert.match(
+        nodeText(expanded),
+        /Docs\nhttps:\/\/example\.org\/docs\nShort Unnumbered content must survive\./u,
     );
-    assert.match(huge, /Unique Source 100 — example\.com\/source-100/u);
-    assert.match(huge, /… \+900 sources/u);
-    assert.doesNotMatch(huge, /Unique Source 101 —/u);
-    assert.doesNotMatch(huge, /Unique Highlight 500/u);
+    assert.match(nodeText(expanded), /omitted/u);
+    assert.doesNotMatch(
+        nodeText(expanded),
+        /Content type:|Total lines:|L\d+:|Complete page line 601|cite/u,
+    );
+    const node = decodeGlowupNode(expanded);
+    assert.ok(node);
+    const rendered = compactPresentation
+        .renderNode(
+            node,
+            {
+                fg: (_token, value) => value,
+                bold: (value) => value,
+            },
+            { ...completeContext, args: {}, expanded: true },
+            "static",
+        )
+        .render(200)
+        .join("\n");
+    assert.match(rendered, /Docs/u);
+    assert.match(rendered, /Unnumbered content must survive/u);
+    assert.doesNotMatch(rendered, /L601:|Final unnumbered content/u);
+    assert.match(JSON.stringify(expanded), /"tone":"url"/u);
+    assert.match(JSON.stringify(expanded), /"bold":true/u);
+});
+
+test("native and Glowup expanded sources keep all entries and the same readable prose", () => {
+    const tool = createWebRunTool({ getConfig: () => DEFAULT_CODEX_CORE_CONFIG });
+    assert.ok(tool.renderResult);
+    const renderer = tool.glowupRendering;
+    const raw = Array.from({ length: 7 }, (_, index) =>
+        [
+            `Guide ${index + 1} (https://example.org/guide-${index + 1})`,
+            "【turn0search0】 [wordlim: 200] Crawled: today;",
+            "# Navigation",
+            "* Home",
+            "* Guide",
+            "History",
+            "",
+            "This guide explains how to configure the application with practical examples.",
+        ].join("\n"),
+    ).join("\n--------------------------------------------------------------------------------\n");
+    const result = {
+        content: [{ type: "text" as const, text: raw }],
+        details: {
+            fullOutputPath: "/existing/artifact.txt",
+            outputCharacters: raw.length,
+            sourceCount: 7,
+        },
+    };
+    const args = parseArgs(renderer, { search_query: [{ q: "guides" }] });
+    const expanded = renderer.renderResult(parseResult(renderer, result), {
+        ...completeContext,
+        args,
+        expanded: true,
+    });
+    const native = tool.renderResult(
+        result,
+        { expanded: true, isPartial: false },
+        TEST_THEME,
+        makeRenderContext({}),
+    );
+    assert.equal(
+        native
+            .render(1000)
+            .map((line) => line.trimEnd())
+            .join("\n"),
+        nodeText(expanded),
+    );
+    assert.match(
+        nodeText(expanded),
+        /Guide 7\nhttps:\/\/example\.org\/guide-7\nThis guide explains/u,
+    );
+    assert.doesNotMatch(nodeText(expanded), /Navigation|History|wordlim|Crawled|----|【turn/u);
+    assert.equal(result.content[0]?.text, raw);
+});
+
+test("web_run handles streaming arguments, partial results, empty output, and errors", () => {
+    const renderer = createWebRunTool({
+        getConfig: () => DEFAULT_CODEX_CORE_CONFIG,
+    }).glowupRendering;
+    const args = parseArgs(renderer, {});
+    const streaming = renderer.renderCall(
+        parseArgs(renderer, {
+            open: [],
+            find: [{ ref_id: "turn0view0" }],
+            search_query: [{ q: "partial query" }],
+        }),
+        { ...completeContext, phase: "pending", argsComplete: false, isPartial: true },
+    );
+    assert.match(nodeText(streaming), /partial query/u);
+    assert.doesNotMatch(nodeText(streaming), /undefined|request/u);
+    const partial = parseResult(renderer, { content: [{ type: "text", text: "Partial page" }] });
+    assert.deepEqual(
+        renderer.renderResult(partial, { ...completeContext, args, isPartial: true }),
+        { kind: "empty" },
+    );
+    assert.equal(
+        nodeText(
+            renderer.renderResult(partial, {
+                ...completeContext,
+                args,
+                expanded: true,
+                isPartial: true,
+            }),
+        ),
+        "Partial page",
+    );
+    assert.equal(
+        nodeText(
+            renderer.renderResult(parseResult(renderer, {}), {
+                ...completeContext,
+                args,
+                expanded: true,
+            }),
+        ),
+        "No web output.",
+    );
+    assert.deepEqual(
+        renderer.renderResult(parseResult(renderer, {}), { ...completeContext, args }),
+        { kind: "empty" },
+    );
+    assert.equal(
+        renderer.renderResult(partial, { ...completeContext, args, isError: true }),
+        undefined,
+    );
+    assert.equal(
+        renderer.renderResult(partial, { ...completeContext, args, expanded: true, isError: true }),
+        undefined,
+    );
 });
 
 test("imagegen adapter preserves streaming, multiline, Unicode, and private-path behavior", () => {

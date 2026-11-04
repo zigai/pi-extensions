@@ -1,229 +1,199 @@
-export type WebRunFormattedOutput = {
-    readonly text: string;
-    readonly sourceCount: number;
-};
-
-const CITATION_MARKER_PATTERN = /cite[^]*/g;
-const URL_PATTERN = /https?:\/\/[^\s)]+/;
-const SECTION_SEPARATOR_PATTERN = /\n-{20,}\n/g;
-const MAX_SOURCES = 6;
-const MAX_SNIPPETS_PER_SOURCE = 6;
-const MAX_COMPACT_OUTPUT_CHARS = 12_000;
-
-type ParsedWebRunSource = {
-    readonly title: string;
+export type WebRunSource = {
+    readonly title?: string | undefined;
     readonly url?: string | undefined;
-    readonly metadata?: string | undefined;
-    readonly snippets: readonly WebRunSnippet[];
+    readonly paragraphs: readonly string[];
+    readonly omitted: boolean;
 };
 
-type WebRunSnippet = {
-    readonly line?: number | undefined;
-    readonly text: string;
-};
+const MAX_EXCERPT_CHARS = 800;
+const MAX_EXCERPT_LINES = 8;
+const MAX_EXCERPT_PARAGRAPHS = 3;
+export const WEB_RUN_OMISSION =
+    "[Remaining content omitted; full text is in the tool result artifact.]";
 
-export function formatWebRunToolOutput(
-    rawOutput: string,
-    fullOutputPath: string | undefined,
-): WebRunFormattedOutput {
-    const sources = parseWebRunSources(rawOutput);
-    const lines =
-        sources.length > 0
-            ? formatSources(sources, fullOutputPath)
-            : formatPlainText(rawOutput, fullOutputPath);
-    return {
-        text: truncateCompactOutput(lines.join("\n"), fullOutputPath),
-        sourceCount: sources.length,
-    };
+function stripCodexCitationMarkers(text: string): string {
+    return text
+        .replace(/(?:cite|navlist|image)[^]*/gu, "")
+        .replace(/【(?:turn[^】]*|\d+†[^】]*)】/gu, "");
 }
 
-export function stripCodexCitationMarkers(text: string): string {
-    return text.replace(CITATION_MARKER_PATTERN, "");
-}
-
-function parseWebRunSources(rawOutput: string): ParsedWebRunSource[] {
-    return rawOutput
-        .split(SECTION_SEPARATOR_PATTERN)
-        .flatMap((section) => {
-            const parsed = parseWebRunSection(section);
-            return parsed ? [parsed] : [];
-        })
-        .slice(0, MAX_SOURCES);
-}
-
-function parseWebRunSection(section: string): ParsedWebRunSource | undefined {
-    const cleaned = cleanWebRunText(section);
-    const lines = cleaned
-        .split("\n")
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0);
-    if (lines.length === 0) return undefined;
-
-    const url = firstUrl(lines);
-    const title = parseTitle(lines, url);
-    const metadata = parseMetadata(lines);
-    const snippets = parseSnippets(lines);
-    if (!url && snippets.length === 0 && title.length < 10) return undefined;
-
-    return { title: title || "Web result", url, metadata, snippets };
-}
-
-function formatSources(
-    sources: readonly ParsedWebRunSource[],
-    fullOutputPath: string | undefined,
-): string[] {
-    const lines = [
-        `web_run results (${sources.length} source${sources.length === 1 ? "" : "s"}, compact view)`,
-    ];
-    if (fullOutputPath) lines.push(`Full raw Codex search output: ${fullOutputPath}`);
-
-    lines.push(
-        "Codex citation markers were removed; cite the URLs shown below, not turn/view markers.",
-    );
-
-    sources.forEach((source, index) => {
-        lines.push("");
-        lines.push(`${index + 1}. ${source.title}`);
-
-        if (source.url) lines.push(`   URL: ${source.url}`);
-        if (source.metadata) lines.push(`   ${source.metadata}`);
-
-        if (source.snippets.length > 0) {
-            lines.push("   Key lines:");
-
-            for (const snippet of source.snippets) {
-                const prefix = snippet.line === undefined ? "-" : `L${snippet.line}:`;
-                lines.push(`   ${prefix} ${snippet.text}`);
-            }
+/** Parse both remote Markdown/page output and restored numbered compact results. No source cap. */
+export function parseWebRunSources(rawOutput: string): WebRunSource[] {
+    const sources: WebRunSource[] = [];
+    let title: string | undefined;
+    let url: string | undefined;
+    let content: ContentLine[] = [];
+    const flush = () => {
+        const excerpt = readableExcerpt(content);
+        if (title || url || excerpt.paragraphs.length > 0) {
+            sources.push({ title, url, ...excerpt });
         }
-    });
 
-    return lines;
-}
+        title = undefined;
+        url = undefined;
+        content = [];
+    };
 
-function formatPlainText(rawOutput: string, fullOutputPath: string | undefined): string[] {
-    const cleaned = cleanWebRunText(rawOutput).trim();
-    return [
-        "web_run results (compact view)",
-        ...(fullOutputPath ? [`Full raw Codex search output: ${fullOutputPath}`] : []),
-        "Codex citation markers were removed; cite explicit URLs from the text below.",
-        "",
-        cleaned,
-    ];
-}
+    const lines = stripCodexCitationMarkers(rawOutput)
+        .replace(/\u00a0/gu, " ")
+        // Remote search sometimes appends the ruler directly to the preceding paragraph.
+        .replace(/[+|]?-{20,}[+|]?/gu, "\n")
+        .split(/\r?\n/u);
 
-function truncateCompactOutput(text: string, fullOutputPath: string | undefined): string {
-    if (text.length <= MAX_COMPACT_OUTPUT_CHARS) return text;
+    for (let index = 0; index < lines.length; index += 1) {
+        const line = (lines[index] ?? "").trim();
+        if (/^(?:[+|]?-{3,}[+|]?|_{3,}|\*{3,})$/u.test(line)) {
+            flush();
+            continue;
+        }
 
-    const suffix = fullOutputPath
-        ? `\n[web_run compact output truncated after ${MAX_COMPACT_OUTPUT_CHARS} characters. Full raw output saved to ${fullOutputPath}.]`
-        : `\n[web_run compact output truncated after ${MAX_COMPACT_OUTPUT_CHARS} characters.]`;
-    return `${text.slice(0, MAX_COMPACT_OUTPUT_CHARS)}${suffix}`;
-}
+        const heading = /^(?:#{1,6}\s+)?(?:\d+\.\s+)?\[?(.+?)\]?\s*\((https?:\/\/\S+)\)\s*$/u.exec(
+            line,
+        );
+        if (heading) {
+            flush();
+            title = cleanText(heading[1] ?? "");
+            url = heading[2];
+            continue;
+        }
 
-function cleanWebRunText(text: string): string {
-    return stripCodexCitationMarkers(text)
-        .replace(/\u00a0/g, " ")
-        .replace(/[ \t]+\n/g, "\n")
-        .replace(/\n{3,}/g, "\n\n")
-        .trim();
-}
+        // Compact entries use a numbered title followed by an explicit URL line.
+        if (/^\d+\.\s+/u.test(line) && /^\s*URL:\s*https?:\/\//u.test(lines[index + 1] ?? "")) {
+            flush();
+            title = cleanText(line.replace(/^\d+\.\s+/u, ""));
+            continue;
+        }
 
-function firstUrl(lines: readonly string[]): string | undefined {
-    for (const line of lines) {
-        const match = URL_PATTERN.exec(line);
-        if (match) return match[0];
+        const link = /^(?:(?:URL:|Opened)\s*)?(https?:\/\/\S+)$/u.exec(line);
+        if (link) {
+            if (url) flush();
+            url = link[1];
+            continue;
+        }
+
+        if (
+            /^(?:web_run results|Full raw Codex search output:|Codex citation markers|Key lines:)/u.test(
+                line,
+            )
+        )
+            continue;
+
+        if (/(?:Content type:|Source:\s*(?:open|find|click)\(|Total lines:)/iu.test(line)) continue;
+
+        const cleaned = cleanText(line);
+        if (url && !title && /^(?:L\d+:\s*)?#{1,6}\s/u.test(line)) {
+            title = cleaned;
+            continue;
+        }
+
+        if (/^(?:Source|Content[- ]type|Total[- ]lines):/iu.test(cleaned)) continue;
+        if (cleaned !== "" && cleaned === title) continue;
+
+        if (/^(?:Menu|Search|Skip to (?:content|main content)|Share:|Image:)$/iu.test(cleaned))
+            continue;
+
+        content.push({
+            text: cleaned,
+            prose: !/^(?:#{1,6}\s|[-*]\s)/u.test(cleanContentLine(line)),
+        });
     }
 
-    return undefined;
+    flush();
+
+    return sources;
 }
 
-function parseTitle(lines: readonly string[], url: string | undefined): string {
-    const firstContentLine = lines.find((line) => !isMetadataLine(line));
-    if (!firstContentLine) return "";
-    if (!url) return stripLineNoise(firstContentLine);
+type ContentLine = { readonly text: string; readonly prose: boolean };
 
-    const withoutUrl = firstContentLine
-        .replace(`(${url})`, "")
-        .replace(url, "")
-        .replace(/\s+/g, " ")
-        .trim();
-    return stripLineNoise(withoutUrl || firstContentLine);
-}
-
-function parseMetadata(lines: readonly string[]): string | undefined {
-    const line = lines.find(isMetadataLine);
-    if (!line) return undefined;
-
-    const parts = [
-        parseMetadataPart(line, /Content type:\s*([^;]+)/),
-        parseMetadataPart(line, /Source:\s*([^;]+)/),
-        parseMetadataPart(line, /Total lines:\s*(\d+)/, (value) => `${value} lines`),
-    ].filter((part): part is string => part !== undefined);
-
-    return parts.length > 0 ? parts.join(" · ") : undefined;
-}
-
-function parseMetadataPart(
-    line: string,
-    pattern: RegExp,
-    format: (value: string) => string = (value) => value,
-): string | undefined {
-    const match = pattern.exec(line);
-    const value = match?.[1]?.trim();
-    return value ? format(value) : undefined;
-}
-
-function parseSnippets(lines: readonly string[]): WebRunSnippet[] {
-    const snippets: WebRunSnippet[] = [];
-    for (const line of lines) {
-        const match = /^L(\d+):\s*(.*)$/.exec(line);
-        if (!match) continue;
-
-        const text = stripLineNoise(match[2] ?? "");
-        if (!isUsefulSnippet(text)) continue;
-        snippets.push({ line: Number(match[1]), text });
-
-        if (snippets.length >= MAX_SNIPPETS_PER_SOURCE) break;
-    }
-
-    if (snippets.length > 0) return snippets;
-
-    for (const line of lines) {
-        if (isMetadataLine(line) || URL_PATTERN.test(line)) continue;
-
-        const text = stripLineNoise(line);
-        if (!isUsefulSnippet(text)) continue;
-        snippets.push({ text });
-
-        if (snippets.length >= 3) break;
-    }
-
-    return snippets;
-}
-
-function stripLineNoise(line: string): string {
+function cleanContentLine(line: string): string {
     return line
-        .replace(/\[wordlim:\s*\d+\]/g, "")
-        .replace(/\s+/g, " ")
-        .replace(/^[-*]\s+/, "")
+        .replace(/\[wordlim:\s*\d+\]/giu, "")
+        .trim()
+        .replace(/(?:Published|Crawled):\s*[^;]*(?:;|$)\s*/giu, "")
+        .replace(/^L\d+:\s*/u, "")
         .trim();
 }
 
-function isMetadataLine(line: string): boolean {
-    return (
-        line.includes("Content type:") || line.includes("Source:") || line.includes("Total lines:")
-    );
+function cleanText(line: string): string {
+    return cleanContentLine(line)
+        .replace(/^#{1,6}\s+/u, "")
+        .replace(/^[-*]\s+/u, "")
+        .replace(/^\*\*(.*?)\*\*$/u, "$1")
+        .replace(/\s+/gu, " ")
+        .trim();
 }
 
-function isUsefulSnippet(text: string): boolean {
-    if (text.length < 18) return false;
+function readableExcerpt(
+    lines: readonly ContentLine[],
+): Pick<WebRunSource, "paragraphs" | "omitted"> {
+    const paragraphs: string[] = [];
+    let paragraph: string[] = [];
+    let chars = 0;
+    let count = 0;
 
-    if (/^(search|menu|skip to|share:|email|sms|facebook|twitter|linkedin|bluesky)$/i.test(text)) {
-        return false;
+    // Prefer prose to page navigation/headings, but retain heading-only API excerpts.
+    const prose = lines.filter((line) => line.prose);
+
+    // Navigation labels and signatures must not crowd out explanatory sentences.
+    const descriptive = prose.filter(
+        (line) => line.text === "" || line.text.split(/\s+/u).length >= 6,
+    );
+    const selected = descriptive.some((line) => line.text !== "")
+        ? descriptive
+        : prose.some((line) => line.text !== "")
+          ? prose
+          : lines;
+
+    // Deduplicate complete paragraphs within this source before applying excerpt budgets.
+    const seen = new Set<string>();
+    const uniqueLines: string[] = [];
+    for (const section of selected
+        .map((line) => line.text)
+        .join("\n")
+        .split(/\n{2,}/u)) {
+        const sectionLines = section.split("\n").filter((line) => line !== "");
+        const text = sectionLines.join(" ");
+        if (text === "" || seen.has(text)) continue;
+        seen.add(text);
+        uniqueLines.push(...sectionLines, "");
     }
 
-    if (/^image:/i.test(text)) return false;
-    if (/^add .* on google/i.test(text)) return false;
-    return true;
+    let omitted = false;
+
+    const flush = () => {
+        if (paragraph.length > 0) paragraphs.push(paragraph.join(" "));
+        paragraph = [];
+    };
+
+    for (const line of uniqueLines) {
+        if (line === "") {
+            flush();
+            continue;
+        }
+
+        if (
+            count >= MAX_EXCERPT_LINES ||
+            paragraphs.length >= MAX_EXCERPT_PARAGRAPHS ||
+            chars >= MAX_EXCERPT_CHARS
+        ) {
+            omitted = true;
+            break;
+        }
+
+        const available = MAX_EXCERPT_CHARS - chars;
+        if (line.length > available) {
+            // End an oversized line at a word boundary, not in the middle of a raw page.
+            paragraph.push(line.slice(0, available).replace(/\s+\S*$/u, "") + "…");
+            omitted = true;
+            break;
+        }
+
+        paragraph.push(line);
+        chars += line.length + 1;
+        count += 1;
+    }
+
+    flush();
+
+    return { paragraphs, omitted };
 }

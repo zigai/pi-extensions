@@ -31,7 +31,15 @@ import { defaultCodexRuntime, type CodexRuntime } from "../../runtime.ts";
 import { CodexTokenizer } from "../../compaction/tokenizer.ts";
 import { compileSchema } from "../../schema-parsing.ts";
 import { recentWebSearchInput } from "./history.ts";
-import { formatWebRunToolOutput } from "./output.ts";
+import { parseWebRunSources } from "./output.ts";
+import { parseGlowupWireArgs } from "../../glowup/wire.ts";
+import {
+    WEB_RUN_LABELS,
+    webRunActions,
+    webRunLabels,
+    webRunResultLines,
+    type WebRunPhase,
+} from "./rendering.ts";
 import { webRunGlowupRendering } from "./glowup-rendering.ts";
 
 export const WEB_RUN_TOOL_NAME = "web_run";
@@ -174,11 +182,6 @@ type WebRunDetails = {
     readonly sourceCount: number;
 };
 
-type WebRunSourceCard = {
-    readonly title: string;
-    readonly url?: string | undefined;
-};
-
 type WebRunOptions = {
     readonly getConfig: () => CodexCoreConfig;
     readonly runtime?: CodexRuntime | undefined;
@@ -208,37 +211,55 @@ export function createWebRunTool(options: WebRunOptions): ToolDefinition<
         glowupRendering: webRunGlowupRendering,
         parameters: WEB_RUN_PARAMETERS,
         prepareArguments: prepareWebRunArguments,
-        renderCall(args, theme, _context) {
-            const summary = summarizeWebRunCall(args);
-            const summaryColor = summary ? "accent" : "dim";
-            const text =
-                theme.fg("toolTitle", theme.bold("web_run ")) +
-                theme.fg(summaryColor, summary ? summary : "...");
-            return new Text(text, 0, 0);
+        renderCall(args, theme, context) {
+            const phase: WebRunPhase = !context.isPartial
+                ? "complete"
+                : context.executionStarted
+                  ? "running"
+                  : "pending";
+            const actions = webRunActions(parseGlowupWireArgs(args) ?? {});
+            const lines =
+                actions.length === 0
+                    ? [
+                          theme.fg(
+                              "toolTitle",
+                              theme.bold(
+                                  webRunLabels(WEB_RUN_LABELS, phase, context.isError).static,
+                              ),
+                          ),
+                      ]
+                    : actions.map(
+                          (action) =>
+                              theme.fg(
+                                  "toolTitle",
+                                  theme.bold(
+                                      webRunLabels(action.labels, phase, context.isError).static,
+                                  ),
+                              ) +
+                              " " +
+                              theme.fg(action.isUrl ? "mdLinkUrl" : "accent", action.target),
+                      );
+
+            return new Text(lines.join("\n"), 0, 0);
         },
-        renderResult(result, { expanded, isPartial }, theme, _context) {
-            if (isPartial) return new Text(theme.fg("warning", "Searching web..."), 0, 0);
+        renderResult(result, { expanded }, theme, context) {
+            const rawOutput = result.content
+                .flatMap((item) => {
+                    const block = TextContentBlockSchema.decode(item);
+                    return block === undefined ? [] : [block.text];
+                })
+                .join("\n");
+            if (context.isError)
+                return new Text(theme.fg("error", rawOutput || "Web request failed."), 0, 0);
 
-            const rawOutput = firstTextContent(result.content);
-            const output = rawOutput
-                ? formatWebRunToolOutput(rawOutput, result.details.fullOutputPath).text
-                : undefined;
-            if (expanded) return new Text(theme.fg("toolOutput", output ?? "No web output."), 0, 0);
+            if (!expanded) return new Text("", 0, 0);
 
-            const cards = parseWebRunSourceCards(output);
-            const sourceCount =
-                result.details.sourceCount > 0 ? result.details.sourceCount : cards.length;
-            const lines = [formatWebRunResultHeader(sourceCount, theme)];
-            for (const [index, card] of cards.slice(0, 2).entries()) {
-                lines.push(theme.fg("dim", `${index + 1}. ${card.title}`));
-
-                if (card.url) lines.push(theme.fg("muted", `   ${card.url}`));
-            }
-
-            const hiddenCount = Math.max(0, sourceCount - Math.min(cards.length, 2));
-            const hint = "Ctrl+U to expand";
-            if (hiddenCount > 0) lines.push(theme.fg("muted", `… ${hiddenCount} more (${hint})`));
-            else if (output) lines.push(theme.fg("muted", `(${hint})`));
+            const lines = webRunResultLines(rawOutput).map((line) => {
+                if (line.kind === "title") return theme.bold(theme.fg("toolOutput", line.text));
+                if (line.kind === "url") return theme.fg("mdLinkUrl", line.text);
+                if (line.kind === "omission") return theme.fg("muted", line.text);
+                return theme.fg("toolOutput", line.text);
+            });
 
             return new Text(lines.join("\n"), 0, 0);
         },
@@ -473,144 +494,6 @@ async function waitBeforeRetry(attempt: number, signal: AbortSignal | undefined)
     });
 }
 
-function summarizeWebRunCall(args: WebRunParams): string {
-    const parts: string[] = [];
-
-    appendCountedValues(
-        parts,
-        "search",
-        args.search_query?.map((query) => compactQuotedText(query.q)),
-    );
-
-    appendCountedValues(
-        parts,
-        "image",
-        args.image_query?.map((query) => compactQuotedText(query.q)),
-    );
-
-    appendCountedValues(
-        parts,
-        "open",
-        args.open?.map((request) =>
-            request.lineno === undefined ? request.ref_id : `${request.ref_id}:L${request.lineno}`,
-        ),
-    );
-
-    appendCountedValues(
-        parts,
-        "click",
-        args.click?.map((request) => `${request.ref_id}#${request.id}`),
-    );
-
-    appendCountedValues(
-        parts,
-        "find",
-        args.find?.map(
-            (request) => `${compactQuotedText(request.pattern, 48)} in ${request.ref_id}`,
-        ),
-    );
-
-    appendCountedValues(
-        parts,
-        "screenshot",
-        args.screenshot?.map((request) => `${request.ref_id} p${request.pageno}`),
-    );
-
-    appendCountedValues(
-        parts,
-        "finance",
-        args.finance?.map((request) => `${request.ticker}:${request.type}`),
-    );
-
-    appendCountedValues(
-        parts,
-        "weather",
-        args.weather?.map((request) => request.location),
-    );
-
-    appendCountedValues(
-        parts,
-        "sports",
-        args.sports?.map((request) => `${request.league} ${request.fn}`),
-    );
-
-    appendCountedValues(
-        parts,
-        "time",
-        args.time?.map((request) => request.utc_offset),
-    );
-
-    if (args.response_length) parts.push(`length=${args.response_length}`);
-    return parts.join(" • ");
-}
-
-function appendCountedValues(
-    parts: string[],
-    label: string,
-    values: readonly string[] | undefined,
-): void {
-    if (!values || values.length === 0) return;
-
-    const displayed = values.slice(0, 2).join(", ");
-    const hiddenCount = values.length - 2;
-    parts.push(hiddenCount > 0 ? `${label} ${displayed} +${hiddenCount}` : `${label} ${displayed}`);
-}
-
-function compactQuotedText(value: string, maxCharacters = 72): string {
-    const normalized = value.replace(/\s+/g, " ").trim();
-    const limit = Math.max(4, maxCharacters);
-    const text = normalized.length > limit ? `${normalized.slice(0, limit - 1)}…` : normalized;
-    return JSON.stringify(text);
-}
-
-function formatWebRunResultHeader(
-    sourceCount: number,
-    theme: { fg(color: "success", text: string): string },
-): string {
-    const noun = sourceCount === 1 ? "source" : "sources";
-    return theme.fg("success", `${sourceCount} ${noun}`);
-}
-
-function parseWebRunSourceCards(output: string | undefined): WebRunSourceCard[] {
-    if (!output) return [];
-
-    const cards: WebRunSourceCard[] = [];
-    const lines = output.split("\n");
-    for (let index = 0; index < lines.length; index += 1) {
-        const title = parseSourceTitle(lines[index]);
-        if (!title) continue;
-        cards.push({ title, url: findCardUrl(lines, index + 1) });
-    }
-
-    return cards;
-}
-
-function parseSourceTitle(line: string | undefined): string | undefined {
-    const match = /^(\d+)\.\s+(.+)$/.exec(line ?? "");
-    return match?.[2]?.trim();
-}
-
-function findCardUrl(lines: readonly string[], startIndex: number): string | undefined {
-    for (let index = startIndex; index < lines.length; index += 1) {
-        const line = lines[index] ?? "";
-        if (/^\d+\.\s+/.test(line)) return undefined;
-
-        const match = /^\s*URL:\s+(.+?)\s*$/.exec(line);
-        if (match?.[1]) return match[1];
-    }
-
-    return undefined;
-}
-
-function firstTextContent(content: readonly unknown[]): string | undefined {
-    for (const item of content) {
-        const block = TextContentBlockSchema.decode(item);
-        if (block && block.text.trim().length > 0) return block.text.trim();
-    }
-
-    return undefined;
-}
-
 function setWebRunCommand<Key extends WebRunCommandKey>(
     commands: WebRunCommands,
     key: Key,
@@ -661,8 +544,11 @@ async function prepareWebRunOutput(
         agentDir,
         options,
     );
-    const formatted = formatWebRunToolOutput(output, fullOutputPath);
-    return { fullOutputPath, sourceCount: formatted.sourceCount };
+    const sourceCount = parseWebRunSources(output).filter(
+        (source) => source.url !== undefined,
+    ).length;
+
+    return { fullOutputPath, sourceCount };
 }
 
 async function saveFullWebRunOutput(

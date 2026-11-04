@@ -5,7 +5,7 @@ import { deflateSync } from "node:zlib";
 import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import type { ExtensionToolContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionToolContext, Theme } from "@earendil-works/pi-coding-agent";
 import { getImageDimensions } from "@earendil-works/pi-tui";
 import { JsonArrayDecoder, JsonObjectDecoder } from "../src/compaction/responses-input.ts";
 import type { JsonObject, JsonValue } from "../src/compaction/types.ts";
@@ -20,7 +20,7 @@ import { imageDimensionsFromBytes } from "../src/images/metadata.ts";
 import { createImagegenTool } from "../src/tools/imagegen.ts";
 import { createApplyPatchTool } from "../src/tools/apply-patch/tool.ts";
 import { createViewImageTool } from "../src/tools/view-image/tool.ts";
-import { formatWebRunToolOutput } from "../src/tools/web-run/output.ts";
+import { parseWebRunSources } from "../src/tools/web-run/output.ts";
 import { createWebRunTool } from "../src/tools/web-run/tool.ts";
 import { imageDetailMarker, rewriteProviderImageDetails } from "../src/images/detail.ts";
 import {
@@ -90,7 +90,7 @@ test("renders compact invocation summaries for Codex tools", () => {
         renderComponent(
             webRunTool.renderCall(webRunArgs, TEST_THEME, makeRenderContext(webRunArgs)),
         ),
-        /web_run search "official TypeScript documentation handbook" • length=short/,
+        /Searched the web for "official TypeScript documentation handbook"/,
     );
 
     const imagegenTool = createImagegenTool({ getConfig: () => DEFAULT_CODEX_CORE_CONFIG });
@@ -497,53 +497,142 @@ test("restores durable image detail markers in provider requests", () => {
     ]);
 });
 
-test("renders compact web_run results until expanded", () => {
-    const webRunTool = createWebRunTool({ getConfig: () => DEFAULT_CODEX_CORE_CONFIG });
-    assert.ok(webRunTool.renderResult);
-    const rawOutputPath = "/tmp/pi-agent/pi-codex-core/web-run/session/call.txt";
+function renderUnpadded(component: { render(width: number): string[] }): string {
+    return component
+        .render(200)
+        .map((line) => line.trimEnd())
+        .join("\n");
+}
+
+test("native web_run hides successful results until expanded and shows readable blue sources", () => {
+    const tool = createWebRunTool({ getConfig: () => DEFAULT_CODEX_CORE_CONFIG });
+    assert.ok(tool.renderResult);
     const output = [
-        "Extensions · Docs · Pi (https://pi.dev/docs/latest/extensions)",
-        "L10: Tools can provide renderCall and renderResult for custom TUI display.",
-        "--------------------",
-        "Pi Coding Agent (https://pi.dev/)",
-        "L20: Build a custom workflow extension.",
-        "--------------------",
-        "GitHub Docs (https://github.com/earendil-works/pi)",
-        "L30: Browse the source repository.",
+        "Docs (https://example.org/docs)",
+        "citeturn0view0 Content type: text/html; Total lines: 42",
+        "L0: Menu",
+        "Unnumbered page content.",
+        ...Array.from({ length: 20 }, (_, i) => `L${i + 1}: Full page content ${i + 1}`),
+        "Last unnumbered content.",
     ].join("\n");
     const result = {
         content: [{ type: "text" as const, text: output }],
         details: {
-            fullOutputPath: rawOutputPath,
+            fullOutputPath: "/tmp/private-web-output.txt",
             outputCharacters: output.length,
-            sourceCount: 3,
+            sourceCount: 1,
         },
     };
-
-    const compact = renderComponent(
-        webRunTool.renderResult(
+    const compact = tool.renderResult(
+        result,
+        { expanded: false, isPartial: false },
+        TEST_THEME,
+        makeRenderContext({}),
+    );
+    assert.equal(renderUnpadded(compact).trim(), "");
+    const expanded = renderUnpadded(
+        tool.renderResult(
             result,
-            { expanded: false, isPartial: false },
+            { expanded: true, isPartial: false },
             TEST_THEME,
             makeRenderContext({}),
         ),
     );
-    assert.match(compact, /3 sources/);
-    assert.match(compact, /Extensions · Docs · Pi/);
-    assert.match(compact, /https:\/\/pi\.dev\/docs\/latest\/extensions/);
-    assert.match(compact, /… 1 more/);
-    assert.doesNotMatch(compact, /Key lines/);
-    assert.doesNotMatch(compact, /raw:|call\.txt/);
-
-    const expanded = renderComponent(
-        webRunTool.renderResult(
+    assert.match(expanded, /Docs\nhttps:\/\/example\.org\/docs\nUnnumbered page content\./u);
+    assert.match(expanded, /omitted/u);
+    assert.doesNotMatch(
+        expanded,
+        /Content type:|Total lines:|L\d+:|Last unnumbered content|cite/u,
+    );
+    const themed = testDouble<Theme>({
+        fg: (token: string, value: string) => `<${token}>${value}</${token}>`,
+        bold: (value: string) => `<bold>${value}</bold>`,
+    });
+    const styled = renderUnpadded(
+        tool.renderResult(
             result,
             { expanded: true, isPartial: false },
-            TEST_THEME,
-            makeRenderContext({}, undefined, { expanded: true }),
+            themed,
+            makeRenderContext({}),
         ),
     );
-    assert.match(expanded, /Key lines/);
+    assert.match(styled, /<bold><toolOutput>Docs<\/toolOutput><\/bold>/u);
+    assert.match(styled, /<mdLinkUrl>https:\/\/example\.org\/docs<\/mdLinkUrl>/u);
+    assert.ok(tool.renderCall);
+    assert.match(
+        renderUnpadded(
+            tool.renderCall(
+                { open: [{ ref_id: "https://example.org/docs" }] },
+                themed,
+                makeRenderContext({}),
+            ),
+        ),
+        /<mdLinkUrl>https:\/\/example\.org\/docs<\/mdLinkUrl>/u,
+    );
+});
+
+test("native web_run renders separate lifecycle actions and visible errors without details", () => {
+    const tool = createWebRunTool({ getConfig: () => DEFAULT_CODEX_CORE_CONFIG });
+    assert.ok(tool.renderCall);
+    assert.ok(tool.renderResult);
+    const args = {
+        search_query: [{ q: "first query" }, { q: "second query" }, { q: "third query" }],
+        open: [{ ref_id: "https://example.org/docs", lineno: 40 }],
+        find: [{ ref_id: "turn0view0", pattern: "render result" }],
+        response_length: "short" as const,
+    };
+    assert.equal(
+        renderUnpadded(tool.renderCall(args, TEST_THEME, makeRenderContext(args))),
+        [
+            'Searched the web for "first query"',
+            'Searched the web for "second query"',
+            'Searched the web for "third query"',
+            "Opened https://example.org/docs",
+            'Searched for "render result" in turn0view0',
+        ].join("\n"),
+    );
+    assert.equal(
+        renderUnpadded(
+            tool.renderCall({ open: [{ ref_id: "https://example.org" }] }, TEST_THEME, {
+                ...makeRenderContext(args),
+                executionStarted: true,
+                isPartial: true,
+            }),
+        ),
+        "Opening https://example.org",
+    );
+    assert.equal(
+        renderUnpadded(
+            tool.renderCall({}, TEST_THEME, {
+                ...makeRenderContext({}),
+                executionStarted: false,
+                argsComplete: false,
+                isPartial: true,
+            }),
+        ),
+        "Browse the web",
+    );
+    const error = testDouble<Parameters<typeof tool.renderResult>[0]>({
+        content: [{ type: "text", text: "Web request failed" }],
+    });
+    assert.equal(
+        renderUnpadded(
+            tool.renderResult(error, { expanded: false, isPartial: false }, TEST_THEME, {
+                ...makeRenderContext(args),
+                isError: true,
+            }),
+        ),
+        "Web request failed",
+    );
+    assert.equal(
+        renderUnpadded(
+            tool.renderResult(error, { expanded: true, isPartial: false }, TEST_THEME, {
+                ...makeRenderContext(args),
+                isError: true,
+            }),
+        ),
+        "Web request failed",
+    );
 });
 
 test("renders viewed image fallback when inline images are hidden", () => {
@@ -658,17 +747,133 @@ test("formats web_run output without Codex citation markers", () => {
         "L41: You can run Claude, Codex, and Copilot directly inside github.com, GitHub Mobile, and VS Code.",
     ].join("\n");
 
-    const rawOutputPath = "/tmp/pi-agent/pi-codex-core/web-run/session/call.txt";
-    const formatted = formatWebRunToolOutput(rawOutput, rawOutputPath);
-    assert.equal(formatted.sourceCount, 1);
-    assert.doesNotMatch(formatted.text, /cite/);
-    assert.match(
-        formatted.text,
-        /Full raw Codex search output: \/tmp\/pi-agent\/pi-codex-core\/web-run\/session\/call\.txt/,
-    );
-    assert.match(formatted.text, /URL: https:\/\/github\.blog\/example/);
-    assert.match(formatted.text, /L39: Claude by Anthropic/);
-    assert.doesNotMatch(formatted.text, /Skip to content/);
+    const sources = parseWebRunSources(rawOutput);
+    assert.deepEqual(sources, [
+        {
+            title: "Claude and Codex now available - GitHub Changelog",
+            url: "https://github.blog/example",
+            paragraphs: [
+                "Claude by Anthropic and OpenAI Codex are now available as coding agents for Copilot Business and Copilot Pro customers. You can run Claude, Codex, and Copilot directly inside github.com, GitHub Mobile, and VS Code.",
+            ],
+            omitted: false,
+        },
+    ]);
+});
+
+test("web_run parses ordinary Markdown snippets, page lines, and restored compact entries without losing sources", () => {
+    const raw = [
+        "Getting Started (https://example.org/start)",
+        "citeturn0search0 [wordlim: 200] Crawled: today; A quick introduction for new users.",
+        "",
+        "# Getting Started",
+        "",
+        "Install the package and follow the examples.--------------------------------------------------------------------------------",
+        "Handbook (https://example.org/handbook)",
+        "【turn0search1】 [wordlim: 200] Published: 6 months ago; Crawled: today; Learn the core features through practical examples.",
+        "",
+        "A second readable paragraph with useful context.",
+        "+--------------------------------------------------------------------------------+",
+        "API Reference (https://example.org/api)",
+        'citeturn1view0 [wordlim: 200] Content type: text/html; Source: open({"ref_id":"turn0search0"}); Total lines: 306',
+        "L0: Skip to content",
+        "L198: # API References",
+        "L199: ## `codeToHast`",
+        "",
+        "4. CLI Guide",
+        "   URL: https://example.org/cli",
+        "   Key lines:",
+        "   L10: Run the command with the desired options.",
+        "",
+        "5. Configuration",
+        "   URL: https://example.org/config",
+        "6. Examples (https://example.org/examples)",
+        "Short example description.",
+        "[Seventh source](https://example.org/seven)",
+        "The last source must not be lost to a six-source limit.",
+    ].join("\n");
+    const sources = parseWebRunSources(raw);
+    assert.deepEqual(sources, [
+        {
+            title: "Getting Started",
+            url: "https://example.org/start",
+            paragraphs: [
+                "A quick introduction for new users.",
+                "Install the package and follow the examples.",
+            ],
+            omitted: false,
+        },
+        {
+            title: "Handbook",
+            url: "https://example.org/handbook",
+            paragraphs: [
+                "Learn the core features through practical examples.",
+                "A second readable paragraph with useful context.",
+            ],
+            omitted: false,
+        },
+        {
+            title: "API Reference",
+            url: "https://example.org/api",
+            paragraphs: ["API References `codeToHast`"],
+            omitted: false,
+        },
+        {
+            title: "CLI Guide",
+            url: "https://example.org/cli",
+            paragraphs: ["Run the command with the desired options."],
+            omitted: false,
+        },
+        {
+            title: "Configuration",
+            url: "https://example.org/config",
+            paragraphs: [],
+            omitted: false,
+        },
+        {
+            title: "Examples",
+            url: "https://example.org/examples",
+            paragraphs: ["Short example description."],
+            omitted: false,
+        },
+        {
+            title: "Seventh source",
+            url: "https://example.org/seven",
+            paragraphs: ["The last source must not be lost to a six-source limit."],
+            omitted: false,
+        },
+    ]);
+    assert.equal(sources.length, 7);
+});
+
+test("web_run removes repeated source paragraphs and navigation without claiming truncation", () => {
+    const paragraph = "Custom tools can provide call and result rendering functions.";
+    const raw = [
+        "Guide (https://example.org/guide)",
+        "# Navigation",
+        "* Home",
+        "",
+        paragraph,
+        "",
+        "Find: rendering",
+        paragraph,
+        "",
+        "Other guide (https://example.org/other)",
+        paragraph,
+    ].join("\n");
+    assert.deepEqual(parseWebRunSources(raw), [
+        {
+            title: "Guide",
+            url: "https://example.org/guide",
+            paragraphs: [paragraph],
+            omitted: false,
+        },
+        {
+            title: "Other guide",
+            url: "https://example.org/other",
+            paragraphs: [paragraph],
+            omitted: false,
+        },
+    ]);
 });
 
 test("saves web_run raw output outside workspace", async () => {
