@@ -324,12 +324,19 @@ export function createCodeStreamStore(): CodeStreamStore {
                         /^[\t \r\n]*$/u.test(gap) &&
                         (gap.includes("\n") ||
                             (lastKind === "header" && containerIndent !== undefined) ||
+                            (lastKind !== "header" &&
+                                ["javascript", "typescript", "tsx"].includes(entry.language) &&
+                                display.endsWith(";")) ||
                             unit.kind === "close")
                     ) {
                         let newlines = gap.replace(/[^\n]/gu, "");
                         if (newlines.length === 0) newlines = "\n";
                         gap = newlines + indent;
-                    } else if (gap.includes("\n")) gap = gap.replace(/[\t ]*$/u, "") + indent;
+                    } else if (/\n[\t ]*$/u.test(gap)) {
+                        // Gaps can include lexical prefixes such as `export `.
+                        // Only replace indentation on an otherwise empty final row.
+                        gap = gap.replace(/[\t ]*$/u, "") + indent;
+                    }
                 }
 
                 display += gap + formatted.text;

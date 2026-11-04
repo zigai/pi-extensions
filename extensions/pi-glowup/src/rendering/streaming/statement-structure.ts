@@ -66,11 +66,13 @@ export function structuralUnits(
                 "variable_declaration",
                 "function_expression",
                 "expression_statement",
+                "assignment_expression",
                 "decorated_definition",
                 "else_clause",
                 "labeled_statement",
                 "arguments",
                 "call_expression",
+                "new_expression",
                 "parenthesized_expression",
                 "array",
                 "object",
@@ -116,6 +118,15 @@ export function structuralUnits(
                 node.type === "switch_body")
         ) {
             const enclosing = owner(node);
+
+            // Recovery blocks can be direct children of ERROR, whose start belongs
+            // to an earlier declaration rather than this block's header.
+            if (enclosing.isError) {
+                for (const child of node.namedChildren) collect(child);
+
+                return;
+            }
+
             const close = node.children
                 .slice()
                 .reverse()
@@ -323,37 +334,77 @@ export function structuralUnits(
         if (node.isError) {
             let segmentStart = node.startIndex;
             for (const child of node.children) {
-                if (["{", "then", "do"].includes(child.type) && !child.isMissing) {
+                if (
+                    ["{", "then", "do", "statement_block"].includes(child.type) &&
+                    !child.isMissing
+                ) {
                     let start = segmentStart;
                     const whitespace =
                         /^\s*/u.exec(source.slice(start, child.startIndex))?.[0].length ?? 0;
                     start += whitespace;
 
-                    const header = source.slice(start, child.endIndex);
+                    let end = child.endIndex;
+                    if (child.type === "statement_block") end = child.startIndex + 1;
+
+                    const header = source.slice(start, end);
+                    let before = "";
                     let after = "\n}";
                     if (child.type === "then") after = "\nfi";
                     if (child.type === "do") after = "\ndone";
 
                     if (
-                        !regions.some((region) => region.end === child.endIndex) &&
-                        (/^(?:(?:async\s+)?function\b|(?:const|let|var)\b|(?:if|for|while|until|else|elif)\b|[\w$]+\s*\(\s*\)\s*\{)/u.test(
+                        !regions.some((region) => region.end === end) &&
+                        (/^(?:(?:async\s+)?function\b|(?:const|let|var|class)\b|(?:if|for|while|until|else|elif|try|catch|finally)\b|(?:(?:async|get|set)\s+)?[\w$#]+\s*\()/u.test(
                             header,
                         ) ||
                             header.includes("=>") ||
                             /\bfunction\b/u.test(header))
                     ) {
-                        if (language !== "bash")
-                            after = "\n" + closeForHeader(start, child.endIndex);
+                        if (language !== "bash") {
+                            after = "\n" + closeForHeader(start, end);
+                            if (/^try\b/u.test(header)) after += " finally {}";
+                            if (/^(?:catch|finally)\b/u.test(header)) before = "try {}\n";
+                            if (/^else\b/u.test(header)) before = "if (true) {}\n";
 
-                        add(start, child.endIndex, source.length, child.endIndex, "", after);
+                            if (
+                                /^(?:(?:async|get|set)\s+)?[\w$#]+\s*\(/u.test(header) &&
+                                !/^(?:if|for|while|catch|switch|with)\b/u.test(header) &&
+                                node.children.some(
+                                    (part) =>
+                                        [
+                                            "property_identifier",
+                                            "private_property_identifier",
+                                        ].includes(part.type) &&
+                                        part.startIndex >= start &&
+                                        part.endIndex <= end,
+                                ) &&
+                                node.children.some(
+                                    (part) =>
+                                        part.type === "formal_parameters" &&
+                                        part.startIndex >= start &&
+                                        part.endIndex <= end,
+                                )
+                            ) {
+                                before = "class __glowup_context__ {\n";
+                                after += "\n}";
+                            }
+                        }
+
+                        let body: string | undefined;
+                        if (/^class\b/u.test(header)) body = "__glowup_placeholder__() {}";
+                        if (/^switch\b/u.test(header))
+                            body = "default:\n    __glowup_placeholder__();";
+
+                        let bodyEnd = source.length;
+                        if (child.type === "statement_block") bodyEnd = child.endIndex;
+                        add(start, end, bodyEnd, child.endIndex, before, after, false, body);
                     }
 
                     segmentStart = child.endIndex;
                 } else if (
                     leaves.some(
                         (leaf) => leaf.start === child.startIndex && leaf.end === child.endIndex,
-                    ) &&
-                    /^[\t ]*\r?\n/u.test(source.slice(child.endIndex))
+                    )
                 )
                     segmentStart = child.endIndex;
             }

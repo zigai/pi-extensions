@@ -122,6 +122,44 @@ function streamTextResponse(model: Model<string>): AssistantMessageEventStream {
     return stream;
 }
 
+function streamStructuralSourceResponse(
+    model: Model<string>,
+    options: SimpleStreamOptions | undefined,
+): AssistantMessageEventStream {
+    const stream = createAssistantMessageEventStream();
+    const output = createOutput(model);
+    const content = { type: "text", text: "" } as const;
+    output.content.push(content);
+    stream.push({ type: "start", partial: output });
+    stream.push({ type: "text_start", contentIndex: 0, partial: output });
+
+    const chunks = [
+        "```typescript\nconst marker=1;\n\nexport async function verify(){\n await new Promise<void>((resolve,reject)=>{\n",
+        " ready(resolve,reject);\n });\n while(true){try{work();}catch{}break;}\n",
+        "}\n```\nSTRUCTURAL_SOURCE_COMPLETE",
+    ];
+
+    void (async () => {
+        try {
+            let text = "";
+            for (const delta of chunks) {
+                await delay(FRAME_DELAY_MS, undefined, { signal: options?.signal });
+                text += delta;
+                output.content[0] = { type: "text", text };
+                stream.push({ type: "text_delta", contentIndex: 0, delta, partial: output });
+            }
+
+            stream.push({ type: "text_end", contentIndex: 0, content: text, partial: output });
+            stream.push({ type: "done", reason: "stop", message: output });
+            stream.end();
+        } catch (cause: unknown) {
+            finishWithError(stream, output, cause);
+        }
+    })();
+
+    return stream;
+}
+
 function streamPatchResponse(
     model: Model<string>,
     options: SimpleStreamOptions | undefined,
@@ -448,9 +486,12 @@ function streamOfflineProvider(
         return streamWrappingEditResponse(model);
     }
 
+    if (prompt.includes("deterministic structural source"))
+        return streamStructuralSourceResponse(model, options);
     if (prompt.includes("deterministic formatter failure"))
         return streamFormatterFailureResponse(model);
     if (prompt.includes("deterministic codemode format")) return streamCodemodeResponse(model);
+
     if (prompt.includes("deterministic generated policy"))
         return streamCompletedToolCall(model, {
             type: "toolCall",
@@ -458,6 +499,7 @@ function streamOfflineProvider(
             name: "generated_policy",
             arguments: {},
         });
+
     if (prompt.includes("deterministic bash chain")) return streamBashChainResponse(model);
     if (prompt.includes("deterministic bash layout")) return streamBashLayoutResponse(model);
 
@@ -492,6 +534,7 @@ export default function offlinePtyProvider(pi: ExtensionAPI): void {
     pi.on("session_start", (_event, ctx) => {
         ctx.ui.setStatus("fixture-ready", "POLICY_FIXTURE_READY");
     });
+
     pi.on("tool_call", (event, ctx) => {
         if (event.toolCallId === "pty-formatter-failure") ctx.ui.setEditorText("DIAGNOSTIC_DRAFT");
     });
@@ -516,6 +559,7 @@ export default function offlinePtyProvider(pi: ExtensionAPI): void {
     });
 
     const stageSchema = Type.Object({ details: Type.Object({ stage: Type.String() }) });
+
     pi.registerTool(
         withGlowupRendering(
             defineTool({
@@ -528,8 +572,10 @@ export default function offlinePtyProvider(pi: ExtensionAPI): void {
                         content: [{ type: "text", text: "raw partial source" }],
                         details: { stage: "partial" },
                     });
+
                     for (let attempt = 0; attempt < 200; attempt++) {
                         signal?.throwIfAborted();
+
                         const released = await access(
                             join(ctx.cwd, "release-generated-policy"),
                         ).then(
@@ -541,8 +587,10 @@ export default function offlinePtyProvider(pi: ExtensionAPI): void {
                                 content: [{ type: "text", text: "raw final source" }],
                                 details: { stage: "complete" },
                             };
+
                         await delay(FRAME_DELAY_MS, undefined, { signal });
                     }
+
                     throw new Error("Generated policy checkpoint was not released");
                 },
             }),

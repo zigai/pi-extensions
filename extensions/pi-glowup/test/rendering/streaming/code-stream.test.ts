@@ -544,6 +544,91 @@ describe("code stream store", () => {
         expect(calls).toBe(1);
     });
 
+    it.each([
+        ["const before=1;try { work(); } catch { recover(); }", "const before = 1;\ntry {"],
+        [
+            "const lines=render();bench(name, () => { work(); });",
+            "const lines = render();\nbench(name, () => {",
+        ],
+        [
+            "for(let i=0;i<2;i++){ work();next(); }",
+            "for (let i = 0; i < 2; i++) {\n  work();\n  next();\n}",
+        ],
+    ])(
+        "separates formatted JavaScript siblings without splitting loop headers: %s",
+        async (source, expected) => {
+            const subject = store();
+            const input = {
+                key: "inline-siblings",
+                source,
+                language: "javascript",
+                mode: "statement" as const,
+                complete: true,
+                formatter: async ({ code }: { code: string }) =>
+                    (await transform(code, { loader: "ts", legalComments: "inline" })).code,
+            };
+            subject.get(input);
+            await subject.settled();
+            expect(subject.get(input)).toContain(expected);
+            expect(subject.ready(input.key)).toBe(true);
+        },
+    );
+
+    it.each(["function read() { return 1; }", "class Reader { read() { return 1; } }"])(
+        "preserves lexical whitespace after export in multiline gaps: %s",
+        async (declaration) => {
+            const subject = store();
+            const input = {
+                key: "export-gap",
+                source: `const value=1;\n\nexport ${declaration}`,
+                language: "typescript",
+                mode: "statement" as const,
+                complete: true,
+                formatter: async ({ code }: { code: string }) =>
+                    (await transform(code, { loader: "ts", legalComments: "inline" })).code,
+            };
+            subject.get(input);
+            await subject.settled();
+            const display = subject.get(input);
+            expect(display).toContain(`\n\nexport ${declaration.split(" {")[0]} {`);
+            await expect(transform(display, { loader: "ts" })).resolves.toBeDefined();
+        },
+    );
+
+    it.each([
+        "while(true){try{work();}catch{}next();}",
+        "while(true){try{work();}catch(error){}next();}",
+        "while(true){try{work();}finally{}next();}",
+        "while(true){if(ready){work();}else{}next();}",
+        "try{work();}catch{}next();",
+        "try{work();}finally{}next();",
+        "if(ready){work();}else{}next();",
+    ])("formats empty JavaScript branches with private grammatical context: %s", async (source) => {
+        const subject = store();
+        const failures: string[] = [];
+        const input = {
+            key: "empty-branch",
+            source,
+            language: "javascript",
+            mode: "statement" as const,
+            complete: true,
+            formatter: async ({ code }: { code: string }) => {
+                try {
+                    return (await transform(code, { loader: "ts", legalComments: "inline" })).code;
+                } catch {
+                    failures.push(code);
+                    return undefined;
+                }
+            },
+        };
+        subject.get(input);
+        await subject.settled();
+        expect(failures).toEqual([]);
+        const canonical = async (code: string) =>
+            (await transform(code, { loader: "ts", minifyWhitespace: true })).code;
+        expect(await canonical(subject.get(input))).toBe(await canonical(source));
+    });
+
     it("keeps formatting completed statements while later chunks append", async () => {
         const subject = store();
         const gate = new EventEmitter();

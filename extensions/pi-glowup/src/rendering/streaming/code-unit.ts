@@ -119,6 +119,14 @@ export async function formatCodeUnit(
 
     const begin = `${comment} ${marker}begin`;
     const end = `${comment} ${marker}end`;
+    let branchPrelude = "";
+    if (["javascript", "typescript", "tsx"].includes(language)) {
+        // Empty branches are leaf units, not structural headers. Their owning
+        // loop/function context does not supply the required preceding branch.
+        if (["catch_clause", "finally_clause"].includes(unit.kind)) branchPrelude = "try {}\n";
+        else if (unit.kind === "else_clause") branchPrelude = "if (true) {}\n";
+    }
+
     let wrapped = false;
     if (unit.scaffold !== undefined) {
         let placeholder = unit.scaffold.body ?? "__glowup_placeholder__();";
@@ -139,8 +147,8 @@ export async function formatCodeUnit(
         code = `${unit.scaffold.before}${contextIndent}${begin}\n${header}\n${body}${unit.scaffold.after}\n`;
         if (unit.context !== undefined) code = unit.context.before + code + unit.context.after;
         wrapped = true;
-    } else if (unit.context !== undefined) {
-        code = `${unit.context.before}${begin}\n${code}\n${end}\n${unit.context.after}`;
+    } else if (unit.context !== undefined || branchPrelude.length > 0) {
+        code = `${unit.context?.before ?? ""}${branchPrelude}${begin}\n${code}\n${end}\n${unit.context?.after ?? ""}`;
         wrapped = true;
     } else if (
         language === "python" &&

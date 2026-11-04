@@ -511,6 +511,7 @@ describe("actual Pi CLI in a real PTY", () => {
             totalTokens: 0,
             cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
         };
+
         const restored = [
             {
                 type: "message",
@@ -692,10 +693,12 @@ describe("actual Pi CLI in a real PTY", () => {
                 );
                 expect(expanded.text).not.toContain("POLICY_PENDING");
                 expect(expanded.text).not.toContain("POLICY_PROSE_PENDING");
+
                 for (const frame of pi.frames()) {
                     expect(frame.text).not.toContain("POLICY_PENDING");
                     expect(frame.text).not.toContain("POLICY_PROSE_PENDING");
                 }
+
                 writeFileSync(join(fixture.cwd, "release-generated-policy"), "release");
                 const completed = await pi.waitForFrame(
                     (frame) =>
@@ -774,6 +777,48 @@ describe("actual Pi CLI in a real PTY", () => {
             expectTerminalInvariants(formatted, [resolve("test/pty/fixtures/offline-provider.ts")]);
         } catch (cause: unknown) {
             await pi.writeFailureArtifacts("codemode-formatter-preview", cause);
+            throw cause;
+        } finally {
+            await pi.stop();
+        }
+    }, 45_000);
+
+    it("preserves exported declarations and constructor callbacks in real streamed Markdown", async () => {
+        const fixture = createFixtureWorkspace();
+        fixtures.push(fixture);
+        writeFileSync(
+            getGlowupGlobalConfigPath(fixture.agentDir),
+            JSON.stringify({
+                streaming: { code: "statement" },
+                scriptPreview: {
+                    formatters: {
+                        typescript: { kind: "typescript", command: [oxfmtExecutable] },
+                    },
+                },
+            }),
+        );
+        const pi = new PiPtyProcess(
+            launchOptions(fixture, { initialPrompt: "show the deterministic structural source" }),
+        );
+        try {
+            const rendered = await pi.waitForFrame(
+                (frame) =>
+                    frame.text.includes("STRUCTURAL_SOURCE_COMPLETE") &&
+                    frame.text.includes("export async function verify()") &&
+                    frame.text.includes("await new Promise<void>((resolve, reject) => {"),
+                PTY_TIMEOUT_MS,
+            );
+            expect(rendered.text).toContain("ready(resolve, reject);");
+            expect(rendered.text).not.toContain("exportasync");
+            expect(rendered.text).not.toContain("display formatter");
+            expectTerminalInvariants(rendered, [resolve("test/pty/fixtures/offline-provider.ts")]);
+
+            for (const frame of pi.frames()) {
+                expect(frame.text).not.toContain("exportasync");
+                expect(frame.text).not.toContain("Promise<void>(resolve, reject) =>");
+            }
+        } catch (cause: unknown) {
+            await pi.writeFailureArtifacts("structural-source-fidelity", cause);
             throw cause;
         } finally {
             await pi.stop();

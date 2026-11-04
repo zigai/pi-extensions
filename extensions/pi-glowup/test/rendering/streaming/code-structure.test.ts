@@ -2,6 +2,8 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, expect, it } from "vitest";
+import { transform } from "esbuild";
+import { stringParser } from "../../../src/json-scalar.ts";
 import {
     createCodeStreamStore,
     type CodeStreamStore,
@@ -27,17 +29,21 @@ function setup(language: string) {
     const log = join(directory, "inputs.jsonl");
     const printer = `import(${JSON.stringify(import.meta.resolve("oxfmt"))}).then(async ({format})=>{const result=await format('unit.ts',code,{tabWidth:2,objectWrap:'collapse'});if(result.errors.length)process.exit(1);process.stdout.write(result.code);});`;
     const program = `const fs=require('node:fs');const code=fs.readFileSync(0,'utf8');fs.appendFileSync(${JSON.stringify(log)},JSON.stringify(code)+'\\n');${printer}`;
+    const warnings: string[] = [];
     const formatter = createCommandScriptFormatter(
         parseScriptFormatterCommandsValue({
             [language]: { kind: "command", command: [process.execPath, "-e", program] },
         }),
+        (message) => {
+            warnings.push(message);
+        },
     );
     if (formatter === undefined) throw new Error("Invalid formatter");
 
     const store = createCodeStreamStore();
     stores.push(store);
 
-    return { store, formatter, journal: () => readFileSync(log, "utf8") };
+    return { store, formatter, warnings, journal: () => readFileSync(log, "utf8") };
 }
 
 it("formats JS/TS function, arrow, if and else headers once, before progressive reveal", async () => {
@@ -100,6 +106,100 @@ it("formats a streaming try header before its real handler without leaking the p
     expect(journal().startsWith(before)).toBe(true);
     expect(journal().slice(before.length)).not.toContain("const x=1");
 });
+
+it("recovers nested class and try headers when an unfinished catch discards ancestor blocks", async () => {
+    const { store, formatter, warnings, journal } = setup("typescript");
+    const input = {
+        key: "recovered-catch",
+        source: "class Player {\n async run(signal:AbortSignal) {\n while(!signal.aborted) {\n try {\n await this.stream(signal);\n } catch(error) {\n if(signal.aborted) {\n",
+        language: "typescript",
+        mode: "statement" as const,
+        complete: false,
+        formatter,
+    };
+    store.get(input);
+    await store.settled();
+    expect(warnings).toEqual([]);
+    expect(store.get(input)).toBe(
+        "class Player {\n  async run(signal: AbortSignal) {\n    while (!signal.aborted) {\n      try {\n        await this.stream(signal);\n      }",
+    );
+
+    // Recovery must not turn a whole ERROR-node prefix into one synthetic header.
+    const units: string[] = journal()
+        .trim()
+        .split("\n")
+        .map((line: string) => {
+            const value = stringParser.parse(JSON.parse(line));
+            if (value === undefined) throw new Error("Invalid formatter journal entry");
+            return value;
+        });
+    expect(units.some((unit) => unit.includes("try {\n//!"))).toBe(true);
+    expect(units.every((unit) => !unit.includes("class Player {\n async run"))).toBe(true);
+});
+
+it.each([
+    {
+        name: "assigned anonymous function",
+        source: "for(const value of [1]){try{target.handler=function(x){return x+1;};\n",
+        expected:
+            "for (const value of [1]) {\n  try {\n    target.handler = function (x) {\n      return x + 1;\n    }",
+    },
+    {
+        name: "inline statements before try",
+        source: "for(const value of [1]){const before=1;try{const result=2; consume({result:res",
+        expected: "for (const value of [1]) {\n  const before = 1;\n  try {\n    const result = 2;",
+    },
+    {
+        name: "callback call rather than class method",
+        source: "for(const value of [1]){const lines=render();bench(name,()=>{invalidate();return render(",
+        expected:
+            "for (const value of [1]) {\n  const lines = render();\n  bench(name, () => {\n    invalidate();",
+    },
+])("formats recovered $name without invalid private scaffolding", async ({ source, expected }) => {
+    const { store, formatter, warnings } = setup("typescript");
+    const input = {
+        key: "recovered-expression",
+        source,
+        language: "typescript",
+        mode: "statement" as const,
+        complete: false,
+        formatter,
+    };
+    store.get(input);
+    await store.settled();
+    expect(warnings).toEqual([]);
+    expect(store.get(input)).toBe(expected);
+});
+
+it.each(["Promise", "Promise<void>"])(
+    "preserves constructor callback parentheses for %s during incremental reveal",
+    async (constructor) => {
+        const { store, formatter, warnings } = setup("typescript");
+        const source = `async function run(){\n await new ${constructor}((resolve,reject)=>{\n ready(resolve,reject);\n });\n}\n`;
+        const input = {
+            key: "constructor-callback",
+            source,
+            language: "typescript",
+            mode: "statement" as const,
+            complete: false,
+            formatter,
+        };
+        for (let end = 16; end < source.length; end += 16) {
+            store.get({ ...input, source: source.slice(0, end) });
+            await store.settled();
+        }
+
+        store.get({ ...input, complete: true });
+        await store.settled();
+        const display = store.get({ ...input, complete: true });
+        expect(warnings).toEqual([]);
+        expect(display).toContain(`await new ${constructor}((resolve, reject) => {`);
+        const options = { loader: "ts" as const, minifyWhitespace: true };
+        expect((await transform(display, options)).code).toBe(
+            (await transform(source, options)).code,
+        );
+    },
+);
 
 it("formats class/method and unbraced conditional headers independently", async () => {
     const { store, formatter } = setup("typescript");
