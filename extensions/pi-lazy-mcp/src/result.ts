@@ -13,9 +13,13 @@ import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 
-import { jsonValueSchema, type JsonObject } from "./json.ts";
-
-type JsonValue = JsonObject[string];
+import {
+    isJsonObject,
+    isJsonString,
+    parsedJsonValueSchema,
+    type JsonObject,
+    type JsonValue,
+} from "./json.ts";
 
 const schemaDataKeywords = new Set(["const", "enum", "default", "examples"]);
 
@@ -27,14 +31,6 @@ const schemaMapKeywords = new Set([
     "$defs",
     "definitions",
 ]);
-
-function isJsonObject(value: JsonValue): value is JsonObject {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isJsonString(value: JsonValue): value is string {
-    return typeof value === "string";
-}
 
 function relocateSchema(value: JsonObject, relocatePointers?: boolean): JsonObject;
 function relocateSchema(value: JsonValue, relocatePointers?: boolean): JsonValue;
@@ -98,8 +94,18 @@ export function mcpResultSchema(structuredContentSchema?: JsonObject) {
     );
 }
 
-export async function toolResult(result: CallToolResult): Promise<AgentToolResult<CallToolResult>> {
+export async function toolResult(
+    result: CallToolResult,
+    source: { server: string; tool: string },
+): Promise<AgentToolResult<CallToolResult>> {
     let content = toLlmContent(result);
+    const hasText = content.some((block) => block.type === "text" && block.text !== "");
+    if (result.isError === true && !hasText)
+        content.push({
+            type: "text",
+            text: `MCP tool ${source.server}/${source.tool} returned an error`,
+        });
+
     const text = content
         .filter((block) => block.type === "text")
         .map((block) => block.text)
@@ -135,6 +141,6 @@ export async function toolResult(result: CallToolResult): Promise<AgentToolResul
         content,
         details: result,
         isError: result.isError === true,
-        structuredContent: Value.Parse(jsonValueSchema, scriptResult),
+        structuredContent: Value.Parse(parsedJsonValueSchema, scriptResult),
     };
 }

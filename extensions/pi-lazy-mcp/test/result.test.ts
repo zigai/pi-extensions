@@ -10,6 +10,7 @@ import { Value } from "typebox/value";
 import { mcpResultSchema, toolResult } from "../src/result.ts";
 
 const directories: string[] = [];
+const source = { server: "sample", tool: "run" };
 afterEach(async () => {
     vi.unstubAllEnvs();
 
@@ -69,7 +70,7 @@ describe("MCP result projection", () => {
         const image: CallToolResult = {
             content: [{ type: "image", data: "c2FtcGxl", mimeType: "image/png" }],
         };
-        const result = await toolResult(image);
+        const result = await toolResult(image, source);
         expect(result.structuredContent).toEqual(image);
         expect(Value.Check(mcpResultSchema(), result.structuredContent)).toBe(true);
         expect(
@@ -96,7 +97,7 @@ describe("MCP result projection", () => {
             structuredContent: { complete: true },
             _meta: { private: "server metadata" },
         };
-        const result = await toolResult(original);
+        const result = await toolResult(original, source);
         const preview = result.content
             .filter((block) => block.type === "text")
             .map((block) => block.text)
@@ -127,14 +128,17 @@ describe("MCP result projection", () => {
     });
 
     it("keeps short error results and their content order", async () => {
-        const result = await toolResult({
-            isError: true,
-            content: [
-                { type: "text", text: "first" },
-                { type: "image", data: "c2FtcGxl", mimeType: "image/png" },
-                { type: "text", text: "second" },
-            ],
-        });
+        const result = await toolResult(
+            {
+                isError: true,
+                content: [
+                    { type: "text", text: "first" },
+                    { type: "image", data: "c2FtcGxl", mimeType: "image/png" },
+                    { type: "text", text: "second" },
+                ],
+            },
+            source,
+        );
         expect(result.isError).toBe(true);
         expect(result.structuredContent).toEqual({
             isError: true,
@@ -149,5 +153,13 @@ describe("MCP result projection", () => {
         expect(
             result.content.filter((block) => block.type === "text").map((block) => block.text),
         ).toEqual(["first", "second"]);
+    });
+
+    it("says which tool failed when an error result has no text", async () => {
+        const result = await toolResult({ isError: true, content: [] }, source);
+        expect(result.isError).toBe(true);
+        expect(result.content).toEqual([
+            { type: "text", text: "MCP tool sample/run returned an error" },
+        ]);
     });
 });

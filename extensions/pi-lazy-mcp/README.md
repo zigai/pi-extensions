@@ -1,9 +1,10 @@
 # Pi Lazy MCP
 
-Start MCP servers only when Pi calls their tools. Saved tool catalogs let the model find tools while the servers stay stopped.
+Start MCP servers only when Pi calls their tools. Automatically saved tool catalogs let the model find tools while the servers stay stopped.
 
 - **Start on use:** Connect to a server when its tools are called.
-- **Find tools:** Make saved tool descriptions available to Pi's tool search.
+- **Same configuration:** Read the `mcp.json` files Pi's built-in MCP support reads.
+- **Same tools:** Expose tools under the same names and through the same `codemode`, `tool_search`, and direct routes.
 - **Stop idle servers:** Optionally disconnect servers that are safe to restart.
 
 ## Installation
@@ -12,17 +13,17 @@ Start MCP servers only when Pi calls their tools. Saved tool catalogs let the mo
 pi install npm:@zigai/pi-lazy-mcp
 ```
 
-This replaces Pi's built-in MCP connections. Move server settings from `mcp.json` into this extension's settings; other MCP replacements and extension-registered servers cannot run alongside it.
+This replaces Pi's built-in MCP support. Extension-registered MCP servers are ignored with a warning.
 
-## Quick start
+## Setup
 
-1. Add a server and its tool catalog to `~/.pi/agent/extension-settings/pi-lazy-mcp.json`. Expand the settings reference below for an example.
-2. Start a new Pi session. Ask Pi to use one of the configured tools; its server connects on the first call.
-3. Run `/mcp` to see connection status. Use `/mcp discover NAME` to connect and fetch a fresh catalog, then copy it into settings for future sessions.
+1. Keep your servers in `~/.pi/agent/mcp.json` and the trusted project's `.pi/mcp.json`. The format, overrides, `${VAR}`/`!command` expansion, and exposure settings match Pi's built-in MCP support, described in Pi's `docs/mcp.md`.
+2. Start Pi. A server without a saved tool catalog is discovered once in the background, then stopped. Catalogs are saved in `~/.pi/agent/lazy-mcp-catalogs.json`, one per server name, command, args, and URL.
+3. Use the tools. A server starts on its first tool call and stays running until the session ends, or until its idle time passes if you set one below.
 
-For `deferred` or `codemode` exposure, enable Pi's `tool_search` or `codemode` tool, respectively. Changed server tool definitions reject the old call and refresh the session catalog.
+Run `/mcp` to see server status and errors, and `/mcp discover NAME` to refresh and save one catalog. When a call finds a changed tool definition, the call is rejected, the new catalog is saved, and the model can retry.
 
-Credential settings name environment variables containing the secrets. Stdio servers receive only the configured environment. HTTP uses the authentication headers you configure.
+Servers using `auth` or `oauth`, and servers answering 401, are not supported. They report an error without affecting other servers. Resource tools such as `list_mcp_resources` are not provided.
 
 <details>
 <summary>Full settings reference and example</summary>
@@ -34,14 +35,14 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-lazy-mcp.json`.
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
-| `servers` | [LazyServer](#settings-type-LazyServer)[] | `[]` | Owned servers and supplied catalogs. This extension replaces native session MCP; use /mcp discover NAME to explicitly refresh one catalog. |
+| `idle` | Record<string, integer> | `{}` | Milliseconds of idleness after which to stop a server, by server name. Set only for restart-safe servers; active calls and residency capabilities prevent eviction. Unlisted servers stay connected once started. |
 
 ### Defaults
 
 ```json
 {
   "$schema": "./schemas/pi-lazy-mcp.schema.json",
-  "servers": []
+  "idle": {}
 }
 ```
 
@@ -50,130 +51,11 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-lazy-mcp.json`.
 ```json
 {
   "$schema": "./schemas/pi-lazy-mcp.schema.json",
-  "servers": [
-    {
-      "name": "sample",
-      "description": "Sample lookups",
-      "exposure": "deferred",
-      "transport": {
-        "type": "stdio",
-        "command": "sample-mcp",
-        "args": [],
-        "cwd": ".",
-        "env": {}
-      },
-      "catalog": {
-        "tools": [
-          {
-            "name": "lookup",
-            "description": "Look up a sample entry",
-            "inputSchema": {
-              "type": "object",
-              "properties": {
-                "key": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "key"
-              ]
-            }
-          }
-        ]
-      }
-    }
-  ]
+  "idle": {
+    "sample": 600000
+  }
 }
 ```
-
-### Structural types
-
-<a id="settings-type-LazyServer"></a>
-
-#### LazyServer
-
-Additional fields are not allowed.
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `name` | string | Yes |  |
-| `description` | string | Yes |  |
-| `transport` | [StdioServer](#settings-type-StdioServer) \| [HttpServer](#settings-type-HttpServer) | Yes |  |
-| `catalog` | [ToolCatalog](#settings-type-ToolCatalog) | Yes |  |
-| `exposure` | `direct` \| `codemode` \| `deferred` \| `hidden` | Yes | Pi tool exposure; discovery uses supplied metadata without connecting. |
-| `idle` | [IdlePolicy](#settings-type-IdlePolicy) | No |  |
-
-<a id="settings-type-StdioServer"></a>
-
-#### StdioServer
-
-Additional fields are not allowed.
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `type` | `stdio` | Yes |  |
-| `command` | string | Yes |  |
-| `args` | string[] | Yes |  |
-| `cwd` | string | Yes | Working directory, relative to the session root or absolute. |
-| `env` | Record<string, string> | Yes | Environment variable bindings: destination name to source variable name. Values are never persisted credentials. |
-
-<a id="settings-type-HttpServer"></a>
-
-#### HttpServer
-
-Additional fields are not allowed.
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `type` | `http` | Yes |  |
-| `url` | string | Yes | Streamable HTTP endpoint without embedded credentials. |
-| `headers` | Record<string, string> | Yes | Environment variable bindings: destination name to source variable name. Values are never persisted credentials. |
-
-<a id="settings-type-ToolCatalog"></a>
-
-#### ToolCatalog
-
-Additional fields are not allowed.
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `instructions` | string | No |  |
-| `tools` | [CatalogTool](#settings-type-CatalogTool)[] | Yes |  |
-
-<a id="settings-type-IdlePolicy"></a>
-
-#### IdlePolicy
-
-Additional fields are not allowed.
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `afterMs` | integer | Yes | Disconnect after this idle duration. Set only for restart-safe servers; active calls and residency capabilities prevent eviction. |
-
-<a id="settings-type-CatalogTool"></a>
-
-#### CatalogTool
-
-Additional fields are not allowed.
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `name` | string | Yes |  |
-| `title` | string | No |  |
-| `description` | string | No |  |
-| `inputSchema` | [JsonObject](#settings-type-JsonObject) | Yes |  |
-| `outputSchema` | [JsonObject](#settings-type-JsonObject) | No |  |
-| `annotations` | { title?: string; readOnlyHint?: boolean; destructiveHint?: boolean; idempotentHint?: boolean; openWorldHint?: boolean } | No |  |
-| `execution` | { taskSupport?: `forbidden` \| `optional` \| `required` } | No |  |
-| `_meta` | [JsonObject](#settings-type-JsonObject) | No |  |
-
-<a id="settings-type-JsonObject"></a>
-
-#### JsonObject
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `^.*$` | Json | No |  |
 <!-- pi-extension-settings:end -->
 
 </details>

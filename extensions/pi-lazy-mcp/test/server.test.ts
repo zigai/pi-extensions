@@ -16,8 +16,9 @@ import {
 import type { JsonObject } from "../src/json.ts";
 import type { AddressInfo } from "node:net";
 
+import type { Catalog } from "../src/catalog.ts";
+import type { McpServerConfig, McpServerEntry } from "../src/config.ts";
 import { LazyServer } from "../src/server.ts";
-import type { Catalog, Server } from "../src/settings-input.ts";
 
 const catalog: Catalog = {
     tools: [
@@ -42,6 +43,19 @@ const logSchema = Type.Array(
     }),
 );
 const cleanup: (() => Promise<void>)[] = [];
+const noCatalogChange = (): void => undefined;
+const noReport = (): void => undefined;
+
+function entryOf(config: McpServerConfig): McpServerEntry {
+    return { name: "sample", config, source: "mcp.json", scope: "global" };
+}
+
+function currentCatalog(server: LazyServer): Catalog {
+    const current = server.catalog;
+    if (current === undefined) throw new Error("Missing catalog");
+
+    return current;
+}
 
 afterEach(async () => {
     for (const dispose of cleanup.reverse()) await dispose();
@@ -50,13 +64,22 @@ afterEach(async () => {
     vi.unstubAllEnvs();
 });
 
+type FixtureState = {
+    capabilities?: ServerCapabilities & { tasks?: JsonObject };
+    gate?: boolean;
+    closeGate?: boolean;
+    stdoutBanner?: string;
+    startupStderr?: string;
+    exitOnStart?: number;
+    firstListDelayMs?: number;
+};
+
 async function fixture(
-    options: {
-        idle?: { afterMs: number };
-        capabilities?: ServerCapabilities & { tasks?: JsonObject };
-        gate?: boolean;
-        closeGate?: boolean;
-        transportEnv?: Record<string, string>;
+    options: FixtureState & {
+        idleAfterMs?: number;
+        timeout?: number;
+        env?: Record<string, string>;
+        savedCatalog?: Catalog | null;
         changed?: (catalog: Catalog) => void;
         report?: (message: string) => void;
     } = {},
@@ -76,33 +99,33 @@ async function fixture(
             capabilities: options.capabilities,
             gate: options.gate,
             closeGate: options.closeGate,
+            stdoutBanner: options.stdoutBanner,
+            startupStderr: options.startupStderr,
+            exitOnStart: options.exitOnStart,
+            firstListDelayMs: options.firstListDelayMs,
         }),
     );
-    const config: Server = {
-        name: "sample",
-        description: "Sample operations",
+    const config: McpServerConfig = {
+        command: process.execPath,
+        args: [fileURLToPath(new URL("./server-fixture.ts", import.meta.url)), statePath, logPath],
         exposure: "direct",
-        catalog,
-        transport: {
-            type: "stdio",
-            command: process.execPath,
-            args: [
-                fileURLToPath(new URL("./server-fixture.ts", import.meta.url)),
-                statePath,
-                logPath,
-            ],
-            cwd: ".",
-            env: options.transportEnv ?? {},
-        },
     };
-    if (options.idle !== undefined) config.idle = options.idle;
+    if (options.env !== undefined) config.env = options.env;
+    if (options.timeout !== undefined) config.timeout = options.timeout;
 
-    const server = new LazyServer(
-        config,
-        directory,
-        options.changed ?? (() => undefined),
-        options.report ?? (() => undefined),
-    );
+    let saved: Catalog | undefined = catalog;
+
+    if (options.savedCatalog === null) saved = undefined;
+    else if (options.savedCatalog !== undefined) saved = options.savedCatalog;
+
+    const server = new LazyServer({
+        entry: entryOf(config),
+        root: directory,
+        catalog: saved,
+        idleAfterMs: options.idleAfterMs,
+        changed: options.changed ?? noCatalogChange,
+        report: options.report ?? noReport,
+    });
     cleanup.push(async () => {
         await server.dispose();
         await rm(directory, { recursive: true });
@@ -121,28 +144,184 @@ async function fixture(
 }
 
 describe("demand-owned MCP lifecycle", () => {
-    it("reports malformed stdio responses safely and disconnects the failed connection", async () => {
+    it("keeps the connection through malformed stdout and fails the call with its cause", async () => {
         const notices: string[] = [];
-        const { server } = await fixture({
+        const { server, logs } = await fixture({
             report: (message) => {
                 notices.push(message);
             },
         });
-        await expect(
-            server.call(catalog, "run", { mode: "invalid" }, { timeoutMs: 1000 }),
-        ).rejects.toThrow("call failed");
-        expect(notices).toEqual([
-            "MCP server sample transport or protocol failed; connection closed",
+        const failure = server.call(catalog, "run", { mode: "invalid" }, { timeoutMs: 200 });
+        await expect(failure).rejects.toThrow("timed out");
+        await expect(failure).rejects.not.toThrow("sample-private-payload");
+        expect(notices).toEqual([]);
+
+        expect(server.state).toBe("connected");
+        await server.call(catalog, "run", {});
+        expect((await logs()).filter((entry) => entry.event === "start")).toHaveLength(1);
+    });
+
+    it("works with a server that prints a banner on stdout before speaking the protocol", async () => {
+        const { server } = await fixture({ stdoutBanner: "sample server ready" });
+        await expect(server.call(catalog, "run", {})).resolves.toMatchObject({
+            content: [{ type: "text", text: "completed" }],
+        });
+    });
+
+    it("reconnects after a crash, reporting the crash and its stderr on the failed call", async () => {
+        const { server, logs } = await fixture();
+        const failure = server.call(catalog, "run", { mode: "crash" });
+        await expect(failure).rejects.toThrow("execution may not have completed");
+        await expect(failure).rejects.toThrow("sample crash detail");
+
+        await vi.waitFor(() => expect(server.state).toBe("dormant"));
+        expect(server.error).toContain("sample crash detail");
+
+        await server.call(catalog, "run", {});
+        expect(server.error).toBeUndefined();
+        expect((await logs()).filter((entry) => entry.event === "start")).toHaveLength(2);
+    });
+
+    it("names the missing command when the server cannot start", async () => {
+        const server = new LazyServer({
+            entry: entryOf({ command: "pi-lazy-mcp-sample-missing-command" }),
+            root: process.cwd(),
+            catalog: undefined,
+            idleAfterMs: undefined,
+            changed: noCatalogChange,
+            report: noReport,
+        });
+        cleanup.push(async () => server.dispose());
+
+        const failure = server.discover();
+        await expect(failure).rejects.toThrow('MCP server "sample" failed to connect');
+        await expect(failure).rejects.toThrow("pi-lazy-mcp-sample-missing-command ENOENT");
+        expect(server.error).toContain("ENOENT");
+    });
+
+    it("includes the stderr tail when the server exits during startup", async () => {
+        const { server } = await fixture({
+            savedCatalog: null,
+            startupStderr: "sample startup detail",
+            exitOnStart: 7,
+        });
+        await expect(server.discover()).rejects.toThrow("sample startup detail");
+    });
+
+    it("hides configured values that a failing server echoes on stderr", async () => {
+        vi.stubEnv("SAMPLE_SECRET", "sample-secret-value");
+        const { server } = await fixture({
+            savedCatalog: null,
+            startupStderr: "bad token sample-secret-value",
+            exitOnStart: 7,
+            env: { TOKEN: "Bearer ${SAMPLE_SECRET}" },
+        });
+        const failure = server.discover();
+        await expect(failure).rejects.toThrow("bad token [redacted]");
+        await expect(failure).rejects.not.toThrow("sample-secret-value");
+    });
+
+    it("gives a stdio server the inherited environment plus its resolved env", async () => {
+        vi.stubEnv("SAMPLE_INHERITED", "inherited-value");
+        vi.stubEnv("SAMPLE_SOURCE", "source-value");
+        const { server } = await fixture({
+            env: { SAMPLE_CONFIGURED: "prefix-${SAMPLE_SOURCE}" },
+        });
+        const read = async (variable: string) =>
+            server.call(catalog, "run", { mode: "environment", variable });
+
+        expect((await read("SAMPLE_INHERITED")).content).toEqual([
+            { type: "text", text: "inherited-value" },
         ]);
 
-        expect(server.state).not.toBe("connected");
+        expect((await read("SAMPLE_CONFIGURED")).content).toEqual([
+            { type: "text", text: "prefix-source-value" },
+        ]);
+    });
+
+    it("fails only this server, naming the variable, when its env cannot be resolved", async () => {
+        vi.stubEnv("SAMPLE_UNSET", undefined);
+        const { server, logs } = await fixture({
+            savedCatalog: null,
+            env: { TOKEN: "${SAMPLE_UNSET}" },
+        });
+        await expect(server.discover()).rejects.toThrow(
+            'Failed to resolve MCP server "sample" env "TOKEN" from environment variable: SAMPLE_UNSET',
+        );
+        expect(await logs()).toEqual([]);
+    });
+
+    it("resolves env again on reconnect instead of pinning the first value", async () => {
+        vi.stubEnv("SAMPLE_ACCOUNT", "account-a");
+        const { server } = await fixture({
+            idleAfterMs: 1,
+            env: { SAMPLE_CONFIGURED: "${SAMPLE_ACCOUNT}" },
+        });
+        const read = async () =>
+            server.call(catalog, "run", { mode: "environment", variable: "SAMPLE_CONFIGURED" });
+        expect((await read()).content).toEqual([{ type: "text", text: "account-a" }]);
+        await vi.waitFor(() => expect(server.state).toBe("dormant"));
+        vi.stubEnv("SAMPLE_ACCOUNT", "account-b");
+        expect((await read()).content).toEqual([{ type: "text", text: "account-b" }]);
+    });
+
+    it("applies the configured timeout to tool calls", async () => {
+        const { server } = await fixture({ timeout: 0.1 });
+        await expect(server.call(catalog, "run", { mode: "hold" })).rejects.toThrow(
+            "timed out after 100ms",
+        );
+    });
+
+    it("stops a server it started for discovery, and leaves one a call started running", async () => {
+        const { server, logs } = await fixture({ savedCatalog: null });
+        expect(server.catalog).toBeUndefined();
+
+        await expect(server.discover()).resolves.toEqual(catalog);
+        expect(server.state).toBe("dormant");
+        const pid = (await logs())[0]?.pid;
+        if (pid === undefined) throw new Error("Missing child PID");
+
+        expect(() => process.kill(pid, 0)).toThrow();
+
         await server.call(catalog, "run", {});
+        await server.discover();
         expect(server.state).toBe("connected");
-        expect(notices.join("\n")).not.toContain("sample-private-payload");
+    });
+
+    it("keeps a connection a call used, even when the call finishes before discovery", async () => {
+        const { server, logs } = await fixture({ firstListDelayMs: 200 });
+        const discovery = server.discover();
+        await server.call(catalog, "run", {});
+        await discovery;
+        expect(server.state).toBe("connected");
+        expect((await logs()).filter((entry) => entry.event === "start")).toHaveLength(1);
+    });
+
+    it("publishes a changed catalog when the server announces one", async () => {
+        const published: Catalog[] = [];
+        const { server } = await fixture({
+            changed: (next) => {
+                published.push(next);
+            },
+        });
+        await server.call(catalog, "run", { mode: "announce" });
+
+        await vi.waitFor(() =>
+            expect(published.at(-1)?.tools.map((tool) => tool.name)).toEqual(["run", "added"]),
+        );
+    });
+
+    it("does not ask a server without the tools capability for its tools", async () => {
+        const { server, logs } = await fixture({
+            savedCatalog: null,
+            capabilities: { resources: {} },
+        });
+        await expect(server.discover()).resolves.toEqual({ tools: [] });
+        expect((await logs()).filter((entry) => entry.event === "list")).toEqual([]);
     });
 
     it.each(["tools/list", "tools/call"])(
-        "reconnects only the next operation after HTTP session expiry in %s",
+        "retries once on a new session after HTTP session expiry in %s",
         async (expirationMethod) => {
             const requestSchema = Type.Object({
                 id: Type.Optional(Type.Integer()),
@@ -223,22 +402,17 @@ describe("demand-owned MCP lifecycle", () => {
                 }),
                 http.address(),
             );
-            const server = new LazyServer(
-                {
-                    name: "sample",
-                    description: "Sample operations",
+            const server = new LazyServer({
+                entry: entryOf({
+                    url: `http://127.0.0.1:${address.port}/mcp`,
                     exposure: "direct",
-                    catalog,
-                    transport: {
-                        type: "http",
-                        url: `http://127.0.0.1:${address.port}/mcp`,
-                        headers: {},
-                    },
-                },
-                process.cwd(),
-                () => undefined,
-                () => undefined,
-            );
+                }),
+                root: process.cwd(),
+                catalog,
+                idleAfterMs: undefined,
+                changed: noCatalogChange,
+                report: noReport,
+            });
             cleanup.push(async () => {
                 await server.dispose();
                 http.closeAllConnections();
@@ -251,10 +425,7 @@ describe("demand-owned MCP lifecycle", () => {
                 await Promise.all(pending);
                 expect(requestErrors).toEqual([]);
             });
-            await server.discover();
             expired = true;
-            await expect(server.call(catalog, "run", {})).rejects.toThrow("call failed");
-            expect(calls).toBe(0);
             await expect(server.call(catalog, "run", {})).resolves.toEqual({
                 content: [{ type: "text", text: "completed" }],
             });
@@ -323,7 +494,7 @@ describe("demand-owned MCP lifecycle", () => {
         await writeFile(statePath, JSON.stringify({ tools: [{ ...catalog.tools[0], ...change }] }));
         await expect(server.call(catalog, "run", {})).rejects.toThrow("MCP catalog is stale");
         expect((await logs()).filter((entry) => entry.event === "call")).toEqual([]);
-        await server.call(server.catalog, "run", {});
+        await server.call(currentCatalog(server), "run", {});
         expect((await logs()).filter((entry) => entry.event === "call")).toHaveLength(1);
     });
 
@@ -340,7 +511,7 @@ describe("demand-owned MCP lifecycle", () => {
 
     it("keeps active calls resident, then unloads and initializes the next call", async () => {
         vi.useFakeTimers();
-        const { server, logs } = await fixture({ idle: { afterMs: 10 } });
+        const { server, logs } = await fixture({ idleAfterMs: 10 });
         const held = server.call(catalog, "run", { mode: "hold" });
         await vi.waitFor(async () =>
             expect((await logs()).filter((entry) => entry.event === "call")).toHaveLength(1),
@@ -357,7 +528,7 @@ describe("demand-owned MCP lifecycle", () => {
         expect(() => process.kill(released.pid, 0)).toThrow();
         const restarted = Value.Parse(
             resultSchema,
-            (await server.call(server.catalog, "run", {})).structuredContent,
+            (await server.call(currentCatalog(server), "run", {})).structuredContent,
         );
         expect(restarted.pid).not.toBe(released.pid);
         expect(restarted.count).toBe(1);
@@ -369,19 +540,10 @@ describe("demand-owned MCP lifecycle", () => {
         { tools: {}, experimental: { residency: {} } },
     ])("does not evict residency capabilities: %j", async (capabilities) => {
         vi.useFakeTimers();
-        const { server } = await fixture({ idle: { afterMs: 10 }, capabilities });
+        const { server } = await fixture({ idleAfterMs: 10, capabilities });
         await server.call(catalog, "run", {});
         await vi.advanceTimersByTimeAsync(100);
         expect(server.state).toBe("connected");
-    });
-
-    it("rejects credential identity changes rather than reusing another account", async () => {
-        vi.stubEnv("SAMPLE_ACCOUNT", "account-a");
-        const { server, logs } = await fixture({ transportEnv: { ACCOUNT: "SAMPLE_ACCOUNT" } });
-        await server.call(catalog, "run", {});
-        vi.stubEnv("SAMPLE_ACCOUNT", "account-b");
-        await expect(server.call(catalog, "run", {})).rejects.toThrow("reload required");
-        expect((await logs()).filter((entry) => entry.event === "call")).toHaveLength(1);
     });
 
     it("disconnects HTTP without terminating an external server", async () => {
@@ -467,18 +629,14 @@ describe("demand-owned MCP lifecycle", () => {
         const parsedAddress: AddressInfo = Value.Parse(addressSchema, address);
 
         const url = `http://127.0.0.1:${parsedAddress.port}`;
-        const server = new LazyServer(
-            {
-                name: "sample",
-                description: "Sample",
-                exposure: "direct",
-                catalog,
-                transport: { type: "http", url, headers: {} },
-            },
-            process.cwd(),
-            () => undefined,
-            () => undefined,
-        );
+        const server = new LazyServer({
+            entry: entryOf({ url, exposure: "direct" }),
+            root: process.cwd(),
+            catalog,
+            idleAfterMs: undefined,
+            changed: noCatalogChange,
+            report: noReport,
+        });
         cleanup.push(async () => server.dispose());
         await server.call(catalog, "run", {});
         await server.dispose();
@@ -487,7 +645,7 @@ describe("demand-owned MCP lifecycle", () => {
     });
 
     it("cancels one startup waiter without closing a sibling's lifecycle", async () => {
-        const { server, logs } = await fixture({ gate: true, idle: { afterMs: 10 } });
+        const { server, logs } = await fixture({ gate: true, idleAfterMs: 10 });
         const controller = new AbortController();
         const first = server.call(catalog, "run", {}, { signal: controller.signal });
         const rejected = expect(first).rejects.toBeInstanceOf(McpAbortError);
@@ -524,4 +682,90 @@ describe("demand-owned MCP lifecycle", () => {
             expect(() => process.kill(pid, 0)).toThrow();
         },
     );
+
+    describe("over HTTP", () => {
+        async function httpServer(
+            respond: (request: IncomingMessage, response: ServerResponse) => void | Promise<void>,
+        ): Promise<string> {
+            const external = createServer((request, response) => {
+                void respond(request, response);
+            });
+            external.listen(0, "127.0.0.1");
+            await once(external, "listening");
+            cleanup.push(async () => {
+                external.closeAllConnections();
+                external.close();
+                await once(external, "close");
+            });
+            const { port } = Value.Parse(Type.Object({ port: Type.Integer() }), external.address());
+            return `http://127.0.0.1:${port}/mcp`;
+        }
+
+        const lazyServer = (config: McpServerConfig) => {
+            const server = new LazyServer({
+                entry: entryOf(config),
+                root: process.cwd(),
+                catalog: undefined,
+                idleAfterMs: undefined,
+                changed: noCatalogChange,
+                report: noReport,
+            });
+            cleanup.push(async () => server.dispose());
+
+            return server;
+        };
+
+        it("says sign-in is unsupported when a server answers 401, without retrying", async () => {
+            let requests = 0;
+            const url = await httpServer((_request, response) => {
+                requests += 1;
+                response.statusCode = 401;
+                response.end();
+            });
+            await expect(lazyServer({ url }).discover()).rejects.toThrow(
+                "requires sign-in, which pi-lazy-mcp does not support",
+            );
+            expect(requests).toBe(1);
+        });
+
+        it("retries a connection refused by a restarting server, then names the status", async () => {
+            let requests = 0;
+            const url = await httpServer((_request, response) => {
+                requests += 1;
+                response.statusCode = 503;
+                response.end();
+            });
+            await expect(lazyServer({ url }).discover()).rejects.toThrow("503");
+            expect(requests).toBe(3);
+        });
+
+        it("sends expanded headers and keeps their values out of errors", async () => {
+            vi.stubEnv("SAMPLE_HTTP_TOKEN", "sample-http-token");
+            let authorization: string | undefined;
+            const url = await httpServer((request, response) => {
+                authorization = request.headers.authorization;
+                response.statusCode = 400;
+                response.end("rejected sample-http-token");
+            });
+            const failure = lazyServer({
+                url,
+                headers: { Authorization: "Bearer ${SAMPLE_HTTP_TOKEN}" },
+            }).discover();
+            await expect(failure).rejects.toThrow("failed to connect");
+            await expect(failure).rejects.not.toThrow("sample-http-token");
+            expect(authorization).toBe("Bearer sample-http-token");
+        });
+
+        it("names the variable when a header cannot be resolved", async () => {
+            vi.stubEnv("SAMPLE_HTTP_UNSET", undefined);
+            const url = await httpServer((_request, response) => {
+                response.end();
+            });
+            await expect(
+                lazyServer({ url, headers: { Authorization: "${SAMPLE_HTTP_UNSET}" } }).discover(),
+            ).rejects.toThrow(
+                'header "Authorization" from environment variable: SAMPLE_HTTP_UNSET',
+            );
+        });
+    });
 });
