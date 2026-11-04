@@ -2,7 +2,7 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it } from "vitest";
 
-import { Theme } from "@earendil-works/pi-coding-agent";
+import { keyText, keyHint, Theme } from "@earendil-works/pi-coding-agent";
 import { renderBashCommandCall } from "../../../../src/tools/built-in/bash/renderer.ts";
 import { createNativeBashFeature } from "../../../../src/tools/built-in/bash/preview.ts";
 import {
@@ -336,6 +336,190 @@ describe("bash command rendering", () => {
         expect(rendered.join("\n")).toContain("\n  case");
     });
 
+    it("renders quoted heredoc prose verbatim without shell colors", () => {
+        const coloredTheme: GlowupRenderTheme = {
+            ...theme,
+            fg(_token, text) {
+                return `\u001b[31m${text}\u001b[0m`;
+            },
+        };
+        const command =
+            "send --stdin <<'MESSAGE'\nSome plain words  with spaces and $symbols.\nMESSAGE";
+        const rows = renderBashCommandCall(coloredTheme, command, {
+            state: "success",
+            expanded: true,
+            maxCodePreviewLines: 8,
+            showPrologueOmission: false,
+            shellLayout: "preserve",
+            shellOperatorPosition: "trailing",
+        }).render(120);
+
+        expect(stripVTControlCharacters(rows[1] ?? "")).toBe(
+            "  Some plain words  with spaces and $symbols.",
+        );
+
+        expect(rows[1]).toBe("  Some plain words  with spaces and $symbols.");
+    });
+
+    it("keeps multiple and incomplete heredoc bodies literal while highlighting later commands", () => {
+        const coloredTheme: GlowupRenderTheme = {
+            ...theme,
+            fg(_token, text) {
+                return `\u001b[31m${text}\u001b[0m`;
+            },
+        };
+        const command =
+            "send <<'FIRST' <<-'SECOND'\nfirst plain text\nFIRST\n\tsecond plain text\n\tSECOND\necho done\nsend <<'LAST'\nunfinished plain text";
+        const rows = renderBashCommandCall(coloredTheme, command, {
+            state: "success",
+            expanded: true,
+            maxCodePreviewLines: 8,
+            showPrologueOmission: false,
+            shellLayout: "preserve",
+            shellOperatorPosition: "trailing",
+        }).render(120);
+
+        expect(rows[1]).toBe("  first plain text");
+        expect(stripVTControlCharacters(rows[3] ?? "")).toBe("      second plain text");
+        expect(rows[3]).not.toContain("\u001b[");
+        expect(rows[5]).toContain("\u001b[31mecho\u001b[0m");
+        expect(rows[7]).toBe("  unfinished plain text");
+    });
+
+    it("renders quoted heredoc prose inside command substitutions without shell colors", () => {
+        const coloredTheme: GlowupRenderTheme = {
+            ...theme,
+            fg(_token, text) {
+                return `\u001b[31m${text}\u001b[0m`;
+            },
+        };
+        const command =
+            "echo \"$(send <<'MESSAGE'\nSome plain words  with $symbols and echo.\nMESSAGE\n)\"";
+        const rows = renderBashCommandCall(coloredTheme, command, {
+            state: "success",
+            expanded: true,
+            maxCodePreviewLines: 8,
+            showPrologueOmission: false,
+            shellLayout: "preserve",
+            shellOperatorPosition: "trailing",
+        }).render(120);
+
+        expect(rows[1]).toBe("  Some plain words  with $symbols and echo.");
+    });
+
+    it("keeps nested heredoc bodies separate from following shell commands", () => {
+        const coloredTheme: GlowupRenderTheme = {
+            ...theme,
+            fg(_token, text) {
+                return `\u001b[31m${text}\u001b[0m`;
+            },
+        };
+        const command =
+            "cat <<'FIRST'; echo $(cat <<'SECOND'\nsecond plain text\nSECOND\n)\nfirst plain text\nFIRST\necho done";
+        const rows = renderBashCommandCall(coloredTheme, command, {
+            state: "success",
+            expanded: true,
+            maxCodePreviewLines: 8,
+            showPrologueOmission: false,
+            shellLayout: "preserve",
+            shellOperatorPosition: "trailing",
+        }).render(120);
+
+        expect(rows[1]).toBe("  second plain text");
+        expect(rows[4]).toBe("  first plain text");
+        expect(rows[6]).toContain("\u001b[31mecho\u001b[0m");
+    });
+
+    it.each([
+        "[[ $(cat <<'MESSAGE'\nSome plain $words here\nMESSAGE\n) ]]",
+        "echo $(( $(cat <<'MESSAGE'\nSome plain $words here\nMESSAGE\n) + 1 ))",
+    ])("keeps nested heredoc prose plain inside shell expressions", (command) => {
+        const coloredTheme: GlowupRenderTheme = {
+            ...theme,
+            fg(_token, text) {
+                return `\u001b[31m${text}\u001b[0m`;
+            },
+        };
+        const rows = renderBashCommandCall(coloredTheme, command, {
+            state: "success",
+            expanded: true,
+            maxCodePreviewLines: 8,
+            showPrologueOmission: false,
+            shellLayout: "preserve",
+            shellOperatorPosition: "trailing",
+        }).render(120);
+
+        expect(rows[1]).toBe("  Some plain $words here");
+    });
+
+    it("finds quoted bodies after unquoted heredocs with matching text", () => {
+        const coloredTheme: GlowupRenderTheme = {
+            ...theme,
+            fg(_token, text) {
+                return `\u001b[31m${text}\u001b[0m`;
+            },
+        };
+        const command = "cat <<FIRST <<'SECOND'\nsame words\nSECOND\nFIRST\nsame words\nSECOND";
+        const rows = renderBashCommandCall(coloredTheme, command, {
+            state: "success",
+            expanded: true,
+            maxCodePreviewLines: 8,
+            showPrologueOmission: false,
+            shellLayout: "preserve",
+            shellOperatorPosition: "trailing",
+        }).render(120);
+
+        expect(rows[1]).toContain("\u001b[31msame\u001b[0m");
+        expect(rows[4]).toBe("  same words");
+    });
+
+    it("distinguishes matching text in separate nested heredocs", () => {
+        const coloredTheme: GlowupRenderTheme = {
+            ...theme,
+            fg(_token, text) {
+                return `\u001b[31m${text}\u001b[0m`;
+            },
+        };
+        const command =
+            "cat <<'FIRST'; echo $(cat <<'SECOND'\nsame words\nFIRST\nSECOND\n)\nsame words\nFIRST\necho done";
+        const rows = renderBashCommandCall(coloredTheme, command, {
+            state: "success",
+            expanded: true,
+            maxCodePreviewLines: 8,
+            showPrologueOmission: false,
+            shellLayout: "preserve",
+            shellOperatorPosition: "trailing",
+        }).render(120);
+
+        expect(rows[1]).toBe("  same words");
+        expect(rows[2]).toBe("  FIRST");
+        expect(rows[5]).toBe("  same words");
+        expect(rows[7]).toContain("\u001b[31mecho\u001b[0m");
+    });
+
+    it("recognizes heredoc bodies after a continued command header", () => {
+        const coloredTheme: GlowupRenderTheme = {
+            ...theme,
+            fg(_token, text) {
+                return `\u001b[31m${text}\u001b[0m`;
+            },
+        };
+        const command =
+            "send <<'FIRST' \\\n <<'SECOND'\nfirst plain text\nFIRST\nsecond plain text\nSECOND\necho done";
+        const rows = renderBashCommandCall(coloredTheme, command, {
+            state: "success",
+            expanded: true,
+            maxCodePreviewLines: 8,
+            showPrologueOmission: false,
+            shellLayout: "preserve",
+            shellOperatorPosition: "trailing",
+        }).render(120);
+
+        expect(rows[2]).toBe("  first plain text");
+        expect(rows[4]).toBe("  second plain text");
+        expect(rows[6]).toContain("\u001b[31mecho\u001b[0m");
+    });
+
     it("leaves code-writing heredocs as Bash without special body labels", () => {
         const command = `cat > check.py <<'PY'\nimport json\nprint(json)\nPY`;
         const rendered = render(command, { width: 80 }).join("\n");
@@ -472,6 +656,7 @@ describe("bash command rendering", () => {
             expect(stripVTControlCharacters(dynamicRendered)).toContain(
                 "python -c 'print($VALUE)'",
             );
+
             expect(dynamicRendered).not.toContain(dynamicHighlight);
         } finally {
             await disposeSyntaxHighlighting();
@@ -578,6 +763,8 @@ describe("bash result rendering", () => {
             isError: false,
             durationMs: 1000,
             outputPad: 1,
+            keyText,
+            keyHint,
             invalidate: () => {},
         };
 

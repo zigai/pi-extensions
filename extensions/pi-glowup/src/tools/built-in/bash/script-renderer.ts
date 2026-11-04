@@ -49,7 +49,7 @@ import {
     wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import { parse, type WordPart } from "unbash";
-import { shellWords } from "./shell-words.ts";
+import { heredocBodyRows, shellWords } from "./shell-words.ts";
 import type { ScriptFormatterProfile } from "../../../settings-input.ts";
 import { recordRenderError } from "../../../diagnostics/render-events.ts";
 
@@ -521,18 +521,23 @@ function highlightShellLineWithEmbeddedCode(
     theme: GlowupRenderTheme,
     line: string,
     rows: ReadonlyArray<EmbeddedInlineHighlightRow> | undefined,
+    literal: boolean,
 ): string {
-    if (rows === undefined || rows.length === 0) return highlightShellLine(theme, line);
+    const highlight = (text: string): string => {
+        if (literal) return text;
+        return highlightShellLine(theme, text);
+    };
+    if (rows === undefined || rows.length === 0) return highlight(line);
 
     const highlighted: string[] = [];
     let cursor = 0;
     for (const row of rows) {
-        highlighted.push(highlightShellLine(theme, line.slice(cursor, row.start)));
+        highlighted.push(highlight(line.slice(cursor, row.start)));
         highlighted.push(row.highlighted);
         cursor = row.end;
     }
 
-    highlighted.push(highlightShellLine(theme, line.slice(cursor)));
+    highlighted.push(highlight(line.slice(cursor)));
 
     return highlighted.join("");
 }
@@ -545,10 +550,16 @@ function highlightBashScriptPreviewLines(
     childOptions: (key: string, source: string) => SyntaxHighlightOptions,
 ): string[] {
     const embeddedRows = embeddedInlineHighlightRows(lines, theme, programs, parent, childOptions);
+    const literalRows = heredocBodyRows(lines.join("\n"));
 
     return lines.map((line, lineIndex) => {
         if (isPreviewMetaLine(line)) return line;
-        return highlightShellLineWithEmbeddedCode(theme, line, embeddedRows.get(lineIndex));
+        return highlightShellLineWithEmbeddedCode(
+            theme,
+            line,
+            embeddedRows.get(lineIndex),
+            literalRows.has(lineIndex),
+        );
     });
 }
 
