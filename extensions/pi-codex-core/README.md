@@ -38,6 +38,8 @@ Model-aware Codex prompt mode adapts bundled GPT prompts to Pi's active tools an
 
 The selectable `codex-native` handler preserves remote compaction v2 checkpoints, replay, chaining, fallbacks, and token-aware shrinking. Toggles can select it per model or preset; a preset's compaction role supplies its model and optional reasoning.
 
+Automatic compaction defaults to an early 80% trigger. The separate native-compaction request budget is 95% of the compaction model's registered context window, matching Codex CLI's default usable-context headroom. Tool outputs are only truncated when that request budget is exceeded. If protected context still exceeds the local estimate budget, Pi compaction runs instead; this warning is not a server context-limit rejection.
+
 ### Turn recovery
 
 Resumes transiently failed Codex turns after Pi exhausts standard retry attempts.

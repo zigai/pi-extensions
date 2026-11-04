@@ -1608,6 +1608,229 @@ test.each([
     },
 );
 
+test.each([
+    { contextWindow: undefined, expectedBudget: undefined },
+    { contextWindow: null, expectedBudget: undefined },
+    { contextWindow: 0, expectedBudget: undefined },
+    { contextWindow: -1, expectedBudget: undefined },
+    { contextWindow: Number.NaN, expectedBudget: undefined },
+    { contextWindow: Number.POSITIVE_INFINITY, expectedBudget: undefined },
+    { contextWindow: 2_001, expectedBudget: 1_900 },
+    { contextWindow: 2_000.5, expectedBudget: 1_900 },
+])(
+    "handles unknown or fractional request context windows ($contextWindow)",
+    async ({ contextWindow, expectedBudget }) => {
+        const request = buildRemoteCompactionV2Request({
+            sessionId: "context-window-validation",
+            model: "gpt-5.5",
+            input: [{ type: "function_call_output", call_id: "call/test", output: "evidence" }],
+            instructions: "system",
+            promptCacheKey: "test",
+            verbosity: "low",
+            fast: false,
+        });
+        const result = await shrinkRemoteCompactionRequestForContextWindow(
+            request,
+            contextWindow,
+            createTokenEstimateCache(),
+            { tokenizer: compactionTokenizer },
+        );
+        assert.equal(result.kind, "ok");
+        assert.equal(result.budgetTokens, expectedBudget);
+        assert.equal(result.rewrittenToolOutputs, 0);
+    },
+);
+
+test.each([
+    { model: "gpt-5.5", estimatedTokens: 401_543, expected: "ok" },
+    { model: "gpt-6.1-sol", estimatedTokens: 401_543, expected: "ok" },
+    { model: "gpt-5.5", estimatedTokens: 475_000, expected: "ok" },
+    { model: "gpt-6.1-sol", estimatedTokens: 475_000, expected: "ok" },
+    { model: "gpt-5.5", estimatedTokens: 475_001, expected: "too_large" },
+    { model: "gpt-6.1-sol", estimatedTokens: 475_001, expected: "too_large" },
+])(
+    "uses a separate usable-context budget for $model at $estimatedTokens tokens",
+    async ({ model, estimatedTokens, expected }) => {
+        const parts = {
+            sessionId: "separate-compaction-budgets",
+            model,
+            instructions: "system",
+            promptCacheKey: "budget-test",
+            verbosity: "low",
+            fast: false,
+        };
+        const cache = createTokenEstimateCache();
+        const empty = await shrinkRemoteCompactionRequestForContextWindow(
+            buildRemoteCompactionV2Request({ ...parts, input: [] }),
+            undefined,
+            cache,
+            { tokenizer: compactionTokenizer },
+        );
+
+        // Match Codex's encrypted-reasoning estimate without tokenizing ciphertext.
+        const reasoningTokens = estimatedTokens - empty.estimatedTokensAfter;
+        const encryptedContent = "x".repeat(Math.ceil(((reasoningTokens * 4 + 650) * 4) / 3));
+        const input = [{ type: "reasoning", encrypted_content: encryptedContent, summary: [] }];
+        const preflight = await rewriteRemoteCompactionToolOutputsForContextWindow(
+            input,
+            parts,
+            500_000,
+            cache,
+            { tokenizer: compactionTokenizer },
+        );
+        const request = buildRemoteCompactionV2Request({ ...parts, input: preflight.input });
+
+        for (const options of [
+            { tokenizer: compactionTokenizer },
+            { tokenizer: compactionTokenizer, preflight },
+        ]) {
+            const result = await shrinkRemoteCompactionRequestForContextWindow(
+                request,
+                500_000,
+                cache,
+                options,
+            );
+            assert.equal(result.estimatedTokensAfter, estimatedTokens);
+            assert.equal(result.kind, expected);
+            assert.equal(result.budgetTokens, 475_000);
+            assert.equal(result.rewrittenToolOutputs, 0);
+            assert.equal(preflight.input, input);
+
+            if (result.kind === "ok") {
+                assert.equal(result.request, request);
+                assert.equal(
+                    result.promptInput.find((item) => item.type === "reasoning")?.encrypted_content,
+                    encryptedContent,
+                );
+            }
+        }
+    },
+);
+
+test.each(["gpt-5.5", "gpt-6.1-sol"])(
+    "sends native compaction above the auto trigger without losing tool evidence for %s",
+    async (modelId) => {
+        let requestBody: unknown;
+        const runtime = makeTestRuntime(async (_input, init) => {
+            requestBody = decodeRequestBody(init);
+            return new Response(
+                [
+                    "event: response.output_item.done",
+                    'data: {"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"sealed-above-trigger"}}',
+                    "",
+                    "event: response.completed",
+                    'data: {"type":"response.completed","response":{"id":"resp_above_trigger","created_at":123}}',
+                    "",
+                ].join("\n"),
+                { status: 200 },
+            );
+        });
+        const encryptedContent = "x".repeat(2_140_000);
+        const toolOutput = "useful evidence that should not be truncated";
+        const warnings: string[] = [];
+        const result = await handleCodexNativeCompaction(
+            makeBeforeCompactEvent({
+                branchEntries: [
+                    messageEntry("reasoning", null, {
+                        ...assistantMessage([
+                            {
+                                type: "thinking",
+                                thinking: "",
+                                thinkingSignature: JSON.stringify({
+                                    type: "reasoning",
+                                    encrypted_content: encryptedContent,
+                                    summary: [],
+                                }),
+                            },
+                            {
+                                type: "toolCall",
+                                id: "call/evidence|item/evidence",
+                                name: "read",
+                                arguments: { path: "evidence.txt" },
+                            },
+                        ]),
+                        model: modelId,
+                    }),
+                    messageEntry(
+                        "evidence",
+                        "reasoning",
+                        toolResultMessage("call/evidence|item/evidence", toolOutput),
+                    ),
+                    messageEntry("continue", "evidence", userMessage("continue")),
+                ],
+                firstKeptEntryId: "continue",
+            }),
+            makeNativeCompactionContext({ modelId, contextWindow: 500_000, warnings }),
+            DEFAULT_CODEX_CORE_CONFIG,
+            makeCompactionApi(),
+            runtime,
+        );
+        assert.ok(result?.compaction);
+        assert.equal(result.compaction.details.requestMeta?.rewrittenToolOutputs, 0);
+        assert.deepEqual(warnings, []);
+        const input = responseInput(requestBody);
+        assert.equal(
+            JsonObjectDecoder.Parse(
+                input.find((item) => isRecord(item) && item.type === "reasoning"),
+            ).encrypted_content,
+            encryptedContent,
+        );
+        assert.equal(
+            JsonObjectDecoder.Parse(
+                input.find((item) => isRecord(item) && item.type === "function_call_output"),
+            ).output,
+            toolOutput,
+        );
+    },
+);
+
+test.each(["gpt-5.5", "gpt-6.1-sol"])(
+    "reports a local usable-context fallback without sending oversized protected input for %s",
+    async (modelId) => {
+        let fetchCalls = 0;
+        const warnings: string[] = [];
+        const runtime = makeTestRuntime(async () => {
+            fetchCalls += 1;
+            throw new Error("oversized request must not be sent");
+        });
+        const encryptedContent = "x".repeat(2_560_000);
+        const result = await handleCodexNativeCompaction(
+            makeBeforeCompactEvent({
+                branchEntries: [
+                    messageEntry("oversized-reasoning", null, {
+                        ...assistantMessage([
+                            {
+                                type: "thinking",
+                                thinking: "",
+                                thinkingSignature: JSON.stringify({
+                                    type: "reasoning",
+                                    encrypted_content: encryptedContent,
+                                    summary: [],
+                                }),
+                            },
+                            { type: "text", text: "protected assistant context" },
+                        ]),
+                        model: modelId,
+                    }),
+                ],
+                firstKeptEntryId: "oversized-reasoning",
+            }),
+            makeNativeCompactionContext({ modelId, contextWindow: 500_000, warnings }),
+            DEFAULT_CODEX_CORE_CONFIG,
+            makeCompactionApi(),
+            runtime,
+        );
+        assert.equal(result, undefined);
+        assert.equal(fetchCalls, 0);
+        assert.equal(warnings.length, 1);
+        assert.match(warnings[0] ?? "", /skipped locally: estimated request size \d+ tokens/);
+        assert.match(warnings[0] ?? "", /usable-context budget of 475000 tokens/);
+        assert.match(warnings[0] ?? "", /95% of the 500000-token model context window/);
+        assert.match(warnings[0] ?? "", /Pi compaction will run/);
+        assert.doesNotMatch(warnings[0] ?? "", /is too large for the context window/);
+    },
+);
+
 test("still rejects reasoning that exceeds the budget after ciphertext-aware estimation", async () => {
     const reasoningItem = {
         type: "reasoning",
@@ -1631,7 +1854,7 @@ test("still rejects reasoning that exceeds the budget after ciphertext-aware est
     );
     assert.equal(result.kind, "too_large");
     assert.ok(result.estimatedTokensAfter >= 4_338);
-    assert.equal(result.budgetTokens, 1_600);
+    assert.equal(result.budgetTokens, 1_900);
     assert.equal(result.rewrittenToolOutputs, 0);
     assert.equal(reasoningItem.encrypted_content, "q7X9".repeat(6000));
 });
@@ -2142,7 +2365,7 @@ test("Responses Lite preflight charges original images before detail projection"
         { tokenizer: compactionTokenizer, preflight },
     );
 
-    assert.ok(preflight.estimatedTokensAfter > 8_000);
+    assert.ok(preflight.estimatedTokensAfter > 10_000);
     assert.equal(result.kind, "too_large");
 });
 
@@ -2439,6 +2662,27 @@ test("auto compaction ignores stale session contexts", () => {
     fixture.invalidate();
     assert.doesNotThrow(() => scheduledTasks.shift()?.());
     assert.equal(compactCalls.length, 0);
+});
+
+test("keeps the default automatic trigger at 80% independently of the request budget", () => {
+    const compactCalls: unknown[] = [];
+    const usage = { tokens: 399_999 };
+    const ctx = makeAutoCompactionContext(
+        compactCalls,
+        { value: true },
+        {
+            modelId: "gpt-6.1-sol",
+            contextWindow: 500_000,
+            sessionId: "auto-separate-request-budget",
+            usageTokens: () => usage.tokens,
+        },
+    );
+    assert.equal(DEFAULT_CODEX_CORE_CONFIG.compaction.thresholdPercent, 80);
+    assert.equal(maybeTriggerCodexAutoCompaction(ctx, DEFAULT_CODEX_CORE_CONFIG), false);
+    usage.tokens = 400_000;
+    assert.equal(maybeTriggerCodexAutoCompaction(ctx, DEFAULT_CODEX_CORE_CONFIG), true);
+    assert.equal(compactCalls.length, 1);
+    cancelScheduledCodexAutoCompaction();
 });
 
 test("uses Pi model context for GPT-5.6 auto compaction", () => {
@@ -3179,6 +3423,7 @@ function makeCompactionApi(): ExtensionAPI {
 function makeNativeCompactionContext(
     options: {
         readonly contextWindow?: number;
+        readonly warnings?: string[];
         readonly sessionId?: string;
         readonly modelId?: string;
         readonly branchEntries?: readonly JsonObject[];
@@ -3186,7 +3431,8 @@ function makeNativeCompactionContext(
 ): ExtensionContext {
     const modelId = options.modelId ?? "gpt-5.5";
     const ctx = {
-        hasUI: false,
+        hasUI: options.warnings !== undefined,
+        ui: { notify: (message: string) => options.warnings?.push(message) },
         cwd: "/workspace",
         model: {
             provider: "openai-codex",

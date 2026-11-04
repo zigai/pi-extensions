@@ -226,7 +226,7 @@ export async function handleCodexNativeCompaction(
     if (shrink.kind === "too_large") {
         notifyCompactionFallback(
             ctx,
-            `Codex remote compaction v2 request is too large for the context window (${shrink.estimatedTokensAfter}/${shrink.budgetTokens} estimated tokens).`,
+            `Codex remote compaction v2 skipped locally: estimated request size ${shrink.estimatedTokensAfter} tokens exceeds the usable-context budget of ${shrink.budgetTokens} tokens (95% of the ${contextWindow}-token model context window), even after tool-output trimming.`,
         );
         return undefined;
     }
