@@ -520,9 +520,12 @@ test("ModesStore deleting the final mode persists empty modes, not generated fal
     });
 });
 
-test("ModesStore deliberate edits to generated modes make them configured", async () => {
-    await withStore(async ({ store, cwd, filePath }) => {
-        for (const edit of ["edit", "add", "reorder"]) {
+// Each transaction scenario owns its environment and temporary files. Keeping all three
+// in one async test can leave a transaction running into the next fixture after a timeout.
+test.each(["edit", "add", "reorder"])(
+    "ModesStore deliberate edits to generated modes make them configured (%s)",
+    async (edit) => {
+        await withStore(async ({ store, cwd, filePath }) => {
             await writeFile(filePath, JSON.stringify({ modes: {} }));
             await store.resolvePath({ cwd, projectTrusted: false });
             const loaded = await store.load(filePath, fallbackMode);
@@ -535,9 +538,9 @@ test("ModesStore deliberate edits to generated modes make them configured", asyn
             const saved = await store.saveChanges(filePath, loaded, next, fallbackMode);
             assert.equal(saved?.data.hasConfiguredModes, true);
             assert.ok(Object.keys((await readModesDocument(filePath)).modes).length > 0);
-        }
-    });
-});
+        });
+    },
+);
 
 test("project saves retain inheritance and persist inherited deletions", async () => {
     await withStore(async ({ store, cwd, filePath }) => {
