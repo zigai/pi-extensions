@@ -2,8 +2,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Theme, type ThemeColor } from "@earendil-works/pi-coding-agent";
-import { visibleWidth } from "@earendil-works/pi-tui";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { visibleWidth, type Component } from "@earendil-works/pi-tui";
+import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import {
     buildLargeDiffSummaryPayload,
     buildPierreSummaryPayload,
@@ -1023,6 +1023,25 @@ describe("Pierre diff rendering", () => {
         clearQueuedDiffHighlights();
         let invalidations = 0;
         let maximumActive = 0;
+        let finish: () => void = () => {};
+        const completed = new Promise<void>((resolve) => {
+            finish = resolve;
+        });
+
+        // A restored transcript owns its components. The scheduler intentionally
+        // keeps only weak owners, so discarding these would make completion GC-dependent.
+        const components: Component[] = [];
+
+        // Production queue timers are unref'ed. Keep the test event loop awake
+        // while observing concurrency; the completion callback resolves the wait.
+        const progress = setInterval(() => {
+            maximumActive = Math.max(maximumActive, pierreDiffHighlightStats().activeHighlights);
+        }, 50);
+        onTestFinished(() => {
+            clearInterval(progress);
+            clearQueuedDiffHighlights();
+        });
+
         for (let index = 0; index < 100; index += 1) {
             const payload = buildPierreDiffPayload({
                 path: `src/restored-${index}.ts`,
@@ -1034,32 +1053,42 @@ describe("Pierre diff rendering", () => {
             });
             if (payload?.kind !== "renderable") throw new Error("expected restored payload");
 
-            renderPierreDiff(
-                payload,
-                testTheme,
-                { expanded: true },
-                {
-                    lastComponent: undefined,
-                    toolCallId: `restored-${index}`,
-                    invalidate() {
-                        invalidations += 1;
+            components.push(
+                renderPierreDiff(
+                    payload,
+                    testTheme,
+                    { expanded: true },
+                    {
+                        lastComponent: undefined,
+                        toolCallId: `restored-${index}`,
+                        invalidate() {
+                            invalidations += 1;
+                            maximumActive = Math.max(
+                                maximumActive,
+                                pierreDiffHighlightStats().activeHighlights,
+                            );
+
+                            if (invalidations === 100) finish();
+                        },
                     },
-                },
+                ),
             );
             maximumActive = Math.max(maximumActive, pierreDiffHighlightStats().activeHighlights);
         }
 
-        await vi.waitFor(
-            () => {
-                const stats = pierreDiffHighlightStats();
-                maximumActive = Math.max(maximumActive, stats.activeHighlights);
-                expect(invalidations).toBe(100);
-                expect(stats.queuedHighlights).toBe(0);
-                expect(stats.queueRunning).toBe(false);
-            },
-            { timeout: 10_000 },
-        );
+        // Await actual completion, not a throughput deadline for 100 grammar jobs.
+        await completed;
+        const stats = pierreDiffHighlightStats();
+        expect(invalidations).toBe(100);
+        expect(stats.queuedHighlights).toBe(0);
+        expect(stats.queueRunning).toBe(false);
         expect(maximumActive).toBeLessThanOrEqual(1);
+
+        for (const [index, component] of components.entries()) {
+            expect(stripAnsi(component.render(100).join("\n"))).toContain(
+                `const newValue = ${index + 1};`,
+            );
+        }
     });
 
     it("isolates rendered output across tool calls", () => {
