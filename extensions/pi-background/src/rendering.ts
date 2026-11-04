@@ -13,23 +13,60 @@ import {
     jobArgsSchema,
     outputSchema,
     startArgsSchema,
+    waitArgsSchema,
+    waitOutputSchema,
     type CommandSnapshot,
 } from "./commands.ts";
 import { commandLabel, commandStatus, plainOutput } from "./presentation.ts";
 
 type StartArgs = StaticDecode<typeof startArgsSchema>;
 type JobArgs = StaticDecode<typeof jobArgsSchema>;
+type WaitArgs = StaticDecode<typeof waitArgsSchema>;
+
+type WaitResult =
+    | { kind: "available"; jobs: StaticDecode<typeof outputSchema>[] }
+    | { kind: "unavailable" };
+
 type RenderTheme = Pick<Theme, "fg" | "bold">;
 
 type Result =
     | { kind: "available"; job: CommandSnapshot; output: string; truncated: boolean }
     | { kind: "unavailable" };
 
-const jobResultSchema = Type.Object({ details: commandSchema });
-const outputResultSchema = Type.Object({ details: outputSchema });
+// Saved sessions from before task/service support have no kind. Only the rendering
+// boundary accepts that legacy shape; new tool results still use commandSchema.
+const savedCommandSchema = Type.Object(
+    { ...commandSchema.properties, kind: Type.Optional(commandSchema.properties.kind) },
+    { additionalProperties: false },
+);
+const savedOutputSchema = Type.Object(
+    { ...outputSchema.properties, job: savedCommandSchema },
+    { additionalProperties: false },
+);
+const jobResultSchema = Type.Object({ details: savedCommandSchema });
+const outputResultSchema = Type.Object({ details: savedOutputSchema });
 const startValidator = Compile(startArgsSchema);
 const jobValidator = Compile(jobArgsSchema);
 const resultValidator = Compile(Type.Union([jobResultSchema, outputResultSchema]));
+const waitValidator = Compile(waitArgsSchema);
+const waitResultValidator = Compile(Type.Object({ details: waitOutputSchema }));
+
+function parseWait(value: unknown): WaitArgs | undefined {
+    try {
+        return waitValidator.Parse(value);
+    } catch {
+        return undefined;
+    }
+}
+
+function parseWaitResult(value: unknown): WaitResult {
+    try {
+        const parsed = waitResultValidator.Parse(value);
+        return { kind: "available", jobs: parsed.details.jobs };
+    } catch {
+        return { kind: "unavailable" };
+    }
+}
 
 function parseStart(value: unknown): StartArgs | undefined {
     try {
@@ -50,16 +87,21 @@ function parseJob(value: unknown): JobArgs | undefined {
 function parseResult(value: unknown): Result {
     try {
         const parsed = resultValidator.Parse(value);
-        if (Value.Check(outputSchema, parsed.details)) {
+        if (Value.Check(savedOutputSchema, parsed.details)) {
             return {
                 kind: "available",
-                job: parsed.details.job,
+                job: { ...parsed.details.job, kind: parsed.details.job.kind ?? "task" },
                 output: parsed.details.output,
                 truncated: parsed.details.truncated,
             };
         }
 
-        return { kind: "available", job: parsed.details, output: "", truncated: false };
+        return {
+            kind: "available",
+            job: { ...parsed.details, kind: parsed.details.kind ?? "task" },
+            output: "",
+            truncated: false,
+        };
     } catch {
         return { kind: "unavailable" };
     }
@@ -67,12 +109,15 @@ function parseResult(value: unknown): Result {
 
 function resultLabel(result: Result): string {
     if (result.kind === "unavailable") return "Background command unavailable";
-    return `${commandLabel(result.job.command)} · ${commandStatus(result.job).text}`;
+    return `${result.job.kind} · ${commandLabel(result.job.command)} · ${commandStatus(result.job).text}`;
 }
 
 export function renderStartCall(args: Partial<StartArgs>, theme: RenderTheme): Component {
     const parsed = parseStart(args);
-    let label = theme.fg("accent", theme.bold("Background"));
+    let title = "Background";
+    if (parsed !== undefined) title += ` ${parsed.kind ?? "task"}`;
+
+    let label = theme.fg("accent", theme.bold(title));
     if (parsed !== undefined) label += ` ${commandLabel(parsed.command)}`;
 
     return new Text(label, 0, 0);
@@ -80,6 +125,10 @@ export function renderStartCall(args: Partial<StartArgs>, theme: RenderTheme): C
 
 export function renderStatusCall(_args: JobArgs, theme: RenderTheme): Component {
     return new Text(theme.fg("accent", theme.bold("Background output")), 0, 0);
+}
+
+export function renderWaitCall(_args: WaitArgs, theme: RenderTheme): Component {
+    return new Text(theme.fg("accent", theme.bold("Wait for background tasks")), 0, 0);
 }
 
 export function renderStopCall(_args: JobArgs, theme: RenderTheme): Component {
@@ -95,34 +144,55 @@ export function renderJobResult(result: AgentToolResult<unknown>): Component {
     return new Text(resultLabel(parsed), 0, 0);
 }
 
+function outputLines(result: Result, expanded: boolean): string[] {
+    const lines = [resultLabel(result)];
+    if (result.kind === "available" && expanded) {
+        lines.push(plainOutput(result.output));
+
+        if (result.truncated)
+            lines.push("Earlier output omitted; full log is available in /background.");
+    }
+
+    return lines;
+}
+
 export function renderOutputResult(
     result: AgentToolResult<unknown>,
     options: ToolRenderResultOptions,
 ): Component {
-    const parsed = parseResult(result);
-    const lines = [resultLabel(parsed)];
-    if (parsed.kind === "available" && options.expanded) {
-        lines.push(plainOutput(parsed.output));
+    return new Text(outputLines(parseResult(result), options.expanded).join("\n"), 0, 0);
+}
 
-        if (parsed.truncated)
-            lines.push("Earlier output omitted; full log is available in /background.");
-    }
+export function renderWaitResult(
+    result: AgentToolResult<unknown>,
+    options: ToolRenderResultOptions,
+): Component {
+    const parsed = parseWaitResult(result);
+    if (parsed.kind === "unavailable") return new Text("Background tasks unavailable", 0, 0);
+    if (parsed.jobs.length === 0) return new Text("No outstanding background tasks.", 0, 0);
 
+    const lines = parsed.jobs.flatMap((job) =>
+        outputLines({ kind: "available", ...job }, options.expanded),
+    );
     return new Text(lines.join("\n"), 0, 0);
 }
 
 export const startRendering = {
     version: 3,
+    callStyle: { kind: "bash", background: true },
     parseArgs: parseStart,
     parseResult,
     renderCall(args) {
+        let kind = "Task";
+        if (args.kind === "service") kind = "Service";
+
         return call(
             {
-                static: "Background",
-                running: "Starting Background",
-                completed: "Started Background",
+                static: `Background ${kind}`,
+                running: `Starting Background ${kind}`,
+                completed: `Started Background ${kind}`,
             },
-            { body: text(args.command) },
+            { body: text(commandLabel(args.command)) },
         );
     },
     renderResult(result) {
@@ -181,3 +251,25 @@ export const stopRendering = {
         });
     },
 } satisfies GlowupRenderer<JobArgs, Result>;
+
+export const waitRendering = {
+    version: 3,
+    parseArgs: parseWait,
+    parseResult: parseWaitResult,
+    renderCall(_args) {
+        return call({
+            static: "Wait for Background Tasks",
+            running: "Waiting for Background Tasks",
+            completed: "Collected Background Tasks",
+        });
+    },
+    renderResult(result) {
+        if (result.kind === "unavailable")
+            return text({ kind: "text", text: "Background tasks unavailable", tone: "error" });
+        if (result.jobs.length === 0) return text("No outstanding background tasks.");
+
+        return stack(
+            result.jobs.map((job) => statusRendering.renderResult({ kind: "available", ...job })),
+        );
+    },
+} satisfies GlowupRenderer<WaitArgs, WaitResult>;

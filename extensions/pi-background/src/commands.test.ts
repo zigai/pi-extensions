@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { createLocalBashOperations, DEFAULT_MAX_BYTES } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { BackgroundCommands, type CommandSnapshot } from "./commands.ts";
 
 let directory: string;
@@ -156,4 +156,174 @@ it("reports launch failures and rejects unknown jobs", async () => {
     expect(failed).toMatchObject({ id: job.id, state: "failed", exitCode: null });
     expect(failed.error).toBe("Could not execute the background command.");
     expect(() => commands.get("missing")).toThrow("Unknown background command");
+});
+
+it("collects completed and running tasks together without waiting for services or replaying results", async () => {
+    const fixture = await blockingCommand();
+    const service = commands.start(fixture.command, directory, { kind: "service" });
+    await fixture.connection;
+    const first = commands.start("printf 'tests passed'", directory);
+    const second = commands.start("printf 'build failed'; exit 3", directory);
+    const result = await commands.wait();
+
+    expect(result.jobs).toMatchObject([
+        {
+            job: { id: first.id, kind: "task", state: "completed", exitCode: 0 },
+            output: "tests passed",
+        },
+        {
+            job: { id: second.id, kind: "task", state: "completed", exitCode: 3 },
+            output: "build failed",
+        },
+    ]);
+
+    expect(commands.get(service.id)).toMatchObject({ kind: "service", state: "running" });
+    expect(await commands.wait()).toEqual({ jobs: [], timedOut: false });
+    expect(await commands.wait([first.id])).toMatchObject({ jobs: [{ job: { id: first.id } }] });
+});
+
+it("includes an already finished task and does not collect eventual results on a running status read", async () => {
+    const first = commands.start("printf done", directory);
+    await nextCompletion;
+
+    expect(await commands.wait()).toMatchObject({
+        jobs: [{ job: { id: first.id }, output: "done" }],
+    });
+    const fixture = await blockingCommand();
+    const second = commands.start(fixture.command, directory);
+    const socket = await fixture.connection;
+    commands.output(second.id); // Reading a running task must not collect its eventual completion.
+    socket.write("finish");
+    const collected = await commands.wait();
+    expect(collected.jobs).toMatchObject([{ job: { id: second.id }, output: "finished\n" }]);
+    expect(await commands.wait()).toEqual({ jobs: [], timedOut: false });
+});
+
+it("returns running output at the default checkpoint and later collects the task", async () => {
+    const fixture = await blockingCommand();
+    const job = commands.start(fixture.command, directory);
+    const socket = await fixture.connection;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+        const waiting = commands.wait();
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(await waiting).toMatchObject({
+            timedOut: true,
+            jobs: [{ job: { id: job.id, state: "running" } }],
+        });
+
+        expect(vi.getTimerCount()).toBe(0);
+        expect(commands.get(job.id).state).toBe("running");
+    } finally {
+        vi.useRealTimers();
+    }
+
+    socket.write("finish");
+    expect(await commands.wait()).toMatchObject({
+        timedOut: false,
+        jobs: [{ job: { id: job.id, state: "completed" }, output: "finished\n" }],
+    });
+});
+
+it("collects only completed jobs at a checkpoint", async () => {
+    const finished = commands.start("printf ready", directory);
+    await nextCompletion;
+    const fixture = await blockingCommand();
+    const running = commands.start(fixture.command, directory);
+    const socket = await fixture.connection;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+        const waiting = commands.wait(undefined, { timeout: 1 });
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(await waiting).toMatchObject({
+            timedOut: true,
+            jobs: [
+                { job: { id: finished.id, state: "completed" }, output: "ready" },
+                { job: { id: running.id, state: "running" } },
+            ],
+        });
+    } finally {
+        vi.useRealTimers();
+    }
+
+    socket.write("finish");
+    expect((await commands.wait()).jobs.map((result) => result.job.id)).toEqual([running.id]);
+});
+
+it("rejects unbounded or invalid wait budgets without losing completed results", async () => {
+    const job = commands.start("printf done", directory);
+    await nextCompletion;
+
+    for (const timeout of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, 121]) {
+        await expect(commands.wait(undefined, { timeout })).rejects.toThrow("timeout");
+    }
+
+    expect(await commands.wait()).toMatchObject({
+        timedOut: false,
+        jobs: [{ job: { id: job.id }, output: "done" }],
+    });
+});
+
+it("clears the checkpoint when the batch already completed", async () => {
+    commands.start("printf ready", directory);
+    await nextCompletion;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+        expect(await commands.wait()).toMatchObject({ timedOut: false });
+        expect(vi.getTimerCount()).toBe(0);
+    } finally {
+        vi.useRealTimers();
+    }
+});
+
+it("cancels a wait without stopping the task or collecting its result", async () => {
+    const fixture = await blockingCommand();
+    const job = commands.start(fixture.command, directory);
+    const socket = await fixture.connection;
+    const controller = new AbortController();
+    const waiting = commands.wait(undefined, { signal: controller.signal });
+    const rejection = expect(waiting).rejects.toMatchObject({ name: "AbortError" });
+
+    controller.abort();
+    await rejection;
+    expect(commands.get(job.id).state).toBe("running");
+    socket.write("finish");
+    expect(await commands.wait()).toMatchObject({
+        jobs: [{ job: { id: job.id }, output: "finished\n" }],
+    });
+});
+
+it("rejects invalid wait selections immediately and does not collect valid tasks in the selection", async () => {
+    const fixture = await blockingCommand();
+    const service = commands.start(fixture.command, directory, { kind: "service" });
+    await fixture.connection;
+    const job = commands.start("printf done", directory);
+
+    await expect(commands.wait([job.id, "missing"])).rejects.toThrow("Unknown background command");
+    await expect(commands.wait([service.id])).rejects.toThrow("service");
+    expect(await commands.wait()).toMatchObject({ jobs: [{ job: { id: job.id } }] });
+});
+
+it("shutdown settles an existing wait with stopped results", async () => {
+    const fixture = await blockingCommand();
+    const job = commands.start(fixture.command, directory);
+    await fixture.connection;
+    const waiting = commands.wait();
+    await commands.dispose();
+    expect(await waiting).toMatchObject({ jobs: [{ job: { id: job.id, state: "stopped" } }] });
+    expect(await commands.wait()).toEqual({ jobs: [], timedOut: false });
+});
+
+it("keeps uncollected results available when a wait is already cancelled", async () => {
+    const job = commands.start("printf done", directory);
+    await nextCompletion;
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(commands.wait(undefined, { signal: controller.signal })).rejects.toMatchObject({
+        name: "AbortError",
+    });
+    expect(await commands.wait()).toMatchObject({
+        jobs: [{ job: { id: job.id }, output: "done" }],
+    });
 });

@@ -3,18 +3,22 @@ import {
     createLocalBashOperations,
     defineTool,
     getAgentDir,
+    isToolCallEventType,
     type ExtensionAPI,
     type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { registerExtensionDiagnostics } from "@zigai/pi-extension-internals";
 import { registerStatusBarSegment, type StatusBarSegmentHandle } from "@zigai/pi-status-bar/api";
 import { withGlowupRendering } from "@zigai/pi-glowup/protocol";
+import type { StaticDecode } from "typebox";
 import {
     BackgroundCommands,
     commandSchema,
     jobArgsSchema,
     outputSchema,
     startArgsSchema,
+    waitArgsSchema,
+    waitOutputSchema,
     type CommandSnapshot,
 } from "./commands.ts";
 import { commandLabel, commandStatus, plainOutput, runningShellStatus } from "./presentation.ts";
@@ -25,13 +29,16 @@ import {
     renderStartCall,
     renderStatusCall,
     renderStopCall,
+    renderWaitCall,
+    renderWaitResult,
     startRendering,
     statusRendering,
     stopRendering,
+    waitRendering,
 } from "./rendering.ts";
 
 function summary(job: CommandSnapshot): string {
-    return `${commandLabel(job.command)} · ${commandStatus(job).text}`;
+    return `${job.kind} · ${commandLabel(job.command)} · ${commandStatus(job).text}`;
 }
 
 function describe(job: CommandSnapshot): string {
@@ -39,13 +46,21 @@ function describe(job: CommandSnapshot): string {
     if (job.state === "completed") state = `finished (exit ${job.exitCode})`;
 
     const lines = [
-        `Background command ${state}: ${commandLabel(job.command)}`,
+        `Background ${job.kind} ${state}: ${commandLabel(job.command)}`,
         `Job: ${job.id}`,
         `Directory: ${job.cwd}`,
         `Output: ${job.outputPath}`,
     ];
     if (job.error !== null) lines.push(job.error);
     return lines.join("\n");
+}
+
+function describeOutput(result: StaticDecode<typeof outputSchema>): string {
+    let text = `${describe(result.job)}\n\n${result.output || "(no output)"}`;
+    if (result.truncated)
+        text += "\n\n[Output preview truncated; read the output file for the full log.]";
+
+    return text;
 }
 
 type ActiveSession = {
@@ -101,27 +116,10 @@ export default function backgroundExtension(pi: ExtensionAPI): void {
         const commands = new BackgroundCommands(
             createLocalBashOperations(),
             join(getAgentDir(), "background", ctx.sessionManager.getSessionId()),
-            (job) => {
+            () => {
                 if (active?.owner !== owner) return;
 
                 refresh();
-                pi.sendMessage(
-                    {
-                        customType: "background-command",
-                        content: describe(job),
-                        display: false,
-                        details: job,
-                    },
-                    { deliverAs: "followUp", triggerTurn: true },
-                );
-
-                if (mode !== "tui") {
-                    let severity: "info" | "error" = "info";
-                    if (job.state === "failed" || (job.exitCode !== null && job.exitCode !== 0))
-                        severity = "error";
-
-                    ui?.notify(summary(job), severity);
-                }
             },
         );
         const state: ActiveSession = {
@@ -141,6 +139,19 @@ export default function backgroundExtension(pi: ExtensionAPI): void {
         });
     });
     pi.on("session_shutdown", reset);
+    pi.on("tool_call", (event) => {
+        if (!isToolCallEventType("bash", event) && !isToolCallEventType("powershell", event))
+            return undefined;
+
+        const timeout = event.input.timeout;
+        if (timeout !== undefined && Number.isFinite(timeout) && timeout > 0 && timeout <= 120)
+            return undefined;
+
+        return {
+            block: true,
+            reason: "This foreground command has not started. Choose an explicit timeout of at most 120 seconds only when it is safe to stop the command at that deadline. For longer or uncertain work, use background_start and background_wait; waits return progress checkpoints without stopping the command. Inspect progress or queue state before waiting again.",
+        };
+    });
 
     const current = (): BackgroundCommands => {
         if (active === undefined)
@@ -246,12 +257,13 @@ export default function backgroundExtension(pi: ExtensionAPI): void {
                 name: "background_start",
                 label: "Background command",
                 description:
-                    "Start a shell command in the background and return immediately with a job ID and output file. Completion automatically notifies you with its exit status. Continue other work instead of polling or sleeping. Run the command directly, without appending &.",
+                    "Start a shell command in the background and return immediately with a job ID and output file. Use for long or uncertain-duration commands, even without independent work. Foreground shell calls require an explicit timeout of at most 120 seconds and may be stopped at that deadline; background commands survive wait checkpoints. Use kind: task (default) for finite work or service for servers/watchers. Completion never wakes you. Continue independent work if available, then inspect and collect task results with bounded background_wait before your final answer. Run the command directly, without appending &.",
                 promptSnippet:
-                    "Run shell commands in the background with automatic completion notifications",
+                    "Run finite tasks or long-lived services while doing independent work",
                 promptGuidelines: [
-                    "Use background_start for commands that should run while you continue other work. Completion arrives automatically as a follow-up, including when you are idle.",
-                    "Use background_status to inspect a job's output when needed, and background_stop to stop it. Do not poll for completion.",
+                    "Start tasks in the background only when you have independent work to do. Before your final response, use background_wait to collect outstanding task results. Completion never wakes the agent or delivers a follow-up.",
+                    "Start servers and watchers with kind: service. Verify readiness instead of waiting for them to exit; services may keep running after your final response.",
+                    "Use background_status to inspect output when needed and background_stop to stop jobs. Do not poll or sleep to wait for completion; use background_wait.",
                 ],
                 parameters: startArgsSchema,
                 outputSchema: commandSchema,
@@ -260,6 +272,7 @@ export default function backgroundExtension(pi: ExtensionAPI): void {
                 async execute(_toolCallId, args, signal, _onUpdate, ctx) {
                     const job = current().start(args.command, resolve(ctx.cwd, args.cwd ?? "."), {
                         signal,
+                        kind: args.kind,
                     });
                     refresh();
                     return {
@@ -279,7 +292,7 @@ export default function backgroundExtension(pi: ExtensionAPI): void {
                 name: "background_status",
                 label: "Background output",
                 description:
-                    "Inspect a background command's status and recent combined stdout/stderr. Full output is available at outputPath. Completion notifications are automatic; do not poll this tool.",
+                    "Inspect a task or service's status and recent combined stdout/stderr. Full output is available at outputPath. Reading a finished task collects its result. Do not poll to wait for completion; use background_wait.",
                 annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
                 parameters: jobArgsSchema,
                 outputSchema,
@@ -287,13 +300,8 @@ export default function backgroundExtension(pi: ExtensionAPI): void {
                 renderResult: renderOutputResult,
                 async execute(_toolCallId, { id }) {
                     const output = current().output(id);
-                    let text = `${describe(output.job)}\n\n${output.output || "(no output)"}`;
-                    if (output.truncated)
-                        text +=
-                            "\n\n[Output preview truncated; read the output file for the full log.]";
-
                     return {
-                        content: [{ type: "text", text }],
+                        content: [{ type: "text", text: describeOutput(output) }],
                         details: output,
                         structuredContent: output,
                     };
@@ -306,10 +314,44 @@ export default function backgroundExtension(pi: ExtensionAPI): void {
     pi.registerTool(
         withGlowupRendering(
             defineTool({
+                name: "background_wait",
+                label: "Wait for background tasks",
+                description:
+                    "Wait for selected finite tasks, or all outstanding tasks when ids is omitted. Returns after 60 seconds by default (maximum 120), even if jobs still run. A timedOut result is an inspection checkpoint: read the returned output, check whether work is progressing or queued, and explain a stalled command before waiting again. Do not blindly repeat waits. Completed results are collected; running jobs remain available and are not stopped. Excludes services and previously collected tasks by default. Before your final answer, collect outstanding task results or report why work remains running. Cancelling only the wait leaves commands running.",
+                parameters: waitArgsSchema,
+                outputSchema: waitOutputSchema,
+                renderCall: renderWaitCall,
+                renderResult: renderWaitResult,
+                async execute(_toolCallId, { ids, timeout }, signal) {
+                    const result = await current().wait(ids, { signal, timeout });
+                    refresh();
+                    let text = "No outstanding background tasks.";
+                    if (result.jobs.length > 0)
+                        text = result.jobs.map(describeOutput).join("\n\n---\n\n");
+
+                    if (result.timedOut)
+                        text =
+                            "Wait checkpoint reached. Commands are still running, not cancelled. Inspect the output and whether work is progressing or queued before waiting again; investigate a stall instead of repeating waits blindly.\n\n" +
+                            text;
+
+                    return {
+                        content: [{ type: "text", text }],
+                        details: result,
+                        structuredContent: result,
+                    };
+                },
+            }),
+            waitRendering,
+        ),
+    );
+
+    pi.registerTool(
+        withGlowupRendering(
+            defineTool({
                 name: "background_stop",
                 label: "Stop background command",
                 description:
-                    "Stop a background command and its process tree. Repeating a stop for a finished job is harmless.",
+                    "Stop a background command and its process tree, dismissing it from default waits. Repeating a stop for a finished job is harmless. Output remains available through background_status or an explicit task wait.",
                 parameters: jobArgsSchema,
                 outputSchema: commandSchema,
                 renderCall: renderStopCall,

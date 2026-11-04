@@ -6,6 +6,7 @@ function job(overrides: Partial<CommandSnapshot> = {}): CommandSnapshot {
     return {
         id: "task-one",
         command: "npm test",
+        kind: "task",
         cwd: "/project",
         outputPath: "/private/output/task-one.log",
         state: "running",

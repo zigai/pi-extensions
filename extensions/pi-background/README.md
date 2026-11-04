@@ -1,11 +1,11 @@
 # Pi Background Commands
 
-Run shell commands while Pi continues other work. A compact right-aligned status-bar count tracks running shells without adding rows above the input. Completion sends the agent its exit status and output path, waking it if idle.
+Run tests, builds, and servers in the background while Pi keeps working. A finished command never starts a new agent turn, even if it fails.
 
-- **Keep working:** Commands return a job ID immediately.
-- **Get notified:** Completion arrives automatically; no polling is needed.
-- **Read output:** Inspect recent stdout and stderr or read the full saved log.
-- **Stop work:** Cancel a command and its process tree.
+- **Tasks:** Run finite work such as tests and builds, and get the results before the agent answers.
+- **Services:** Keep servers and watchers running. The agent checks that they're ready instead of waiting for them to exit.
+- **Short waits:** Get results or a progress update after 60 seconds, with commands still running.
+- **Output and stop:** Read saved output, or stop a command and its child processes.
 
 ## Installation
 
@@ -18,26 +18,45 @@ pi install npm:@zigai/pi-background
 Ask Pi:
 
 ```text
-Run npm test in the background. Continue reviewing the code and tell me when the tests finish.
+Run the tests in the background while you review the code. Wait for the results before your final answer.
 ```
 
-| Tool                | Purpose                                                   |
-| ------------------- | --------------------------------------------------------- |
-| `background_start`  | Start a command; optionally choose its working directory. |
-| `background_status` | Inspect a job's status and recent output by ID.           |
-| `background_stop`   | Stop a job by ID.                                         |
+The agent uses these tools:
 
-The indicator uses the `@zigai/pi-status-bar/api` segment API: `1 shell running` or `2 shells running`, visible while Pi is working or idle and hidden when no shells are running. Load `@zigai/pi-status-bar` to display it; without that extension, tools, notifications, and `/background` still work, with no fallback panel.
+| Tool                | Purpose                                                                    |
+| ------------------- | -------------------------------------------------------------------------- |
+| `background_start`  | Start a command; optionally choose `cwd` and `kind` (`task` or `service`). |
+| `background_wait`   | Collect all outstanding tasks, or selected task `ids`.                     |
+| `background_status` | Show a job's status and recent output.                                     |
+| `background_stop`   | Stop a job and its child processes.                                        |
 
-Use `/background` to inspect current and finished jobs, read full output in bounded pages (PgUp/PgDn, Home/End, ↑/↓ to scroll, r to refresh, q/Esc to close), or stop a running job. Tool calls use Glowup styling when Glowup is active.
+This extension also changes foreground commands. Bash and PowerShell calls are blocked unless they set a timeout of 120 seconds or less. Longer commands belong in a background task.
 
-Run commands directly, without appending `&`. Completion waits until the agent finishes its current work before starting a follow-up.
+## Collecting results
+
+The agent is told to call `background_wait` before its final answer, but nothing enforces this.
+
+A wait without `ids` collects every task whose result hasn't been collected yet, including tasks that already finished. Later waits skip those results. Pass `ids` to get a result again.
+
+A result also counts as collected after `background_status` reads a finished task. Stopping a job removes it from default waits, and its output stays readable.
+
+Waits return after 60 seconds by default, and `timeout` accepts 1 to 120 seconds. If tasks are still running, the result sets `timedOut` and includes their current output. Those tasks keep running, even if you cancel the wait.
+
+Waits don't cover services. Check that a service is ready some other way, such as an HTTP request.
+
+## Inspecting jobs
+
+Load `@zigai/pi-status-bar` to show a running count such as `2 shells running`. The tools and `/background` work without it.
+
+Use `/background` to list jobs, read full output, or stop a running job. In the output view, PgUp/PgDn, Home/End, and ↑/↓ scroll, `r` refreshes, and `q` or `Esc` closes. Reading output here doesn't collect it for the agent.
+
+With Glowup active, start calls look like Bash calls, with a `` icon before the duration (requires a Nerd Font). The duration covers the launch, not the command's run time.
 
 ## Job lifetime
 
-Jobs belong to the current Pi session. Switching sessions, reloading extensions, or quitting Pi stops running jobs. Ordinary turn completion leaves them running.
+Jobs belong to the current Pi session. Switching sessions, reloading extensions, or quitting Pi stops all running jobs. Finishing a turn doesn't.
 
-Logs remain under `~/.pi/agent/background/<session-id>/` after jobs end. Each result includes its full output path. Status previews use Pi's normal output limits; full logs are retained until you delete them.
+Logs stay in `~/.pi/agent/background/<session-id>/` until you delete them, and each result includes its log path.
 
 ## License
 

@@ -10,6 +10,12 @@ import { Type, type StaticDecode } from "typebox";
 
 export const startArgsSchema = Type.Object({
     command: Type.String({ minLength: 1, description: "Shell command to execute" }),
+    kind: Type.Optional(
+        Type.Enum(["task", "service"], {
+            description:
+                "task (default): finite work to collect before your final answer. service: a server or watcher that stays running; verify readiness instead of waiting for exit.",
+        }),
+    ),
     cwd: Type.Optional(
         Type.String({
             description: "Working directory, relative to the current project or absolute",
@@ -21,10 +27,30 @@ export const jobArgsSchema = Type.Object({
     id: Type.String({ minLength: 1, description: "Job ID returned by background_start" }),
 });
 
+export const waitArgsSchema = Type.Object({
+    timeout: Type.Optional(
+        Type.Number({
+            minimum: 1,
+            maximum: 120,
+            description:
+                "Maximum seconds to wait before returning progress for inspection (default 60, maximum 120). Commands keep running.",
+        }),
+    ),
+    ids: Type.Optional(
+        Type.Array(Type.String({ minLength: 1 }), {
+            minItems: 1,
+            uniqueItems: true,
+            description:
+                "Task IDs to wait for. Omit to collect all outstanding tasks, including finished results not yet collected. Services cannot be waited on.",
+        }),
+    ),
+});
+
 export const commandSchema = Type.Object(
     {
         id: Type.String(),
         command: Type.String(),
+        kind: Type.Enum(["task", "service"]),
         cwd: Type.String(),
         outputPath: Type.String(),
         state: Type.Enum(["running", "completed", "stopped", "failed"]),
@@ -43,6 +69,11 @@ export const outputSchema = Type.Object(
     { additionalProperties: false },
 );
 
+export const waitOutputSchema = Type.Object(
+    { jobs: Type.Array(outputSchema), timedOut: Type.Boolean() },
+    { additionalProperties: false },
+);
+
 export type CommandSnapshot = StaticDecode<typeof commandSchema>;
 
 type Outcome =
@@ -54,10 +85,17 @@ type Outcome =
 type Command = {
     readonly id: string;
     readonly command: string;
+    readonly kind: CommandSnapshot["kind"];
     readonly cwd: string;
     readonly outputPath: string;
     readonly controller: AbortController;
     outcome: Outcome;
+};
+
+type CommandEntry = {
+    readonly job: Command;
+    readonly completion: Promise<void>;
+    collected: boolean;
 };
 
 function snapshot(job: Command): CommandSnapshot {
@@ -70,6 +108,7 @@ function snapshot(job: Command): CommandSnapshot {
     return {
         id: job.id,
         command: job.command,
+        kind: job.kind,
         cwd: job.cwd,
         outputPath: job.outputPath,
         state: job.outcome.state,
@@ -79,7 +118,7 @@ function snapshot(job: Command): CommandSnapshot {
 }
 
 export class BackgroundCommands {
-    private readonly jobs = new Map<string, { job: Command; completion: Promise<void> }>();
+    private readonly jobs = new Map<string, CommandEntry>();
     private closed = false;
 
     constructor(
@@ -91,7 +130,7 @@ export class BackgroundCommands {
     start(
         command: string,
         cwd: string,
-        options: { signal?: AbortSignal | undefined } = {},
+        options: { signal?: AbortSignal | undefined; kind?: CommandSnapshot["kind"] } = {},
     ): CommandSnapshot {
         if (this.closed) throw new Error("Background commands are closed");
 
@@ -105,13 +144,14 @@ export class BackgroundCommands {
         const job: Command = {
             id,
             command,
+            kind: options.kind ?? "task",
             cwd,
             outputPath,
             controller: new AbortController(),
             outcome: { state: "running" },
         };
         const completion = Promise.resolve().then(async () => this.run(job, descriptor));
-        this.jobs.set(id, { job, completion });
+        this.jobs.set(id, { job, completion, collected: false });
 
         return snapshot(job);
     }
@@ -125,7 +165,74 @@ export class BackgroundCommands {
     }
 
     output(id: string): StaticDecode<typeof outputSchema> {
-        const job = this.get(id);
+        const entry = this.lookup(id);
+        const result = this.readOutput(entry.job);
+
+        if (entry.job.outcome.state !== "running") entry.collected = true;
+        return result;
+    }
+
+    async wait(
+        ids?: readonly string[],
+        options: { signal?: AbortSignal | undefined; timeout?: number | undefined } = {},
+    ): Promise<StaticDecode<typeof waitOutputSchema>> {
+        const { signal, timeout = 60 } = options;
+        signal?.throwIfAborted();
+
+        if (!Number.isFinite(timeout) || timeout < 1 || timeout > 120)
+            throw new Error("Wait timeout must be between 1 and 120 seconds.");
+
+        let entries: CommandEntry[];
+        if (ids === undefined) {
+            entries = [...this.jobs.values()].filter(
+                (entry) => entry.job.kind === "task" && !entry.collected,
+            );
+        } else {
+            entries = [...new Set(ids)].map((id) => this.lookup(id));
+            if (entries.some((entry) => entry.job.kind === "service"))
+                throw new Error("Cannot wait for a service to exit; verify readiness instead.");
+        }
+
+        const completion = Promise.all(entries.map(async (entry) => entry.completion));
+        let onAbort: (() => void) | undefined;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+
+        try {
+            const cancelled = new Promise<never>((_resolve, reject) => {
+                if (signal === undefined) return;
+
+                onAbort = () => {
+                    const cause: unknown = signal.reason;
+                    if (cause instanceof Error) reject(cause);
+                    else reject(new DOMException("Background wait cancelled.", "AbortError"));
+                };
+                signal.addEventListener("abort", onAbort, { once: true });
+            });
+
+            const checkpoint = new Promise<void>((resolve) => {
+                timer = setTimeout(resolve, timeout * 1_000);
+            });
+
+            await Promise.race([completion, cancelled, checkpoint]);
+            signal?.throwIfAborted();
+        } finally {
+            clearTimeout(timer);
+
+            if (onAbort !== undefined) signal?.removeEventListener("abort", onAbort);
+        }
+
+        // Read the whole batch before collecting it, so a failed read loses no results.
+        const jobs = entries.map((entry) => this.readOutput(entry.job));
+
+        for (const entry of entries) {
+            if (entry.job.outcome.state !== "running") entry.collected = true;
+        }
+
+        return { jobs, timedOut: jobs.some((result) => result.job.state === "running") };
+    }
+
+    private readOutput(command: Command): StaticDecode<typeof outputSchema> {
+        const job = snapshot(command);
         const descriptor = openSync(job.outputPath, "r");
 
         try {
@@ -151,6 +258,7 @@ export class BackgroundCommands {
             await entry.completion;
         }
 
+        entry.collected = true;
         return snapshot(entry.job);
     }
 
@@ -164,7 +272,7 @@ export class BackgroundCommands {
         await Promise.all(running.map(async (entry) => entry.completion));
     }
 
-    private lookup(id: string): { job: Command; completion: Promise<void> } {
+    private lookup(id: string): CommandEntry {
         const entry = this.jobs.get(id);
         if (entry === undefined) throw new Error("Unknown background command.");
         return entry;
@@ -217,7 +325,7 @@ export class BackgroundCommands {
         try {
             this.onComplete(snapshot(job));
         } catch {
-            console.error("Background command completed, but its completion notification failed.");
+            console.error("Background command completed, but its status refresh failed.");
         }
     }
 }

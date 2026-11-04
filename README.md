@@ -32,7 +32,7 @@ A collection of small Pi extensions for improving interaction, display, and mode
 | [@zigai/pi-toggles](extensions/pi-toggles)                         | Central capability policy, profiles, conditions, and session overrides for Pi     | `pi install npm:@zigai/pi-toggles`             |
 | [@zigai/pi-settings-ui](extensions/pi-settings-ui)                 | Schema-driven TUI editor for Pi extension settings.                               | `pi install npm:@zigai/pi-settings-ui`         |
 | [@zigai/pi-enhanced-skills](extensions/pi-expanded-skills)         | Enhanced Pi skills                                                                | `pi install npm:@zigai/pi-enhanced-skills`     |
-| [@zigai/pi-background](extensions/pi-background)                   | Run shell commands in the background and notify Pi when they finish.              | `pi install npm:@zigai/pi-background`          |
+| [@zigai/pi-background](extensions/pi-background)                   | Run tests, builds, and servers in the background while Pi keeps working.          | `pi install npm:@zigai/pi-background`          |
 | [@zigai/pi-lazy-mcp](extensions/pi-lazy-mcp)                       | Start MCP servers only when their tools are called.                               | `pi install npm:@zigai/pi-lazy-mcp`            |
 | [@zigai/pi-workspace](extensions/pi-workspace)                     | Customize Pi's chat and sidebar; search saved history.                            | `pi install npm:@zigai/pi-workspace`           |
 
