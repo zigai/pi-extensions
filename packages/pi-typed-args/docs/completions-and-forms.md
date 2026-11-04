@@ -145,8 +145,9 @@ Composed extensions can require two consecutive Tabs on unchanged editor text:
 installTypedCommandUx(pi, { formTrigger: "double-tab" });
 ```
 
-With this option, the first Tab arms the form shortcut and the second opens it. Typing any other
-key or changing the command text resets the sequence.
+The first Tab arms the form shortcut and the second opens it. If any extension's autocomplete picker
+is visible, Tab accepts its selection instead. Accepting a completion, typing any other key, or
+changing the command text resets the sequence.
 
 Multiple `installTypedCommandUx()` calls composed into the same Pi host share one live UX bridge,
 even though Pi gives each extension a scoped API object. Later explicit options are merged into that

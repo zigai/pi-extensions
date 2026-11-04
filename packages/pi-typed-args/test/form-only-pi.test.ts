@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { describe, it } from "vitest";
-import type { ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import {
+    CustomEditor,
+    type ExtensionCommandContext,
+    type ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import type { EditorComponent, EditorTheme } from "@earendil-works/pi-tui";
 import { defineTypedCommand } from "../src/command/definition.ts";
 import { installTypedCommandUx } from "../src/pi/extension.ts";
@@ -318,6 +322,136 @@ describe("Pi form-only arguments", () => {
             await session.stop();
         }
     });
+
+    it.each(["tab", "double-tab"] as const)(
+        "gives visible autocomplete priority over the %s form shortcut and clears its arm",
+        async (formTrigger) => {
+            const registry = createTypedCommandRegistry();
+            registry.register({
+                name: "autocomplete-priority-test",
+                description: "Test autocomplete priority",
+                formSymbols: {
+                    selectedCheckbox: "■",
+                    unselectedCheckbox: "□",
+                    selectedRadio: "●",
+                    unselectedRadio: "○",
+                },
+                args: {
+                    task: { type: "string", position: 0, rest: true },
+                    raw: { type: "boolean", aliases: ["r"] },
+                },
+                target: { kind: "extension", run() {} },
+            });
+
+            let terminalInput: ((data: string) => { consume?: boolean } | undefined) | undefined;
+            let customCalls = 0;
+            let editorText = "/autocomplete-priority-test Build";
+            let showingAutocomplete = false;
+            let delegatedTabs = 0;
+            let visibilityReads = 0;
+            let currentEditorFactory: ReturnType<ExtensionContext["ui"]["getEditorComponent"]> = (
+                tui,
+                theme,
+                keybindings,
+            ) => {
+                const editor = new CustomEditor(tui, theme, keybindings);
+                editor.isShowingAutocomplete = () => {
+                    visibilityReads += 1;
+                    return showingAutocomplete;
+                };
+                editor.handleInput = () => {
+                    delegatedTabs += 1;
+                };
+
+                return editor;
+            };
+            let activeEditor: EditorComponent | undefined;
+            const ctx = createTestExtensionContext({
+                ui: {
+                    custom: async () => {
+                        customCalls += 1;
+                        return undefined;
+                    },
+                    getEditorComponent: () => currentEditorFactory,
+                    getEditorText: () => editorText,
+                    onTerminalInput(handler) {
+                        terminalInput = handler;
+
+                        return () => {
+                            terminalInput = undefined;
+                        };
+                    },
+                    setEditorComponent(factory) {
+                        currentEditorFactory = factory;
+                        activeEditor = factory?.(
+                            createTestTui(),
+                            editorTheme,
+                            createTestKeybindings(),
+                        );
+                    },
+                    setEditorText(text) {
+                        editorText = text;
+                        activeEditor?.setText(text);
+                    },
+                },
+            });
+            const session = new TypedCommandUxSession(
+                createTestExtensionApi(),
+                { formTrigger },
+                registry,
+            );
+
+            try {
+                await session.start(ctx);
+                assert.ok(terminalInput);
+
+                if (formTrigger === "double-tab") {
+                    assert.deepEqual(terminalInput("\t"), { consume: true });
+                }
+
+                // A picker can appear asynchronously without changing the draft. Each
+                // chained completion must reach the editor rather than open a form.
+                showingAutocomplete = true;
+
+                for (let stage = 0; stage < 3; stage += 1) {
+                    assert.equal(terminalInput("\t"), undefined);
+                    activeEditor?.handleInput("\t");
+                }
+
+                assert.equal(delegatedTabs, 3);
+                assert.equal(customCalls, 0);
+
+                // Visible completion also wins over typed flag rewriting.
+                editorText = "/autocomplete-priority-test -r";
+                assert.equal(terminalInput("\t"), undefined);
+                assert.equal(editorText, "/autocomplete-priority-test -r");
+                assert.equal(customCalls, 0);
+                showingAutocomplete = false;
+                editorText = "/autocomplete-priority-test Build";
+                assert.deepEqual(terminalInput("\t"), { consume: true });
+
+                if (formTrigger === "double-tab") {
+                    assert.equal(customCalls, 0, "completion must disarm the earlier Tab");
+                    assert.deepEqual(terminalInput("\t"), { consume: true });
+                }
+
+                await session.waitForFormCompletion();
+                assert.equal(customCalls, 1);
+
+                // A replacement factory must not leave the detached editor in charge.
+                showingAutocomplete = true;
+                currentEditorFactory = undefined;
+                const readsBeforeReplacement = visibilityReads;
+                assert.deepEqual(terminalInput("\t"), { consume: true });
+                assert.equal(visibilityReads, readsBeforeReplacement);
+                await session.waitForFormCompletion();
+            } finally {
+                await session.stop();
+            }
+
+            assert.equal(terminalInput, undefined);
+        },
+    );
 
     it.each(["cancellation", "shutdown", "replacement"] as const)(
         "prevents expanded extension-form side effects after %s",

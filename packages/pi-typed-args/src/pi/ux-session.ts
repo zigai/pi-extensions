@@ -51,6 +51,16 @@ import { completeTypedCommandOnTab } from "./tab-completion.ts";
 
 type PiEditorFactory = NonNullable<ReturnType<ExtensionContext["ui"]["getEditorComponent"]>>;
 
+type AutocompleteVisibility = {
+    isShowingAutocomplete(): boolean;
+};
+
+function hasAutocompleteVisibility(
+    editor: ReturnType<PiEditorFactory>,
+): editor is ReturnType<PiEditorFactory> & AutocompleteVisibility {
+    return "isShowingAutocomplete" in editor && typeof editor.isShowingAutocomplete === "function";
+}
+
 type EditorUxInstallation = {
     readonly ctx: ExtensionContext;
     readonly installed: PiEditorFactory | undefined;
@@ -531,17 +541,21 @@ export class TypedCommandUxSession {
         installation.dispose();
     }
 
-    private submitEditorInput(ctx: ExtensionContext, data: string): boolean {
+    private getActiveEditor(ctx: ExtensionContext): ReturnType<PiEditorFactory> | undefined {
         const installation = this.editorUxInstallation;
         if (
             installation === undefined ||
             installation.ctx !== ctx ||
             ctx.ui.getEditorComponent() !== installation.installed
         ) {
-            return false;
+            return undefined;
         }
 
-        const editor = installation.getActiveEditor();
+        return installation.getActiveEditor();
+    }
+
+    private submitEditorInput(ctx: ExtensionContext, data: string): boolean {
+        const editor = this.getActiveEditor(ctx);
         if (editor === undefined) {
             return false;
         }
@@ -729,6 +743,20 @@ export class TypedCommandUxSession {
             this.activeTypedCompletionEditorText = undefined;
             this.scheduleRefresh(ctx);
 
+            return undefined;
+        }
+
+        // Completion pickers own Tab, including those supplied by other extensions.
+        // Never leave the form shortcut armed after delegating a completion key.
+        const editor = this.getActiveEditor(ctx);
+        if (
+            editor !== undefined &&
+            hasAutocompleteVisibility(editor) &&
+            editor.isShowingAutocomplete()
+        ) {
+            this.armedDoubleTabEditorText = undefined;
+            this.activeTypedCompletionEditorText = undefined;
+            this.scheduleRefresh(ctx);
             return undefined;
         }
 
