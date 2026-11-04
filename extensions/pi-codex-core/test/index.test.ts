@@ -8,7 +8,7 @@ import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import type { SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { dirname, join } from "node:path";
 import assert from "node:assert/strict";
-import { test } from "vitest";
+import { afterEach, test } from "vitest";
 import { Type } from "typebox";
 import { Compile } from "typebox/compile";
 import {
@@ -30,8 +30,58 @@ import {
     TEST_THEME,
     makeExtensionHarness,
     makeExtensionContext,
+    shutdownExtensionHarnesses,
     testDouble,
 } from "./helpers.ts";
+
+afterEach(shutdownExtensionHarnesses);
+
+test("fixture cleanup awaits shutdown once for every started session", async () => {
+    const harness = makeExtensionHarness();
+    const ctx = testDouble<ExtensionContext>(makeExtensionContext("/workspace", false));
+    let shutdowns = 0;
+    harness.api.on("session_start", () => {});
+    harness.api.on("session_shutdown", async () => {
+        await Promise.resolve();
+        shutdowns += 1;
+    });
+    await harness.startSession(ctx);
+
+    await shutdownExtensionHarnesses();
+    assert.equal(shutdowns, 1);
+    await shutdownExtensionHarnesses();
+    assert.equal(shutdowns, 1);
+});
+
+test("fixture cleanup cancels pending compaction before disposing its session", async () => {
+    const harness = makeExtensionHarness();
+    const ctx = testDouble<ExtensionContext>(makeExtensionContext("/workspace", false));
+    let signal: AbortSignal | undefined;
+    harness.api.on("session_start", () => {});
+    harness.api.on("session_shutdown", () => {
+        assert.ok(signal);
+        assert.equal(signal.aborted, true);
+    });
+    const started = new Promise<void>((resolveStarted) => {
+        harness.api.on("session_before_compact", (event) => {
+            signal = event.signal;
+            resolveStarted();
+            return new Promise<{ cancel: true }>((resolve) => {
+                event.signal.addEventListener("abort", () => resolve({ cancel: true }), {
+                    once: true,
+                });
+            });
+        });
+    });
+    await harness.startSession(ctx);
+    const compaction = harness.beginCompaction(ctx);
+    await started;
+    assert.ok(signal);
+
+    await shutdownExtensionHarnesses();
+    assert.equal(signal.aborted, true);
+    assert.deepEqual(await compaction, { cancel: true });
+});
 
 test("exports extension metadata", () => {
     assert.equal(packageName, "pi-codex-core");
