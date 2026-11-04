@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import {
+    keyText,
+    keyHint,
     createEventBus,
     type BeforeAgentStartEvent,
     type BeforeAgentStartEventResult,
@@ -452,6 +454,8 @@ type TestRenderContext<TState extends object, TArgs> = {
     isError: boolean;
     durationMs: number | undefined;
     outputPad: number;
+    keyText: typeof keyText;
+    keyHint: typeof keyHint;
 };
 
 export function renderComponent(component: { render(width: number): string[] }): string {
@@ -488,6 +492,8 @@ export function makeRenderContext<TArgs, TState extends object>(
         isError: false,
         durationMs: undefined,
         outputPad: 1,
+        keyText,
+        keyHint,
     };
 }
 

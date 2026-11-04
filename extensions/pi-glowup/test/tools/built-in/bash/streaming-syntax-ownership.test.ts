@@ -1,5 +1,5 @@
 import type { Component } from "@earendil-works/pi-tui";
-import { Theme } from "@earendil-works/pi-coding-agent";
+import { keyText, keyHint, Theme } from "@earendil-works/pi-coding-agent";
 import { createHash } from "node:crypto";
 import { format } from "oxfmt";
 import Type from "typebox";
@@ -80,6 +80,8 @@ describe("streaming Bash syntax ownership", () => {
                 isError: false,
                 durationMs: undefined,
                 outputPad: 1,
+                keyText,
+                keyHint,
                 invalidate: () => {},
             } satisfies BuiltInRenderContext;
             previous = feature.renderBashCall(
@@ -205,6 +207,8 @@ describe("streaming Bash syntax ownership", () => {
                 isError: false,
                 durationMs: undefined,
                 outputPad: 1,
+                keyText,
+                keyHint,
                 invalidate: () => {},
             } satisfies BuiltInRenderContext;
             previous = feature.renderBashCall(
@@ -261,6 +265,8 @@ describe("streaming Bash syntax ownership", () => {
                 isError: false,
                 durationMs: undefined,
                 outputPad: 1,
+                keyText,
+                keyHint,
                 invalidate: render,
             } satisfies BuiltInRenderContext;
             previous = feature.renderBashCall(
@@ -344,6 +350,8 @@ describe("streaming Bash syntax ownership", () => {
                 isError: false,
                 durationMs: undefined,
                 outputPad: 1,
+                keyText,
+                keyHint,
                 invalidate: () => {},
             } satisfies BuiltInRenderContext;
             previous = feature.renderBashCall(
@@ -394,6 +402,8 @@ describe("streaming Bash syntax ownership", () => {
             isError: false,
             durationMs: undefined,
             outputPad: 1,
+            keyText,
+            keyHint,
             invalidate: () => {},
         } satisfies Omit<BuiltInRenderContext, "lastComponent">;
         const render = (width: number) => {
@@ -465,6 +475,8 @@ describe("streaming Bash syntax ownership", () => {
                 isError: false,
                 durationMs: undefined,
                 outputPad: 1,
+                keyText,
+                keyHint,
                 invalidate: () => previous?.invalidate(),
             } satisfies BuiltInRenderContext;
             previous = feature.renderBashCall(
@@ -532,6 +544,8 @@ describe("streaming Bash syntax ownership", () => {
                 isError: false,
                 durationMs: undefined,
                 outputPad: 1,
+                keyText,
+                keyHint,
                 invalidate: () => previous?.invalidate(),
             } satisfies BuiltInRenderContext;
             previous = feature.renderBashCall(
@@ -599,6 +613,8 @@ describe("streaming Bash syntax ownership", () => {
                 isError: false,
                 durationMs: undefined,
                 outputPad: 1,
+                keyText,
+                keyHint,
                 invalidate,
             } satisfies BuiltInRenderContext;
             previous = feature.renderBashCall(
@@ -652,6 +668,8 @@ describe("streaming Bash syntax ownership", () => {
                 isError: false,
                 durationMs: undefined,
                 outputPad: 1,
+                keyText,
+                keyHint,
                 invalidate,
             } satisfies BuiltInRenderContext;
             previous = feature.renderBashCall(
@@ -698,6 +716,8 @@ describe("streaming Bash syntax ownership", () => {
             isError: false,
             durationMs: undefined,
             outputPad: 1,
+            keyText,
+            keyHint,
             invalidate,
         } satisfies BuiltInRenderContext;
         const show = () =>
@@ -743,6 +763,8 @@ describe("streaming Bash syntax ownership", () => {
                 isError: false,
                 durationMs: undefined,
                 outputPad: 1,
+                keyText,
+                keyHint,
                 invalidate,
             } satisfies BuiltInRenderContext;
             previous = feature.renderBashCall(

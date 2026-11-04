@@ -256,7 +256,7 @@ export function createRuntimeHarness(
       });
     },
     events: createEventBus(),
-    exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+    exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false, truncated: false }),
     getActiveTools: () => [...activeToolNames],
     getAllTools: () => {
       // SAFETY: goal-tool policy consumes only ToolInfo.name; each fixture supplies that field,

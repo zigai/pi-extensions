@@ -974,6 +974,7 @@ function createExtensionHarness(
                 stderr: execResult?.stderr ?? "",
                 code: execResult?.code ?? 0,
                 killed: execResult?.killed ?? false,
+                truncated: false,
             };
         },
     };

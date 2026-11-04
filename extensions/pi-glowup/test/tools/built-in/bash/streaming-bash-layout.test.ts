@@ -1,5 +1,5 @@
 import { describe, expect, it, onTestFinished } from "vitest";
-import { Theme } from "@earendil-works/pi-coding-agent";
+import { keyText, keyHint, Theme } from "@earendil-works/pi-coding-agent";
 import { TEST_THEME_BACKGROUND_COLORS, TEST_THEME_COLORS } from "../../../support/theme-colors.ts";
 import { stripVTControlCharacters } from "node:util";
 import { bindExtensionDiagnostics } from "@zigai/pi-extension-internals";
@@ -30,6 +30,8 @@ function context(command: string, expanded = false): BuiltInRenderContext {
         isError: false,
         durationMs: undefined,
         outputPad: 1,
+        keyText,
+        keyHint,
         invalidate: () => {},
     };
 }

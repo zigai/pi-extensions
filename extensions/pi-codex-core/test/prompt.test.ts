@@ -128,6 +128,23 @@ test("preserves append-style system instructions from earlier extensions", () =>
     );
 });
 
+test("preserves appended instructions after Pi 1.5's tightened preamble", () => {
+    const config = parseCodexCoreConfig({ prompt: { mode: "codex" } });
+    const prompt = [
+        "You are a coding assistant running inside pi, a coding agent harness. Help users inspect files, run commands, and modify code.",
+        "<cwd>\n/workspace\n</cwd>",
+        "Independent addition",
+    ].join("\n\n");
+    const result = buildCodexCoreSystemPromptResult(
+        prompt,
+        config,
+        { cwd: "/workspace", forceSystemPrompt: prompt },
+        { modelId: "gpt-6.1-sol" },
+    );
+    assert.equal(result.interop, "preserved-append");
+    assert.equal(result.prompt.split("Independent addition").length - 1, 1);
+});
+
 test("reports earlier full system-prompt replacements that cannot be merged safely", () => {
     const result = buildCodexCoreSystemPromptResult(
         "A completely replaced prompt.\nCurrent working directory: /workspace",

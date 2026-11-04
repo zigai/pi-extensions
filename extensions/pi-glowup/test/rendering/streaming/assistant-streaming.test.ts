@@ -421,7 +421,9 @@ describe("assistant structured streaming", () => {
         expect(painted).toContain("const first=1;");
         expect(painted).toContain("const second=2;");
         expect(painted).not.toContain("unfinished");
-        expect(content.children).not.toEqual(beforeReady);
+        // Pi 1.5 reuses the Markdown slot when the prepared statement changes.
+        // Assert the next paint's content, not replacement component identities.
+        expect(text(component)).toBe(painted);
         expect(raw.content).toEqual([
             {
                 type: "text",

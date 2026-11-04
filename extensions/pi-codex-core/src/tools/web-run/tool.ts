@@ -4,7 +4,6 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { Type, type Static } from "typebox";
-import { StringEnum } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import {
     withFileMutationQueue,
@@ -85,7 +84,7 @@ const WEB_RUN_PARAMETERS = Type.Object({
         Type.Array(
             Type.Object({
                 ticker: Type.String(),
-                type: StringEnum(["equity", "fund", "crypto", "index"] as const),
+                type: Type.Enum(["equity", "fund", "crypto", "index"] as const),
                 market: Type.Optional(Type.String()),
             }),
         ),
@@ -103,8 +102,8 @@ const WEB_RUN_PARAMETERS = Type.Object({
         Type.Array(
             Type.Object({
                 tool: Type.Optional(Type.Literal("sports")),
-                fn: StringEnum(["schedule", "standings"] as const),
-                league: StringEnum([
+                fn: Type.Enum(["schedule", "standings"] as const),
+                league: Type.Enum([
                     "nba",
                     "wnba",
                     "nfl",
@@ -126,7 +125,7 @@ const WEB_RUN_PARAMETERS = Type.Object({
     ),
     time: Type.Optional(Type.Array(Type.Object({ utc_offset: Type.String() }))),
     response_length: Type.Optional(
-        StringEnum(["short", "medium", "long"] as const, {
+        Type.Enum(["short", "medium", "long"] as const, {
             description: "Length of returned response.",
         }),
     ),

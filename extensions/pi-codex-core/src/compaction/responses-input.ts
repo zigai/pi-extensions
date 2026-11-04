@@ -199,7 +199,13 @@ function serializeMessagesToResponsesInput(
 
     let transcriptMessages = messages;
     if (!initialTranscript) {
-        transcriptMessages = [{ role: "system", content: "", timestamp: 0 }, ...messages];
+        // The checkpoint tail may contain calls whose declarations preceded it.
+        // Pi 1.5 emits additional_tools from transcript declarations, not the
+        // grammar-property lookup alone, so carry the projected tool loadout.
+        transcriptMessages = [
+            { role: "system", content: "", toolsAdded: declaredTools, timestamp: 0 },
+            ...messages,
+        ];
     }
 
     const context = transcriptApi.normalizeContext({ messages: transcriptMessages });

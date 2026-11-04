@@ -66,6 +66,7 @@ type Host = {
     editor: CustomEditor;
     editorContainer: Container;
     editorComponentFactory: Factory | undefined;
+    extensionDialogs: unknown[];
     disposeActiveSelector(): void;
 };
 
@@ -81,6 +82,7 @@ function createHost(): Host {
         editor: defaultEditor,
         editorContainer: new Container(),
         editorComponentFactory: undefined,
+        extensionDialogs: [],
         disposeActiveSelector() {},
     };
 }

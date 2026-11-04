@@ -1,7 +1,7 @@
 import { Type } from "typebox";
 
 import { compileSchema } from "../../schema-parsing.ts";
-import { StringEnum, type ImageContent } from "@earendil-works/pi-ai";
+import { type ImageContent } from "@earendil-works/pi-ai";
 import {
     Container,
     getImageDimensions,
@@ -71,7 +71,7 @@ const ViewImageArgumentsSchema = compileSchema(
         path: Type.Optional(Type.String()),
         file_path: Type.Optional(Type.String()),
         image_path: Type.Optional(Type.String()),
-        detail: Type.Optional(StringEnum(["high", "original"] as const)),
+        detail: Type.Optional(Type.Enum(["high", "original"])),
     }),
 );
 
@@ -94,7 +94,7 @@ const VIEW_IMAGE_PARAMETERS = Type.Object(
     {
         path: Type.String({ description: "Local filesystem path to an image file." }),
         detail: Type.Optional(
-            StringEnum(["high", "original"] as const, {
+            Type.Enum(["high", "original"], {
                 description:
                     "Image detail level. Defaults to `high`; use `original` to preserve exact resolution.",
             }),

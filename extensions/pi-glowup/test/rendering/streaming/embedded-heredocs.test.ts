@@ -1,6 +1,6 @@
 import { format } from "oxfmt";
 import { afterEach, expect, it, vi } from "vitest";
-import { Theme } from "@earendil-works/pi-coding-agent";
+import { keyText, keyHint, Theme } from "@earendil-works/pi-coding-agent";
 import { stripVTControlCharacters } from "node:util";
 import { createNativeBashFeature } from "../../../src/tools/built-in/bash/preview.ts";
 import type { BuiltInRenderContext } from "../../../src/tools/built-in/context.ts";
@@ -418,6 +418,8 @@ it.each([true, false])(
             isError: false,
             durationMs: undefined,
             outputPad: 1,
+            keyText,
+            keyHint,
             invalidate: () => {},
         };
         const render = (expanded: boolean, width = 100) =>
@@ -684,6 +686,8 @@ it("shows formatted awk programs collapsed and expanded, like source heredocs", 
         isError: false,
         durationMs: undefined,
         outputPad: 1,
+        keyText,
+        keyHint,
         invalidate: () => {},
     };
     const render = (expanded: boolean, width = 50) =>

@@ -705,10 +705,14 @@ test.each(["default", undefined, "flex"])(
         const provider = openaiCodexProvider();
         const originalStream = Object.getOwnPropertyDescriptor(provider, "stream");
         const originalSimple = Object.getOwnPropertyDescriptor(provider, "streamSimple");
-        const catalogModel = provider.getModels().find((model) => model.id === "gpt-5.5");
+        // Exercise tier rewriting with a synthetic pricing identity, not catalog membership.
+        const catalogModel = provider
+            .getModels()
+            .find((model) => model.api === "openai-codex-responses");
         assert.ok(catalogModel);
         const model = {
             ...catalogModel,
+            id: "gpt-5.5",
             cost: { input: 1, output: 4, cacheRead: 0.1, cacheWrite: 2 },
         };
         const ctx = testDouble<ExtensionContext>({

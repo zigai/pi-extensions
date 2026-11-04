@@ -96,7 +96,11 @@ it("loads the packed production install in Pi and restores persisted naming prog
             JSON.stringify({
                 private: true,
                 type: "module",
-                overrides: hostManifest.overrides,
+                overrides: {
+                    ...hostManifest.overrides,
+                    "@earendil-works/pi-coding-agent": "$@earendil-works/pi-coding-agent",
+                    "@earendil-works/pi-ai": "$@earendil-works/pi-ai",
+                },
                 dependencies: {
                     "@zigai/pi-autoname-session": `file:${join(installDir, archive)}`,
                     "@zigai/pi-extension-settings": `file:${join(installDir, packedSettings.filename)}`,

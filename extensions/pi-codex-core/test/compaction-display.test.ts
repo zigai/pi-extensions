@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
+import { keyText, keyHint, type ExtensionAPI, type Theme } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { stripVTControlCharacters } from "node:util";
 import { registerNativeCompactionDisplay } from "../src/compaction/display.ts";
@@ -51,7 +51,7 @@ test("native compaction renderer clips colored CJK and emoji by terminal columns
             display: true,
             timestamp: 0,
         },
-        { expanded: false, outputPad: 0 },
+        { expanded: false, outputPad: 0, keyText, keyHint },
         theme,
     );
     assert.ok(component);

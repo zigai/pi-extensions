@@ -144,6 +144,7 @@ type MarkdownFencesPatchRecord = {
     readonly owners: Set<symbol>;
     markdownRenderPatch?: LinkedMethodPatchHandle<Markdown, [width: number], string[]>;
     markdownInvalidatePatch?: LinkedMethodPatchHandle<Markdown, [], void>;
+    markdownSetTextPatch?: LinkedMethodPatchHandle<Markdown, [text: string], void>;
     foreignMarkdownPatches: ForeignMarkdownPatch[];
     assistantRenderPatch?: AssistantRenderPatchHandle;
 
@@ -166,6 +167,7 @@ function restoreMarkdownFencesPatch(patch: MarkdownFencesPatchRecord, owner: sym
 
     patch.markdownRenderPatch?.dispose();
     patch.markdownInvalidatePatch?.dispose();
+    patch.markdownSetTextPatch?.dispose();
 
     for (const foreignPatch of patch.foreignMarkdownPatches) foreignPatch.handle.dispose();
     patch.foreignMarkdownPatches.length = 0;
@@ -214,6 +216,17 @@ async function patchMarkdownFences(owner: symbol): Promise<MarkdownFencesPatchRe
             function (this: Markdown): void {
                 invalidateThinkingMarkdown(this);
                 predecessor.call(this);
+            },
+    );
+    // Pi 1.5 reuses Markdown instances and calls setText even when only the
+    // streaming transform context changes. Keep the plain-thinking clone fresh.
+    patch.markdownSetTextPatch = installLinkedMethodPatch(
+        Markdown.prototype,
+        "setText",
+        (predecessor) =>
+            function (this: Markdown, text: string): void {
+                invalidateThinkingMarkdown(this);
+                predecessor.call(this, text);
             },
     );
     patch.markdownRenderPatch = installLinkedRenderPatch(

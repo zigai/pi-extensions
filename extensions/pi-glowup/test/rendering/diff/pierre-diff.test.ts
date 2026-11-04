@@ -6,6 +6,7 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
     buildLargeDiffSummaryPayload,
+    buildPierreSummaryPayload,
     buildPierreDiffPayload,
     buildPierreDiffPayloadsFromPatch,
 } from "../../../src/rendering/diff/payload.ts";

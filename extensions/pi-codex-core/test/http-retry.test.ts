@@ -40,7 +40,10 @@ test("Codex request-tier wrapper is idempotent, removable, and preserves a later
 
 test("Codex raw streams price concurrent requests by their final payload, without mutating caller options", async () => {
     const provider = openaiCodexProvider();
-    const model = provider.getModels().find((candidate) => candidate.id === "gpt-5.5");
+    // This exercises request hooks/pricing, not membership of a retired catalog ID.
+    const model = provider
+        .getModels()
+        .find((candidate) => candidate.api === "openai-codex-responses");
     assert.ok(model);
     const handle = installCodexRequestTierWrapper(provider);
     assert.ok(handle);
@@ -76,6 +79,8 @@ test("Codex raw streams price concurrent requests by their final payload, withou
 
     const costModel = {
         ...model,
+        // Keep the intentional 2.5x priority-pricing fixture independent of catalog churn.
+        id: "gpt-5.5",
         cost: { input: 1000, output: 1000, cacheRead: 1000, cacheWrite: 1000 },
     };
     const priorityOptions = {
@@ -108,14 +113,15 @@ test("Codex raw streams price concurrent requests by their final payload, withou
         const prioritized = await priority;
         assert.equal(regular.stopReason, "stop", regular.errorMessage);
         assert.equal(prioritized.stopReason, "stop", prioritized.errorMessage);
-        assert.deepEqual(regular.usage.cost, {
+        // Pi 1.5 additionally reports totalFromProvider; this test owns tier pricing.
+        assert.partialDeepStrictEqual(regular.usage.cost, {
             input: 1,
             output: 0.1,
             cacheRead: 0,
             cacheWrite: 0,
             total: 1.1,
         });
-        assert.deepEqual(prioritized.usage.cost, {
+        assert.partialDeepStrictEqual(prioritized.usage.cost, {
             input: 2.5,
             output: 0.25,
             cacheRead: 0,
@@ -132,7 +138,10 @@ test("Codex raw streams price concurrent requests by their final payload, withou
 
 test("Codex refuses requests when the SDK loses the payload hook receiver", async () => {
     const provider = openaiCodexProvider();
-    const model = provider.getModels().find((candidate) => candidate.id === "gpt-5.5");
+    // This exercises request hooks/pricing, not membership of a retired catalog ID.
+    const model = provider
+        .getModels()
+        .find((candidate) => candidate.api === "openai-codex-responses");
     assert.ok(model);
     const changedSdk = installLinkedMethodPatch(
         provider,

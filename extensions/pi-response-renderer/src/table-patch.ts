@@ -51,6 +51,8 @@ const tableSchema = Type.Object({
     ),
 });
 
+const sourceSchema = Type.Object({ text: Type.String() });
+
 const hostSchema = Type.Object({
     render: Type.Function([Type.Number()], Type.Array(Type.String())),
     invalidate: Type.Function([], Type.Void()),
@@ -135,6 +137,7 @@ export function installTableRendering(settings: TableStyle) {
 function createTablePatch(host: TableHost, settings: TableStyle) {
     const revisions = new WeakMap<TableHost, number>();
     const widths = new WeakMap<TableHost, number>();
+    const sources = new WeakMap<TableHost, string>();
     const accentSamples = new WeakMap<TableHost, string>();
     const affected = new WeakSet<TableHost>();
     const instances = new Set<WeakRef<TableHost>>();
@@ -229,6 +232,15 @@ function createTablePatch(host: TableHost, settings: TableStyle) {
         undefined,
         (predecessor) =>
             function (this: TableHost, width) {
+                // Pi 1.5's setText clears the outer cache, not invalidate().
+                // Boundary metadata belongs to the source, and reused table blocks
+                // must be rendered again when rebuilding that metadata.
+                if (Value.Check(sourceSchema, this)) {
+                    if (sources.get(this) !== this.text) {
+                        if (affected.has(this)) this.invalidate();
+                        sources.set(this, this.text);
+                    }
+                }
                 const accent = settings.accent;
                 const sample = accent?.("\u0000") ?? "";
                 if (accentSamples.get(this) !== sample) {

@@ -1,4 +1,4 @@
-import { Theme } from "@earendil-works/pi-coding-agent";
+import { keyText, keyHint, Theme } from "@earendil-works/pi-coding-agent";
 import { stripVTControlCharacters } from "node:util";
 import { expect, it, vi } from "vitest";
 import { createNativeBashFeature } from "../../../../src/tools/built-in/bash/preview.ts";
@@ -38,6 +38,8 @@ it.each(["show", "omit"] as const)(
             isError: false,
             durationMs: undefined,
             outputPad: 1,
+            keyText,
+            keyHint,
             invalidate: () => {},
         };
         const render = (expanded: boolean, width: number) =>
