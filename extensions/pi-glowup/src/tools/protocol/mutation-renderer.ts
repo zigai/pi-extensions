@@ -16,6 +16,7 @@ import {
     renderGlowupDiff,
     type GlowupDiffRenderOptions,
 } from "../../rendering/diff/text-renderer.ts";
+import { displayMutationPath } from "../../rendering/path.ts";
 import { renderMutationCall } from "../../rendering/tool-header.ts";
 import { type DiffLineCoordinates, type DiffSection } from "../../rendering/diff/text-diff.ts";
 import { type GlowupCallState, type GlowupRenderTheme } from "../../rendering/theme.ts";
@@ -189,6 +190,8 @@ class ProtocolMutationComponent implements Component {
         const nextDiffComponents = new Map<string, Component>();
         const sections = update.node.files.map((file, index) => {
             const path = mutationPath(file);
+            let displayPath = displayMutationPath(file.path);
+            if (path !== file.path) displayPath = displayMutationPath(file.path, file.previousPath);
             const occurrence = pathOccurrences.get(path) ?? 0;
             pathOccurrences.set(path, occurrence + 1);
 
@@ -237,7 +240,7 @@ class ProtocolMutationComponent implements Component {
                 update.theme,
                 {
                     label: update.label,
-                    path,
+                    path: displayPath,
                     added: showStats ? file.added : 0,
                     removed: showStats ? file.removed : 0,
                 },

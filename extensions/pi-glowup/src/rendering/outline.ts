@@ -1,5 +1,6 @@
+import { renderInline } from "../tools/protocol/inline-renderer.ts";
+import { displayMutationPath } from "./path.ts";
 import { protocolContent } from "../tools/protocol/content.ts";
-import Type from "typebox";
 import type { CodePreview } from "./streaming/presentation.ts";
 import { Value } from "typebox/value";
 import { inlineObjectSchema, decodeGlowupNode } from "../tools/protocol/decode.ts";
@@ -36,15 +37,6 @@ import { jsonObjectParser } from "../json-value.ts";
 import { boundedPreviewValue, type PreviewValue } from "../tools/previews.ts";
 import { textOutput } from "../tools/built-in/arguments.ts";
 import type { ThirdPartyToolRenderer, ThirdPartyToolRenderContext } from "../tools/types.ts";
-
-const inlineSchema = Type.Union([
-    Type.String(),
-    Type.Decode(inlineObjectSchema, (token) => token.text),
-]);
-
-function inline(value: GlowupInline): string {
-    return Value.Decode(inlineSchema, value);
-}
 
 function listNode(item: GlowupInline | GlowupNode): GlowupNode {
     const scalar = stringParser.parse(item);
@@ -145,12 +137,12 @@ function nodeRows(
         case "empty":
             return [];
         case "text":
-            return inline(node.text)
+            return renderInline(theme, node.text)
                 .split("\n")
                 .flatMap((line) => wrapStyledText(line, width));
         case "summary":
             return node.rows.flatMap((row) =>
-                `${inline(row.label)}: ${inline(row.value)}`
+                `${renderInline(theme, row.label)}: ${renderInline(theme, row.value)}`
                     .split("\n")
                     .flatMap((line) => wrapStyledText(line, width)),
             );
@@ -243,7 +235,9 @@ function nodeRows(
 
             const rows = renderGlowupOutput(theme, content, outputOptions).render(width);
             if (node.kind === "code" && node.title !== undefined)
-                rows.unshift(...wrapStyledText(theme.fg("accent", inline(node.title)), width));
+                rows.unshift(
+                    ...wrapStyledText(theme.fg("accent", renderInline(theme, node.title)), width),
+                );
 
             return rows;
         }
@@ -251,9 +245,7 @@ function nodeRows(
             const full = showsFullMutation(mutations, context.expanded);
 
             return node.files.flatMap((file) => {
-                let path = file.path;
-                if (file.previousPath !== undefined) path = `${file.previousPath} → ${file.path}`;
-
+                const path = displayMutationPath(file.path, file.previousPath);
                 let heading = theme.fg("accent", path);
                 if (file.countsKnown !== false) {
                     const stats = formatMutationStats(

@@ -120,6 +120,45 @@ function stripAnsi(text: string): string {
 }
 
 describe("Pierre diff rendering", () => {
+    it("shortens Pierre summary labels and unreadable paths", () => {
+        vi.stubEnv("HOME", "/home/test");
+        try {
+            const payload = buildPierreSummaryPayload(
+                "/home/test/file.ts",
+                { added: 0, removed: 0, lineCount: 0, sizeBytes: 0 },
+                "not-readable",
+            );
+            const rendered = renderPierreDiff(
+                payload,
+                testTheme,
+                { expanded: true },
+                { toolCallId: "summary", lastComponent: undefined },
+            )
+                .render(160)
+                .join("\n");
+            expect(rendered).toContain("~/file.ts");
+            expect(rendered).not.toContain("/home/test/file.ts");
+            expect(payload.path).toBe("/home/test/file.ts");
+            const rename = buildPierreSummaryPayload(
+                "/home/test/old.ts → /home/test/new.ts",
+                { added: 1, removed: 1, lineCount: 2, sizeBytes: 10 },
+                "too-large",
+            );
+            expect(
+                renderPierreDiff(
+                    rename,
+                    testTheme,
+                    { expanded: true },
+                    { toolCallId: "rename", lastComponent: undefined },
+                )
+                    .render(160)
+                    .join("\n"),
+            ).toContain("~/old.ts → ~/new.ts");
+        } finally {
+            vi.unstubAllEnvs();
+        }
+    });
+
     beforeEach(() => configureRenderingAppearance(defaultAppearance));
 
     it("accepts valid persisted summaries and rejects malformed payload details", () => {

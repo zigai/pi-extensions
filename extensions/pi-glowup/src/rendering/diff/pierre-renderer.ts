@@ -1,4 +1,5 @@
 import { RenderedLineCache, RenderedValueCache } from "../rendered-line-cache.ts";
+import { displayDiffPath } from "../path.ts";
 import { omittedLinesLabel, type ToolKeyHint } from "../component.ts";
 import { keyHint } from "@earendil-works/pi-coding-agent";
 import Type from "typebox";
@@ -899,7 +900,7 @@ function renderPierreDiffSummary(
         render(width: number): string[] {
             const safeWidth = Math.max(1, Math.floor(width));
             const changeStats = `${payload.stats.added.toLocaleString("en-US")} + / ${payload.stats.removed.toLocaleString("en-US")} -`;
-            const headline = `${theme.fg("toolDiffContext", payload.path)} ${theme.fg("muted", changeStats)}`;
+            const headline = `${theme.fg("toolDiffContext", displayDiffPath(payload.path))} ${theme.fg("muted", changeStats)}`;
             const hint = "Use git diff or read the file directly to inspect the full change.";
 
             return [
@@ -943,7 +944,7 @@ function omittedDiffLineCount(
 
 export function summaryDetail(payload: PierreSummaryDiffPayload): string {
     if (payload.summary.reason === "not-readable") {
-        return `Diff omitted: ${payload.path} could not be read safely.`;
+        return `Diff omitted: ${displayDiffPath(payload.path)} could not be read safely.`;
     }
 
     if (payload.summary.reason === "metadata-too-large") {

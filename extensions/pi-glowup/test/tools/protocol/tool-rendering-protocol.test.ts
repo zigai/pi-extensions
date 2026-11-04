@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { renderOutlineNode } from "../../../src/rendering/outline.ts";
 import { renderProtocolNode } from "../../../src/tools/protocol/node-renderer.ts";
 import { createCodeStreamStore } from "../../../src/rendering/streaming/code-stream.ts";
 import type { ThirdPartyToolRenderContext } from "../../../src/tools/types.ts";
@@ -22,6 +23,79 @@ import {
 } from "../../../src/tools/protocol/contract.ts";
 
 describe("Glowup tool-rendering protocol", () => {
+    it("uses link colors for URL text and preserves bold titles in both presentations", () => {
+        const theme: GlowupRenderTheme = {
+            fg: (token, value) => `<${token}>${value}</${token}>`,
+            bold: (value) => `**${value}**`,
+        };
+        const context: ThirdPartyToolRenderContext = {
+            toolCallId: "styled-result",
+            args: {},
+            argsComplete: true,
+            executionStarted: true,
+            isPartial: false,
+            isError: false,
+            expanded: true,
+            showImages: false,
+        };
+        const node = stack([
+            text({ kind: "text", text: "Example documentation", bold: true }),
+            text({ kind: "text", text: "https://example.org/docs", tone: "url" }),
+        ]);
+        const compact = renderProtocolNode(node, theme, context, "static").render(500).join("\n");
+        const outline = renderOutlineNode(node, theme, context, "static").render(500).join("\n");
+        expect(compact).toContain("<mdLinkUrl>https://example.org/docs</mdLinkUrl>");
+        expect(outline).toContain("<mdLinkUrl>https://example.org/docs</mdLinkUrl>");
+        expect(compact).toContain("**<toolTitle>Example documentation</toolTitle>**");
+        expect(outline).toContain("**<toolTitle>Example documentation</toolTitle>**");
+    });
+
+    it("shortens both mutation endpoints in compact, nested and outline views without rewriting content", () => {
+        const theme = {
+            fg: (_token: string, value: string) => value,
+            bold: (value: string) => value,
+        };
+        const context: ThirdPartyToolRenderContext = {
+            toolCallId: "path",
+            args: {},
+            argsComplete: true,
+            executionStarted: true,
+            isPartial: false,
+            isError: false,
+            expanded: true,
+            showImages: false,
+        };
+        vi.stubEnv("HOME", "/home/test");
+        try {
+            const node = mutation({ static: "Patch" }, [
+                {
+                    previousPath: "/home/test/old.ts",
+                    path: "/home/test/new.ts",
+                    lines: [{ kind: "addition", text: "/home/test/literal" }],
+                    added: 1,
+                    removed: 0,
+                },
+            ]);
+            const compact = renderProtocolNode(node, theme, context, "static")
+                .render(160)
+                .join("\n");
+            const nested = renderProtocolNode(list([node]), theme, context, "static")
+                .render(160)
+                .join("\n");
+            const outline = renderOutlineNode(node, theme, context, "static")
+                .render(160)
+                .join("\n");
+            for (const rendered of [compact, nested, outline])
+                expect(rendered).toContain("~/old.ts → ~/new.ts");
+
+            expect(compact).toContain("/home/test/literal");
+            expect(outline).toContain("/home/test/literal");
+            expect(node.files[0]?.path).toBe("/home/test/new.ts");
+        } finally {
+            vi.unstubAllEnvs();
+        }
+    });
+
     it("streams nested list code independently without delaying ordinary output", async () => {
         const streams = createCodeStreamStore();
         const node = list([

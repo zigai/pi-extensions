@@ -1,3 +1,5 @@
+import { renderInline } from "./inline-renderer.ts";
+import { displayMutationPath } from "../../rendering/path.ts";
 import type { Component } from "@earendil-works/pi-tui";
 import { protocolContent } from "./content.ts";
 import { emptyComponent, makeComponent, wrapPrefixedLine } from "../../rendering/component.ts";
@@ -133,38 +135,8 @@ function renderBodyText(
     const prefixFirst = bodyFirstPrefix(theme, position);
 
     return makeComponent((width) =>
-        wrapPrefixedLine(toneText(theme, value), width, prefixFirst, BODY_INDENT),
+        wrapPrefixedLine(renderInline(theme, value), width, prefixFirst, BODY_INDENT),
     );
-}
-
-function toneText(theme: GlowupRenderTheme, value: GlowupInline): string {
-    if (!(value instanceof Object) || !("kind" in value)) return value;
-
-    const token: Parameters<GlowupRenderTheme["fg"]>[0] = (() => {
-        switch (value.tone) {
-            case "accent":
-            case "path":
-            case "url":
-                return "accent";
-            case "success":
-                return "success";
-            case "error":
-                return "error";
-            case "dim":
-                return "dim";
-            case "muted":
-                return "muted";
-            case "code":
-                return "syntaxString";
-            case "default":
-            case undefined:
-                return "toolTitle";
-        }
-
-        return "toolTitle";
-    })();
-    const styled = theme.fg(token, value.text);
-    return value.bold === true ? theme.bold(styled) : styled;
 }
 
 function statusLabel(
@@ -210,17 +182,17 @@ function nodeText(
 ): string {
     switch (node.kind) {
         case "text":
-            return toneText(theme, node.text);
+            return renderInline(theme, node.text);
         case "summary":
             return node.rows
                 .map(
                     (row) =>
-                        `${toneText(theme, row.label)} ${theme.fg("dim", "→")} ${toneText(theme, row.value)}`,
+                        `${renderInline(theme, row.label)} ${theme.fg("dim", "→")} ${renderInline(theme, row.value)}`,
                 )
                 .join("\n");
         case "code":
             return [
-                node.title === undefined ? undefined : toneText(theme, node.title),
+                node.title === undefined ? undefined : renderInline(theme, node.title),
                 codeContent(node, key, indent),
             ]
                 .filter((value): value is string => value !== undefined)
@@ -231,7 +203,7 @@ function nodeText(
                     if (!(item instanceof Object)) return `• ${item}`;
 
                     if (item.kind === "text" && ("tone" in item || "bold" in item)) {
-                        return `• ${toneText(theme, item)}`;
+                        return `• ${renderInline(theme, item)}`;
                     }
 
                     return `• ${nodeText(item, theme, codeContent, `${key}.${index}`, indent + 2)}`;
@@ -241,11 +213,7 @@ function nodeText(
             return codeContent(node, key, indent);
         case "mutation":
             return node.files
-                .map((file) =>
-                    file.previousPath === undefined
-                        ? file.path
-                        : `${file.previousPath} → ${file.path}`,
-                )
+                .map((file) => displayMutationPath(file.path, file.previousPath))
                 .join("\n");
         case "stack":
             return node.children

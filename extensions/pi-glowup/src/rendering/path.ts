@@ -13,6 +13,17 @@ export function collapseHome(path: string): string {
     return path;
 }
 
+/** Formats known rename endpoints independently; callers retain the original paths. */
+export function displayMutationPath(path: string, previousPath?: string): string {
+    if (previousPath === undefined) return collapseHome(path);
+    return `${collapseHome(previousPath)} → ${collapseHome(path)}`;
+}
+
+/** Pierre summary paths encode rename endpoints using this separator. */
+export function displayDiffPath(path: string): string {
+    return path.split(" → ").map(collapseHome).join(" → ");
+}
+
 export function isInstructionFilePath(path: string | undefined): boolean {
     const normalized = (path ?? "").replace(/\\/g, "/");
     const segments = normalized.split("/").filter((segment) => segment.length > 0);
