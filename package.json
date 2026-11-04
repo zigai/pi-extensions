@@ -117,7 +117,8 @@
       "./extensions/pi-autoname-session/src/index.ts",
       "./extensions/pi-toggles/src/index.ts",
       "./extensions/pi-settings-ui/src/index.ts",
-      "./extensions/pi-expanded-skills/src/index.ts"
+      "./extensions/pi-expanded-skills/src/index.ts",
+      "./extensions/pi-input-corrections/src/index.ts"
     ]
   },
   "piWorkspace": {

@@ -1,0 +1,67 @@
+{
+  "name": "@zigai/pi-input-corrections",
+  "version": "0.1.0",
+  "description": "Conservative configurable corrections for interactive Pi input.",
+  "keywords": [
+    "pi",
+    "pi-coding-agent",
+    "pi-extension",
+    "pi-package",
+    "pi-tweaks"
+  ],
+  "homepage": "https://github.com/zigai/pi-tweaks/tree/master/extensions/pi-input-corrections#readme",
+  "bugs": {
+    "url": "https://github.com/zigai/pi-tweaks/issues"
+  },
+  "license": "MIT",
+  "author": "zigai",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zigai/pi-tweaks.git",
+    "directory": "extensions/pi-input-corrections"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "*.json",
+    "LICENSE",
+    "vitest.config.ts"
+  ],
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./engine": "./src/correction-engine.ts",
+    "./policy": "./src/policy-loader.ts"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "test": "vitest run --config vitest.config.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "oxlint --type-aware src",
+    "format:check": "oxfmt --check src package.json tsconfig.json vitest.config.ts",
+    "format": "oxfmt --write src package.json tsconfig.json vitest.config.ts",
+    "config:generate": "pi-extension-settings generate && npm run policy:generate",
+    "policy:generate": "node --input-type=module -e \"import { writeFileSync } from 'node:fs'; import { policySchema } from './src/policy-input.ts'; writeFileSync('policy.schema.json', JSON.stringify(policySchema, null, 2) + '\\n');\" && oxfmt policy.schema.json",
+    "config:check": "pi-extension-settings check"
+  },
+  "dependencies": {
+    "@zigai/pi-extension-settings": "0.6.1"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "^1.3.0",
+    "typebox": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "piExtensionSettings": {
+    "definition": "./src/settings-input.ts",
+    "prevalidation": "./src/settings.prevalidated.ts",
+    "schema": "./config.schema.json",
+    "readme": "./README.md"
+  }
+}

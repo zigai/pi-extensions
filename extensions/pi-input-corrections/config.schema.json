@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/zigai/pi-tweaks/master/extensions/pi-input-corrections/config.schema.json",
+  "title": "Pi Input Corrections settings",
+  "description": "Conservative corrections for interactive prose input.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "default": "./schemas/pi-input-corrections.schema.json",
+      "description": "JSON Schema used by editors for this settings file."
+    },
+    "enabled": {
+      "type": "boolean",
+      "default": true,
+      "description": "Enable interactive input corrections."
+    },
+    "policyFile": {
+      "type": "string",
+      "default": "",
+      "description": "Personal policy JSON path. Empty disables corrections; ~/ expands to home, relative paths resolve beside this settings file."
+    }
+  }
+}

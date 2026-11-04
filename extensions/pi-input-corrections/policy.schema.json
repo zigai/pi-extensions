@@ -1,0 +1,66 @@
+{
+  "type": "object",
+  "required": ["version", "rules"],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "type": "number",
+      "const": 1
+    },
+    "trailingQuestionMark": {
+      "type": "boolean",
+      "default": true
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "find", "replacement"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "description": "A descriptive name for this rule."
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "Enable this rule."
+          },
+          "kind": {
+            "enum": ["literal", "word", "regex"],
+            "default": "literal",
+            "description": "Literal text, a Unicode-delimited literal word, or the documented safe regex subset."
+          },
+          "find": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "Text or regex source to find. Empty-matching regexes are rejected."
+          },
+          "replacement": {
+            "type": "string",
+            "maxLength": 1024,
+            "description": "Literal replacement text; dollar substitutions and callbacks are not evaluated."
+          },
+          "flags": {
+            "type": "string",
+            "default": "g",
+            "maxLength": 5,
+            "description": "Regex flags: unique g, i, m, s, u only. Ignored for literal/word rules, which replace all occurrences."
+          }
+        },
+        "title": "CorrectionRule",
+        "additionalProperties": false
+      },
+      "maxItems": 512
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/zigai/pi-tweaks/master/extensions/pi-input-corrections/policy.schema.json",
+  "title": "Input Correction Policy",
+  "additionalProperties": false
+}

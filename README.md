@@ -21,6 +21,7 @@ A collection of small Pi extensions for improving interaction, display, and mode
 | [@zigai/pi-message-timestamps](extensions/pi-message-timestamps)   | Shows timestamps on conversation messages.                                        | `pi install npm:@zigai/pi-message-timestamps`  |
 | [@zigai/pi-status-bar](extensions/pi-status-bar)                   | Provides a programmable active and idle status bar with timing stats.             | `pi install npm:@zigai/pi-status-bar`          |
 | [@zigai/pi-model-modes](extensions/pi-model-modes)                 | Mode presets for switching models and thinking levels in Pi.                      | `pi install npm:@zigai/pi-model-modes`         |
+| [@zigai/pi-input-corrections](extensions/pi-input-corrections)     | Applies your own correction rules to prompts you type.                            | `pi install npm:@zigai/pi-input-corrections`   |
 | [@zigai/pi-prompt-history](extensions/pi-prompt-history)           | Current-session prompt history for Pi's prompt editor.                            | `pi install npm:@zigai/pi-prompt-history`      |
 | [@zigai/pi-trust-all-folders](extensions/pi-trust-all-folders)     | Automatically trust all folders in Pi.                                            | `pi install npm:@zigai/pi-trust-all-folders`   |
 | [@zigai/pi-branch](extensions/pi-branch)                           | Pi package for branching the current session into parallel tmux or Ghostty panes. | `pi install npm:@zigai/pi-branch`              |
