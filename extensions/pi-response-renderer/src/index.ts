@@ -50,9 +50,10 @@ export default function assistantRenderingExtension(pi: ExtensionAPI): void {
                 for (const diagnostic of loaded.diagnostics)
                     ctx.ui.notify(diagnostic.message, diagnostic.severity);
 
+                const ui = ctx.ui;
                 const handle = await installResponseRendering({
                     ...loaded.settings,
-                    accent: (text) => ctx.ui.theme.fg("accent", text),
+                    accent: (text) => ui.theme.fg("accent", text),
                 });
                 if (current !== generation) {
                     handle.dispose();
