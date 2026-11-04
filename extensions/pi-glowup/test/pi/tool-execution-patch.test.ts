@@ -1,10 +1,27 @@
-import { Text } from "@earendil-works/pi-tui";
+import {
+    configureCompletedLineCache,
+    RenderedLineCache,
+    clearCompletedLineCache,
+    completedLineCacheStats,
+} from "../../src/rendering/rendered-line-cache.ts";
+import { Text, TuiMainScreen } from "@earendil-works/pi-tui";
+import { fc } from "@fast-check/vitest";
+import { stripVTControlCharacters } from "node:util";
+import { VirtualTerminal } from "../support/virtual-terminal.ts";
+import { propertyReplayParameters } from "../support/property-replay.ts";
 import { queryObjects } from "node:v8";
 import { setImmediate } from "node:timers/promises";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import Type from "typebox";
 import { Value } from "typebox/value";
-import { ToolExecutionComponent, type AgentToolResult } from "@earendil-works/pi-coding-agent";
+import {
+    keyText,
+    keyHint,
+    ToolExecutionComponent,
+    initTheme,
+    createReadToolDefinition,
+    type AgentToolResult,
+} from "@earendil-works/pi-coding-agent";
 import type { GlowupRenderTheme } from "../../src/rendering/theme.ts";
 import { createPlainTheme } from "../support/plain-theme.ts";
 import { call, text } from "../../src/tools/protocol/contract.ts";
@@ -17,7 +34,6 @@ import { disposeSyntaxHighlighting } from "../../src/rendering/syntax/highlighte
 import type { ThirdPartyToolRendererPlugin, ThirdPartyToolResult } from "../../src/tools/types.ts";
 import {
     configureBuiltInToolRendererPatch,
-    configureCompletedLineCache,
     configureThirdPartyToolRendererPatch,
     toolRendererPatchStats,
 } from "../../src/pi/patches/tool-execution-patch.ts";
@@ -100,6 +116,8 @@ const renderContext: FakeRenderContext = {
     isError: false,
     durationMs: undefined,
     outputPad: 1,
+    keyText,
+    keyHint,
 };
 
 function createPrototype(): FakeToolExecutionPrototype {
@@ -1996,6 +2014,256 @@ describe("tool execution patches", () => {
             expect(lineRenders).toBe(22);
         } finally {
             configureBuiltInToolRendererPatch(false, undefined, prototype);
+        }
+    });
+
+    it("preserves frame values and budgets through generated shared-cache histories", () => {
+        const operation = fc.record({
+            kind: fc.constantFrom("store", "read", "clear", "reset", "resize"),
+            owner: fc.integer({ min: 0, max: 2 }),
+            width: fc.constantFrom(40, 80),
+            size: fc.integer({ min: 0, max: 80 }),
+        });
+        fc.assert(
+            fc.property(fc.array(operation, { minLength: 12, maxLength: 50 }), (operations) => {
+                clearCompletedLineCache();
+                const caches = [
+                    new RenderedLineCache(),
+                    new RenderedLineCache(),
+                    new RenderedLineCache(),
+                ];
+
+                const model = new Map<number, { width: number; line: string; bytes: number }>();
+                let maxBytes = 128;
+                let maxEntries = 2;
+                configureCompletedLineCache({ maxBytes, maxEntries });
+                try {
+                    for (const { kind, owner, width, size } of operations) {
+                        const cache = caches[owner];
+                        if (cache === undefined) throw new Error("Missing cache fixture");
+
+                        if (kind === "reset") {
+                            clearCompletedLineCache();
+                            model.clear();
+                        }
+
+                        if (kind === "resize") {
+                            const nextBytes = 64 + size;
+                            if (maxBytes !== nextBytes || maxEntries !== owner + 1) model.clear();
+                            maxBytes = nextBytes;
+                            maxEntries = owner + 1;
+                            configureCompletedLineCache({ maxBytes, maxEntries });
+                        }
+
+                        if (kind === "clear") {
+                            cache.clear();
+                            model.delete(owner);
+                        }
+
+                        if (kind === "store") {
+                            const line = "x".repeat(size);
+                            cache.set(width, [line]);
+                            model.delete(owner);
+                            const bytes = size + 16;
+                            if (bytes <= maxBytes) {
+                                while (
+                                    [...model.values()].reduce(
+                                        (sum, value) => sum + value.bytes,
+                                        0,
+                                    ) +
+                                        bytes >
+                                        maxBytes ||
+                                    model.size >= maxEntries
+                                ) {
+                                    const oldest = model.keys().next().value;
+                                    if (oldest === undefined)
+                                        throw new Error("Empty reference budget");
+
+                                    model.delete(oldest);
+                                }
+
+                                model.set(owner, { width, line, bytes });
+                            }
+                        }
+
+                        if (kind === "read") {
+                            const expected = model.get(owner);
+                            let expectedLines: string[] | undefined;
+                            if (expected?.width === width) {
+                                expectedLines = [expected.line];
+                                model.delete(owner);
+                                model.set(owner, expected);
+                            }
+
+                            expect(cache.get(width)).toEqual(expectedLines);
+                        }
+
+                        const stats = completedLineCacheStats();
+                        expect(stats.completedLineCacheBytes).toBe(
+                            [...model.values()].reduce((sum, value) => sum + value.bytes, 0),
+                        );
+
+                        expect(stats.completedLineCacheEntries).toBe(model.size);
+                        expect(stats.completedLineCacheBytes).toBeLessThanOrEqual(maxBytes);
+                        expect(stats.completedLineCacheEntries).toBeLessThanOrEqual(maxEntries);
+                    }
+                } finally {
+                    clearCompletedLineCache();
+                    configureCompletedLineCache({ maxBytes: 64 * 1024 * 1024, maxEntries: 10_000 });
+                }
+            }),
+            { ...propertyReplayParameters(), numRuns: 80 },
+        );
+    });
+
+    it("isolates interleaved native and adapter rows through real host updates", () => {
+        initTheme("dark");
+        const terminal = new VirtualTerminal(100, 20);
+        const tui = new TuiMainScreen(terminal);
+        const nativeOptions = {
+            renderCall: (_name, args, _theme, context) =>
+                new Text(
+                    `native-call:${context.toolCallId}:${stringField(jsonValueParser.parse(args), "path")}`,
+                    0,
+                    0,
+                ),
+            renderResult: (_name, _result, _options, _theme, context) =>
+                new Text(
+                    `native-result:${context.toolCallId}:${context.isError}:${context.expanded}`,
+                    0,
+                    0,
+                ),
+        } satisfies Parameters<typeof configureBuiltInToolRendererPatch>[1];
+        const plugin: ThirdPartyToolRendererPlugin = {
+            name: "isolated-rows",
+            matches: (name) => name === "fixture_tool",
+            createRenderer: () => ({
+                renderCall: (_args, _theme, context) =>
+                    new Text(`adapter-call:${context.toolCallId}`, 0, 0),
+                renderResult: (_result, _options, _theme, context) =>
+                    new Text(
+                        `adapter-result:${context.toolCallId}:${context.isError}:${context.expanded}`,
+                        0,
+                        0,
+                    ),
+            }),
+        };
+        configureBuiltInToolRendererPatch(true, nativeOptions);
+        configureThirdPartyToolRendererPatch(true, { renderers: [plugin] });
+        const make = (name: string, id: string) => {
+            let definition = {};
+            if (name === "read") definition = createReadToolDefinition("/workspace");
+
+            const row = new ToolExecutionComponent(
+                name,
+                id,
+                { path: "old.txt" },
+                undefined,
+                definition,
+                tui,
+                "/workspace",
+            );
+            row.setArgsComplete();
+            row.updateResult({ content: [], isError: false });
+
+            return row;
+        };
+        try {
+            const first = make("read", "native-first");
+            const second = make("read", "native-second");
+            const adapter = make("fixture_tool", "adapter-first");
+            const firstBefore = first.render(100);
+            const adapterBefore = adapter.render(100);
+            expect(stripVTControlCharacters(adapterBefore.join("\n"))).toContain(
+                "adapter-call:adapter-first",
+            );
+
+            expect(stripVTControlCharacters(adapterBefore.join("\n"))).toContain(
+                "adapter-result:adapter-first:false:false",
+            );
+
+            second.render(100);
+            second.updateArgs({ path: "new.txt" });
+            second.setExpanded(true);
+            second.updateResult({ content: [], isError: true });
+            expect(stripVTControlCharacters(second.render(100).join("\n"))).toContain(
+                "native-call:native-second:new.txt",
+            );
+
+            expect(stripVTControlCharacters(second.render(100).join("\n"))).toContain(
+                "native-result:native-second:true:true",
+            );
+
+            expect(first.render(100)).toEqual(firstBefore);
+            expect(adapter.render(100)).toEqual(adapterBefore);
+
+            for (const width of [40, 100]) {
+                first.invalidate();
+                adapter.invalidate();
+                expect(first.render(width)).toEqual(make("read", "native-first").render(width));
+                expect(adapter.render(width)).toEqual(
+                    make("fixture_tool", "adapter-first").render(width),
+                );
+            }
+        } finally {
+            configureBuiltInToolRendererPatch(false);
+            configureThirdPartyToolRendererPatch(false);
+            tui.stop();
+            terminal.dispose();
+        }
+    });
+
+    it("keeps current owner output through late callbacks and shared-cache lifecycle changes", () => {
+        const prototype = createPrototype();
+        const callbacks: Array<() => void> = [];
+        let revision = "before";
+        const options = {
+            renderCall: (_name, args, _theme, context) => {
+                callbacks.push(context.invalidate);
+                const content = `${stringField(jsonValueParser.parse(args), "path")}:${revision}`;
+                return new Text(content, 0, 0);
+            },
+            renderResult: () => undefined,
+        } satisfies Parameters<typeof configureBuiltInToolRendererPatch>[1];
+        const first = { toolName: "read" };
+        const second = { toolName: "read" };
+        const context = { ...renderContext, cwd: "/workspace", state: {}, invalidate: noop };
+        const argumentsByPath = new Map(
+            ["old", "other", "current"].map((path) => [path, { path }]),
+        );
+        const draw = (owner: typeof first, path: string) => {
+            const args = argumentsByPath.get(path);
+            if (args === undefined) throw new Error("Missing fixture arguments");
+
+            const component = prototype.getCallRenderer.call(owner)?.(args, plainTheme, context);
+            if (component === undefined) throw new Error("Missing owner component");
+            return component
+                .render(80)
+                .map(stripVTControlCharacters)
+                .map((line) => line.trimEnd());
+        };
+        configureBuiltInToolRendererPatch(true, options, prototype);
+        try {
+            expect(draw(first, "old")).toEqual(["old:before"]);
+            expect(draw(second, "other")).toEqual(["other:before"]);
+            const obsolete = callbacks[0];
+            expect(draw(first, "current")).toEqual(["current:before"]);
+            revision = "ready";
+            obsolete?.();
+            expect(draw(first, "current")).toEqual(["current:ready"]);
+            expect(draw(second, "other")).toEqual(["other:before"]);
+            configureCompletedLineCache({ maxBytes: 256, maxEntries: 1 });
+            expect(completedLineCacheStats().completedLineCacheEntries).toBe(0);
+            expect(draw(first, "current")).toEqual(["current:ready"]);
+            expect(draw(second, "other")).toEqual(["other:before"]);
+            configureBuiltInToolRendererPatch(false, undefined, prototype);
+            expect(completedLineCacheStats().completedLineCacheBytes).toBe(0);
+            configureBuiltInToolRendererPatch(false, undefined, prototype);
+            configureBuiltInToolRendererPatch(true, options, prototype);
+            expect(draw(second, "other")).toEqual(["other:ready"]);
+        } finally {
+            configureBuiltInToolRendererPatch(false, undefined, prototype);
+            configureCompletedLineCache({ maxBytes: 64 * 1024 * 1024, maxEntries: 10_000 });
         }
     });
 

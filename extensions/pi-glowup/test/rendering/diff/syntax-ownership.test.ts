@@ -1,5 +1,5 @@
 import type { Component } from "@earendil-works/pi-tui";
-import { Theme } from "@earendil-works/pi-coding-agent";
+import { keyText, keyHint, Theme } from "@earendil-works/pi-coding-agent";
 import { stripVTControlCharacters } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -9,6 +9,7 @@ import {
 } from "../../../src/rendering/syntax/highlighter.ts";
 import { PREVIEW_MUTATION_SETTINGS } from "../../../src/rendering/preview-settings.ts";
 import { createNativeEditFeature } from "../../../src/tools/built-in/edit.ts";
+import { renderGlowupDiff } from "../../../src/rendering/diff/text-renderer.ts";
 import { createNativeDeleteFeature } from "../../../src/tools/built-in/delete.ts";
 import type { BuiltInRenderContext } from "../../../src/tools/built-in/context.ts";
 import { mutation } from "../../../src/tools/protocol/contract.ts";
@@ -19,7 +20,7 @@ const theme = new Theme(TEST_THEME_COLORS, TEST_THEME_BACKGROUND_COLORS, "trueco
 
 // Larger than the shared syntax cache's per-source budget, but within the tokenizer limit.
 const source = Array.from(
-    { length: 180 },
+    { length: 400 },
     (_value, index) => `const value${index} = formatValue("syntax_${index}", ${index});`,
 );
 
@@ -29,6 +30,48 @@ describe("text mutation syntax ownership", () => {
     afterEach(async () => {
         await disposeSyntaxHighlighting();
     });
+
+    it.each(["before", "after"] as const)(
+        "refreshes an admitted frame when syntax starts %s its first draw",
+        async (startup) => {
+            await disposeSyntaxHighlighting();
+
+            if (startup === "before")
+                await initializeSyntaxHighlighting({}, { preloadLanguages: ["typescript"] });
+
+            let component: Component | undefined;
+
+            const sections = [
+                {
+                    path,
+                    lines: source.map((line, index) => `+${index + 1} ${line}`),
+                    added: source.length,
+                    removed: 0,
+                },
+            ];
+            component = renderGlowupDiff(theme, sections, true, {
+                invalidate: () => component?.invalidate(),
+            });
+            const initial = component.render(100);
+            expect(initial.length).toBeGreaterThan(300);
+
+            if (startup === "after")
+                await initializeSyntaxHighlighting({}, { preloadLanguages: ["typescript"] });
+
+            component.render(100);
+            await settleSyntaxHighlights();
+            const settled = component.render(100);
+            expect(settled).not.toEqual(initial);
+            expect(settled.map(stripVTControlCharacters)).toEqual(
+                initial.map(stripVTControlCharacters),
+            );
+            const fresh = renderGlowupDiff(theme, sections, true);
+            fresh.render(100);
+            await settleSyntaxHighlights();
+            expect(fresh.render(100)).toEqual(settled);
+            expect(component.render(100)).toEqual(settled);
+        },
+    );
 
     it.each(["protocol", "edit", "delete"] as const)(
         "keeps %s colors and completion notifications across component rebuilds",
@@ -47,6 +90,8 @@ describe("text mutation syntax ownership", () => {
                     cwd: "/tmp",
                     durationMs: undefined,
                     outputPad: 0,
+                    keyText,
+                    keyHint,
                     executionStarted: true,
                     argsComplete: true,
                     isPartial: false,
@@ -125,6 +170,12 @@ describe("text mutation syntax ownership", () => {
             expect(settled.map(stripVTControlCharacters)).toEqual(
                 cold.map(stripVTControlCharacters),
             );
+
+            expect(settled.length).toBeGreaterThan(300);
+            previous = undefined;
+            redraw();
+            await settleSyntaxHighlights();
+            expect(redraw()).toEqual(settled);
         },
     );
 });

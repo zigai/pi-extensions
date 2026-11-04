@@ -1,10 +1,22 @@
 import { readFileSync } from "node:fs";
-import { expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
+import { fc } from "@fast-check/vitest";
+import { stripVTControlCharacters } from "node:util";
+import { clearCompletedLineCache } from "../../../src/rendering/rendered-line-cache.ts";
+import { propertyReplayParameters } from "../../support/property-replay.ts";
+import { toolExpandHint } from "../../../src/rendering/component.ts";
+import {
+    configureRenderingAppearance,
+    type RenderingAppearance,
+} from "../../../src/rendering/theme.ts";
 import { textDiffGolden } from "../../support/text-diff-corpus.ts";
 import { createPlainTheme } from "../../support/plain-theme.ts";
 import { renderGlowupDiff } from "../../../src/rendering/diff/text-renderer.ts";
 import type { DiffLineCoordinates } from "../../../src/rendering/diff/text-diff.ts";
 
+// Pi 1.5 closes styled-word ANSI codes before wrapping whitespace. At width 20,
+// this removes one stray space before wrapped file statistics; syntax and diff
+// cell colors stay intact. The corpus intentionally records that upstream fix.
 it("preserves exact plain and syntax-highlighted diff frames through layouts and resizing", async () => {
     expect(await textDiffGolden()).toBe(
         readFileSync(new URL("./golden/text-diff.json", import.meta.url), "utf8"),

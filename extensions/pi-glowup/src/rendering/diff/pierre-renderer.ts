@@ -1,4 +1,5 @@
-import { omittedLinesLabel } from "../component.ts";
+import { RenderedLineCache, RenderedValueCache } from "../rendered-line-cache.ts";
+import { omittedLinesLabel, type ToolKeyHint } from "../component.ts";
 import { keyHint } from "@earendil-works/pi-coding-agent";
 import Type from "typebox";
 import { Value } from "typebox/value";
@@ -66,11 +67,18 @@ type HighlightState =
     | { readonly status: "ready"; readonly key: string; readonly value: HighlightedDiffSet }
     | { readonly status: "failed"; readonly key: string; readonly fallback: HighlightedDiffSet };
 
+type HighlightSubscription = {
+    readonly promise: Promise<HighlightedDiffLoadResult | undefined>;
+    readonly release: () => void;
+};
+
 type QueuedHighlight = {
     readonly key: string;
     readonly priority: number;
     readonly run: () => Promise<HighlightedDiffLoadResult>;
-    readonly resolve: (result: HighlightedDiffLoadResult) => void;
+    readonly promise: Promise<HighlightedDiffLoadResult | undefined>;
+    readonly resolve: (result: HighlightedDiffLoadResult | undefined) => void;
+    subscribers: number;
 };
 
 type DiffHighlightSchedulerStats = {
@@ -81,50 +89,71 @@ type DiffHighlightSchedulerStats = {
 
 class DiffHighlightScheduler {
     private readonly queued: QueuedHighlight[] = [];
-    private readonly pending = new Map<string, Promise<HighlightedDiffLoadResult>>();
-    private readonly cached = new Map<string, HighlightedDiffLoadResult>();
+    private readonly pending = new Map<string, QueuedHighlight>();
+    private readonly cached = new Map<
+        string,
+        { readonly value: WeakRef<HighlightedDiffSet>; readonly failed: boolean }
+    >();
     private timer: ReturnType<typeof setTimeout> | undefined;
-    private running = false;
+    private active: QueuedHighlight | undefined;
     private disposed = false;
 
-    async schedule(
+    subscribe(
         key: string,
         run: () => Promise<HighlightedDiffLoadResult>,
         priority = 0,
-    ): Promise<HighlightedDiffLoadResult> {
+    ): HighlightSubscription {
         const cached = this.cached.get(key);
-        if (cached !== undefined) return Promise.resolve(cached);
+        const value = cached?.value.deref();
+        if (cached !== undefined && value !== undefined)
+            return { promise: Promise.resolve({ value, failed: cached.failed }), release() {} };
 
-        const pending = this.pending.get(key);
-        if (pending !== undefined) return pending;
-
-        const promise = new Promise<HighlightedDiffLoadResult>((resolve) => {
-            const task = { key, priority, run, resolve };
+        let task = this.pending.get(key);
+        if (task === undefined) {
+            let resolve: QueuedHighlight["resolve"] = () => {};
+            const promise = new Promise<HighlightedDiffLoadResult | undefined>((done) => {
+                resolve = done;
+            });
+            task = { key, priority, run, promise, resolve, subscribers: 0 };
             const insertionIndex = this.queued.findIndex((queued) => queued.priority < priority);
             if (insertionIndex < 0) this.queued.push(task);
             else this.queued.splice(insertionIndex, 0, task);
-        });
-
-        this.pending.set(key, promise);
-        this.scheduleNext(this.running ? 100 : initialDiffHighlightDelayMs());
-
-        return promise;
+            this.pending.set(key, task);
+        }
+        task.subscribers += 1;
+        const subscribed = task;
+        let released = false;
+        this.scheduleNext(this.active === undefined ? initialDiffHighlightDelayMs() : 100);
+        return {
+            promise: task.promise,
+            release: () => {
+                if (released) return;
+                released = true;
+                subscribed.subscribers -= 1;
+                if (subscribed.subscribers > 0 || subscribed === this.active) return;
+                const index = this.queued.indexOf(subscribed);
+                if (index >= 0) this.queued.splice(index, 1);
+                if (this.pending.get(key) === subscribed) this.pending.delete(key);
+                // Only cancel queued work. An active operation stays joinable if a
+                // consumer needs this key again; its reactions hold only weak owners.
+                subscribed.resolve(undefined);
+                if (this.queued.length === 0 && this.timer !== undefined) {
+                    clearTimeout(this.timer);
+                    this.timer = undefined;
+                }
+            },
+        };
     }
 
     dispose(): void {
         this.disposed = true;
-
         if (this.timer !== undefined) {
             clearTimeout(this.timer);
             this.timer = undefined;
         }
-
-        const fallback = { value: emptyHighlightedDiffSet(), failed: true } as const;
-        for (const task of this.queued.splice(0)) {
-            this.pending.delete(task.key);
-            task.resolve(fallback);
-        }
-
+        for (const task of this.pending.values()) task.resolve(undefined);
+        this.pending.clear();
+        this.queued.length = 0;
         this.cached.clear();
     }
 
@@ -132,15 +161,18 @@ class DiffHighlightScheduler {
         return {
             activeTimers: this.timer === undefined ? 0 : 1,
             queued: this.queued.length,
-            running: this.running,
+            running: this.active !== undefined,
         };
     }
 
     private scheduleNext(delayMs: number): void {
-        if (this.disposed || this.running || this.timer !== undefined || this.queued.length === 0) {
+        if (
+            this.disposed ||
+            this.active !== undefined ||
+            this.timer !== undefined ||
+            this.queued.length === 0
+        )
             return;
-        }
-
         this.timer = setTimeout(() => {
             this.timer = undefined;
             void this.processNext();
@@ -149,14 +181,10 @@ class DiffHighlightScheduler {
     }
 
     private async processNext(): Promise<void> {
-        const { disposed, running } = this;
-        if (disposed || running) return;
-
+        if (this.disposed || this.active !== undefined) return;
         const task = this.queued.shift();
         if (task === undefined) return;
-
-        this.running = true;
-
+        this.active = task;
         let result: HighlightedDiffLoadResult;
         try {
             result = await task.run();
@@ -164,23 +192,18 @@ class DiffHighlightScheduler {
             recordRenderError("diff.pierre-highlight", cause);
             result = { value: emptyHighlightedDiffSet(), failed: true };
         }
-
-        this.pending.delete(task.key);
-
-        if (!this.disposed) {
+        if (this.pending.get(task.key) === task) this.pending.delete(task.key);
+        if (!this.disposed && task.subscribers > 0) {
             this.cached.delete(task.key);
-            this.cached.set(task.key, result);
-
+            this.cached.set(task.key, { value: new WeakRef(result.value), failed: result.failed });
             while (this.cached.size > MAX_CACHED_DIFF_HIGHLIGHTS) {
-                const oldest = this.cached.keys().next().value;
-                if (oldest === undefined) break;
-
-                this.cached.delete(oldest);
+                const oldest = this.cached.keys().next();
+                if (oldest.done === true) break;
+                this.cached.delete(oldest.value);
             }
         }
-
         task.resolve(result);
-        this.running = false;
+        this.active = undefined;
         this.scheduleNext(0);
     }
 }
@@ -380,6 +403,7 @@ function isDefined<T>(value: T | undefined): value is T {
 
 /** Context fields Pierre's lazy renderer consumes from Pi's public render context. */
 export type PierreDiffRenderContext = {
+    readonly keyHint?: ToolKeyHint;
     readonly lastComponent: Component | undefined;
     readonly invalidate?: () => void;
     readonly toolCallId?: string;
@@ -474,9 +498,17 @@ export function renderPierreDiff(
                   options.expanded,
                   context.toolCallId,
                   context.invalidate,
+                  context.keyHint,
               );
 
-    component.update(payload, theme, rowPolicy, options.expanded, context.invalidate);
+    component.update(
+        payload,
+        theme,
+        rowPolicy,
+        options.expanded,
+        context.invalidate,
+        context.keyHint,
+    );
 
     return component;
 }
@@ -512,6 +544,27 @@ export function pierreDiffHighlightStats(): PierreDiffHighlightStats {
     };
 }
 
+// Conservative accounting of derived row objects, span records, and referenced
+// strings; source payloads and tokenization results keep their existing owners.
+function derivedRowBytes(rows: ReadonlyArray<UnifiedDiffRow | SplitDiffRow>): number {
+    let bytes = rows.length * 96;
+    const spanBytes = (spans: ReadonlyArray<DiffSpan>): number => {
+        let total = spans.length * 64;
+        for (const span of spans) {
+            total += Buffer.byteLength(span.text, "utf8");
+            if (span.fg !== undefined) total += span.fg.length * 2;
+            if (span.bg !== undefined) total += span.bg.length * 2;
+        }
+        return total;
+    };
+    for (const row of rows) {
+        if (row.kind !== "line") bytes += Buffer.byteLength(row.text, "utf8");
+        else if ("spans" in row) bytes += spanBytes(row.spans);
+        else bytes += 128 + spanBytes(row.deletion.spans) + spanBytes(row.addition.spans);
+    }
+    return bytes;
+}
+
 class PierreDiffComponent implements Component {
     private payload: PierreRenderableDiffPayload;
     private palette: PierreTerminalPalette;
@@ -521,11 +574,13 @@ class PierreDiffComponent implements Component {
     private appearanceVersion: number;
     private syntaxVersion: number;
     private highlightState: HighlightState = { status: "idle" };
-    private readonly cachedLinesByWidth = new Map<number, string[]>();
-    private cachedUnifiedRows: ReadonlyArray<UnifiedDiffRow> | undefined;
-    private cachedSplitRows: ReadonlyArray<SplitDiffRow> | undefined;
+    private releaseHighlight: (() => void) | undefined;
+    private readonly cachedLinesByWidth = new Map<number, RenderedLineCache>();
+    private readonly cachedUnifiedRows = new RenderedValueCache<ReadonlyArray<UnifiedDiffRow>>();
+    private readonly cachedSplitRows = new RenderedValueCache<ReadonlyArray<SplitDiffRow>>();
     private readonly toolCallId: string | undefined;
     private requestRender: (() => void) | undefined;
+    private expandHint: string;
 
     constructor(
         payload: PierreRenderableDiffPayload,
@@ -534,7 +589,9 @@ class PierreDiffComponent implements Component {
         expanded: boolean,
         toolCallId: string | undefined,
         requestRender: (() => void) | undefined,
+        injectedKeyHint?: ToolKeyHint,
     ) {
+        this.expandHint = pierreExpandHint(injectedKeyHint);
         this.payload = payload;
         this.palette = getPierrePalette(theme);
         this.highlighted = emptyHighlightedDiffSet();
@@ -557,7 +614,9 @@ class PierreDiffComponent implements Component {
         rowPolicy: PierreRowPolicy,
         expanded: boolean,
         requestRender: (() => void) | undefined,
+        injectedKeyHint?: ToolKeyHint,
     ): void {
+        const nextExpandHint = pierreExpandHint(injectedKeyHint);
         const previousPayload = this.payload;
         const previousKey = refreshKeyFor(previousPayload);
         const nextKey = refreshKeyFor(payload);
@@ -566,6 +625,7 @@ class PierreDiffComponent implements Component {
         const nextSyntaxVersion = syntaxHighlightingVersion();
         const syntaxChanged = this.syntaxVersion !== nextSyntaxVersion;
         const canReuseRenderedCache =
+            this.expandHint === nextExpandHint &&
             previousPayload.modelKey === payload.modelKey &&
             pierreRowPoliciesEqual(this.rowPolicy, rowPolicy) &&
             this.expanded === expanded &&
@@ -573,6 +633,7 @@ class PierreDiffComponent implements Component {
             !syntaxChanged &&
             pierrePalettesEqual(this.palette, nextPalette);
 
+        this.expandHint = nextExpandHint;
         this.payload = payload;
         this.palette = nextPalette;
         this.rowPolicy = rowPolicy;
@@ -605,7 +666,7 @@ class PierreDiffComponent implements Component {
             this.maybeRefreshHighlightedDiff();
         }
 
-        const cachedLines = this.cachedLinesByWidth.get(safeWidth);
+        const cachedLines = this.cachedLinesByWidth.get(safeWidth)?.get(safeWidth);
         if (cachedLines !== undefined) return cachedLines;
 
         const highlighted = this.highlighted[this.palette.appearance];
@@ -651,19 +712,23 @@ class PierreDiffComponent implements Component {
     }
 
     invalidate(): void {
+        for (const cache of this.cachedLinesByWidth.values()) cache.clear();
         this.cachedLinesByWidth.clear();
-        this.cachedUnifiedRows = undefined;
-        this.cachedSplitRows = undefined;
+        this.cachedUnifiedRows.clear();
+        this.cachedSplitRows.clear();
     }
 
     private cacheRenderedLines(width: number, lines: string[]): string[] {
+        const cache = this.cachedLinesByWidth.get(width) ?? new RenderedLineCache();
+        cache.set(width, lines);
         this.cachedLinesByWidth.delete(width);
-        this.cachedLinesByWidth.set(width, lines);
+        this.cachedLinesByWidth.set(width, cache);
 
         while (this.cachedLinesByWidth.size > 2) {
             const oldest = this.cachedLinesByWidth.keys().next().value;
             if (oldest === undefined) break;
 
+            this.cachedLinesByWidth.get(oldest)?.clear();
             this.cachedLinesByWidth.delete(oldest);
         }
 
@@ -672,9 +737,11 @@ class PierreDiffComponent implements Component {
 
     private renderUnifiedBody(width: number, highlighted: HighlightedDiffSet["dark"]): string[] {
         const narrowLayout = configuredNarrowDiffLayout();
-        const sourceRows =
-            this.cachedUnifiedRows ?? this.buildUnifiedRows(highlighted, narrowLayout);
-        this.cachedUnifiedRows = sourceRows;
+        let sourceRows = this.cachedUnifiedRows.get();
+        if (sourceRows === undefined) {
+            sourceRows = this.buildUnifiedRows(highlighted, narrowLayout);
+            this.cachedUnifiedRows.set(sourceRows, derivedRowBytes(sourceRows));
+        }
         return renderUnifiedRows(
             sourceRows,
             this.payload.metadata,
@@ -685,8 +752,11 @@ class PierreDiffComponent implements Component {
     }
 
     private renderSplitBody(width: number, highlighted: HighlightedDiffSet["dark"]): string[] {
-        const sourceRows = this.cachedSplitRows ?? this.buildSplitRows(highlighted);
-        this.cachedSplitRows = sourceRows;
+        let sourceRows = this.cachedSplitRows.get();
+        if (sourceRows === undefined) {
+            sourceRows = this.buildSplitRows(highlighted);
+            this.cachedSplitRows.set(sourceRows, derivedRowBytes(sourceRows));
+        }
         return renderSplitRows(
             sourceRows,
             this.payload.metadata,
@@ -729,7 +799,7 @@ class PierreDiffComponent implements Component {
                   ...visible,
                   {
                       kind: "collapsed",
-                      text: `${omittedLinesLabel(selection.omitted)} (${pierreExpandHint()})`,
+                      text: `${omittedLinesLabel(selection.omitted)} (${this.expandHint})`,
                       fg: this.palette.metadataFg,
                       bg: this.palette.metadataBg,
                   },
@@ -762,7 +832,7 @@ class PierreDiffComponent implements Component {
                   ...visible,
                   {
                       kind: "collapsed",
-                      text: `${omittedLinesLabel(selection.omitted)} (${pierreExpandHint()})`,
+                      text: `${omittedLinesLabel(selection.omitted)} (${this.expandHint})`,
                       fg: this.palette.metadataFg,
                       bg: this.palette.metadataBg,
                   },
@@ -775,6 +845,8 @@ class PierreDiffComponent implements Component {
             return;
         }
 
+        this.releaseHighlight?.();
+        this.releaseHighlight = undefined;
         const cached = getCachedHighlightedDiff(this.payload.metadata);
         if (cached !== undefined) {
             this.highlighted = cached.value;
@@ -790,28 +862,32 @@ class PierreDiffComponent implements Component {
         const metadata = this.payload.metadata;
         const scheduler = diffHighlightScheduler;
 
-        void scheduler
-            .schedule(
-                nextKey,
-                async () => loadHighlightedDiffResult(metadata),
-                this.expanded ? 1 : 0,
+        const subscription = scheduler.subscribe(
+            nextKey,
+            async () => loadHighlightedDiffResult(metadata),
+            this.expanded ? 1 : 0,
+        );
+        this.releaseHighlight = subscription.release;
+        // Promise reactions must not keep a discarded transcript component alive.
+        const owner = new WeakRef(this);
+        void subscription.promise.then((result) => {
+            const component = owner.deref();
+            if (
+                result === undefined ||
+                component === undefined ||
+                scheduler !== diffHighlightScheduler ||
+                component.highlightState.status !== "pending" ||
+                component.highlightState.key !== nextKey
             )
-            .then((result) => {
-                if (
-                    scheduler !== diffHighlightScheduler ||
-                    this.highlightState.status !== "pending" ||
-                    this.highlightState.key !== nextKey
-                ) {
-                    return;
-                }
-
-                this.highlighted = result.value;
-                this.highlightState = result.failed
-                    ? { status: "failed", key: nextKey, fallback: result.value }
-                    : { status: "ready", key: nextKey, value: result.value };
-                this.invalidate();
-                this.requestRender?.();
-            });
+                return;
+            component.releaseHighlight = undefined;
+            component.highlighted = result.value;
+            component.highlightState = result.failed
+                ? { status: "failed", key: nextKey, fallback: result.value }
+                : { status: "ready", key: nextKey, value: result.value };
+            component.invalidate();
+            component.requestRender?.();
+        });
     }
 }
 
@@ -844,8 +920,9 @@ function renderPierreDiffSummary(
     };
 }
 
-function pierreExpandHint(): string {
+function pierreExpandHint(injectedKeyHint?: ToolKeyHint): string {
     try {
+        if (injectedKeyHint !== undefined) return injectedKeyHint("app.tools.expand", "to expand");
         return keyHint("app.tools.expand", "to expand");
     } catch {
         return "expand to inspect";

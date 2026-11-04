@@ -212,6 +212,9 @@ class ProtocolMutationComponent implements Component {
             if (update.context.invalidate !== undefined) {
                 pierreContext = { ...pierreContext, invalidate: update.context.invalidate };
             }
+            if (update.context.keyHint !== undefined) {
+                pierreContext = { ...pierreContext, keyHint: update.context.keyHint };
+            }
 
             const diff =
                 payload === undefined

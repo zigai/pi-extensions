@@ -1,4 +1,5 @@
 import type { Component } from "@earendil-works/pi-tui";
+import type { ToolKeyHint } from "../rendering/component.ts";
 import type { JsonValue } from "../json-value.ts";
 import type { GlowupRenderTheme } from "../rendering/theme.ts";
 import type { ToolLabelMode } from "../rendering/status-labels.ts";
@@ -18,6 +19,7 @@ export type ToolNameMatcher =
 /** Internal context translated from Pi's ToolExecutionComponent. */
 export type ThirdPartyToolRenderContext = Omit<GlowupCallContext, "toolName" | "phase"> & {
     readonly toolName?: string;
+    readonly keyHint?: ToolKeyHint;
     readonly streamCode?: CodePreview;
     readonly streamKey?: string;
     readonly streamPhase?: "call" | "result";

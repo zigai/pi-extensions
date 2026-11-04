@@ -1,3 +1,8 @@
+import {
+    RenderedLineCache,
+    clearCompletedLineCache,
+    completedLineCacheStats,
+} from "../../rendering/rendered-line-cache.ts";
 import { glowupRenderingAdapter } from "../../tools/protocol/renderer.ts";
 import {
     ToolExecutionComponent,
@@ -289,127 +294,18 @@ function sameRenderSignature(previous: readonly unknown[], current: readonly unk
     return previous.every((value, index) => Object.is(value, current[index]));
 }
 
-const DEFAULT_COMPLETED_LINE_CACHE_BYTES = 64 * 1024 * 1024;
-const DEFAULT_COMPLETED_LINE_CACHE_ENTRIES = 10_000;
-const COMPLETED_LINE_CACHE_ENTRY_OVERHEAD_BYTES = 16;
-
-export type CompletedLineCacheLimits = {
-    readonly maxBytes: number;
-    readonly maxEntries: number;
-};
-
-type CompletedComponentState = {
-    cachedWidth: number | undefined;
-    cachedLines: string[] | undefined;
-};
-
 const completedComponentBases = new WeakMap<Component, Component>();
-const completedComponentStates = new WeakMap<Component, CompletedComponentState>();
-
-// Retain only bounded line state, never the wrapper/base renderer and its source graph.
-const completedLineCacheLru = new Map<CompletedComponentState, number>();
-
-// The held state never points back to its wrapper or source renderer. Bounds remain
-// authoritative; finalization only releases orphaned entries earlier than LRU eviction.
-const completedLineCacheFinalizer = new FinalizationRegistry<CompletedComponentState>(
-    releaseCompletedLineCache,
-);
-
-let completedLineCacheBytes = 0;
-let completedLineCacheLimitBytes = DEFAULT_COMPLETED_LINE_CACHE_BYTES;
-let completedLineCacheLimitEntries = DEFAULT_COMPLETED_LINE_CACHE_ENTRIES;
-let completedLineCacheEvictions = 0;
-let completedLineCacheHits = 0;
-let completedLineCacheMisses = 0;
-
-function completedLinesSize(lines: readonly string[]): number {
-    let bytes = lines.length * COMPLETED_LINE_CACHE_ENTRY_OVERHEAD_BYTES;
-    for (const line of lines) {
-        bytes += Buffer.byteLength(line, "utf8");
-    }
-
-    return bytes;
-}
-
-function releaseCompletedLineCache(state: CompletedComponentState): void {
-    const retainedBytes = completedLineCacheLru.get(state);
-    if (retainedBytes !== undefined) {
-        completedLineCacheLru.delete(state);
-        completedLineCacheBytes -= retainedBytes;
-        completedLineCacheFinalizer.unregister(state);
-    }
-
-    state.cachedWidth = undefined;
-    state.cachedLines = undefined;
-}
-
-function clearCompletedLineCache(): void {
-    for (const state of completedLineCacheLru.keys()) {
-        completedLineCacheFinalizer.unregister(state);
-        state.cachedWidth = undefined;
-        state.cachedLines = undefined;
-    }
-
-    completedLineCacheLru.clear();
-    completedLineCacheBytes = 0;
-}
-
-function touchCompletedLineCache(state: CompletedComponentState): void {
-    const bytes = completedLineCacheLru.get(state);
-    if (bytes === undefined) return;
-
-    completedLineCacheLru.delete(state);
-    completedLineCacheLru.set(state, bytes);
-}
-
-function retainCompletedLines(
-    state: CompletedComponentState,
-    width: number,
-    lines: string[],
-    wrapper: Component,
-): void {
-    releaseCompletedLineCache(state);
-
-    const bytes = completedLinesSize(lines);
-    if (bytes > completedLineCacheLimitBytes) return;
-
-    while (
-        completedLineCacheBytes + bytes > completedLineCacheLimitBytes ||
-        completedLineCacheLru.size >= completedLineCacheLimitEntries
-    ) {
-        const oldest = completedLineCacheLru.keys().next();
-        if (oldest.done === true) return;
-
-        releaseCompletedLineCache(oldest.value);
-        completedLineCacheEvictions += 1;
-    }
-
-    state.cachedWidth = width;
-    state.cachedLines = lines;
-    completedLineCacheLru.set(state, bytes);
-    completedLineCacheBytes += bytes;
-    completedLineCacheFinalizer.register(wrapper, state, state);
-}
+const completedComponentCaches = new WeakMap<Component, RenderedLineCache>();
 
 function cacheCompletedComponent(component: Component): Component {
     const base = completedComponentBases.get(component) ?? component;
-    const state: CompletedComponentState = {
-        cachedWidth: undefined,
-        cachedLines: undefined,
-    };
+    const cache = new RenderedLineCache();
     const wrapper: Component = {
         render(width) {
-            if (state.cachedWidth === width && state.cachedLines !== undefined) {
-                completedLineCacheHits += 1;
-                touchCompletedLineCache(state);
-                return state.cachedLines;
-            }
-
-            completedLineCacheMisses += 1;
-
+            const cached = cache.get(width);
+            if (cached !== undefined) return cached;
             const lines = base.render(width);
-            retainCompletedLines(state, width, lines, wrapper);
-
+            cache.set(width, lines);
             return lines;
         },
         handleMouse(event) {
@@ -420,19 +316,14 @@ function cacheCompletedComponent(component: Component): Component {
             // changes replace this wrapper, while renderer invalidations clear its cache slot.
         },
     };
-
     completedComponentBases.set(wrapper, base);
-    completedComponentStates.set(wrapper, state);
+    completedComponentCaches.set(wrapper, cache);
     inheritSyntaxComponent(wrapper, base);
-
     return wrapper;
 }
 
 function releaseCompletedRender(render: CompletedRender | undefined): void {
-    if (render === undefined) return;
-
-    const state = completedComponentStates.get(render.component);
-    if (state !== undefined) releaseCompletedLineCache(state);
+    if (render !== undefined) completedComponentCaches.get(render.component)?.clear();
 }
 
 function clearCompletedRendersForInstance(
@@ -655,6 +546,9 @@ export function thirdPartyRenderContext(
         showImages: context.showImages,
         isError: context.isError,
     };
+    if (context.keyHint !== undefined) {
+        renderContext = { ...renderContext, keyHint: context.keyHint };
+    }
     if (context.cwd !== undefined) {
         renderContext = { ...renderContext, cwd: context.cwd };
     }
@@ -757,20 +651,6 @@ function trimRendererCache(
 
         cache.delete(oldestToolName.value);
     }
-}
-
-/** Updates bounded completed-output cache limits and clears retained rendered lines. */
-export function configureCompletedLineCache(limits: CompletedLineCacheLimits): void {
-    if (
-        completedLineCacheLimitBytes === limits.maxBytes &&
-        completedLineCacheLimitEntries === limits.maxEntries
-    ) {
-        return;
-    }
-
-    clearCompletedLineCache();
-    completedLineCacheLimitBytes = limits.maxBytes;
-    completedLineCacheLimitEntries = limits.maxEntries;
 }
 
 /** Enables, updates, or disables render-only Glowup renderers for built-in tool names. */
@@ -1015,13 +895,7 @@ export function toolRendererPatchStats(
         builtInPatchEnabled: builtInState?.enabled === true,
         thirdPartyPatchEnabled: thirdPartyState?.enabled === true,
         thirdPartyRendererCacheEntries: thirdPartyState?.rendererCache.size ?? 0,
-        completedLineCacheEntries: completedLineCacheLru.size,
-        completedLineCacheBytes,
-        completedLineCacheLimitBytes,
-        completedLineCacheLimitEntries,
-        completedLineCacheEvictions,
-        completedLineCacheHits,
-        completedLineCacheMisses,
+        ...completedLineCacheStats(),
     };
 }
 

@@ -7,6 +7,7 @@ import {
 } from "./text-diff.ts";
 import {
     configuredDiffLineNumberStyle,
+    configuredRenderingAppearanceVersion,
     type GlowupRenderTheme,
     muted,
     dim,
@@ -38,6 +39,8 @@ import {
 } from "./preview-selection.ts";
 import { formatMutationStats } from "../tool-header.ts";
 import { collapseHome } from "../path.ts";
+import { RenderedLineCache } from "../rendered-line-cache.ts";
+import { diffContentDigest } from "./identity.ts";
 
 // A mapped sparse input retains holes; consumers treat those like unparsed rows.
 type ParsedDiffLine = ReturnType<typeof parseDiffLine> | undefined;
@@ -503,6 +506,43 @@ function createDiffComponent(
 ): Component {
     let isCurrent = (): boolean => false;
     let syntaxVersion: number | undefined;
+    let renderIdentity: string | undefined;
+    const sharedCache = new RenderedLineCache();
+    const identity = () =>
+        diffContentDigest(
+            JSON.stringify([
+                sections.map((section) => [
+                    section.path,
+                    section.added,
+                    section.removed,
+                    section.lines,
+                    section.lineCoordinates?.map((coordinate) => [
+                        coordinate?.oldLine,
+                        coordinate?.newLine,
+                    ]),
+                ]),
+                configuredRenderingAppearanceVersion(),
+                toolExpandHint(),
+                process.env.HOME,
+                process.env.USERPROFILE,
+                (
+                    [
+                        "dim",
+                        "muted",
+                        "accent",
+                        "toolOutput",
+                        "toolDiffAdded",
+                        "toolDiffRemoved",
+                    ] as const
+                ).map((token) => theme.fg(token, "__PI_GLOWUP_STYLE__")),
+                theme.getFgAnsi?.("toolDiffAdded"),
+                theme.getFgAnsi?.("toolDiffRemoved"),
+                theme.getBgAnsi?.("toolSuccessBg"),
+                theme.getBgAnsi?.("toolErrorBg"),
+                theme.bg?.("toolSuccessBg", "__PI_GLOWUP_STYLE__"),
+                theme.bg?.("toolErrorBg", "__PI_GLOWUP_STYLE__"),
+            ]),
+        );
 
     const component = makeComponent((width) => {
         const allDiffLineCount = sections.reduce(
@@ -633,10 +673,15 @@ function createDiffComponent(
         }
 
         return rendered;
-    });
+    }, sharedCache);
 
     return {
         render(width) {
+            let currentIdentity: string | undefined;
+            if (sharedCache.has(Math.max(1, Math.floor(width)))) {
+                currentIdentity = identity();
+                if (renderIdentity !== currentIdentity) component.invalidate();
+            }
             const version = syntaxHighlightingVersion();
             if (syntaxVersion !== version) {
                 syntaxVersion = version;
@@ -644,10 +689,15 @@ function createDiffComponent(
                 component.invalidate();
             }
 
-            return component.render(width);
+            const lines = component.render(width);
+            if (sharedCache.has(Math.max(1, Math.floor(width))))
+                renderIdentity = currentIdentity ?? identity();
+            else renderIdentity = undefined;
+            return lines;
         },
         invalidate() {
             component.invalidate();
+            renderIdentity = undefined;
         },
     };
 }

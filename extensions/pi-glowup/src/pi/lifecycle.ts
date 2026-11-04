@@ -1,3 +1,4 @@
+import { configureCompletedLineCache } from "../rendering/rendered-line-cache.ts";
 import { setImmediate } from "node:timers/promises";
 import { createStreamingPresentation } from "../rendering/streaming/content-presentation.ts";
 import {
@@ -75,7 +76,6 @@ import { configureMarkdownSyntaxPatch } from "./patches/markdown-syntax.ts";
 import { canonicalBuiltInToolName, compatBuiltInToolName } from "../tools/built-in/names.ts";
 import {
     configureBuiltInToolRendererPatch,
-    configureCompletedLineCache,
     configureThirdPartyToolRendererPatch,
     thirdPartyRenderContext,
 } from "./patches/tool-execution-patch.ts";

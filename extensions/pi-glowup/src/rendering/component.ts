@@ -8,11 +8,15 @@ import {
 import { stripVTControlCharacters } from "node:util";
 import { neutralizeTerminalControls } from "../text-boundaries.ts";
 import { keyHint } from "@earendil-works/pi-coding-agent";
+import type { RenderedLineCache } from "./rendered-line-cache.ts";
 
 const MAX_COMPONENT_CACHE_LINES = 300;
 const MAX_COMPONENT_CACHE_BYTES = 128 * 1024;
 
-export function makeComponent(renderLines: (width: number) => string[]): Component {
+export function makeComponent(
+    renderLines: (width: number) => string[],
+    sharedCache?: RenderedLineCache,
+): Component {
     let cachedWidth: number | undefined;
     let cachedLines: string[] | undefined;
 
@@ -22,14 +26,18 @@ export function makeComponent(renderLines: (width: number) => string[]): Compone
             if (cachedWidth === safeWidth && cachedLines !== undefined) {
                 return cachedLines;
             }
+            const shared = sharedCache?.get(safeWidth);
+            if (shared !== undefined) return [...shared];
 
             const rendered = renderLines(safeWidth).map((line) => clipLine(line, safeWidth));
             if (shouldCacheRenderedLines(rendered)) {
+                sharedCache?.clear();
                 cachedWidth = safeWidth;
                 cachedLines = rendered;
             } else {
                 cachedWidth = undefined;
                 cachedLines = undefined;
+                sharedCache?.set(safeWidth, [...rendered]);
             }
 
             return rendered;
@@ -37,6 +45,7 @@ export function makeComponent(renderLines: (width: number) => string[]): Compone
         invalidate(): void {
             cachedWidth = undefined;
             cachedLines = undefined;
+            sharedCache?.clear();
         },
     };
 }
@@ -228,8 +237,11 @@ export function omittedLinesLabel(count: number): string {
     return `… +${count} lines`;
 }
 
-export function toolExpandHint(): string {
+export type ToolKeyHint = (keybinding: "app.tools.expand", description: string) => string;
+
+export function toolExpandHint(injectedKeyHint?: ToolKeyHint): string {
     try {
+        if (injectedKeyHint !== undefined) return injectedKeyHint("app.tools.expand", "to expand");
         return keyHint("app.tools.expand", "to expand");
     } catch {
         return "to expand";
