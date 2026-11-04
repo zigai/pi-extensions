@@ -115,6 +115,7 @@ type PartialWritePreviewUpdate = {
     readonly expanded: boolean;
     readonly maxWritePreviewBytes: number | null;
     readonly invalidate: (() => void) | undefined;
+    readonly appendStart: number | undefined;
 };
 
 function boundedPartialWriteLine(line: string): string {
@@ -150,6 +151,22 @@ function writeDiffSection(path: string, preview: string, totalLines: number): Di
     };
 }
 
+// Only the first few blank samples are retained by the established preview policy.
+// Visit bounded head/tail samples and account for the invisible middle in O(1).
+function appendPendingBlankLines(
+    count: number,
+    samples: readonly string[],
+    append: (line: string) => void,
+    skip: (count: number) => void,
+): void {
+    const head = Math.min(count, PARTIAL_WRITE_HEAD_LINES);
+    for (let index = 0; index < head; index += 1) append(samples[index] ?? "");
+    const tail = Math.min(count - head, PARTIAL_WRITE_MOVING_TAIL_LINES);
+    skip(count - head - tail);
+
+    for (let index = 0; index < tail; index += 1) append("");
+}
+
 class PartialWriteContentPreview {
     private scannedLength = 0;
     private newlineCount = 0;
@@ -161,10 +178,15 @@ class PartialWriteContentPreview {
     private pendingBlankLineCount = 0;
     private readonly pendingBlankLineSamples: string[] = [];
     private currentLine = "";
+    private currentLineStart = 0;
+    private incremental = false;
 
-    update(content: string): void {
-        this.reset();
-        this.consume(content, 0);
+    update(content: string, appendStart: number | undefined): void {
+        this.incremental = appendStart !== undefined;
+        // Only the streaming owner can prove append identity from its already-owned
+        // previous args. Other callers safely rebuild; never retain another full source.
+        if (appendStart === undefined || appendStart !== this.scannedLength) this.reset();
+        this.consume(content, this.scannedLength);
         this.scannedLength = content.length;
     }
 
@@ -224,14 +246,14 @@ class PartialWriteContentPreview {
         this.pendingBlankLineCount = 0;
         this.pendingBlankLineSamples.length = 0;
         this.currentLine = "";
+        this.currentLineStart = 0;
     }
 
     private consume(content: string, start: number): void {
-        let lineStart = start;
         let index = start;
 
         if (start > 0 && content.charCodeAt(start - 1) === 13 && content.charCodeAt(start) === 10) {
-            lineStart = start + 1;
+            this.currentLineStart = start + 1;
             index = start + 1;
         }
 
@@ -242,7 +264,7 @@ class PartialWriteContentPreview {
                 continue;
             }
 
-            this.consumeLine(`${this.currentLine}${content.slice(lineStart, index)}`);
+            this.consumeLine(this.boundedSourceLine(content, index));
             this.currentLine = "";
             this.newlineCount += 1;
             this.endsWithLineBreak = true;
@@ -251,18 +273,37 @@ class PartialWriteContentPreview {
                 index += 1;
             }
 
-            lineStart = index + 1;
+            this.currentLineStart = index + 1;
         }
 
-        if (lineStart < content.length) {
-            this.currentLine = boundedPartialWriteLine(
-                `${this.currentLine}${content.slice(lineStart)}`,
-            );
+        if (this.currentLineStart < content.length) {
+            this.currentLine = this.retainLine(this.boundedSourceLine(content, content.length));
         }
     }
 
+    private boundedSourceLine(content: string, end: number): string {
+        // Re-read the bounded raw prefix, not the previously truncated display.
+        // This repairs split surrogates / extending graphemes without retaining an
+        // unbounded unfinished line. Two extra code units establish overflow even
+        // when completeUnicodePrefix withholds a trailing high surrogate.
+        return boundedPartialWriteLine(
+            content.slice(
+                this.currentLineStart,
+                Math.min(end, this.currentLineStart + MAX_PARTIAL_WRITE_LINE_CHARS + 2),
+            ),
+        );
+    }
+
+    private retainLine(line: string): string {
+        if (!this.incremental) return line;
+        // Samples survive later updates. A small sliced string can otherwise
+        // pin an entire old input buffer. UTF-16 preserves even unmatched
+        // surrogate code units; UTF-8 round-tripping would change the input.
+        return Buffer.from(line, "utf16le").toString("utf16le");
+    }
+
     private consumeLine(line: string): void {
-        const boundedLine = boundedPartialWriteLine(line);
+        const boundedLine = this.retainLine(boundedPartialWriteLine(line));
         if (!hasNonWhitespaceText(boundedLine)) {
             if (this.sawContent) {
                 this.pendingBlankLineCount += 1;
@@ -281,9 +322,14 @@ class PartialWriteContentPreview {
     }
 
     private flushPendingBlankLines(): void {
-        for (let index = 0; index < this.pendingBlankLineCount; index += 1) {
-            this.appendDisplayLine(this.pendingBlankLineSamples[index] ?? "");
-        }
+        appendPendingBlankLines(
+            this.pendingBlankLineCount,
+            this.pendingBlankLineSamples,
+            (line) => this.appendDisplayLine(line),
+            (count) => {
+                this.displayLineCount += count;
+            },
+        );
 
         this.pendingBlankLineCount = 0;
         this.pendingBlankLineSamples.length = 0;
@@ -331,9 +377,14 @@ class PartialWriteContentPreview {
         }
 
         if (this.sawContent) {
-            for (let index = 0; index < this.pendingBlankLineCount; index += 1) {
-                appendLine(this.pendingBlankLineSamples[index] ?? "");
-            }
+            appendPendingBlankLines(
+                this.pendingBlankLineCount,
+                this.pendingBlankLineSamples,
+                appendLine,
+                (count) => {
+                    lineCount += count;
+                },
+            );
         }
 
         appendLine(currentLine);
@@ -392,7 +443,7 @@ class PartialWriteCallPreviewComponent implements Component {
         this.expandedContent = update.expanded
             ? boundedWriteContentPreview(update.content, update.maxWritePreviewBytes)
             : "";
-        this.preview.update(update.content);
+        this.preview.update(update.content, update.appendStart);
         this.invalidate();
     }
 
@@ -482,9 +533,21 @@ class StreamingWritePreviewComponent implements Component {
     private preview: Component | undefined;
     private readonly rendered = makeComponent((width) => this.renderPreview(width));
     private readonly toolCallId: string | undefined;
+    private sourceNewlineCount = 0;
+    private renderedSourceLength = 0;
 
     constructor(private input: StreamingWriteUpdate) {
+        // The host may mutate an args object in place between updates. Snapshot
+        // its primitive fields, sharing the current string rather than copying it.
+        this.input = { ...input, args: { ...input.args } };
         this.toolCallId = input.context.toolCallId;
+        this.countNewlines(this.input.args.content ?? "", 0);
+    }
+
+    private countNewlines(content: string, start: number): void {
+        for (let index = start; index < content.length; index += 1) {
+            if (content.charCodeAt(index) === 10) this.sourceNewlineCount += 1;
+        }
     }
 
     belongsTo(toolCallId: string | undefined): boolean {
@@ -492,7 +555,21 @@ class StreamingWritePreviewComponent implements Component {
     }
 
     update(input: StreamingWriteUpdate): void {
-        this.input = input;
+        const previous = this.input.args.content ?? "";
+        const content = input.args.content ?? "";
+
+        // Exact rewrite detection still requires a full startsWith comparison.
+        // Borrow the owner's existing args reference; do not retain source history.
+        const appending = content.startsWith(previous);
+        let start = previous.length;
+        if (!appending) {
+            start = 0;
+            this.sourceNewlineCount = 0;
+            this.renderedSourceLength = 0;
+        }
+
+        this.countNewlines(content, start);
+        this.input = { ...input, args: { ...input.args } };
         this.invalidate();
     }
 
@@ -518,14 +595,27 @@ class StreamingWritePreviewComponent implements Component {
             ...(context.toolCallId !== undefined && { toolCallId: context.toolCallId }),
         });
 
-        this.preview = renderWriteCallPreview({ ...args, content: display }, theme, {
-            ...context,
-            invalidate,
-            sourceLineCount: countContentLines(content),
-            syntaxSource: content,
-            waitingForCode: display.length === 0 && content.length > 0,
-            lastComponent: this.preview,
-        });
+        // A transformed streamCode result has no append-identity contract. Only
+        // pass the proof through when the display is exactly the owned raw source.
+        let appendStart: number | undefined;
+        if (display === content) appendStart = this.renderedSourceLength;
+
+        this.preview = renderWriteCallPreviewInternal(
+            { ...args, content: display },
+            theme,
+            {
+                ...context,
+                invalidate,
+                sourceLineCount:
+                    this.sourceNewlineCount + Number(content.length > 0 && !content.endsWith("\n")),
+                syntaxSource: content,
+                waitingForCode: display.length === 0 && content.length > 0,
+                lastComponent: this.preview,
+            },
+            appendStart,
+        );
+        this.renderedSourceLength = 0;
+        if (display === content) this.renderedSourceLength = content.length;
 
         const lines = this.preview.render(width);
         const current = observeSyntaxHighlightSource(content, invalidate);
@@ -542,6 +632,15 @@ export function renderWriteCallPreview(
     args: WriteCallArgs,
     theme: GlowupRenderTheme,
     context: WriteCallContext,
+): Component {
+    return renderWriteCallPreviewInternal(args, theme, context);
+}
+
+function renderWriteCallPreviewInternal(
+    args: WriteCallArgs,
+    theme: GlowupRenderTheme,
+    context: WriteCallContext,
+    appendStart?: number,
 ): Component {
     const path = args.path ?? "";
     const content = args.content;
@@ -603,6 +702,7 @@ export function renderWriteCallPreview(
     if (context.isPartial) {
         const update = {
             toolCallId: context.toolCallId ?? "",
+            appendStart,
             theme,
             path,
             content,
