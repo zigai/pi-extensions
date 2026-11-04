@@ -54,7 +54,7 @@ const hostSchema = Type.Object({
 });
 type HeadingHost = Static<typeof hostSchema>;
 
-const foldable = new WeakSet();
+const foldable = new WeakMap<object, Set<number>>();
 
 type HeadingGroup = {
     children: Markdown[];
@@ -203,10 +203,13 @@ export function installHeadingRendering(): { dispose(): void } | undefined {
                     Reflect.set(this, "theme", theme);
                 }
 
-                if (foldable.has(this) && lines.length > 0) {
+                const collapsed = foldable.get(this);
+                if (collapsed !== undefined && lines.length > 0) {
                     const ordinal = headings.indexOf(token);
+                    let indicator = "";
+                    if (collapsed.has(ordinal)) indicator = yellow("▸ ");
                     return [
-                        `\u001b]9999;pi-fold:${token.depth}:${ordinal}\u0007${lines[0]}${endMarker}`,
+                        `\u001b]9999;pi-fold:${token.depth}:${ordinal}\u0007${indicator}${lines[0]}${endMarker}`,
                         ...lines.slice(1),
                     ];
                 }
@@ -222,7 +225,7 @@ export function foldableMarkdown(
     collapsed: Set<number>,
     group: HeadingGroup,
 ): Component {
-    foldable.add(markdown);
+    foldable.set(markdown, collapsed);
     groups.set(markdown, group);
     group.children.push(markdown);
 
@@ -289,6 +292,7 @@ export function foldableMarkdown(
 
             if (collapsed.has(ordinal)) collapsed.delete(ordinal);
             else collapsed.add(ordinal);
+            markdown.invalidate();
 
             return { handled: true };
         },
