@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { test } from "vitest";
+import { expect, test, vi } from "vitest";
+import { installLinkedRenderPatch } from "@zigai/pi-extension-internals";
+import * as highlighting from "../src/highlight-text.ts";
 import { Markdown, Text, stripTerminalSequences, type MarkdownTheme } from "@earendil-works/pi-tui";
 import {
     highlightWebLinkLabels,
@@ -67,6 +69,41 @@ test("real Text widget and Markdown web labels are patched and disposed", async 
         patch.dispose();
     }
     assert.equal(text.render(100).join("\n"), before);
+});
+
+test("web caching tracks Markdown source even when rendered lines remain equal", async () => {
+    const targets = await loadMessageHighlightTargets();
+    assert.ok(targets);
+    const render = installLinkedRenderPatch(
+        Markdown.prototype,
+        () =>
+            function () {
+                return ["see docs (https://example.com)"];
+            },
+    );
+    const markdown = new Markdown("see [docs](https://example.com)", 0, 0, markdownTheme);
+    const patch = installMessageHighlightPatch(
+        targets,
+        DEFAULT_MESSAGE_HIGHLIGHTS_CONFIG,
+        () => undefined,
+    );
+    const transform = vi.spyOn(highlighting, "highlightMessageLines");
+    try {
+        const first = markdown.render(100);
+        expect(first.join("\n")).toContain(`${blue}docs`);
+        expect(markdown.render(100)).toEqual(first);
+        expect(transform).toHaveBeenCalledTimes(1);
+        markdown.setText("see docs (https://example.com)");
+        expect(markdown.render(100).join("\n")).not.toContain(`${blue}docs`);
+        expect(markdown.render(100).join("\n")).toContain(`${blue}https://example.com`);
+        expect(transform).toHaveBeenCalledTimes(2);
+        markdown.invalidate();
+        expect(markdown.render(100).join("\n")).not.toContain(`${blue}docs`);
+    } finally {
+        transform.mockRestore();
+        patch.dispose();
+        render.dispose();
+    }
 });
 
 test("unknown assistant structure is left untouched rather than guessing thinking identity", () => {

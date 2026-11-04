@@ -79,6 +79,35 @@ test("does not interpret RGB components as intensity controls", () => {
     );
 });
 
+test.each([
+    [
+        { url: "<url>", filepath: "" },
+        `See <url>https://example.com/src/main.ts${ESC}[39m and src/main.ts`,
+    ],
+    [
+        { url: "", filepath: "<path>" },
+        `See https://example.com/src/main.ts and <path>src/main.ts${ESC}[39m`,
+    ],
+    [
+        { url: "<url>", filepath: "<path>" },
+        `See <url>https://example.com/src/main.ts${ESC}[39m and <path>src/main.ts${ESC}[39m`,
+    ],
+    [{ url: "", filepath: "" }, "See https://example.com/src/main.ts and src/main.ts"],
+])("preserves output when match styles are independently disabled (%j)", (policy, expected) => {
+    const line = "See https://example.com/src/main.ts and src/main.ts";
+    assert.equal(highlightMessageLine(line, policy), expected);
+    assert.deepEqual(highlightMessageLines([line], policy), [expected]);
+});
+
+test("disabled highlighting preserves ANSI and wrapped content exactly", () => {
+    const lines = [
+        `${ESC}[31mSee https://example.com/`,
+        `docs${ESC}[39m and /opt/Some`,
+        "Folder/file.ts:12",
+    ];
+    assert.deepEqual(highlightMessageLines(lines, { url: "", filepath: "" }), lines);
+});
+
 test("highlights URLs and file paths without changing visible text", () => {
     const line = "Open https://example.com/docs and packages/pi-footer/src/index.ts.";
     const highlighted = highlightMessageLine(line, styles);

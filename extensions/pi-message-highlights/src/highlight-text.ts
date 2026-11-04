@@ -387,18 +387,22 @@ export function collectHighlightRanges(
 ): HighlightRange[] {
     const ranges: HighlightRange[] = [];
 
-    for (const match of plainText.matchAll(URL_REGEX)) {
-        addRange(ranges, match.index, match[0], "url", styles.url);
+    if (styles.url.length > 0) {
+        for (const match of plainText.matchAll(URL_REGEX)) {
+            addRange(ranges, match.index, match[0], "url", styles.url);
+        }
     }
 
-    for (const match of plainText.matchAll(FILEPATH_REGEX)) {
-        const prefix = match.at(1) ?? "";
-        const filepath = match.at(2);
-        if (filepath === undefined) continue;
+    if (styles.filepath.length > 0) {
+        for (const match of plainText.matchAll(FILEPATH_REGEX)) {
+            const prefix = match.at(1) ?? "";
+            const filepath = match.at(2);
+            if (filepath === undefined) continue;
 
-        const start = match.index + prefix.length;
-        if (shouldSkipFilepathMatch(plainText, start, filepath)) continue;
-        addRange(ranges, start, filepath, "filepath", styles.filepath);
+            const start = match.index + prefix.length;
+            if (shouldSkipFilepathMatch(plainText, start, filepath)) continue;
+            addRange(ranges, start, filepath, "filepath", styles.filepath);
+        }
     }
 
     return ranges.sort((left, right) => left.start - right.start);
@@ -462,7 +466,7 @@ export function highlightMessageLineRanges(
 }
 
 export function highlightMessageLine(line: string, styles: HighlightStyles): string {
-    if (line.length === 0) return line;
+    if (line.length === 0 || (styles.url.length === 0 && styles.filepath.length === 0)) return line;
 
     const plainText = plainTextFromAnsi(line);
     const ranges = collectHighlightRanges(plainText, styles);
@@ -635,6 +639,8 @@ function addWrappedHighlightRanges(
 }
 
 export function highlightMessageLines(lines: readonly string[], styles: HighlightStyles): string[] {
+    if (styles.url.length === 0 && styles.filepath.length === 0) return [...lines];
+
     const contents = lines.map((line, index) => getLineContent(line, index));
     const lineRanges = contents.map((content) =>
         collectHighlightRanges(content.text, styles).map((range) => ({
