@@ -726,7 +726,25 @@ export function configureBuiltInToolRendererPatch(
             initializedRows.add(this);
             observeRow(this);
 
-            const toolName = builtInToolName(this);
+            const thirdPartyState = prototype[THIRD_PARTY_RENDERER_PATCH_STATE_KEY];
+            const declaredStyle = glowupRenderingAdapter(this.toolDefinition)?.callStyle;
+            let shellCall: typeof declaredStyle;
+            if (
+                declaredStyle !== undefined &&
+                thirdPartyState?.enabled === true &&
+                !shouldPreserveThirdPartyToolRenderer({
+                    toolName: instanceToolName(this) ?? "tool",
+                    toolDefinition: this.toolDefinition,
+                    ...(thirdPartyState.renderingOptions !== undefined && {
+                        renderingOptions: thirdPartyState.renderingOptions,
+                    }),
+                })
+            )
+                shellCall = declaredStyle;
+
+            let toolName = builtInToolName(this);
+            if (shellCall !== undefined) toolName = "bash";
+
             const originalRenderer = originalGetCallRenderer?.call(this);
             if (!state.enabled || toolName === undefined) {
                 return originalRenderer;
@@ -751,7 +769,11 @@ export function configureBuiltInToolRendererPatch(
                     cacheLines: shouldCacheCompletedLines(toolName),
                     fallbackOwner: originalOwner,
                     render: (invalidate, useFallback) => {
-                        const glowupContext = { ...restoredContext, invalidate };
+                        const glowupContext = {
+                            ...restoredContext,
+                            invalidate,
+                            ...(shellCall !== undefined && { shellCall }),
+                        };
                         const rendered = state.renderingOptions.renderCall(
                             toolName,
                             args,

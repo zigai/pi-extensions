@@ -682,6 +682,7 @@ export type ScriptCallRenderOptions = {
     readonly formatObservation?: () => ComponentFormat | undefined;
     readonly signal?: AbortSignal;
     readonly durationMs?: number | undefined;
+    readonly background?: boolean | undefined;
 };
 
 /** Renders a Bash call as a `$` prompt: the launcher (or first code line) beside `$`, code below. */
@@ -804,13 +805,29 @@ function createScriptCallComponent(
         }
 
         const promptPrefix = `${renderShellPrompt(theme)} `;
-        let duration = promptDuration(theme, state, options.durationMs);
-        let durationReserve = 0;
-        if (duration !== undefined) durationReserve = visibleWidth(duration) + 2;
+        let annotation = promptDuration(theme, state, options.durationMs);
+        const background = options.background === true;
 
-        if (width - durationReserve < MINIMUM_PROMPT_CODE_WIDTH) {
-            duration = undefined;
-            durationReserve = 0;
+        // nf-cod-debug_continue_small (U+EBE0), used for Continue in Background.
+        const marker = muted(theme, "\uEBE0");
+        if (background) {
+            if (annotation === undefined) annotation = marker;
+            else annotation = `${marker} ${annotation}`;
+        }
+
+        let annotationReserve = 0;
+        if (annotation !== undefined) annotationReserve = visibleWidth(annotation) + 2;
+
+        if (width - annotationReserve < MINIMUM_PROMPT_CODE_WIDTH) {
+            annotation = undefined;
+            annotationReserve = 0;
+
+            // Keep the execution-mode marker when duration and code cannot coexist.
+            // Below eight cells, leave the prompt/continuation prefixes room to render.
+            if (background && width >= 8) {
+                annotation = marker;
+                annotationReserve = visibleWidth(marker) + 2;
+            }
         }
 
         const rendered: string[] = [];
@@ -818,7 +835,7 @@ function createScriptCallComponent(
             rendered.push(
                 ...wrapSinglePhysicalLineWithContinuation(
                     highlightShellLine(theme, retained.launcher),
-                    width - durationReserve,
+                    width - annotationReserve,
                     promptPrefix,
                     PROMPT_CONTINUATION_PREFIX,
                 ),
@@ -837,7 +854,7 @@ function createScriptCallComponent(
         if (preview.code.length === 0) {
             if (codeStartsOnPromptRow) rendered.push(promptPrefix.trimEnd());
 
-            return appendRightAligned(rendered, duration, width);
+            return appendRightAligned(rendered, annotation, width);
         }
 
         let visibleCode = preview.code;
@@ -916,7 +933,7 @@ function createScriptCallComponent(
                 meta,
                 wrapped: wrapSinglePhysicalLineWithContinuation(
                     styled,
-                    onPromptRow ? width - durationReserve : width,
+                    onPromptRow ? width - annotationReserve : width,
                     onPromptRow ? promptPrefix : PROMPT_LINE_PREFIX,
                     PROMPT_CONTINUATION_PREFIX,
                 ),
@@ -934,7 +951,7 @@ function createScriptCallComponent(
         ) {
             return appendRightAligned(
                 [...rendered, ...wrappedLines.flatMap((line) => line.wrapped)],
-                duration,
+                annotation,
                 width,
             );
         }
@@ -983,7 +1000,7 @@ function createScriptCallComponent(
             );
         }
 
-        return appendRightAligned(rendered, duration, width);
+        return appendRightAligned(rendered, annotation, width);
     });
 }
 

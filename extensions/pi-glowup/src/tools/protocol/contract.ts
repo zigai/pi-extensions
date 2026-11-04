@@ -79,7 +79,18 @@ type GlowupRendererBase<Args> = {
     readonly parseArgs: GlowupParser<Args>;
 };
 
+/** Opts a shell tool into the shared native Bash call preview. Its arguments use command/cmd. */
+export type GlowupBashCallStyle = {
+    readonly kind: "bash";
+
+    /** Marks background execution beside the call duration; it is not job-completion state. */
+    readonly background?: boolean;
+};
+
 type GlowupCallRendering<Args> = {
+    /** Native call presentation, retaining renderCall as the semantic fallback. */
+    readonly callStyle?: GlowupBashCallStyle;
+
     /**
      * Optional renderer for incomplete streaming arguments. It receives serialized partial data
      * because the complete argument parser is not expected to accept an unfinished object.

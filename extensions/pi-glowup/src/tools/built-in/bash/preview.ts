@@ -227,7 +227,6 @@ function renderStreamingScriptCall(
                         pureScriptOverride: displayedInvocation,
                         lastComponent: renderState.preview,
                     });
-
                     renderState.preview = preview;
                     return preview.render(width);
                 });
@@ -423,6 +422,7 @@ export function createNativeBashFeature(
                     logicalSource: command,
                     signal: sessionSignal,
                     durationMs: context.durationMs,
+                    background: context.shellCall?.background ?? false,
                     ...(profile !== undefined && { profile }),
                 },
                 false,
@@ -460,12 +460,18 @@ export function createNativeBashFeature(
                     logicalSource: command,
                     signal: sessionSignal,
                     durationMs: context.durationMs,
+                    background: context.shellCall?.background ?? false,
                 },
                 true,
             );
         }
 
-        if (streamCode !== undefined && (context.argsComplete || context.isError)) {
+        // Declared shell tools do not receive native Bash's tool_call scheduling hook.
+        // Schedule through this same preview owner once their arguments are complete.
+        if (
+            (streamCode !== undefined || context.shellCall !== undefined) &&
+            (context.argsComplete || context.isError)
+        ) {
             const formatter = formatterAccessor?.();
             if (formatter !== undefined)
                 schedule({
@@ -511,6 +517,7 @@ export function createNativeBashFeature(
                     logicalSource: command,
                     signal: sessionSignal,
                     durationMs: context.durationMs,
+                    background: context.shellCall?.background ?? false,
                 },
             );
         }
@@ -554,6 +561,7 @@ export function createNativeBashFeature(
             logicalSource: command,
             signal: sessionSignal,
             durationMs: context.durationMs,
+            background: context.shellCall?.background ?? false,
         };
         if (stableScript !== undefined && context.argsComplete) {
             const { toolCallId } = context;

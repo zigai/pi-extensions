@@ -44,6 +44,7 @@ function scriptCallRenderOptions(options: BashCommandRenderOptions): ScriptCallR
         maxCodePreviewLines: options.maxCodePreviewLines,
         showPrologueOmission: options.showPrologueOmission,
         durationMs: options.durationMs,
+        background: options.background,
         lastComponent: options.lastComponent,
     };
     if (options.invalidate !== undefined) {
@@ -187,6 +188,7 @@ export type BashCommandRenderOptions = {
     readonly profile?: ScriptCallRenderOptions["profile"];
     readonly embeddedPrograms?: EmbeddedProgramLookup;
     readonly durationMs?: number | undefined;
+    readonly background?: boolean | undefined;
 };
 
 function renderScriptInvocation(

@@ -143,6 +143,27 @@ until the complete arguments parse successfully. Returning `undefined` from a pa
 method asks Glowup to use the fallback for that slot. Returning `empty()` intentionally suppresses
 the slot.
 
+## Reusing the Bash call preview
+
+Shell tools with a `command` (or `cmd`) argument can opt into Glowup's native Bash call renderer:
+
+```ts
+const rendering = {
+  version: 3,
+  callStyle: { kind: "bash", background: true },
+  // Keep the normal parseArgs/renderCall and result methods here.
+};
+```
+
+`callStyle` changes only the call view. It reuses Bash highlighting, script formatting, streaming,
+and expansion. The owner's result view stays the same, `renderCall` remains the fallback, and
+explicit preserve rules still win.
+
+With `background: true`, the compact preview shows a muted `` (U+EBE0; requires a Nerd Font) to the
+left of the duration, or alone when the duration is unknown. The icon means the command runs in the
+background, not that it finished. On a background-start tool, the duration covers the launch, not
+the process it started.
+
 ## Components
 
 Protocol components are semantic rather than visual:

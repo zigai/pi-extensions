@@ -103,6 +103,15 @@ const renderingAdapterSchema = Type.Object(
     {
         version: Type.Literal(3),
         independentExpansion: Type.Optional(Type.Literal(true)),
+        callStyle: Type.Optional(
+            Type.Object(
+                {
+                    kind: Type.Literal("bash"),
+                    background: Type.Optional(Type.Boolean()),
+                },
+                { additionalProperties: false },
+            ),
+        ),
         parseArgs: parserSchema,
         parseResult: Type.Optional(parserSchema),
         renderPartialCall: Type.Optional(rendererSchema),
@@ -309,6 +318,8 @@ const renderingAdapterParser = {
 
             const adapter = Value.Parse(definitionSchema, toolDefinition)[propertyName];
             if (adapter === undefined) return undefined;
+            if (adapter.callStyle !== undefined && adapter.renderCall === undefined)
+                return undefined;
             if (adapter.renderPartialCall !== undefined && adapter.renderCall === undefined)
                 return undefined;
             if (adapter.renderResult !== undefined && adapter.parseResult === undefined)

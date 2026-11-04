@@ -8,6 +8,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
 import type { ThirdPartyToolResult } from "../types.ts";
+import type { GlowupBashCallStyle } from "../protocol/contract.ts";
 import type { BuiltInToolName } from "./names.ts";
 import { type DiffRenderLimits } from "../../rendering/diff/payload.ts";
 import { isActiveToolCall, type ToolLabelMode } from "../../rendering/status-labels.ts";
@@ -41,6 +42,7 @@ export type PiToolRenderContext = {
     readonly showImages: boolean;
     readonly isError: boolean;
     readonly durationMs?: number | undefined;
+    readonly shellCall?: GlowupBashCallStyle;
     readonly cwd?: string;
     readonly invalidate?: (() => void) | undefined;
     readonly lastComponent?: Component | undefined;
@@ -54,7 +56,7 @@ type SdkToolRenderContext = Parameters<NonNullable<PiRendererDefinition["renderC
 export type BuiltInToolRenderContext = Omit<SdkToolRenderContext, "args" | "state"> & {
     readonly args: unknown;
     readonly state: unknown;
-} & Pick<PiToolRenderContext, "result">;
+} & Pick<PiToolRenderContext, "result" | "shellCall" | "keyHint">;
 
 export type ToolCallArguments = PiToolRenderContext["args"];
 
