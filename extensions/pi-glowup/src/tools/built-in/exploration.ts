@@ -5,6 +5,7 @@ import { Value } from "typebox/value";
 import { isJsonArray, jsonValueParser, type JsonValue } from "../../json-value.ts";
 import { canonicalBuiltInToolName } from "./names.ts";
 import { emptyComponent } from "../../rendering/component.ts";
+import { retireIdleSyntaxHighlightSource } from "../../rendering/syntax/highlighter.ts";
 import {
     renderGlowupCall,
     renderGlowupExplore,
@@ -83,6 +84,13 @@ export function createExplorationFeature() {
             readonly invalidate?: (() => void) | undefined;
         },
     ) {
+        // Hidden plain results need no source owner. Keep finished colors and
+        // in-flight syntax work so re-expansion never flashes uncolored code.
+        if (!expanded) {
+            if (options?.invalidate !== undefined)
+                retireIdleSyntaxHighlightSource(options.invalidate);
+            return emptyComponent();
+        }
         const output = textOutput(result);
         if (output === undefined) {
             return emptyComponent();

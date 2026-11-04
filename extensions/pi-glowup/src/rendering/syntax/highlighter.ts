@@ -51,6 +51,8 @@ import {
 const MAX_CACHEABLE_CODE_BYTES = 8 * 1024;
 const MAX_CACHE_BYTES = 512 * 1024;
 const CACHE_LIMIT = 100;
+const MAX_PENDING_EXACT_ROW_MATCHES = 4096;
+const MAX_PENDING_EXACT_SOURCE_CHARS = 256 * 1024;
 
 export type SyntaxHighlightOptions = {
     readonly cache?: boolean | undefined;
@@ -612,6 +614,22 @@ export function retireSyntaxHighlightSource(invalidate: () => void): void {
     highlightOwners.delete(invalidate);
     observeHighlightRevision(invalidate);
     owner?.controller.abort();
+}
+
+/** Release source-only owners without discarding colors or in-flight work needed on re-expansion. */
+export function retireIdleSyntaxHighlightSource(invalidate: () => void): void {
+    const owner = currentHighlightOwner(invalidate);
+    if (
+        owner !== undefined &&
+        (owner.results.size > 0 ||
+            owner.previousResults.size > 0 ||
+            owner.pending.size > 0 ||
+            owner.readyRequests.size > 0 ||
+            owner.capacityRequests.size > 0 ||
+            owner.timedOut.size > 0)
+    )
+        return;
+    retireSyntaxHighlightSource(invalidate);
 }
 
 /** Cancels obsolete work when a renderer observes a different submitted source. */
@@ -1706,7 +1724,7 @@ function pendingHighlightLines(
         appended = suffix;
     }
 
-    if (previous === undefined) return lines;
+    if (previous === undefined) return retainExactPendingRows(lines, language, themeName, owner);
 
     const [key, result] = previous;
     owner.results.set(key, result);
@@ -1714,7 +1732,61 @@ function pendingHighlightLines(
     const retained = result.lines.slice(0, retainedCount);
     const last = retained.at(-1);
     if (last !== undefined) retained[retained.length - 1] = last + appended;
-    return [...retained, ...lines.slice(retainedCount)];
+    return retainExactPendingRows(
+        [...retained, ...lines.slice(retainedCount)],
+        language,
+        themeName,
+        owner,
+    );
+}
+
+/** Keep exact rows across insertions/deletions without quadratic diffing or stale source text. */
+function retainExactPendingRows(
+    lines: string[],
+    language: string,
+    themeName: string,
+    owner: HighlightOwner,
+): string[] {
+    const rows = new Map<
+        string,
+        { readonly line: string; readonly key: string; readonly source: HighlightedSource }
+    >();
+    let remainingRows = MAX_PENDING_EXACT_ROW_MATCHES;
+    let remainingChars = MAX_PENDING_EXACT_SOURCE_CHARS;
+    let inspectedSources = 0;
+    for (const [key, source] of owner.previousResults) {
+        if (remainingRows <= 0 || remainingChars <= 0) break;
+
+        inspectedSources += 1;
+        if (inspectedSources > MAX_PENDING_EXACT_ROW_MATCHES) break;
+        if (source.language !== language || source.themeName !== themeName) continue;
+        if (source.source.length > remainingChars || source.lines.length > remainingRows) continue;
+        remainingChars -= source.source.length;
+        remainingRows -= source.lines.length;
+
+        const plain = source.source.split("\n");
+        for (const [index, line] of source.lines.entries()) {
+            const text = plain[index];
+            if (text === undefined || stripVTControlCharacters(line) !== text) continue;
+
+            if (!rows.has(text)) rows.set(text, { line, key, source });
+        }
+    }
+
+    let matchedChars = 0;
+    for (let index = 0; index < Math.min(lines.length, MAX_PENDING_EXACT_ROW_MATCHES); index += 1) {
+        const line = lines[index];
+        if (line === undefined) continue;
+        matchedChars += line.length;
+        if (matchedChars > MAX_PENDING_EXACT_SOURCE_CHARS) break;
+
+        const match = rows.get(line);
+        if (match === undefined) continue;
+        lines[index] = match.line;
+        owner.results.set(match.key, match.source);
+    }
+
+    return lines;
 }
 
 function highlightedCodeCacheKey(

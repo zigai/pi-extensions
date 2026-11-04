@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it, onTestFinished } from "vites
 import { createHash } from "node:crypto";
 import { configureRenderDiagnostics } from "../../../src/diagnostics/render-events.ts";
 import type { DebugLogFields } from "../../../src/diagnostics/logger.ts";
-import { Theme, type ThemeColor } from "@earendil-works/pi-coding-agent";
+import { keyText, keyHint, Theme, type ThemeColor } from "@earendil-works/pi-coding-agent";
 import { buildPierreDiffPayload } from "../../../src/rendering/diff/payload.ts";
 import { renderPierreDiff } from "../../../src/rendering/diff/pierre-renderer.ts";
 import { loadHighlightedDiff } from "../../../src/rendering/diff/highlight.ts";
@@ -26,6 +26,7 @@ import {
     configureSyntaxBracketPairColoring,
     highlightSyntaxCode,
     highlightSyntaxCodeAsync,
+    observeSyntaxHighlightSource,
     settleSyntaxHighlights,
     initializeSyntaxHighlighting,
     loadSyntaxLanguageIfReady,
@@ -111,6 +112,8 @@ const renderContext = {
     isError: false,
     durationMs: undefined,
     outputPad: 1,
+    keyText,
+    keyHint,
 };
 const bundledThemePath = join(process.cwd(), "themes", "darker-modern-theme.json");
 
@@ -197,6 +200,42 @@ describe("central syntax highlighting", () => {
 
         expect(lines.join("\n")).toContain(TYPESCRIPT_KEYWORD_COLOR);
         expect(lines.join("\n")).toContain("const");
+    });
+
+    it.each([
+        ["early edit", 'const title = "changed";\nconst count = 1;'],
+        ["inserted row", 'const inserted = true;\nconst title = "original";\nconst count = 1;'],
+        ["deleted row", "const count = 1;"],
+        ["duplicate row", "const count = 1;\nconst count = 1;"],
+    ])("keeps exact unchanged rows colored during a non-prefix %s", async (_label, revised) => {
+        const invalidate = () => {};
+        const source = 'const title = "original";\nconst count = 1;';
+
+        const show = (text: string) => {
+            observeSyntaxHighlightSource(text, invalidate);
+            return highlightSyntaxCode(text, "typescript", { invalidate, cache: false });
+        };
+
+        show(source);
+        await settleSyntaxHighlights();
+        const colored = show(source);
+        const countRow = colored[1];
+        expect(countRow).toContain(TYPESCRIPT_KEYWORD_COLOR);
+
+        const pending = show(revised);
+        expect(
+            pending.filter((row) => stripVTControlCharacters(row).includes("const count")),
+        ).toEqual(
+            revised
+                .split("\n")
+                .filter((row) => row.includes("const count"))
+                .map(() => countRow),
+        );
+
+        expect(pending.map(stripVTControlCharacters)).toEqual(revised.split("\n"));
+
+        await settleSyntaxHighlights();
+        expect(show(revised).map(stripVTControlCharacters)).toEqual(revised.split("\n"));
     });
 
     it("keeps unchanged script colors visible while native Bash arguments grow", async () => {
