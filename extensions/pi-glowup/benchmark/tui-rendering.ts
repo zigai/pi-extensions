@@ -3,6 +3,9 @@ import type { Component } from "@earendil-works/pi-tui";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
+import { createHash } from "node:crypto";
+import assert from "node:assert/strict";
+import { collapsedPreviewLinesFromText, renderGlowupOutput } from "../src/rendering/output.ts";
 import { buildPierreDiffPayload } from "../src/rendering/diff/payload.ts";
 import { buildUnifiedDiffRows } from "../src/rendering/diff/rows.ts";
 import {
@@ -62,6 +65,7 @@ type BenchmarkReport = {
     };
 
     readonly timings: Readonly<Record<string, TimingSummary>>;
+    readonly outputHashes: Readonly<Record<string, string>>;
 
     readonly retained: {
         readonly heapBytes: number;
@@ -646,6 +650,102 @@ function formattedBashCallTimings(samples: number): readonly number[] {
     );
 }
 
+function outputPreviewTimings(samples: number) {
+    const inputs = {
+        "short-ascii": "first\nsecond\nthird",
+        "short-unicode": "界\né\n👩‍💻",
+        "large-ascii": Array.from(
+            { length: 50_000 },
+            (_, index) => `row ${index} ${"text ".repeat(12)}`,
+        ).join("\n"),
+        "large-unicode": Array.from(
+            { length: 1_000 },
+            (_, index) => `row ${index} ${"界 é 👩‍💻 ".repeat(120)}`,
+        ).join("\n"),
+        "cr-unicode": Array.from({ length: 1_000 }, (_, index) => `old\r界 ${index}\r\n`).join(""),
+    };
+
+    const timings: Record<string, readonly number[]> = {};
+    const hashes: Record<string, string> = {};
+    for (const [name, text] of Object.entries(inputs)) {
+        for (const mode of ["head", "headTail"] as const) {
+            const prepare = () => collapsedPreviewLinesFromText(text, 6, mode, "hint");
+            const compose = () =>
+                renderGlowupOutput(plainTheme, text, {
+                    expanded: false,
+                    mode,
+                    maxPreviewLines: 6,
+                    omittedHint: "hint",
+                }).render(100);
+
+            for (const [stage, render] of [
+                ["prepare", prepare],
+                ["compose", compose],
+            ] as const) {
+                const key = `output-${name}-${mode}-${stage}`;
+                const expected = render();
+                let batch = 1;
+                if (name.startsWith("short-")) batch = 200;
+
+                for (let warmup = 0; warmup < batch; warmup += 1) render();
+                timings[key] = Array.from(
+                    { length: samples },
+                    () =>
+                        measure(() => {
+                            for (let iteration = 0; iteration < batch; iteration += 1) render();
+                        }) / batch,
+                );
+                assert.deepEqual(render(), expected, `${key} output changed during timing`);
+                hashes[key] = createHash("sha256").update(JSON.stringify(expected)).digest("hex");
+            }
+        }
+    }
+
+    return { timings, hashes };
+}
+
+function diffReuseTimings(samples: number) {
+    const timings: Record<string, readonly number[]> = {};
+    const hashes: Record<string, string> = {};
+    for (const rows of [2, 400]) {
+        const component = renderGlowupDiff(
+            plainTheme,
+            [
+                {
+                    lines: Array.from({ length: rows }, (_, index) => `+${index + 1} row ${index}`),
+                    added: rows,
+                    removed: 0,
+                },
+            ],
+            true,
+        );
+        const expected = component.render(120);
+        for (const invalidated of [false, true]) {
+            const key = `diff-${rows}-rows-invalidated-${invalidated}`;
+            let batch = 1;
+            if (rows === 2) batch = 200;
+
+            const draw = () => {
+                if (invalidated) component.invalidate();
+                return component.render(120);
+            };
+
+            for (let warmup = 0; warmup < batch; warmup += 1) draw();
+            timings[key] = Array.from(
+                { length: samples },
+                () =>
+                    measure(() => {
+                        for (let iteration = 0; iteration < batch; iteration += 1) draw();
+                    }) / batch,
+            );
+            assert.deepEqual(draw(), expected, `${key} output changed during timing`);
+            hashes[key] = createHash("sha256").update(JSON.stringify(expected)).digest("hex");
+        }
+    }
+
+    return { timings, hashes };
+}
+
 async function runBenchmark(options: BenchmarkOptions): Promise<BenchmarkReport> {
     configureRenderingAppearance(defaultAppearance);
     globalThis.gc?.();
@@ -677,6 +777,10 @@ async function runBenchmark(options: BenchmarkOptions): Promise<BenchmarkReport>
         timings[name] = samples;
     }
 
+    const output = outputPreviewTimings(options.quick ? 7 : 15);
+    const diffReuse = diffReuseTimings(options.quick ? 7 : 15);
+    Object.assign(timings, output.timings, diffReuse.timings);
+
     const summaries: Record<string, TimingSummary> = {};
     for (const [name, samples] of Object.entries(timings)) {
         summaries[name] = timingSummary(samples);
@@ -699,6 +803,7 @@ async function runBenchmark(options: BenchmarkOptions): Promise<BenchmarkReport>
             },
         },
         timings: summaries,
+        outputHashes: { ...output.hashes, ...diffReuse.hashes },
         retained: {
             heapBytes: retainedHeapBytes,
             syntaxCacheEntries: cache.entries,

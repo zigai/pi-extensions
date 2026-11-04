@@ -89,17 +89,19 @@ export function collapsedPreviewLinesFromText(
     );
     const headCount = mode === "headTail" ? Math.ceil(lineBudget / 2) : lineBudget;
     const tailCount = mode === "headTail" ? Math.floor(lineBudget / 2) : 0;
-    const headLines: Array<{ line: string; index: number }> = [];
-    const tailLines: Array<{ line: string; index: number }> = [];
-    let allLines: Array<{ line: string; index: number }> | undefined = [];
+
+    type PreviewLine = { start: number; end: number; index: number };
+
+    const headLines: PreviewLine[] = [];
+    const tailLines: PreviewLine[] = [];
+    let allLines: PreviewLine[] | undefined = [];
     let pendingBlankLineCount = 0;
     let pendingBlankStart = 0;
-    let pendingBlankLineSamples: string[] = [];
+    let pendingBlankLineSamples: PreviewLine[] = [];
     let lineCount = 0;
     let sawContent = false;
 
-    const consumeLine = (line: string, index: number): void => {
-        const previewLine = { line: detachedPreviewLine(line, lineByteBudget), index };
+    const consumeLine = (previewLine: PreviewLine): void => {
         lineCount += 1;
 
         if (headLines.length < headCount) {
@@ -125,21 +127,28 @@ export function collapsedPreviewLinesFromText(
 
     const flushPendingBlankLines = (): void => {
         for (let index = 0; index < pendingBlankLineCount; index += 1) {
-            consumeLine(pendingBlankLineSamples[index] ?? "", pendingBlankStart + index);
+            consumeLine(
+                pendingBlankLineSamples[index] ?? {
+                    start: 0,
+                    end: 0,
+                    index: pendingBlankStart + index,
+                },
+            );
         }
 
         pendingBlankLineCount = 0;
         pendingBlankLineSamples = [];
     };
 
-    visitPhysicalLines(normalized, (line, index) => {
+    visitPhysicalLines(normalized, (start, end, index) => {
+        const line = normalized.slice(start, end);
         if (!hasNonWhitespaceText(line)) {
             if (sawContent) {
                 if (pendingBlankLineCount === 0) pendingBlankStart = index;
                 pendingBlankLineCount += 1;
 
                 if (pendingBlankLineSamples.length < lineBudget) {
-                    pendingBlankLineSamples.push(line);
+                    pendingBlankLineSamples.push({ start, end, index });
                 }
             }
 
@@ -155,17 +164,20 @@ export function collapsedPreviewLinesFromText(
             flushPendingBlankLines();
         }
 
-        consumeLine(line, index);
+        consumeLine({ start, end, index });
     });
 
     if (lineCount === 0) {
         return { isEmpty: true };
     }
 
+    const materialize = ({ start, end }: PreviewLine): string =>
+        detachedPreviewLine(normalized.slice(start, end), lineByteBudget);
+
     if (lineCount <= retainedLineBudget) {
         return {
             isEmpty: false,
-            lines: allLines.map(({ line }) => line),
+            lines: allLines.map(materialize),
             sourceIndices: allLines.map(({ index }) => index),
         };
     }
@@ -174,7 +186,7 @@ export function collapsedPreviewLinesFromText(
         return {
             isEmpty: false,
             lines: [
-                ...headLines.map(({ line }) => line),
+                ...headLines.map(materialize),
                 `${omittedLinesLabel(lineCount - headLines.length)} (${omittedHint})`,
             ],
             sourceIndices: [...headLines.map(({ index }) => index), undefined],
@@ -184,9 +196,9 @@ export function collapsedPreviewLinesFromText(
     return {
         isEmpty: false,
         lines: [
-            ...headLines.map(({ line }) => line),
+            ...headLines.map(materialize),
             `${omittedLinesLabel(lineCount - headLines.length - tailLines.length)} (${omittedHint})`,
-            ...tailLines.map(({ line }) => line),
+            ...tailLines.map(materialize),
         ],
         sourceIndices: [
             ...headLines.map(({ index }) => index),
@@ -197,6 +209,8 @@ export function collapsedPreviewLinesFromText(
 }
 
 function normalizeOutputText(text: string): string {
+    if (!text.includes("\r")) return text;
+
     const normalizedLineEndings = text.replace(/\r\n/g, "\n");
     let output = "";
     let lineStart = 0;
@@ -327,29 +341,19 @@ function reportRetainedOutput(
     });
 }
 
-function visitPhysicalLines(text: string, visit: (line: string, index: number) => void): void {
+function visitPhysicalLines(
+    text: string,
+    visit: (start: number, end: number, index: number) => void,
+): void {
     let lineStart = 0;
     let lineIndex = 0;
-    for (let index = 0; index <= text.length; index += 1) {
-        if (index < text.length) {
-            const charCode = text.charCodeAt(index);
-            if (charCode !== 10 && charCode !== 13) {
-                continue;
-            }
-        }
-
-        visit(text.slice(lineStart, index), lineIndex++);
-
-        if (
-            index < text.length &&
-            text.charCodeAt(index) === 13 &&
-            text.charCodeAt(index + 1) === 10
-        ) {
-            index += 1;
-        }
-
-        lineStart = index + 1;
+    let lineEnd: number;
+    while ((lineEnd = text.indexOf("\n", lineStart)) !== -1) {
+        visit(lineStart, lineEnd, lineIndex++);
+        lineStart = lineEnd + 1;
     }
+
+    visit(lineStart, text.length, lineIndex);
 }
 
 type WrappedPreviewLine = {

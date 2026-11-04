@@ -98,6 +98,7 @@ function diffLineNumberText(
 
 function changedRangesForDiffLines(
     lines: ReadonlyArray<ParsedDiffLine>,
+    selected: ReadonlySet<number> | undefined,
 ): ReadonlyArray<readonly TextRange[] | undefined> {
     const ranges: Array<readonly TextRange[] | undefined> = Array.from(
         { length: lines.length },
@@ -111,7 +112,13 @@ function changedRangesForDiffLines(
         for (let pairIndex = 0; pairIndex < pairCount; pairIndex += 1) {
             const deletion = deletions[pairIndex];
             const insertion = insertions[pairIndex];
-            if (deletion !== undefined && insertion !== undefined) {
+            if (
+                deletion !== undefined &&
+                insertion !== undefined &&
+                (selected === undefined ||
+                    selected.has(deletion.index) ||
+                    selected.has(insertion.index))
+            ) {
                 const changed = changedTextRanges(deletion.content, insertion.content);
                 ranges[deletion.index] = changed.before;
                 ranges[insertion.index] = changed.after;
@@ -625,7 +632,9 @@ function createDiffComponent(
                 invalidate,
                 isCurrent,
             );
-            const changedRanges = changedRangesForDiffLines(parsedLines);
+            let selected: ReadonlySet<number> | undefined;
+            if (shouldCollapse) selected = new Set(visibleLines.map((line) => line.index));
+            const changedRanges = changedRangesForDiffLines(parsedLines, selected);
             const renderLines = (
                 lines: ReadonlyArray<{ readonly line: string; readonly index: number }>,
             ): void => {

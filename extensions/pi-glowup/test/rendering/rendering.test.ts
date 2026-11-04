@@ -1,7 +1,7 @@
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { fc } from "@fast-check/vitest";
 import { stripVTControlCharacters } from "node:util";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
     collapseHome,
     isInstructionFilePath,
@@ -27,11 +27,79 @@ import {
 import { parseDiffSections } from "../../src/rendering/diff/text-diff.ts";
 import { parseScriptInvocation } from "../../src/tools/built-in/bash/invocation.ts";
 import { renderGlowupDiff } from "../../src/rendering/diff/text-renderer.ts";
-import { renderGlowupOutput } from "../../src/rendering/output.ts";
+import { collapsedPreviewLinesFromText, renderGlowupOutput } from "../../src/rendering/output.ts";
 import { renderScriptCall } from "../../src/tools/built-in/bash/script-renderer.ts";
 import { createPlainTheme } from "../support/plain-theme.ts";
 
 const plainTheme = createPlainTheme();
+
+function materializedPreview(physical: readonly string[], requestedBudget: number, mode: string) {
+    if (mode === "hidden") return { isEmpty: false, lines: [], sourceIndices: [] };
+
+    let rows = physical.map((text, index) => ({ text, index }));
+    while (rows[0]?.text.trim() === "") rows = rows.slice(1);
+
+    while (rows.at(-1)?.text.trim() === "") rows = rows.slice(0, -1);
+    rows = rows.filter(
+        (row, index) =>
+            row.text.trim() !== "" ||
+            !/^Command exited with code \d+$/u.test(rows[index + 1]?.text.trim() ?? ""),
+    );
+    if (rows.length === 0) return { isEmpty: true };
+
+    const budget = Math.min(256, Math.max(1, requestedBudget));
+    if (rows.length <= Math.min(256, budget + 1))
+        return {
+            isEmpty: false,
+            lines: rows.map((row) => row.text),
+            sourceIndices: rows.map((row) => row.index),
+        };
+
+    let head = budget;
+    let tail = 0;
+    if (mode === "headTail") {
+        head = Math.ceil(budget / 2);
+        tail = Math.floor(budget / 2);
+    }
+
+    let ending: typeof rows = [];
+    if (tail > 0) ending = rows.slice(-tail);
+
+    const omitted = rows.length - head - tail;
+    let noun = "lines";
+    if (omitted === 1) noun = "line";
+
+    return {
+        isEmpty: false,
+        lines: [
+            ...rows.slice(0, head).map((row) => row.text),
+            `… +${omitted} ${noun} (hint)`,
+            ...ending.map((row) => row.text),
+        ],
+        sourceIndices: [
+            ...rows.slice(0, head).map((row) => row.index),
+            undefined,
+            ...ending.map((row) => row.index),
+        ],
+    };
+}
+
+function expectedPreviewLine(clusters: readonly string[]): string {
+    const source = clusters.join("");
+    if (Buffer.byteLength(source) <= 4096) return source;
+
+    let remaining = 4093;
+    const kept: string[] = [];
+    for (const cluster of clusters) {
+        const bytes = Buffer.byteLength(cluster);
+        if (bytes > remaining) break;
+
+        kept.push(cluster);
+        remaining -= bytes;
+    }
+
+    return `${kept.join("")}…`;
+}
 
 function plainLines(lines: readonly string[]): string[] {
     return lines.map((line) => stripVTControlCharacters(line));
@@ -400,6 +468,18 @@ describe("Glowup rendering helpers", () => {
         expect(rendered).toContain("-12");
     });
 
+    it("collapses only the home directory and its descendants", () => {
+        vi.stubEnv("HOME", "/home/test");
+        try {
+            expect(collapseHome("/home/test")).toBe("~");
+            expect(collapseHome("/home/test/file")).toBe("~/file");
+            expect(collapseHome("/home/test-other/file")).toBe("/home/test-other/file");
+            expect(collapseHome("relative/file")).toBe("relative/file");
+        } finally {
+            vi.unstubAllEnvs();
+        }
+    });
+
     it("collapses home paths only at a path boundary", () => {
         const previousHome = process.env.HOME;
         process.env.HOME = "/home/user";
@@ -550,14 +630,186 @@ describe("Glowup rendering helpers", () => {
         expect(rows).toEqual(["• Call first", "  │ second", "  │ … +1 line (hint)"]);
     });
 
-    it("skips hidden collapsed output without building hidden preview lines", () => {
-        const component = renderGlowupOutput(plainTheme, "line\n".repeat(100_000), {
-            expanded: false,
-            mode: "hidden",
-            noOutputLabel: null,
+    it("keeps duplicate preview rows at their original coordinates", () => {
+        expect(
+            collapsedPreviewLinesFromText(
+                "\nsame\nsame\nmiddle\nsame\nsame\n",
+                4,
+                "headTail",
+                "hint",
+            ),
+        ).toEqual({
+            isEmpty: false,
+            lines: ["same", "same", "middle", "same", "same"],
+            sourceIndices: [1, 2, 3, 4, 5],
         });
 
-        expect(component.render(80)).toEqual([]);
+        expect(
+            collapsedPreviewLinesFromText("same\nsame\na\nb\nsame\nsame", 4, "headTail", "hint"),
+        ).toEqual({
+            isEmpty: false,
+            lines: ["same", "same", "… +2 lines (hint)", "same", "same"],
+            sourceIndices: [0, 1, undefined, 4, 5],
+        });
+    });
+
+    it("preserves pending blank samples and drops only status separators", () => {
+        expect(
+            collapsedPreviewLinesFromText("a\n \n\t\n  \n   \nb\n \n", 4, "headTail", "hint"),
+        ).toEqual({
+            isEmpty: false,
+            lines: ["a", " ", "… +2 lines (hint)", "   ", "b"],
+            sourceIndices: [0, 1, undefined, 4, 5],
+        });
+
+        expect(
+            collapsedPreviewLinesFromText("a\n \n\t\n  \n   \n    \nb", 4, "headTail", "hint"),
+        ).toEqual({
+            isEmpty: false,
+            lines: ["a", " ", "… +3 lines (hint)", "", "b"],
+            sourceIndices: [0, 1, undefined, 5, 6],
+        });
+
+        expect(
+            collapsedPreviewLinesFromText(
+                "a\n \n\t\n Command exited with code 2 \n\n",
+                4,
+                "headTail",
+                "hint",
+            ),
+        ).toEqual({
+            isEmpty: false,
+            lines: ["a", " Command exited with code 2 "],
+            sourceIndices: [0, 3],
+        });
+    });
+
+    it("preserves materialized preview selection and indices across generated row combinations", () => {
+        const scenario = fc.record({
+            rows: fc.array(
+                fc.record({
+                    text: fc.constantFrom(
+                        "same",
+                        "界",
+                        "é",
+                        "👩‍💻",
+                        "done",
+                        "Command exited with code 2",
+                    ),
+                    blank: fc.boolean(),
+                }),
+                { maxLength: 280 },
+            ),
+            budget: fc.constantFrom(0, 1, 2, 4, 255, 256, 257),
+            mode: fc.constantFrom("head", "headTail", "hidden"),
+        });
+        fc.assert(
+            fc.property(scenario, ({ rows, budget, mode }) => {
+                const physical = [
+                    "",
+                    " ",
+                    ...rows.flatMap(({ text, blank }) => {
+                        if (blank) return [text, " "];
+
+                        return [text];
+                    }),
+                    "",
+                    " ",
+                ];
+                expect(
+                    collapsedPreviewLinesFromText(physical.join("\n"), budget, mode, "hint"),
+                ).toEqual(materializedPreview(physical, budget, mode));
+            }),
+            { seed: 0x5eed2026, numRuns: 100 },
+        );
+    });
+
+    it.each([
+        { text: "old\r", lines: [], indices: [] },
+        { text: "old\r\rfinal", lines: ["final"], indices: [0] },
+        { text: "界\rnew\nold\rlast", lines: ["new", "last"], indices: [0, 1] },
+        { text: "first\r\n\r\nlast\r\n", lines: ["first", "", "last"], indices: [0, 1, 2] },
+        {
+            text: "first\n \r\rCommand exited with code 2",
+            lines: ["first", "Command exited with code 2"],
+            indices: [0, 1],
+        },
+        { text: "a\r\nb\rnew\r\nlast", lines: ["a", "new", "last"], indices: [0, 1, 2] },
+    ])("preserves normalized rows for $text", ({ text, lines, indices }) => {
+        const result = collapsedPreviewLinesFromText(text, 4, "headTail", "hint");
+        if (lines.length === 0) expect(result).toEqual({ isEmpty: true });
+        else expect(result).toEqual({ isEmpty: false, lines, sourceIndices: indices });
+    });
+
+    it("preserves complete mixed graphemes at the preview byte boundary", () => {
+        fc.assert(
+            fc.property(
+                fc.array(fc.constantFrom("x", "界", "é", "👩‍💻"), { minLength: 1, maxLength: 60 }),
+                fc.integer({ min: 30, max: 150 }),
+                (units, repeats) => {
+                    const clusters = Array.from({ length: repeats }, () => units).flat();
+                    const source = clusters.join("");
+                    const line = expectedPreviewLine(clusters);
+                    expect(collapsedPreviewLinesFromText(source, 4, "head", "hint")).toEqual({
+                        isEmpty: false,
+                        lines: [line],
+                        sourceIndices: [0],
+                    });
+                },
+            ),
+            { seed: 0x5eed2026, numRuns: 75 },
+        );
+    });
+
+    it.each([
+        { length: 4095, expected: "x".repeat(4095) },
+        { length: 4096, expected: "x".repeat(4096) },
+        { length: 4097, expected: `${"x".repeat(4093)}…` },
+    ])("keeps the exact line-byte boundary for $length bytes", ({ length, expected }) => {
+        expect(collapsedPreviewLinesFromText("x".repeat(length), 4, "head", "hint")).toEqual({
+            isEmpty: false,
+            lines: [expected],
+            sourceIndices: [0],
+        });
+    });
+
+    it("maps CRLF rows and bare-CR progress rewrites to normalized source rows", () => {
+        expect(
+            collapsedPreviewLinesFromText(
+                "old\rnew\r\n\rprogress\nlast\rfinal",
+                4,
+                "headTail",
+                "hint",
+            ),
+        ).toEqual({
+            isEmpty: false,
+            lines: ["new", "progress", "final"],
+            sourceIndices: [0, 1, 2],
+        });
+    });
+
+    it.each(["head", "headTail"] as const)("keeps the extra small-input row in %s mode", (mode) => {
+        expect(collapsedPreviewLinesFromText("a\nb\nc", 2, mode, "hint")).toEqual({
+            isEmpty: false,
+            lines: ["a", "b", "c"],
+            sourceIndices: [0, 1, 2],
+        });
+    });
+
+    it("truncates selected lines on grapheme boundaries and detaches invalid Unicode", () => {
+        const cluster = "👩‍💻";
+        const prefix = cluster.repeat(Math.floor((4096 - 3) / Buffer.byteLength(cluster)));
+        expect(collapsedPreviewLinesFromText(cluster.repeat(1000), 4, "head", "hint")).toEqual({
+            isEmpty: false,
+            lines: [`${prefix}…`],
+            sourceIndices: [0],
+        });
+
+        expect(collapsedPreviewLinesFromText("a\ud800", 4, "head", "hint")).toEqual({
+            isEmpty: false,
+            lines: ["a�"],
+            sourceIndices: [0],
+        });
     });
 
     it("trims trailing blank output lines", () => {
