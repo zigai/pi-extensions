@@ -1,4 +1,7 @@
-import { createStatementService } from "../../../rendering/streaming/statement-service.ts";
+import {
+    createStatementService,
+    MAX_STATEMENT_SOURCE_BYTES,
+} from "../../../rendering/streaming/statement-service.ts";
 import type { EmbeddedProgram } from "./embedded-programs.ts";
 import { recordRenderError } from "../../../diagnostics/render-events.ts";
 
@@ -16,26 +19,29 @@ export type EmbeddedProgramLookup = ((
 type Entry = {
     readonly controller: AbortController;
     readonly invalidations: Set<() => void>;
+    readonly bytes: number;
+    readonly completion: Promise<void>;
+    readonly complete: () => void;
     programs: readonly EmbeddedProgram[] | undefined;
     settled: boolean;
-    completion: Promise<void>;
 };
 
-export function createEmbeddedProgramService() {
-    const parser = createStatementService();
+export function createEmbeddedProgramService(parser = createStatementService()) {
     const entries = new Map<string, Entry>();
     const jobs = new Set<Promise<void>>();
+    let active: Entry | undefined;
     let disposed = false;
-    let retainedCharacters = 0;
+    let retainedBytes = 0;
     let generation = 0;
 
-    function trim(current: Entry): void {
-        for (const [source, entry] of entries) {
-            if (entries.size <= 300 && retainedCharacters <= 4 * 1024 * 1024) break;
-            if (entry === current || !entry.settled) continue;
-            entries.delete(source);
-            retainedCharacters -= source.length;
-        }
+    function remove(source: string, entry: Entry): void {
+        entries.delete(source);
+
+        // An active worker still owns its source until its response arrives. Do not
+        // cancel it and immediately submit another job against that same capacity.
+        if (entry !== active) retainedBytes -= entry.bytes;
+        entry.invalidations.clear();
+        entry.complete();
     }
 
     function publish(
@@ -43,12 +49,10 @@ export function createEmbeddedProgramService() {
         entry: Entry,
         programs: readonly EmbeddedProgram[] | undefined,
     ): void {
-        if (disposed || entry.controller.signal.aborted || entries.get(source) !== entry) return;
+        if (disposed || entries.get(source) !== entry) return;
 
         entry.programs = programs;
         entry.settled = true;
-        trim(entry);
-
         for (const notify of entry.invalidations) {
             try {
                 notify();
@@ -60,36 +64,86 @@ export function createEmbeddedProgramService() {
         entry.invalidations.clear();
     }
 
+    function pump(): void {
+        if (disposed || active !== undefined) return;
+
+        for (const [source, entry] of entries) {
+            if (entry.settled) continue;
+            active = entry;
+
+            // Serialize admission, not extraction semantics. Pending demand is bounded
+            // here, so the parser's capacity rejection cannot become a cached result.
+            const job = parser
+                .extract(source, entry.controller.signal)
+                .then(
+                    (programs) => publish(source, entry, programs),
+                    (cause: unknown) => {
+                        recordRenderError("bash.embedded-extract", cause);
+                        publish(source, entry, undefined);
+                    },
+                )
+                .finally(() => {
+                    if (entries.get(source) !== entry) retainedBytes -= entry.bytes;
+                    active = undefined;
+                    entry.complete();
+                    jobs.delete(job);
+                    // Keep a single oversized demanded source valid, as before; byte
+                    // budgets bound competing demand, never truncate a script.
+                    for (const [olderSource, older] of entries) {
+                        if (entries.size <= 1 || retainedBytes <= 2 * MAX_STATEMENT_SOURCE_BYTES)
+                            break;
+                        remove(olderSource, older);
+                    }
+                    pump();
+                });
+
+            jobs.add(job);
+
+            return;
+        }
+    }
+
     function get(source: string, invalidate?: () => void): readonly EmbeddedProgram[] | undefined {
         if (disposed) return undefined;
 
         let entry = entries.get(source);
         if (entry === undefined) {
+            const bytes = Buffer.byteLength(source, "utf8");
+
+            for (const [previousSource, previous] of entries) {
+                if (entries.size < 300 && retainedBytes + bytes <= 2 * MAX_STATEMENT_SOURCE_BYTES)
+                    break;
+
+                if (previous === active) continue;
+                remove(previousSource, previous);
+            }
+
+            let complete: () => void = () => {};
+            const completion = new Promise<void>((resolve) => {
+                complete = resolve;
+            });
+
             entry = {
                 controller: new AbortController(),
                 invalidations: new Set(),
+                bytes,
                 programs: undefined,
                 settled: false,
-                completion: Promise.resolve(),
+                completion,
+                complete,
             };
             entries.set(source, entry);
-            retainedCharacters += source.length;
-
-            const current = entry;
-            const job = parser.extract(source, current.controller.signal).then(
-                (programs) => publish(source, current, programs),
-                (cause: unknown) => {
-                    recordRenderError("bash.embedded-extract", cause);
-                    publish(source, current, undefined);
-                },
-            );
-
-            current.completion = job;
-            jobs.add(job);
-            void job.then(() => jobs.delete(job));
+            retainedBytes += bytes;
         }
 
+        // Repeated demand refreshes recency too; a hot pending preview must not
+        // be evicted merely because its first request was old.
+        entries.delete(source);
+        entries.set(source, entry);
+
         if (invalidate !== undefined && !entry.settled) entry.invalidations.add(invalidate);
+        pump();
+
         return entry.programs;
     }
 
@@ -97,12 +151,14 @@ export function createEmbeddedProgramService() {
         source: string,
         signal: AbortSignal,
     ): Promise<readonly EmbeddedProgram[] | undefined> {
+        if (signal.aborted) return undefined;
+
         get(source);
 
         const entry = entries.get(source);
         const currentGeneration = generation;
 
-        if (entry === undefined || signal.aborted) return undefined;
+        if (entry === undefined) return undefined;
 
         let abort: () => void = () => {};
         const cancelled = new Promise<void>((resolve) => {
@@ -124,9 +180,7 @@ export function createEmbeddedProgramService() {
     function clear(): void {
         generation++;
 
-        for (const entry of entries.values()) entry.controller.abort();
-        entries.clear();
-        retainedCharacters = 0;
+        for (const [source, entry] of entries) remove(source, entry);
     }
 
     async function dispose(): Promise<void> {
@@ -135,6 +189,7 @@ export function createEmbeddedProgramService() {
         disposed = true;
         clear();
         await parser.dispose();
+        await settled();
     }
 
     async function settled(): Promise<void> {

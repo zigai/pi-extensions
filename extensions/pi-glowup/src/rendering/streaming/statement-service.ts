@@ -11,26 +11,65 @@ declare global {
     }
 }
 
+/** Competing source budget; an idle worker still accepts one larger source without truncation. */
+export const MAX_STATEMENT_SOURCE_BYTES = 4 * 1024 * 1024;
+
 type Job = {
+    readonly bytes: number;
+    settled: boolean;
     readonly request: WorkerRequest;
     readonly signal: AbortSignal;
     readonly resolve: (response: WorkerResponse | undefined) => void;
     readonly cancel: () => void;
 };
 
+type StatementWorker = {
+    on(event: "message", listener: (response: WorkerResponse) => void): void;
+    on(event: "error" | "exit", listener: () => void): void;
+    ref(): void;
+    unref(): void;
+    postMessage(request: WorkerRequest): void;
+    terminate(): Promise<number>;
+};
+
 /** One lazy worker per store, bounded queue, explicit failure diagnostics, and no UI-thread parsing. */
-export function createStatementService() {
+export function createStatementService(
+    createWorker: () => StatementWorker = () =>
+        new Worker(
+            new URL(import.meta.glowupStatementWorker ?? "./statement-worker.ts", import.meta.url),
+            { execArgv: [] },
+        ),
+) {
     const queue: Job[] = [];
-    let worker: Worker | undefined;
+    let worker: ReturnType<typeof createWorker> | undefined;
     let active: Job | undefined;
     let nextId = 0;
     let disposed = false;
     let failed = false;
+    let retainedBytes = 0;
     let stopping: Promise<number> | undefined;
 
     function finish(job: Job, response: WorkerResponse | undefined): void {
+        if (job.settled) return;
+
+        job.settled = true;
         job.signal.removeEventListener("abort", job.cancel);
         job.resolve(response);
+    }
+
+    function release(job: Job): void {
+        retainedBytes -= job.bytes;
+    }
+
+    function admits(source: string): boolean {
+        let count = queue.length;
+        if (active !== undefined) count++;
+
+        return (
+            count < MAX_SCRIPT_PREVIEW_ENTRIES &&
+            (count === 0 ||
+                retainedBytes + Buffer.byteLength(source, "utf8") <= MAX_STATEMENT_SOURCE_BYTES)
+        );
     }
 
     function stop(): void {
@@ -45,10 +84,18 @@ export function createStatementService() {
 
         failed = true;
 
-        if (active !== undefined) finish(active, undefined);
+        if (active !== undefined) {
+            release(active);
+            finish(active, undefined);
+        }
+
         active = undefined;
 
-        for (const job of queue.splice(0)) finish(job, undefined);
+        for (const job of queue.splice(0)) {
+            release(job);
+            finish(job, undefined);
+        }
+
         stop();
         reportExtensionDiagnostic(
             "[pi-glowup] Statement parser unavailable (worker or WASM asset failure); unfinished code is held until completion. Reload to retry.",
@@ -68,13 +115,7 @@ export function createStatementService() {
 
         try {
             if (worker === undefined) {
-                const current = new Worker(
-                    new URL(
-                        import.meta.glowupStatementWorker ?? "./statement-worker.ts",
-                        import.meta.url,
-                    ),
-                    { execArgv: [] },
-                );
+                const current = createWorker();
                 worker = current;
                 current.on("error", () => {
                     if (worker === current) fail();
@@ -89,6 +130,7 @@ export function createStatementService() {
 
                     const completed = active;
                     active = undefined;
+                    release(completed);
 
                     if ("error" in response) {
                         finish(completed, undefined);
@@ -117,7 +159,7 @@ export function createStatementService() {
         ): Promise<StatementResponse | undefined> {
             if (disposed || failed || signal.aborted) return Promise.resolve(undefined);
 
-            if (queue.length >= MAX_SCRIPT_PREVIEW_ENTRIES) {
+            if (!admits(source)) {
                 reportExtensionDiagnostic(
                     "[pi-glowup] Statement parser capacity exceeded; unfinished code is held until completion.",
                 );
@@ -126,6 +168,8 @@ export function createStatementService() {
 
             return new Promise((resolve) => {
                 const job: Job = {
+                    bytes: Buffer.byteLength(source, "utf8"),
+                    settled: false,
                     request: { id: ++nextId, source, language, complete },
                     signal,
                     resolve: (response) => {
@@ -134,7 +178,10 @@ export function createStatementService() {
                     },
                     cancel: () => {
                         const index = queue.indexOf(job);
-                        if (index >= 0) queue.splice(index, 1);
+                        if (index >= 0) {
+                            queue.splice(index, 1);
+                            release(job);
+                        }
 
                         // Active parsing cannot be interrupted, but the caller need not wait
                         // for it and its response cannot publish into a newer generation.
@@ -143,14 +190,17 @@ export function createStatementService() {
                 };
 
                 signal.addEventListener("abort", job.cancel, { once: true });
+                retainedBytes += job.bytes;
                 queue.push(job);
                 dispatch();
             });
         },
         async extract(source: string, signal: AbortSignal): Promise<EmbeddedProgram[] | undefined> {
-            if (disposed || failed || signal.aborted) return undefined;
+            if (disposed || failed || signal.aborted || !admits(source)) return undefined;
             return new Promise((resolve) => {
                 const job: Job = {
+                    bytes: Buffer.byteLength(source, "utf8"),
+                    settled: false,
                     request: { id: ++nextId, kind: "embedded", source },
                     signal,
                     resolve: (response) => {
@@ -173,12 +223,17 @@ export function createStatementService() {
                     },
                     cancel: () => {
                         const index = queue.indexOf(job);
-                        if (index >= 0) queue.splice(index, 1);
+                        if (index >= 0) {
+                            queue.splice(index, 1);
+                            release(job);
+                        }
+
                         finish(job, undefined);
                     },
                 };
 
                 signal.addEventListener("abort", job.cancel, { once: true });
+                retainedBytes += job.bytes;
                 queue.push(job);
                 dispatch();
             });
@@ -186,10 +241,18 @@ export function createStatementService() {
         async dispose(): Promise<void> {
             disposed = true;
 
-            if (active !== undefined) finish(active, undefined);
+            if (active !== undefined) {
+                release(active);
+                finish(active, undefined);
+            }
+
             active = undefined;
 
-            for (const job of queue.splice(0)) finish(job, undefined);
+            for (const job of queue.splice(0)) {
+                release(job);
+                finish(job, undefined);
+            }
+
             stop();
             await stopping;
         },
