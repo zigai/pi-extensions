@@ -11,6 +11,14 @@
       "default": "./schemas/pi-lazy-mcp.schema.json",
       "description": "JSON Schema used by editors for this settings file."
     },
+    "eager": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "Servers to connect at session startup and keep connected for presence and feedback, even before any tool call. Overrides idle eviction for these servers."
+    },
     "idle": {
       "type": "object",
       "patternProperties": {

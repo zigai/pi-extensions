@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { setTimeout as delay } from "node:timers/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -227,6 +228,43 @@ describe("lazy MCP sessions", () => {
             expect(await second.started()).toEqual([]);
         });
     });
+
+    it.each([false, true])(
+        "keeps eager servers connected before tool use (saved: %s)",
+        async (saved) => {
+            const directory = await hostDirectory();
+            const fixture = await serverFixture(directory, "sample", catalogOf("run"));
+            let pid = 0;
+            await withHost(
+                directory,
+                {
+                    servers: [fixture],
+                    saved: [fixture].filter(() => saved),
+                    settings: { eager: ["sample"], idle: { sample: 1 } },
+                },
+                async (session, errors) => {
+                    await vi.waitFor(async () => {
+                        expect(await fixture.started()).toHaveLength(1);
+                        expect(
+                            readCatalogs(catalogsFile(directory)).get(
+                                catalogKey("sample", fixture.config),
+                            ),
+                        ).toEqual(fixture.catalog);
+
+                        expect(session.getAllTools().map((tool) => tool.name)).toContain(
+                            "mcp__sample__run",
+                        );
+                    });
+                    pid = (await fixture.started())[0]?.pid ?? 0;
+                    await delay(50);
+                    expect(processGone(pid)).toBe(false);
+                    expect(await fixture.calls()).toEqual([]);
+                    expect(errors).toEqual([]);
+                },
+            );
+            await vi.waitFor(() => expect(processGone(pid)).toBe(true));
+        },
+    );
 
     it("discovers a server without a saved catalog once, saves it, registers it, and stops it", async () => {
         const directory = await hostDirectory();

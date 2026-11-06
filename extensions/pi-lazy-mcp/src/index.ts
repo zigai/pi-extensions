@@ -338,6 +338,7 @@ export default function extension(pi: ExtensionAPI): void {
                 root: ctx.cwd,
                 catalog: catalogs.get(managed.key),
                 idleAfterMs: loaded.settings.idle[entry.name],
+                eager: loaded.settings.eager.includes(entry.name),
                 changed: (catalog) => {
                     if (version !== generation) return;
 
@@ -359,8 +360,9 @@ export default function extension(pi: ExtensionAPI): void {
             if (managed.server === undefined) continue;
 
             const catalog = managed.server.catalog;
-            if (catalog === undefined) discoverInBackground(managed, managed.server, version);
-            else register(managed, managed.server, catalog);
+            if (catalog !== undefined) register(managed, managed.server, catalog);
+            if (catalog === undefined || loaded.settings.eager.includes(managed.entry.name))
+                discoverInBackground(managed, managed.server, version);
         }
 
         void Promise.all(discoveries.values()).then(() => {

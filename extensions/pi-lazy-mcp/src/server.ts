@@ -90,6 +90,7 @@ export type LazyServerOptions = {
     root: string;
     catalog: Catalog | undefined;
     idleAfterMs: number | undefined;
+    eager?: boolean;
     changed: (catalog: Catalog) => void;
     report: (message: string) => void;
 };
@@ -165,6 +166,7 @@ export class LazyServer {
             // Discovery leaves the server as it found it, unless a tool call started using the connection.
             if (
                 client !== undefined &&
+                this.options.eager !== true &&
                 !wasConnected &&
                 !this.calledOnConnection &&
                 this.inflight === 1
@@ -327,6 +329,7 @@ export class LazyServer {
             this.client === undefined ||
             idleAfterMs === undefined ||
             this.residency ||
+            this.options.eager === true ||
             this.shutdown.signal.aborted
         )
             return;

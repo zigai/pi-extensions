@@ -3,6 +3,11 @@ import { Type } from "typebox";
 
 export const settingsSchema = Type.Object(
     {
+        eager: Type.Array(Type.String(), {
+            default: [],
+            description:
+                "Servers to connect at session startup and keep connected for presence and feedback, even before any tool call. Overrides idle eviction for these servers.",
+        }),
         idle: Type.Record(
             Type.String(),
             Type.Integer({
