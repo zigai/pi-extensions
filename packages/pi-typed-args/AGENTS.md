@@ -2,7 +2,7 @@
 
 ## Work and Verify
 
-This repository publishes `pi-typed-args`, a TypeScript ESM library for Pi commands and typed skills, not a manifest-registered extension. Read the affected public exports, README, and relevant `docs/` guide before changing contracts. Run `npm run check` before handoff; it checks formatting, lint, types, and tests.
+This repository publishes `pi-typed-args`, a TypeScript ESM library for Pi commands and typed skills, not a manifest-registered extension. Read the affected public exports, README, and relevant `docs/` guide before changing contracts. Run `just check` before handoff; it checks formatting, lint, types, and tests.
 
 Keep `package.json` exports and its publish allowlist aligned with `src/`, `schemas/`, and `docs/`. Pi host packages and TypeBox stay peers, with development copies for local checks.
 

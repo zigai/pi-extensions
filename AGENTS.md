@@ -6,7 +6,7 @@ This is a strict TypeScript ESM npm-workspaces monorepo. Independently installab
 
 Packages retain independent versions, licenses, published exports, and strict workspace checks. Oxlint and Oxfmt use the repository-root configurations and dependencies, with scoped overrides preserving package policies. The root task runner runs imported-package builds, types, and tests from their own working directories; do not flatten those configurations or suppress failures. The collection uses bundled published dependencies and Pi resource paths, never a combined extension factory. Root development loading and collection loading are alternatives, not simultaneous activations.
 
-Run `just setup` after cloning and `npm run check` before handing off changes. The check covers architecture, generated settings, formatting, lint, types, tests, and npm packaging. Keep pre-commit enabled, including its generated-settings check.
+Run `just setup` after cloning and `just check` before handing off changes. The check covers architecture, generated settings, formatting, lint, types, tests, and npm packaging.
 
 Use explicit `.ts` suffixes for local imports. Let Oxfmt format code; Oxlint disallows ternary expressions. Avoid `any`, `@ts-ignore`, and unchecked assertions about Pi internals. Follow Conventional Commit subjects such as `fix(pi-tree): ...`.
 

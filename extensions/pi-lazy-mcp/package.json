@@ -21,7 +21,6 @@
     "format:check": "oxfmt --check .",
     "config:generate": "pi-extension-settings generate",
     "config:check": "pi-extension-settings check",
-    "check": "npm run config:check && npm run format:check && npm run lint && npm run check:code",
     "check:code": "npm run typecheck && npm test"
   },
   "dependencies": {

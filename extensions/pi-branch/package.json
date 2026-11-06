@@ -39,15 +39,13 @@
   "scripts": {
     "lint": "node ../../scripts/tracked-check.ts lint",
     "lint:fix": "node ../../scripts/tracked-check.ts lint:fix",
-    "format": "node ../../scripts/tracked-check.ts format",
-    "format:check": "node ../../scripts/tracked-check.ts format:check",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
     "test": "vitest run",
     "coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
     "check:package": "node scripts/package-check.ts",
-    "check": "npm run format:check && npm run lint && npm run check:code",
-    "check:code": "npm run typecheck && npm test && npm run check:package",
-    "verify": "npm run check"
+    "check:code": "npm run typecheck && npm test && npm run check:package"
   },
   "dependencies": {
     "@zigai/pi-extension-internals": "0.2.0",

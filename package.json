@@ -28,9 +28,8 @@
   "scripts": {
     "lint": "node scripts/workspace-tasks.ts lint",
     "lint:fix": "node scripts/workspace-tasks.ts lint:fix",
-    "format": "node scripts/workspace-tasks.ts format",
-    "format:check": "node scripts/workspace-tasks.ts format:check",
-    "check": "npm run build && npm run check:root && npm run check:code:workspaces",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
     "build:internals": "npm run build -w @zigai/pi-extension-internals",
     "architecture:check": "node scripts/architecture-check.ts",
     "collection:generate": "node scripts/generate-collection.ts generate",
@@ -39,18 +38,18 @@
     "coverage": "npm run build && node scripts/workspace-tasks.ts coverage",
     "test:package": "npm run build && npm run test:package:built",
     "typecheck": "npm run build && node scripts/workspace-tasks.ts typecheck",
-    "release": "release --root .",
     "release:dry-run": "release --dry --root .",
     "config:generate": "npm run build -w @zigai/pi-extension-settings && node packages/pi-extension-settings/dist/cli-entry.js generate",
     "config:check": "npm run build -w @zigai/pi-extension-settings && node packages/pi-extension-settings/dist/cli-entry.js check",
     "build": "node scripts/workspace-tasks.ts build",
     "check:code:workspaces": "node scripts/workspace-tasks.ts check:code:workspaces",
     "check:root": "npm run architecture:check && npm run collection:check && npm run config:check && npm run format:check:root && npm run lint:root && npm run typecheck:root && npm run test:root && npm run test:package:built",
-    "format:check:root": "node scripts/workspace-tasks.ts format:check:root",
+    "format:check:root": "oxfmt --check .",
     "lint:root": "node scripts/workspace-tasks.ts lint:root",
     "typecheck:root": "node scripts/workspace-tasks.ts typecheck:root",
     "test:root": "node scripts/workspace-tasks.ts test:root",
-    "test:package:built": "node scripts/package-check.mjs"
+    "test:package:built": "node scripts/package-check.mjs",
+    "format:files": "oxfmt"
   },
   "dependencies": {
     "@zigai/pi-extension-settings": "0.6.1"

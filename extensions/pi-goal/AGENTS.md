@@ -35,7 +35,7 @@ Those write duplicate package entries under `.pi/` for the current project, caus
 
 ```sh
 npm run build --prefix ../..
-npm run verify
+just check
 ```
 
 Runs `tsc --noEmit`, the platform-verification harness checks, and the full Vitest suite (`test/*.test.ts`).

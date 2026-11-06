@@ -22,7 +22,7 @@
 - Keep PTY assertions semantic and invariant-based. Reject duplicate mutation blocks, stale content, raw argument JSON, internal paths, over-width or wrapped rows, and blank completion padding.
 - Write raw ANSI and interpreted frame artifacts only when a PTY test fails. CI uploads those failure artifacts; do not commit bulky recordings.
 - Use seeded property tests for streaming chunk boundaries, rewrites, truncation, CRLF, Unicode, width changes, component reuse, tool-call isolation, and cached-versus-cold equivalence.
-- Run `just benchmark` for the full informational TUI benchmark or `just benchmark-quick` for its reduced form. Keep performance timing out of Vitest assertions until a reviewed regression policy exists.
+- Run `just bench` for the full informational TUI benchmark or `just bench-quick` for its reduced form. Keep performance timing out of Vitest assertions until a reviewed regression policy exists.
 
 ## Tool Rendering Contract
 
@@ -48,7 +48,7 @@
 ## Extension Settings
 
 - **Author:** edit TypeBox schema/metadata in `src/settings-input.ts`; no Pi runtime, generated-artifact imports, I/O, or feature initialization. Use a closed root (`additionalProperties: false`), user-facing descriptions, valid defaults, codecs for transformations, and `StaticDecode` for resolved types—not duplicate interfaces/casts. Add realistic, secret-free partial `exampleSettings` only when useful; give complex array-item/record-value objects PascalCase titles for readable docs.
-- **Generate:** declare and publish `src/settings-input.ts`, `src/settings.prevalidated.ts`, `config.schema.json`, and `README.md` through `package.json.piExtensionSettings`. Run `npm run config:generate` after authoring changes; commit outputs, never hand-edit generated artifacts/README region. Gate pre-commit/CI with `npm run config:check`.
+- **Generate:** declare and publish `src/settings-input.ts`, `src/settings.prevalidated.ts`, `config.schema.json`, and `README.md` through `package.json.piExtensionSettings`. Run `npm run config:generate` after authoring changes; commit outputs, never hand-edit generated artifacts/README region. Gate `just check` with `npm run config:check`.
 - **Load:** keep `@zigai/pi-extension-settings` a normal runtime dependency, not bundled. Use its root for authoring, `/runtime` for `definePrevalidatedExtensionSettings` hydration in `src/settings.ts`, and `/pi` for `loadPiExtensionSettings`/updates. Features call the existing `load<ExtensionName>Settings` boundary; no duplicate parsing or hardcoded Pi paths. Keep settings in `settings` modules, not parallel `config.ts`/one-file `config/` modules.
 - **Resolve:** defaults → global → trusted project; objects merge, arrays/scalars replace. The loader owns paths/trust, schema refresh, and missing-global scaffolding; never overwrites settings or auto-creates project settings. Invalid layers are ignored, untouched, and diagnosed without values/secrets. Environment variables are only for secrets, CI/session or explicit path overrides; JSON is not secret storage.
 - **Update:** load first, then use `updatePiExtensionSettings()` with a synchronous, deterministic, side-effect-free callback over the latest encoded layer. Pass `globalRevision`/`projectRevision` as `expectedRevision` for snapshot edits; omit for semantic updates. Handle every typed outcome. Explicit trusted-project updates may create project settings; invalid files remain untouched. No direct writers or extra mutation queue.

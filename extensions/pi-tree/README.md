@@ -49,7 +49,7 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-tree.json`.
 
 ```sh
 npm install
-npm run check
+just check
 ```
 
 ## License

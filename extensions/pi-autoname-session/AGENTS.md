@@ -12,10 +12,10 @@ Guidance for agents working in this repository.
 Run `just setup` and `npm run build` from the monorepo root after cloning. For later changes, run from this workspace:
 
 ```sh
-npm run check
+just check
 ```
 
-The check validates generated settings, formatting, lint, strict TypeScript, and the Vitest suite. Keep pre-commit enabled. Use `just coverage` when coverage evidence is useful. The repository has real tests; do not retain or reintroduce `--passWithNoTests` when modernizing scripts.
+The check validates generated settings, formatting, lint, strict TypeScript, and the Vitest suite. Use `just coverage` when coverage evidence is useful. The repository has real tests; do not retain or reintroduce `--passWithNoTests` when modernizing scripts.
 
 ## Package and module contract
 
@@ -59,7 +59,7 @@ The check validates generated settings, formatting, lint, strict TypeScript, and
 - Never hardcode `~/.pi/agent` or `.pi`. Use the Pi settings adapter, `getAgentDir()`, `CONFIG_DIR_NAME`, and `ctx.isProjectTrusted()` as appropriate.
 - Loading may scaffold a missing global settings file and install or refresh its schema. It never repairs existing settings or creates project settings. Keep malformed or invalid files unchanged, and never include raw setting values or secrets in diagnostics.
 - If the extension gains settings-writing UI, use `updatePiExtensionSettings()` rather than adding a custom lock or atomic writer. Project writes require trust and may explicitly create a missing project file; snapshot editors use the loaded revision for conflict detection.
-- Run `npm run config:generate` after changing the definition. Never hand-edit `config.schema.json` or the README text between the settings markers. `npm run config:check` must remain the first pre-commit and CI settings gate.
+- Run `npm run config:generate` after changing the definition. Never hand-edit `config.schema.json` or the README text between the settings markers. `npm run config:check` must remain the first `just check` settings gate.
 
 ## Verification
 
