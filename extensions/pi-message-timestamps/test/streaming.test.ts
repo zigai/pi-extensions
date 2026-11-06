@@ -15,6 +15,7 @@ import {
     type AgentSessionEvent,
 } from "@earendil-works/pi-coding-agent";
 import { stripTerminalSequences, type Terminal, type TuiMouseEvent } from "@earendil-works/pi-tui";
+import { installLinkedMethodPatch } from "@zigai/pi-extension-internals";
 import { Type } from "typebox";
 import { Compile } from "typebox/compile";
 import { afterAll, afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -71,9 +72,14 @@ const rowSchema = Type.Object({
 });
 
 const hostSchema = Type.Object({
-    chatContainer: Type.Object({ children: Type.Array(rowSchema) }),
+    chatContainer: Type.Object({
+        children: Type.Array(rowSchema),
+        addChild: Type.Function([Type.Unknown()], Type.Void()),
+    }),
     streamingComponent: Type.Optional(rowSchema),
     handleEvent: Type.Function([Type.Unknown()], Type.Unknown()),
+    addMessageToChat: Type.Function([Type.Unknown()], Type.Void()),
+    renderSessionEntries: Type.Function([Type.Array(Type.Unknown())], Type.Void()),
 });
 
 const thinking =
@@ -140,6 +146,7 @@ async function createHost(format: TimestampFormat, history: AssistantMessage[] =
     if (!model) throw new Error("Synthetic model missing");
 
     let timestamps: Timestamps | undefined;
+    const notifications: string[] = [];
     const runtime = await createAgentSessionRuntime(
         async (options) => {
             const services = await createAgentSessionServices({
@@ -155,6 +162,11 @@ async function createHost(format: TimestampFormat, history: AssistantMessage[] =
                     extensionFactories: [
                         (pi) => {
                             pi.on("session_start", (_event, ctx) => {
+                                const notify = ctx.ui.notify.bind(ctx.ui);
+                                ctx.ui.notify = (message, type) => {
+                                    notifications.push(message);
+                                    notify(message, type);
+                                };
                                 timestamps = new Timestamps(ctx, { enabled: true, format });
                             });
                             pi.on("session_shutdown", () => timestamps?.dispose());
@@ -193,6 +205,9 @@ async function createHost(format: TimestampFormat, history: AssistantMessage[] =
         return {
             host,
             timestamps,
+            notifications,
+            sessionManager,
+            restore: () => host.renderSessionEntries(sessionManager.buildContextEntries()),
             event: (event: AgentSessionEvent) => host.handleEvent(event),
             dispose,
         };
@@ -441,6 +456,371 @@ it("keeps assistant dividers full width and omits labels in terminals too narrow
 
         const reference = new AssistantMessageComponent(message, false, undefined, undefined, 0);
         expect(row.render(7)).toEqual(reference.render(7));
+    } finally {
+        await fixture.dispose();
+    }
+});
+
+function observeHistoryReads(container: { children: unknown[] }) {
+    const children = container.children;
+    let reads = 0;
+    const descriptors = children.map((row, index) => {
+        const descriptor = Object.getOwnPropertyDescriptor(children, index);
+        Object.defineProperty(children, index, {
+            configurable: true,
+            enumerable: true,
+            get() {
+                reads += 1;
+                return row;
+            },
+        });
+
+        return descriptor;
+    });
+
+    return {
+        count: () => reads,
+        restore() {
+            for (const [index, descriptor] of descriptors.entries())
+                if (descriptor !== undefined) Object.defineProperty(children, index, descriptor);
+        },
+    };
+}
+
+function observeRenderReads(row: { render(width: number): string[] }) {
+    const descriptor = Object.getOwnPropertyDescriptor(row, "render");
+    const render = row.render.bind(row);
+    let reads = 0;
+    Object.defineProperty(row, "render", {
+        configurable: true,
+        get() {
+            reads += 1;
+            return render;
+        },
+    });
+
+    return {
+        count: () => reads,
+        restore() {
+            if (descriptor === undefined) Reflect.deleteProperty(row, "render");
+            else Object.defineProperty(row, "render", descriptor);
+        },
+    };
+}
+
+it("does not inspect historical rows for unrelated real SDK events", async () => {
+    const fixture = await createHost(
+        "time-only",
+        Array.from({ length: 32 }, (_, index) =>
+            assistant([{ type: "text", text: `History ${index}` }]),
+        ),
+    );
+    const row = fixture.host.chatContainer.children.at(0);
+    if (!row) throw new Error("Historical assistant missing");
+
+    const reads = observeRenderReads(row);
+    const historyReads = observeHistoryReads(fixture.host.chatContainer);
+    const message = assistant([{ type: "text", text: "Streaming response" }]);
+    try {
+        await fixture.event({ type: "message_start", message });
+
+        // Start/end are relevant, but neither needs to validate historical components.
+        expect.soft(reads.count()).toBe(0);
+
+        for (let index = 0; index < 100; index += 1) {
+            await fixture.event({
+                type: "message_update",
+                message,
+                assistantMessageEvent: {
+                    type: "text_delta",
+                    contentIndex: 0,
+                    delta: "x",
+                    partial: message,
+                },
+            });
+        }
+
+        await fixture.event({ type: "agent_start" });
+        await fixture.event({
+            type: "message_end",
+            message: { role: "user", content: "User", timestamp: Date.now() },
+        });
+        expect.soft(reads.count()).toBe(0);
+        await fixture.event({ type: "message_end", message });
+        expect(reads.count()).toBe(0);
+        expect(historyReads.count()).toBe(0);
+        expect(fixture.notifications).toEqual([]);
+    } finally {
+        historyReads.restore();
+        reads.restore();
+        await fixture.dispose();
+    }
+});
+
+it("does not revisit existing rows when the SDK restores more session entries", async () => {
+    const fixture = await createHost("time-only", [
+        assistant([{ type: "text", text: "Existing" }]),
+    ]);
+    const row = fixture.host.chatContainer.children.at(0);
+    if (!row) throw new Error("Historical assistant missing");
+
+    const reads = observeRenderReads(row);
+    const historyReads = observeHistoryReads(fixture.host.chatContainer);
+    try {
+        for (let index = 0; index < 32; index += 1)
+            fixture.sessionManager.appendMessage(
+                assistant([{ type: "text", text: `Restored ${index}` }]),
+            );
+
+        fixture.restore();
+        expect(reads.count()).toBe(0);
+        expect(historyReads.count()).toBe(0);
+        const restored = fixture.host.chatContainer.children.at(-1);
+        expect(restored?.render(64).join("\n")).toContain("\x1b[2m10:30\x1b[22m");
+        expect(fixture.notifications).toEqual([]);
+    } finally {
+        historyReads.restore();
+        reads.restore();
+        await fixture.dispose();
+    }
+});
+
+it("ignores an unsupported historical component instead of rejecting a new streaming row", async () => {
+    const fixture = await createHost("time-only", [
+        assistant([{ type: "text", text: "Existing" }]),
+    ]);
+    const historical = fixture.host.chatContainer.children.at(0);
+    if (!historical) throw new Error("Historical assistant missing");
+
+    const descriptor = Object.getOwnPropertyDescriptor(historical, "render");
+    const message = assistant([{ type: "text", text: "New response" }]);
+    try {
+        Reflect.set(historical, "render", undefined);
+        await fixture.event({ type: "message_start", message });
+        const row = fixture.host.streamingComponent;
+        if (!row) throw new Error("Streaming assistant missing");
+
+        expect.soft(Object.hasOwn(row, "render")).toBe(true);
+        await fixture.event({ type: "message_end", message });
+        expect.soft(row.render(64).join("\n")).toContain("\x1b[2m10:30\x1b[22m");
+        expect(fixture.notifications).toEqual([]);
+    } finally {
+        if (descriptor === undefined) Reflect.deleteProperty(historical, "render");
+        else Object.defineProperty(historical, "render", descriptor);
+
+        await fixture.dispose();
+    }
+});
+
+it.each(["message_start", "message_end"] as const)(
+    "safely skips and reports an invalid actually-used streaming component at %s",
+    async (type) => {
+        const fixture = await createHost("time-only");
+        const message = assistant([{ type: "text", text: "Response" }]);
+        let restore = () => {};
+        try {
+            const started = fixture.event({ type: "message_start", message });
+            const row = fixture.host.streamingComponent;
+            if (!row) throw new Error("Streaming assistant missing");
+            if (type === "message_end") await started;
+
+            const descriptor = Object.getOwnPropertyDescriptor(row, "render");
+            restore = () => {
+                if (descriptor === undefined) Reflect.deleteProperty(row, "render");
+                else Object.defineProperty(row, "render", descriptor);
+            };
+            Reflect.set(row, "render", undefined);
+
+            if (type === "message_start") await started;
+            else await fixture.event({ type: "message_end", message });
+
+            expect(row.render).toBeUndefined();
+
+            if (type === "message_start") expect(Object.hasOwn(row, "handleMouse")).toBe(false);
+
+            expect(fixture.notifications).toEqual([
+                "Message timestamps: unsupported interactive host shape; timestamps may be unavailable.",
+            ]);
+        } finally {
+            restore();
+            await fixture.dispose();
+        }
+    },
+);
+
+it("safely skips invalid newly-restored components and warns only once", async () => {
+    const fixture = await createHost("time-only");
+    const invalid: { component: AssistantMessageComponent; restore(): void }[] = [];
+    const patch = installLinkedMethodPatch(
+        fixture.host.chatContainer,
+        "addChild",
+        (previous) =>
+            function (component) {
+                previous.call(this, component);
+
+                if (!(component instanceof AssistantMessageComponent)) return;
+
+                const descriptor = Object.getOwnPropertyDescriptor(component, "render");
+                invalid.push({
+                    component,
+                    restore() {
+                        if (descriptor === undefined) Reflect.deleteProperty(component, "render");
+                        else Object.defineProperty(component, "render", descriptor);
+                    },
+                });
+
+                Reflect.set(component, "render", undefined);
+            },
+    );
+    try {
+        for (let index = 0; index < 2; index += 1) {
+            const message = assistant([{ type: "text", text: `Invalid ${index}` }]);
+            fixture.sessionManager.appendMessage(message);
+            fixture.host.addMessageToChat(message);
+        }
+
+        expect(invalid).toHaveLength(2);
+
+        for (const { component } of invalid) {
+            expect(Object.getOwnPropertyDescriptor(component, "render")).toMatchObject({
+                value: undefined,
+            });
+
+            expect(Object.hasOwn(component, "handleMouse")).toBe(false);
+        }
+
+        expect(fixture.notifications).toEqual([
+            "Message timestamps: unsupported interactive host shape; timestamps may be unavailable.",
+        ]);
+    } finally {
+        patch.dispose();
+
+        for (const entry of invalid) entry.restore();
+        await fixture.dispose();
+    }
+});
+
+it("rechecks mutable required host capabilities without probing them for unrelated events", async () => {
+    const fixture = await createHost("time-only");
+    const descriptor = Object.getOwnPropertyDescriptor(fixture.sessionManager, "getSessionId");
+    const restore = () => {
+        if (descriptor === undefined)
+            Reflect.deleteProperty(fixture.sessionManager, "getSessionId");
+        else Object.defineProperty(fixture.sessionManager, "getSessionId", descriptor);
+    };
+    try {
+        // First observe a valid host; a cached positive shape result must not survive mutation.
+        fixture.host.addMessageToChat(assistant([{ type: "text", text: "Before mutation" }]));
+        Reflect.set(fixture.sessionManager, "getSessionId", undefined);
+        await fixture.event({ type: "agent_start" });
+        expect(fixture.notifications).toEqual([]);
+        fixture.host.addMessageToChat(assistant([{ type: "text", text: "Unsupported host" }]));
+        const skipped = fixture.host.chatContainer.children.at(-1);
+        expect(skipped?.render(64).join("\n")).not.toContain("\x1b[2m10:30\x1b[22m");
+        expect(fixture.notifications).toEqual([
+            "Message timestamps: unsupported interactive host shape; timestamps may be unavailable.",
+        ]);
+
+        restore();
+        fixture.host.addMessageToChat(assistant([{ type: "text", text: "Recovered host" }]));
+
+        // Assistants outside persisted history have no completion time; use a user to
+        // verify shape recovery independently of assistant timestamp lookup policy.
+        fixture.host.addMessageToChat({
+            role: "user",
+            content: "Recovered",
+            timestamp: Date.now(),
+        });
+        const recovered = fixture.host.chatContainer.children.at(-1);
+        expect(recovered?.render(64).join("\n")).toContain("\x1b[2m10:30\x1b[22m");
+        expect(fixture.notifications).toHaveLength(1);
+    } finally {
+        restore();
+        await fixture.dispose();
+    }
+});
+
+it("observes completion before awaiting the SDK and preserves a foreign row patch on disposal", async () => {
+    const fixture = await createHost("time-only");
+    let foreign: { dispose(): void } | undefined;
+    const message = assistant([{ type: "text", text: "Completed" }]);
+    try {
+        await fixture.event({ type: "message_start", message });
+        const row = fixture.host.streamingComponent;
+        if (!row) throw new Error("Streaming assistant missing");
+
+        const ended = fixture.event({ type: "message_end", message });
+        vi.setSystemTime(new Date(2024, 0, 2, 11, 30));
+        await ended;
+        expect(row.render(64).join("\n")).toContain("\x1b[2m10:30\x1b[22m");
+        foreign = installLinkedMethodPatch(
+            row,
+            "render",
+            (previous) =>
+                function (width) {
+                    return [...previous.call(this, width), "Foreign patch"];
+                },
+        );
+        fixture.timestamps.dispose();
+        const reference = new AssistantMessageComponent(message, false, undefined, undefined, 0);
+        expect(row.render(64)).toEqual([...reference.render(64), "Foreign patch"]);
+        foreign.dispose();
+        expect(row.render(64)).toEqual(reference.render(64));
+    } finally {
+        foreign?.dispose();
+        await fixture.dispose();
+    }
+});
+
+it.each(["message_start", "message_end"] as const)(
+    "does not attach a timestamp after the host changes sessions during awaited %s",
+    async (type) => {
+        const fixture = await createHost("time-only");
+        const message = assistant([{ type: "text", text: "Old session response" }]);
+        const descriptor = Object.getOwnPropertyDescriptor(fixture.host, "sessionManager");
+        try {
+            const started = fixture.event({ type: "message_start", message });
+            const row = fixture.host.streamingComponent;
+            if (!row) throw new Error("Streaming assistant missing");
+
+            let pending = started;
+
+            if (type === "message_end") {
+                await started;
+                pending = fixture.event({ type: "message_end", message });
+            }
+
+            Object.defineProperty(fixture.host, "sessionManager", {
+                configurable: true,
+                value: SessionManager.inMemory(fixture.sessionManager.getCwd()),
+            });
+            await pending;
+            expect(row.render(64).join("\n")).not.toContain("\x1b[2m10:30\x1b[22m");
+
+            if (type === "message_start") expect(Object.hasOwn(row, "render")).toBe(false);
+            expect(fixture.notifications).toEqual([]);
+        } finally {
+            if (descriptor === undefined) Reflect.deleteProperty(fixture.host, "sessionManager");
+            else Object.defineProperty(fixture.host, "sessionManager", descriptor);
+
+            await fixture.dispose();
+        }
+    },
+);
+
+it("rechecks the event after awaiting a mutable predecessor", async () => {
+    const fixture = await createHost("time-only");
+    const message = assistant([{ type: "text", text: "Changed delivery" }]);
+    try {
+        await fixture.event({ type: "message_start", message });
+        const row = fixture.host.streamingComponent;
+        if (!row) throw new Error("Streaming assistant missing");
+
+        const ended: AgentSessionEvent = { type: "message_end", message };
+        const pending = fixture.event(ended);
+        Reflect.set(ended, "type", "agent_start");
+        await pending;
+        expect(row.render(64).join("\n")).not.toContain("\x1b[2m10:30\x1b[22m");
     } finally {
         await fixture.dispose();
     }
