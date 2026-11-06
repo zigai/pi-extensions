@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import {
+    collectHighlightRanges,
     highlightMessageLine,
     highlightMessageLines,
     type HighlightStyles,
@@ -224,4 +225,87 @@ test("ignores URLs inside OSC control sequences", () => {
     assert.equal(stripAnsi(highlighted), "link and ./local/file.ts");
     assert.equal(highlighted.includes("<url>"), false);
     assert.equal(highlighted.includes(`<path>./local/file.ts${ESC}[39m`), true);
+});
+
+test("interleaved path ranges keep URL priority, including paths inside parentheses", () => {
+    const text = [
+        "/tmp/first.ts",
+        "https://example.test/(src/inside.ts)",
+        "src/last.py",
+        "https://second.test/(src/inside.py)",
+        "./after.ts",
+    ].join(" ");
+    const ranges = collectHighlightRanges(text, styles);
+    assert.deepEqual(
+        ranges.map((range) => [text.slice(range.start, range.end), range.style]),
+        [
+            ["/tmp/first.ts", styles.filepath],
+            ["https://example.test/(src/inside.ts)", styles.url],
+            ["src/last.py", styles.filepath],
+            ["https://second.test/(src/inside.py)", styles.url],
+            ["./after.ts", styles.filepath],
+        ],
+    );
+    const pathsOnly = collectHighlightRanges(text, { ...styles, url: "" });
+    assert.equal(
+        pathsOnly.some((range) => text.slice(range.start, range.end) === "src/inside.ts"),
+        true,
+    );
+    assert.equal(
+        pathsOnly.every((range) => range.style === styles.filepath),
+        true,
+    );
+    const urlsOnly = collectHighlightRanges(text, { ...styles, filepath: "" });
+    assert.equal(urlsOnly.length, 2);
+    assert.equal(
+        urlsOnly.every((range) => range.style === styles.url),
+        true,
+    );
+});
+
+test("large URL/path collections stay sorted, disjoint and complete", () => {
+    const text = Array.from(
+        { length: 1000 },
+        (_, index) => `https://example.test/(nested/file-${index}.ts) /workspace/file-${index}.ts`,
+    ).join("\n");
+    const ranges = collectHighlightRanges(text, styles);
+    assert.equal(ranges.length, 2000);
+
+    for (const [index, range] of ranges.entries()) {
+        const previous = ranges.at(index - 1);
+        if (index > 0 && previous !== undefined) assert.equal(previous.end <= range.start, true);
+
+        const item = Math.floor(index / 2);
+        let expected = `/workspace/file-${item}.ts`;
+        let style = styles.filepath;
+        if (index % 2 === 0) {
+            expected = `https://example.test/(nested/file-${item}.ts)`;
+            style = styles.url;
+        }
+
+        assert.equal(text.slice(range.start, range.end), expected);
+        assert.equal(range.style, style);
+    }
+});
+
+test.each([
+    ["name: foo.ts", false],
+    ["name =\tfoo.ts", false],
+    ["name:\nfoo.ts", true],
+    ["name:\rfoo.ts", false],
+    ["name:\u2028foo.ts", false],
+    ["name:\u00a0foo.ts", false],
+    ["name:\ufefffoo.ts", false],
+    ["name:\n  foo.ts", true],
+    ["name: (foo.ts)", true],
+    ["name: \u200c foo.ts", true],
+    ["foo.ts", true],
+    ["\tfoo.ts", true],
+])("bare filename context retains whitespace/newline semantics for %j", (text, expected) => {
+    assert.equal(
+        collectHighlightRanges(text, styles).some(
+            (range) => text.slice(range.start, range.end) === "foo.ts",
+        ),
+        expected,
+    );
 });
