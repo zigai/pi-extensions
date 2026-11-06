@@ -12,7 +12,7 @@ import {
 } from "../src/artifacts.ts";
 import { defineExtensionSettings } from "../src/definition.ts";
 import { README_GENERATED_END, README_GENERATED_START } from "../src/settings-documentation.ts";
-import { testDefinition } from "./fixture.ts";
+import { testDefinition, unpadTables } from "./fixture.ts";
 
 const temporaryDirectories: string[] = [];
 
@@ -50,7 +50,9 @@ describe("settings artifacts", () => {
             '"$id": "https://example.test/pi-example/config.schema.json"',
         );
 
-        expect(rendered.readmeSection).toContain("| `appearance.opacity` | number | `0.8`");
+        expect(unpadTables(rendered.readmeSection)).toContain(
+            "| `appearance.opacity` | number | `0.8`",
+        );
         expect(rendered.readmeSection).toContain("### Defaults");
         expect(rendered.readmeSection).toContain("### Advanced example");
         expect(rendered.readmeSection).toContain('"mode": "expanded"');

@@ -260,6 +260,19 @@ function markdownCell(value: string): string {
     return value.replaceAll("|", "\\|").replaceAll("\n", " ");
 }
 
+function cellWidth(cell: string): number {
+    return [...cell].length;
+}
+
+function markdownTable(header: readonly string[], rows: readonly (readonly string[])[]): string[] {
+    const widths = header.map((cell, column) =>
+        Math.max(3, cellWidth(cell), ...rows.map((row) => cellWidth(row[column] ?? ""))),
+    );
+    const line = (cells: readonly string[]) =>
+        `| ${cells.map((cell, column) => cell + " ".repeat((widths[column] ?? 0) - cellWidth(cell))).join(" | ")} |`;
+    return [line(header), line(widths.map((width) => "-".repeat(width))), ...rows.map(line)];
+}
+
 function renderStructuralTypes(types: Map<string, JsonObject>): string[] {
     if (types.size === 0) return [];
 
@@ -271,8 +284,7 @@ function renderStructuralTypes(types: Map<string, JsonObject>): string[] {
         if (schema.additionalProperties === false)
             lines.push("Additional fields are not allowed.", "");
 
-        lines.push("| Field | Type | Required | Description |", "| --- | --- | --- | --- |");
-
+        const fieldRows: string[][] = [];
         const required = new Set<string>();
         if (isJsonArray(schema.required)) {
             for (const field of schema.required) {
@@ -280,8 +292,12 @@ function renderStructuralTypes(types: Map<string, JsonObject>): string[] {
             }
         }
 
+        const header = ["Field", "Type", "Required", "Description"];
         const properties = schema.properties ?? schema.patternProperties;
-        if (!isJsonObject(properties)) continue;
+        if (!isJsonObject(properties)) {
+            lines.push(...markdownTable(header, fieldRows));
+            continue;
+        }
 
         for (const [field, value] of Object.entries(properties)) {
             if (!isJsonObject(value)) continue;
@@ -292,10 +308,15 @@ function renderStructuralTypes(types: Map<string, JsonObject>): string[] {
             let description = "";
             if (isJsonString(value.description)) description = value.description;
 
-            lines.push(
-                `| ${markdownCell(markdownCode(field))} | ${markdownCell(documentedType(value, types, `${name}.${field}`))} | ${requiredLabel} | ${markdownCell(description)} |`,
-            );
+            fieldRows.push([
+                markdownCell(markdownCode(field)),
+                markdownCell(documentedType(value, types, `${name}.${field}`)),
+                requiredLabel,
+                markdownCell(description),
+            ]);
         }
+
+        lines.push(...markdownTable(header, fieldRows));
     }
 
     return lines;
@@ -336,10 +357,12 @@ export function renderReadmeSettingsSection(
 
     const types = new Map<string, JsonObject>();
     const rows = collectRows(schema.properties, definition.defaultSettings, types);
-    const tableRows = rows.map(
-        (row) =>
-            `| ${markdownCell(markdownCode(row.path))} | ${markdownCell(row.type)} | ${formatDefault(row.defaultValue)} | ${markdownCell(row.description)} |`,
-    );
+    const tableRows = rows.map((row) => [
+        markdownCell(markdownCode(row.path)),
+        markdownCell(row.type),
+        formatDefault(row.defaultValue),
+        markdownCell(row.description),
+    ]);
     const globalPath = options.globalPath ?? defaultGlobalSettingsDisplayPath(definition.id);
     const defaultDocument = createDefaultSettingsDocument(definition);
 
@@ -348,9 +371,7 @@ export function renderReadmeSettingsSection(
         "",
         `Global settings are stored in ${markdownCode(globalPath)}.`,
         "",
-        "| Option | Type | Default | Description |",
-        "| --- | --- | --- | --- |",
-        ...tableRows,
+        ...markdownTable(["Option", "Type", "Default", "Description"], tableRows),
         "",
     ];
 

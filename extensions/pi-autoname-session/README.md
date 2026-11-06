@@ -17,23 +17,23 @@ Requires Pi 1.3 or newer.
 
 Global settings are stored in `~/.pi/agent/extension-settings/pi-autoname-session.json`.
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `enabled` | boolean | `true` | Enable the extension. |
-| `initialNaming.enabled` | boolean | `true` | Automatically name an otherwise unnamed session once. |
-| `initialNaming.timing` | `prompt` \| `settled` | `"prompt"` | When to first check the naming trigger: before the agent starts on a prompt, or after the agent has settled. |
-| `initialNaming.trigger` | `messages` \| `turns` \| `tool_calls` \| `tokens` \| `minutes` | `"messages"` | The session activity that starts a naming attempt. |
-| `initialNaming.threshold` | integer | `1` | The initial activity threshold. |
-| `refreshNaming.enabled` | boolean | `false` | Periodically refresh the name as the session develops. |
-| `refreshNaming.trigger` | `messages` \| `turns` \| `tool_calls` \| `tokens` \| `minutes` | `"turns"` | The activity that starts a naming refresh. |
-| `refreshNaming.threshold` | integer | `10` | The amount of activity between refreshes. |
-| `model` | string | `"current"` | Picker model: provider/model-id, or current for the active model. |
-| `reasoningEffort` | `off` \| `minimal` \| `low` \| `medium` \| `high` \| `xhigh` \| `max` | `"low"` | Reasoning effort used by the session-name picker. |
-| `timeoutMs` | integer | `30000` | Maximum time in milliseconds for picker authentication and the model response before the naming attempt is treated as failed. |
-| `conversationScope` | `minimized` \| `full` | `"minimized"` | How much refresh context to send. Minimized sends only user and assistant text; full also includes tool arguments, results, and shell output. Initial naming always uses only the first user request. |
-| `prompt` | string | *See JSON below* | Prompt used by the picker. Available placeholders are {{repository_context}}, {{conversation}}, {{current_name}}, {{cwd}}, and {{reason}}. |
-| `nameConstraints.minLength` | integer | `6` | Minimum number of characters in a name returned by the picker. |
-| `nameConstraints.maxLength` | integer | `40` | Maximum number of characters in a name returned by the picker. |
+| Option                      | Type                                                                  | Default          | Description                                                                                                                                                                                           |
+| --------------------------- | --------------------------------------------------------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`                   | boolean                                                               | `true`           | Enable the extension.                                                                                                                                                                                 |
+| `initialNaming.enabled`     | boolean                                                               | `true`           | Automatically name an otherwise unnamed session once.                                                                                                                                                 |
+| `initialNaming.timing`      | `prompt` \| `settled`                                                 | `"prompt"`       | When to first check the naming trigger: before the agent starts on a prompt, or after the agent has settled.                                                                                          |
+| `initialNaming.trigger`     | `messages` \| `turns` \| `tool_calls` \| `tokens` \| `minutes`        | `"messages"`     | The session activity that starts a naming attempt.                                                                                                                                                    |
+| `initialNaming.threshold`   | integer                                                               | `1`              | The initial activity threshold.                                                                                                                                                                       |
+| `refreshNaming.enabled`     | boolean                                                               | `false`          | Periodically refresh the name as the session develops.                                                                                                                                                |
+| `refreshNaming.trigger`     | `messages` \| `turns` \| `tool_calls` \| `tokens` \| `minutes`        | `"turns"`        | The activity that starts a naming refresh.                                                                                                                                                            |
+| `refreshNaming.threshold`   | integer                                                               | `10`             | The amount of activity between refreshes.                                                                                                                                                             |
+| `model`                     | string                                                                | `"current"`      | Picker model: provider/model-id, or current for the active model.                                                                                                                                     |
+| `reasoningEffort`           | `off` \| `minimal` \| `low` \| `medium` \| `high` \| `xhigh` \| `max` | `"low"`          | Reasoning effort used by the session-name picker.                                                                                                                                                     |
+| `timeoutMs`                 | integer                                                               | `30000`          | Maximum time in milliseconds for picker authentication and the model response before the naming attempt is treated as failed.                                                                         |
+| `conversationScope`         | `minimized` \| `full`                                                 | `"minimized"`    | How much refresh context to send. Minimized sends only user and assistant text; full also includes tool arguments, results, and shell output. Initial naming always uses only the first user request. |
+| `prompt`                    | string                                                                | *See JSON below* | Prompt used by the picker. Available placeholders are {{repository_context}}, {{conversation}}, {{current_name}}, {{cwd}}, and {{reason}}.                                                            |
+| `nameConstraints.minLength` | integer                                                               | `6`              | Minimum number of characters in a name returned by the picker.                                                                                                                                        |
+| `nameConstraints.maxLength` | integer                                                               | `40`             | Maximum number of characters in a name returned by the picker.                                                                                                                                        |
 
 ```json
 {

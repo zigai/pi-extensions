@@ -52,13 +52,13 @@ Type.String({ "x-control": "combobox", examples: ["accent", "warning"] });
 
 Global settings are stored in `~/.pi/agent/extension-settings/pi-settings-ui.json`.
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `header.layout` | `stacked` \| `compact` | `"stacked"` | Separate navigation and scope, or combine them when space allows. |
-| `header.showHints` | boolean | `true` | Show the tab-picker shortcut in the settings header. |
-| `header.showFieldCounter` | boolean | `true` | Show the current field position in the settings header. |
-| `tabPickerShortcut` | string | `"ctrl+p"` | Key for the settings-tab picker, using Pi key names such as ctrl+shift+p. |
-| `projectOverrides` | boolean | `true` | Let trusted projects have their own extension settings. |
+| Option                    | Type                   | Default     | Description                                                               |
+| ------------------------- | ---------------------- | ----------- | ------------------------------------------------------------------------- |
+| `header.layout`           | `stacked` \| `compact` | `"stacked"` | Separate navigation and scope, or combine them when space allows.         |
+| `header.showHints`        | boolean                | `true`      | Show the tab-picker shortcut in the settings header.                      |
+| `header.showFieldCounter` | boolean                | `true`      | Show the current field position in the settings header.                   |
+| `tabPickerShortcut`       | string                 | `"ctrl+p"`  | Key for the settings-tab picker, using Pi key names such as ctrl+shift+p. |
+| `projectOverrides`        | boolean                | `true`      | Let trusted projects have their own extension settings.                   |
 
 ```json
 {

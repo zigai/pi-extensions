@@ -42,10 +42,10 @@ MIT
 
 Global settings are stored in `~/.pi/agent/extension-settings/pi-response-renderer.json`.
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `tableRenderer` | string | `"codex"` | Selected table renderer: codex, native, or an extension-registered name. |
-| `nativeTableBorderStyle` | `normal` \| `dim` | `"dim"` | Border style for native assistant tables: normal or dim. |
+| Option                   | Type              | Default   | Description                                                              |
+| ------------------------ | ----------------- | --------- | ------------------------------------------------------------------------ |
+| `tableRenderer`          | string            | `"codex"` | Selected table renderer: codex, native, or an extension-registered name. |
+| `nativeTableBorderStyle` | `normal` \| `dim` | `"dim"`   | Border style for native assistant tables: normal or dim.                 |
 
 ```json
 {

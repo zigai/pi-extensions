@@ -43,17 +43,17 @@ Lazy tools stay out of the initial model context and can be activated through th
 
 Global settings are stored in `~/.pi/agent/extension-settings/pi-toggles.json`.
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `enabled` | boolean | `true` | Enforce Pi Toggles policy while preserving the recovery command. |
-| `defaults.unknownCondition` | `no-match` | `"no-match"` | Treat unknown or failed condition facts as a non-match. |
-| `defaults.lazyToolLimit` | integer | `5` | Maximum tools activated by one lazy capability search. |
-| `defaults.showStatus` | boolean | `true` | Show a compact footer status when policy changes Pi or has diagnostics. |
-| `activeProfile` | string | — | Persistent profile selected at this settings scope. |
-| `overrides` | [PolicyDecision](#settings-type-PolicyDecision)[] | `[]` | Explicit persistent capability decisions. |
-| `profiles` | Record<string, [CapabilityProfile](#settings-type-CapabilityProfile)> | `{}` | Named capability, prompt, model-role, mode, and compaction selections. |
-| `promptFragments` | [PromptFragment](#settings-type-PromptFragment)[] | `[]` | Owned system-prompt fragments available to profiles and conditions. |
-| `rules` | [PolicyRule](#settings-type-PolicyRule)[] | `[]` | Conditional decisions and profile activations. |
+| Option                      | Type                                                                  | Default      | Description                                                             |
+| --------------------------- | --------------------------------------------------------------------- | ------------ | ----------------------------------------------------------------------- |
+| `enabled`                   | boolean                                                               | `true`       | Enforce Pi Toggles policy while preserving the recovery command.        |
+| `defaults.unknownCondition` | `no-match`                                                            | `"no-match"` | Treat unknown or failed condition facts as a non-match.                 |
+| `defaults.lazyToolLimit`    | integer                                                               | `5`          | Maximum tools activated by one lazy capability search.                  |
+| `defaults.showStatus`       | boolean                                                               | `true`       | Show a compact footer status when policy changes Pi or has diagnostics. |
+| `activeProfile`             | string                                                                | —            | Persistent profile selected at this settings scope.                     |
+| `overrides`                 | [PolicyDecision](#settings-type-PolicyDecision)[]                     | `[]`         | Explicit persistent capability decisions.                               |
+| `profiles`                  | Record<string, [CapabilityProfile](#settings-type-CapabilityProfile)> | `{}`         | Named capability, prompt, model-role, mode, and compaction selections.  |
+| `promptFragments`           | [PromptFragment](#settings-type-PromptFragment)[]                     | `[]`         | Owned system-prompt fragments available to profiles and conditions.     |
+| `rules`                     | [PolicyRule](#settings-type-PolicyRule)[]                             | `[]`         | Conditional decisions and profile activations.                          |
 
 ### Defaults
 
@@ -116,10 +116,10 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-toggles.json`.
 
 Additional fields are not allowed.
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `target` | { kind: `tool` \| `skill` \| `command` \| `system-fragment`; name?: string; source?: string; path?: string } | Yes |  |
-| `state` | `inherit` \| `on` \| `off` \| `lazy` \| `name-only` \| `user-only` | Yes | Desired capability state. Available states depend on the capability kind. |
+| Field    | Type                                                                                                         | Required | Description                                                               |
+| -------- | ------------------------------------------------------------------------------------------------------------ | -------- | ------------------------------------------------------------------------- |
+| `target` | { kind: `tool` \| `skill` \| `command` \| `system-fragment`; name?: string; source?: string; path?: string } | Yes      |                                                                           |
+| `state`  | `inherit` \| `on` \| `off` \| `lazy` \| `name-only` \| `user-only`                                           | Yes      | Desired capability state. Available states depend on the capability kind. |
 
 <a id="settings-type-CapabilityProfile"></a>
 
@@ -127,13 +127,13 @@ Additional fields are not allowed.
 
 Additional fields are not allowed.
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `decisions` | [PolicyDecision](#settings-type-PolicyDecision)[] | Yes | Capability decisions activated by this profile. |
-| `promptFragments` | string[] | Yes | System-prompt fragment IDs activated by this profile. |
-| `modelMode` | string | No | Model mode selected at the next agent start; requires Pi Model Modes. |
-| `modelRoles` | Record<string, [ModelRole](#settings-type-ModelRole) \| string> | No | Named model roles or @role references. The main role selects the next agent model; manual model choices take precedence until profile selection. |
-| `compactionHandler` | string | No | Named compaction handler selected for subsequent operations; pi selects the host implementation. |
+| Field               | Type                                                            | Required | Description                                                                                                                                      |
+| ------------------- | --------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `decisions`         | [PolicyDecision](#settings-type-PolicyDecision)[]               | Yes      | Capability decisions activated by this profile.                                                                                                  |
+| `promptFragments`   | string[]                                                        | Yes      | System-prompt fragment IDs activated by this profile.                                                                                            |
+| `modelMode`         | string                                                          | No       | Model mode selected at the next agent start; requires Pi Model Modes.                                                                            |
+| `modelRoles`        | Record<string, [ModelRole](#settings-type-ModelRole) \| string> | No       | Named model roles or @role references. The main role selects the next agent model; manual model choices take precedence until profile selection. |
+| `compactionHandler` | string                                                          | No       | Named compaction handler selected for subsequent operations; pi selects the host implementation.                                                 |
 
 <a id="settings-type-PromptFragment"></a>
 
@@ -141,13 +141,13 @@ Additional fields are not allowed.
 
 Additional fields are not allowed.
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `id` | string | Yes |  |
-| `content` | { kind: `inline`; text: string } \| { kind: `file`; path: string } | Yes |  |
-| `operation` | `append` \| `replace` | No | Append owned guidance, or replace the entire system prompt including generated guidance and context. |
-| `priority` | integer | Yes |  |
-| `when` | Condition | No | Declarative condition evaluated against typed Pi and project context facts. |
+| Field       | Type                                                               | Required | Description                                                                                          |
+| ----------- | ------------------------------------------------------------------ | -------- | ---------------------------------------------------------------------------------------------------- |
+| `id`        | string                                                             | Yes      |                                                                                                      |
+| `content`   | { kind: `inline`; text: string } \| { kind: `file`; path: string } | Yes      |                                                                                                      |
+| `operation` | `append` \| `replace`                                              | No       | Append owned guidance, or replace the entire system prompt including generated guidance and context. |
+| `priority`  | integer                                                            | Yes      |                                                                                                      |
+| `when`      | Condition                                                          | No       | Declarative condition evaluated against typed Pi and project context facts.                          |
 
 <a id="settings-type-PolicyRule"></a>
 
@@ -155,14 +155,14 @@ Additional fields are not allowed.
 
 Additional fields are not allowed.
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `id` | string | Yes |  |
-| `priority` | integer | Yes |  |
-| `when` | Condition | Yes | Declarative condition evaluated against typed Pi and project context facts. |
-| `decisions` | [PolicyDecision](#settings-type-PolicyDecision)[] | Yes | Capability decisions contributed while this rule matches. |
-| `activateProfiles` | string[] | Yes | Profiles contributed while this rule matches. |
-| `compactionHandler` | string | No | Named handler selected while this condition matches, independently of profiles. |
+| Field               | Type                                              | Required | Description                                                                     |
+| ------------------- | ------------------------------------------------- | -------- | ------------------------------------------------------------------------------- |
+| `id`                | string                                            | Yes      |                                                                                 |
+| `priority`          | integer                                           | Yes      |                                                                                 |
+| `when`              | Condition                                         | Yes      | Declarative condition evaluated against typed Pi and project context facts.     |
+| `decisions`         | [PolicyDecision](#settings-type-PolicyDecision)[] | Yes      | Capability decisions contributed while this rule matches.                       |
+| `activateProfiles`  | string[]                                          | Yes      | Profiles contributed while this rule matches.                                   |
+| `compactionHandler` | string                                            | No       | Named handler selected while this condition matches, independently of profiles. |
 
 <a id="settings-type-ModelRole"></a>
 
@@ -170,11 +170,11 @@ Additional fields are not allowed.
 
 Additional fields are not allowed.
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `provider` | string | Yes |  |
-| `modelId` | string | Yes |  |
-| `thinkingLevel` | `off` \| `minimal` \| `low` \| `medium` \| `high` \| `xhigh` \| `max` | No |  |
+| Field           | Type                                                                  | Required | Description |
+| --------------- | --------------------------------------------------------------------- | -------- | ----------- |
+| `provider`      | string                                                                | Yes      |             |
+| `modelId`       | string                                                                | Yes      |             |
+| `thinkingLevel` | `off` \| `minimal` \| `low` \| `medium` \| `high` \| `xhigh` \| `max` | No       |             |
 <!-- pi-extension-settings:end -->
 
 Trusted-project settings use `.pi/extension-settings/pi-toggles.json` and are ignored until Pi trusts the project.

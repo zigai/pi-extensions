@@ -14,7 +14,7 @@ import {
     renderReadmeSettingsSection,
     replaceGeneratedReadmeSection,
 } from "../src/settings-documentation.ts";
-import { testDefinition } from "./fixture.ts";
+import { testDefinition, unpadTables } from "./fixture.ts";
 
 describe("settings paths", () => {
     it("centralizes global configs and schemas", () => {
@@ -40,7 +40,7 @@ describe("settings paths", () => {
 
 describe("README generation", () => {
     it("renders flattened settings and the complete defaults", () => {
-        const rendered = renderReadmeSettingsSection(testDefinition());
+        const rendered = unpadTables(renderReadmeSettingsSection(testDefinition()));
 
         expect(rendered).toContain(
             "Global settings are stored in `~/.pi/agent/extension-settings/pi-example.json`.",
@@ -65,6 +65,51 @@ describe("README generation", () => {
         expect(rendered).not.toContain("<details>");
     });
 
+    it("aligns every table column to its widest cell", () => {
+        const entry = Type.Object(
+            {
+                id: Type.String({ description: "Identifier." }),
+                weight: Type.Number({ description: "Relative weight in the ranking pipeline." }),
+            },
+            { title: "Entry", additionalProperties: false },
+        );
+        const definition = defineExtensionSettings({
+            id: "pi-aligned",
+            title: "Pi Aligned",
+            description: "Settings whose table cells differ in width.",
+            schema: Type.Object(
+                {
+                    on: Type.Boolean({ default: true, description: "Résumé café." }),
+                    separatorCharacter: Type.String({
+                        default: "|",
+                        description: "Character between a | b.",
+                    }),
+                    entries: Type.Array(entry, { default: [], description: "Entries." }),
+                },
+                { additionalProperties: false },
+            ),
+        });
+
+        const lines = renderReadmeSettingsSection(definition).split("\n");
+        const tables: string[][] = [];
+        for (const [index, line] of lines.entries()) {
+            if (!line.startsWith("|")) continue;
+            if (lines[index - 1]?.startsWith("|")) tables.at(-1)?.push(line);
+            else tables.push([line]);
+        }
+
+        expect(tables).toHaveLength(2);
+        for (const table of tables) {
+            const pipeColumns = table.map((line) =>
+                [...line].flatMap((character, column, characters) =>
+                    character === "|" && characters[column - 1] !== "\\" ? [column] : [],
+                ),
+            );
+            for (const columns of pipeColumns) expect(columns).toEqual(pipeColumns[0]);
+            expect(table[1]).toMatch(/^\| -+( \| -+)* \|$/);
+        }
+    });
+
     it("keeps long defaults out of the option table without losing their exact values", () => {
         const definition = defineExtensionSettings({
             id: "pi-verbose",
@@ -86,7 +131,7 @@ describe("README generation", () => {
             ),
         });
 
-        const rendered = renderReadmeSettingsSection(definition);
+        const rendered = unpadTables(renderReadmeSettingsSection(definition));
 
         expect(rendered).toContain("| `prompt` | string | *See JSON below* | Prompt text. |");
         expect(rendered).toContain("| `label` | string | *See JSON below* | Display label. |");

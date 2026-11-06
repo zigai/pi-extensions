@@ -41,18 +41,18 @@ These choices apply to the current session. Set `enabled` to `true` and choose `
 
 Global settings are stored in `~/.pi/agent/extension-settings/pi-workspace.json`.
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `enabled` | boolean | `false` | Enable the replaceable workspace surface. |
-| `transcript` | string | `"native"` | Transcript backend: native, ledger, or a registered name. |
-| `editor` | string | `"native"` | Editor backend: native or a registered name. |
-| `layout` | string | `"native"` | Layout backend: native, sidebar, or a registered name. |
-| `sidebarSide` | `off` \| `left` \| `right` | `"off"` | Optional persistent sidebar position. |
-| `sidebarWidth` | integer | `24` | Sidebar width in terminal columns. |
-| `minimumMainWidth` | integer | `48` | Main-area width below which the sidebar is hidden. |
-| `timestamps` | boolean | `false` | Show available message and tool timestamps in ledger metadata. |
-| `durations` | boolean | `false` | Show observed tool duration when both execution boundaries were available. |
-| `timeouts` | boolean | `false` | Show available tool timeout arguments in ledger metadata. |
+| Option             | Type                       | Default    | Description                                                                |
+| ------------------ | -------------------------- | ---------- | -------------------------------------------------------------------------- |
+| `enabled`          | boolean                    | `false`    | Enable the replaceable workspace surface.                                  |
+| `transcript`       | string                     | `"native"` | Transcript backend: native, ledger, or a registered name.                  |
+| `editor`           | string                     | `"native"` | Editor backend: native or a registered name.                               |
+| `layout`           | string                     | `"native"` | Layout backend: native, sidebar, or a registered name.                     |
+| `sidebarSide`      | `off` \| `left` \| `right` | `"off"`    | Optional persistent sidebar position.                                      |
+| `sidebarWidth`     | integer                    | `24`       | Sidebar width in terminal columns.                                         |
+| `minimumMainWidth` | integer                    | `48`       | Main-area width below which the sidebar is hidden.                         |
+| `timestamps`       | boolean                    | `false`    | Show available message and tool timestamps in ledger metadata.             |
+| `durations`        | boolean                    | `false`    | Show observed tool duration when both execution boundaries were available. |
+| `timeouts`         | boolean                    | `false`    | Show available tool timeout arguments in ledger metadata.                  |
 
 ```json
 {

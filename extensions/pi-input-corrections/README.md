@@ -67,10 +67,10 @@ Unreadable/missing files, malformed JSON, and invalid structure disable correcti
 
 Global settings are stored in `~/.pi/agent/extension-settings/pi-input-corrections.json`.
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `enabled` | boolean | `true` | Enable interactive input corrections. |
-| `policyFile` | string | `""` | Personal policy JSON path. Empty disables corrections; ~/ expands to home, relative paths resolve beside this settings file. |
+| Option       | Type    | Default | Description                                                                                                                  |
+| ------------ | ------- | ------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`    | boolean | `true`  | Enable interactive input corrections.                                                                                        |
+| `policyFile` | string  | `""`    | Personal policy JSON path. Empty disables corrections; ~/ expands to home, relative paths resolve beside this settings file. |
 
 ### Defaults
 

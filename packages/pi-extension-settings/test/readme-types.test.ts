@@ -5,6 +5,7 @@ import { defineExtensionSettings } from "../src/definition.ts";
 import { createSettingsFileSchema } from "../src/schema-document.ts";
 import { renderReadmeSettingsSection } from "../src/settings-documentation.ts";
 import { Value } from "../src/typebox-runtime.ts";
+import { unpadTables } from "./fixture.ts";
 
 describe("README schema rendering", () => {
     it("documents optional values, arrays, and escaped descriptions", () => {
@@ -142,7 +143,7 @@ describe("README schema rendering", () => {
             ),
         });
 
-        const rendered = renderReadmeSettingsSection(definition);
+        const rendered = unpadTables(renderReadmeSettingsSection(definition));
 
         expect(rendered).toContain("| `required` | boolean | `true` | Required setting. |");
         expect(rendered).toContain(
@@ -247,7 +248,7 @@ describe("README schema rendering", () => {
             ),
             exampleSettings: { entries: [{ label: "sample", tone: "strong" }] },
         });
-        const text = renderReadmeSettingsSection(definition);
+        const text = unpadTables(renderReadmeSettingsSection(definition));
         expect(text).toContain("[Entry](#settings-type-Entry)[]");
         expect(text).toContain("Record<string, [Entry](#settings-type-Entry)>");
         expect(text).toContain('<a id="settings-type-Entry"></a>');
@@ -294,7 +295,7 @@ describe("README schema rendering", () => {
         expect(Value.Check(fileSchema, { entries: [{}] })).toBe(false);
         expect(Value.Check(fileSchema, { entries: [{ label: "sample" }] })).toBe(true);
 
-        const text = renderReadmeSettingsSection(definition);
+        const text = unpadTables(renderReadmeSettingsSection(definition));
 
         expect(text).toContain(
             "| `entries` | [Entry](#settings-type-Entry)[] | `[]` | Ordered entries. |",

@@ -33,9 +33,9 @@ Servers using `auth` or `oauth`, and servers answering 401, are not supported. T
 
 Global settings are stored in `~/.pi/agent/extension-settings/pi-lazy-mcp.json`.
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `idle` | Record<string, integer> | `{}` | Milliseconds of idleness after which to stop a server, by server name. Set only for restart-safe servers; active calls and residency capabilities prevent eviction. Unlisted servers stay connected once started. |
+| Option | Type                    | Default | Description                                                                                                                                                                                                       |
+| ------ | ----------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `idle` | Record<string, integer> | `{}`    | Milliseconds of idleness after which to stop a server, by server name. Set only for restart-safe servers; active calls and residency capabilities prevent eviction. Unlisted servers stay connected once started. |
 
 ### Defaults
 

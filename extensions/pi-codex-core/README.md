@@ -61,33 +61,33 @@ Use the `/codex` slash command to manage extension settings and usage:
 
 Global settings are stored in `~/.pi/agent/extension-settings/pi-codex-core.json`.
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `scope.tools` | `codex` \| `all` | `"codex"` | Expose Codex tools only for Codex models (`codex`) or for all models (`all`). |
-| `tools.webSearch` | boolean | `true` | Enable the `web_run` web search tool. |
-| `tools.webSearchMode` | `cached` \| `indexed` \| `live` | `"live"` | Set search mode: `cached`, `indexed`, or `live`. |
-| `tools.imageGeneration` | boolean | `true` | Enable the `imagegen` image generation and editing tool. |
-| `tools.viewImage` | boolean | `true` | Enable the `view_image` local image viewing tool. |
-| `tools.viewImageDescriptions` | boolean | `false` | Include Codex-generated descriptions when viewing images. |
-| `tools.applyPatch` | `off` \| `openai` \| `all` | `"off"` | Replace standard `edit` with `apply_patch`: `off`, `openai`, or `all`. |
-| `prompt.mode` | `pi` \| `codex` | `"codex"` | Enable model-aware Codex prompts (`codex`) or standard Pi prompts (`pi`). |
-| `prompt.personality` | `friendly` \| `pragmatic` \| `none` | `"pragmatic"` | Set Codex communication style: `friendly`, `pragmatic`, or `none`. |
-| `compaction.enabled` | boolean | `true` | Enable Codex-style conversation compaction. |
-| `compaction.auto` | boolean | `true` | Automatically trigger compaction when reaching the context threshold. |
-| `compaction.thresholdPercent` | integer | `80` | Context percentage threshold that triggers auto-compaction. |
-| `recovery.enabled` | boolean | `true` | Resume transiently failed Codex turns after Pi exhausts retries. |
-| `recovery.batchFollowUps` | boolean | `false` | Deliver user follow-up messages sent during a turn together when it completes. |
-| `recovery.maxAttempts` | integer | `3` | Maximum delayed resume attempts for a failed turn. |
-| `recovery.baseDelayMs` | integer | `30000` | Initial recovery delay in milliseconds. |
-| `recovery.maxDelayMs` | integer | `120000` | Maximum recovery delay in milliseconds. |
-| `openai.webSearchModel` | string | `"current"` | Model for `web_run`; `current` uses the active model. |
-| `openai.imageModel` | string | `"gpt-image-2"` | Model for `imagegen`. |
-| `openai.imageDescriptionModel` | string | `"current"` | Model for image descriptions; `current` uses the active model. |
-| `openai.compactionModel` | string | `"current"` | Model for compaction; `current` uses the active model. A preset compaction role takes precedence. |
-| `openai.compactionReasoning` | string | `"medium"` | Reasoning effort for compaction requests: `medium`, `current`, `max`, or `ultra`. |
-| `openai.verbosity` | `low` \| `medium` \| `high` | `"low"` | Verbosity level for Codex API requests: `low`, `medium`, or `high`. |
-| `openai.fast` | boolean | `false` | Prioritize speed for supported OpenAI models. |
-| `openai.showReasoningTraces` | boolean | `true` | Stream reasoning trace summaries for GPT Responses models. |
+| Option                         | Type                                | Default         | Description                                                                                       |
+| ------------------------------ | ----------------------------------- | --------------- | ------------------------------------------------------------------------------------------------- |
+| `scope.tools`                  | `codex` \| `all`                    | `"codex"`       | Expose Codex tools only for Codex models (`codex`) or for all models (`all`).                     |
+| `tools.webSearch`              | boolean                             | `true`          | Enable the `web_run` web search tool.                                                             |
+| `tools.webSearchMode`          | `cached` \| `indexed` \| `live`     | `"live"`        | Set search mode: `cached`, `indexed`, or `live`.                                                  |
+| `tools.imageGeneration`        | boolean                             | `true`          | Enable the `imagegen` image generation and editing tool.                                          |
+| `tools.viewImage`              | boolean                             | `true`          | Enable the `view_image` local image viewing tool.                                                 |
+| `tools.viewImageDescriptions`  | boolean                             | `false`         | Include Codex-generated descriptions when viewing images.                                         |
+| `tools.applyPatch`             | `off` \| `openai` \| `all`          | `"off"`         | Replace standard `edit` with `apply_patch`: `off`, `openai`, or `all`.                            |
+| `prompt.mode`                  | `pi` \| `codex`                     | `"codex"`       | Enable model-aware Codex prompts (`codex`) or standard Pi prompts (`pi`).                         |
+| `prompt.personality`           | `friendly` \| `pragmatic` \| `none` | `"pragmatic"`   | Set Codex communication style: `friendly`, `pragmatic`, or `none`.                                |
+| `compaction.enabled`           | boolean                             | `true`          | Enable Codex-style conversation compaction.                                                       |
+| `compaction.auto`              | boolean                             | `true`          | Automatically trigger compaction when reaching the context threshold.                             |
+| `compaction.thresholdPercent`  | integer                             | `80`            | Context percentage threshold that triggers auto-compaction.                                       |
+| `recovery.enabled`             | boolean                             | `true`          | Resume transiently failed Codex turns after Pi exhausts retries.                                  |
+| `recovery.batchFollowUps`      | boolean                             | `false`         | Deliver user follow-up messages sent during a turn together when it completes.                    |
+| `recovery.maxAttempts`         | integer                             | `3`             | Maximum delayed resume attempts for a failed turn.                                                |
+| `recovery.baseDelayMs`         | integer                             | `30000`         | Initial recovery delay in milliseconds.                                                           |
+| `recovery.maxDelayMs`          | integer                             | `120000`        | Maximum recovery delay in milliseconds.                                                           |
+| `openai.webSearchModel`        | string                              | `"current"`     | Model for `web_run`; `current` uses the active model.                                             |
+| `openai.imageModel`            | string                              | `"gpt-image-2"` | Model for `imagegen`.                                                                             |
+| `openai.imageDescriptionModel` | string                              | `"current"`     | Model for image descriptions; `current` uses the active model.                                    |
+| `openai.compactionModel`       | string                              | `"current"`     | Model for compaction; `current` uses the active model. A preset compaction role takes precedence. |
+| `openai.compactionReasoning`   | string                              | `"medium"`      | Reasoning effort for compaction requests: `medium`, `current`, `max`, or `ultra`.                 |
+| `openai.verbosity`             | `low` \| `medium` \| `high`         | `"low"`         | Verbosity level for Codex API requests: `low`, `medium`, or `high`.                               |
+| `openai.fast`                  | boolean                             | `false`         | Prioritize speed for supported OpenAI models.                                                     |
+| `openai.showReasoningTraces`   | boolean                             | `true`          | Stream reasoning trace summaries for GPT Responses models.                                        |
 
 ```json
 {
