@@ -43,7 +43,7 @@ jobs:
         run: npm ci
 
       - name: Check
-        run: npm run check
+        run: npm run format:check && npm run architecture:check && npm run collection:check && npm run config:check && npm run language-catalog:check --workspaces --if-present && npm run lint && npm run typecheck && npm run build && npm run test:package && npm run test:package --workspaces --if-present && npm run check:package --workspaces --if-present && npm test
 
       - name: Select package
         id: package
