@@ -230,6 +230,26 @@ function expectRgbBackgrounds(
     expect(row.cells.every((cell) => cell.isBackgroundRgb)).toBe(true);
 }
 
+async function settleDiffBackgrounds(
+    terminal: VirtualTerminal,
+    text: string,
+    expectedColors: readonly number[],
+): Promise<void> {
+    // Lazy grammar/diff work can finish after the first painted fallback frame.
+    // Observe the actual TUI update rather than assuming a 24 ms scheduling budget.
+    await expect
+        .poll(
+            async () => {
+                await terminal.settle(0);
+                const row = terminal.requireRowContaining(text);
+
+                return new Set(row.cells.map((cell) => cell.background));
+            },
+            { timeout: 5000 },
+        )
+        .toEqual(new Set(expectedColors));
+}
+
 function expectRgbBackgroundSpan(
     row: InterpretedRow,
     span: CellSpan,
@@ -1815,6 +1835,10 @@ export const grownWriteTwelve = 12;
             beforeSentinel,
             afterSentinel,
         );
+        await settleDiffBackgrounds(pendingTerminal, "obsoleteValue", [
+            rgbFromHex(DEFAULT_APPEARANCE.deletedRowBackground),
+            rgbFromHex(DEFAULT_APPEARANCE.deletedContentBackground),
+        ]);
         const deletion = pendingTerminal.requireRowContaining("obsoleteValue");
         const addition = pendingTerminal.requireRowContaining("currentValue");
         const context = pendingTerminal.requireRowContaining("stableContext");
@@ -3070,6 +3094,10 @@ export const grownWriteTwelve = 12;
             tui = activeTui;
             activeTui.start();
             await pendingTerminal.settle();
+            await settleDiffBackgrounds(pendingTerminal, "previousValue", [
+                rgbFromHex(expectedAppearance.deletedRowBackground),
+                rgbFromHex(expectedAppearance.deletedContentBackground),
+            ]);
             const standaloneDeletion = pendingTerminal.requireRowContaining("removedOnly");
             const standaloneAddition = pendingTerminal.requireRowContaining("insertedOnly");
             const replacementDeletion = pendingTerminal.requireRowContaining("previousValue");
