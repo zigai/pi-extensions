@@ -65,6 +65,20 @@ describe("message timestamp rendering", () => {
         expect(visibleWidth(result)).toBe(11);
     });
 
+    it("coalesces printable padding without moving controls across the inserted label", () => {
+        expect(renderTimestamp(["\x1b[44mhi  \x1b[43m       \x1b[0m"], 11, "12:34").lines).toEqual([
+            "\x1b[44mhi  \x1b[43m \x1b[2m12:34\x1b[22m \x1b[0m",
+        ]);
+        expect(renderTimestamp(["hi    \x1b[43m     \x1b[0m"], 11, "12:34").lines).toEqual([
+            "hi   \x1b[2m12:34\x1b[22m\x1b[43m \x1b[0m",
+        ]);
+    });
+
+    it("never treats a space with a combining mark as replaceable ASCII padding", () => {
+        const lines = ["a   \u0301"];
+        expect(renderTimestamp(lines, 10, "12:34").lines).toBe(lines);
+    });
+
     it("leaves unsupported control sequences and lines without text untouched", () => {
         expect(renderTimestamp(["\x1b?hello"], 20, "12:34").lines).toEqual(["\x1b?hello"]);
         expect(renderTimestamp(["     "], 20, "12:34").lines).toEqual(["     "]);
