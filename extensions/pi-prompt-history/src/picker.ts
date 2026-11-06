@@ -6,7 +6,8 @@ import {
     type Component,
     type Focusable,
 } from "@earendil-works/pi-tui";
-import { identity, matching, scopes, scopeLabels, type Occurrence, type Scope } from "./search.ts";
+import { identity, scopes, scopeLabels, type Occurrence, type Scope } from "./search.ts";
+import { HistoryIndex } from "./history-index.ts";
 import { HistorySource, type SearchSnapshot } from "./source.ts";
 
 /** Strip control/format characters before terminal rendering; insertion always uses the untouched text. */
@@ -27,6 +28,7 @@ export class HistoryPicker implements Component, Focusable {
         storageUnavailable: false,
     };
 
+    private readonly index = new HistoryIndex();
     private results: Occurrence[] = [];
     private selected = 0;
     private previewOffset = 0;
@@ -58,7 +60,8 @@ export class HistoryPicker implements Component, Focusable {
             const previous = this.results.at(this.selected);
 
             this.snapshot = snapshot;
-            this.results = matching(snapshot.rows, this.input.getValue());
+            this.index.update(snapshot.rows);
+            this.results = this.index.query(this.input.getValue());
             if (previous !== undefined) {
                 const position = this.results.findIndex(
                     (row) => identity(row) === identity(previous),
@@ -144,7 +147,7 @@ export class HistoryPicker implements Component, Focusable {
             if (sanitized !== this.input.getValue()) this.input.setValue(sanitized);
 
             if (before !== this.input.getValue()) {
-                this.results = matching(this.snapshot.rows, this.input.getValue());
+                this.results = this.index.query(this.input.getValue());
                 this.selected = 0;
                 this.previewOffset = 0;
             }

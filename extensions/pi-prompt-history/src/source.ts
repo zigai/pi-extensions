@@ -29,6 +29,7 @@ export class HistorySource {
     private generation = 0;
     private abort: AbortController | undefined;
     private refresh: (() => void) | undefined;
+    private progressTimer: ReturnType<typeof setTimeout> | undefined;
     private readonly projects = new ProjectIdentity();
 
     constructor(private readonly options: SearchSourceOptions) {}
@@ -36,6 +37,8 @@ export class HistorySource {
     cancel(): void {
         this.generation++;
         this.abort?.abort();
+        clearTimeout(this.progressTimer);
+        this.progressTimer = undefined;
         this.refresh = undefined;
     }
 
@@ -64,8 +67,23 @@ export class HistorySource {
             failures: 0,
             storageUnavailable: false,
         };
+        let pendingFiles = 0;
         const publish = () => {
+            clearTimeout(this.progressTimer);
+            this.progressTimer = undefined;
+            pendingFiles = 0;
+
             if (active()) update({ ...state, rows: [...state.rows] });
+        };
+
+        // Bound repaint/index work without waiting for the entire scan. Initial, live, and final
+        // snapshots remain immediate; cancellation clears the owned timer as well as pending reads.
+        const progress = () => {
+            if (!active()) return;
+
+            pendingFiles++;
+            if (pendingFiles >= 32) publish();
+            else this.progressTimer ??= setTimeout(publish, 32);
         };
 
         this.refresh = () => {
@@ -76,7 +94,9 @@ export class HistorySource {
 
         if (scope === "session") return;
 
-        const project = await this.projects.resolve(cwd);
+        let project: string | undefined;
+        if (scope === "project") project = await this.projects.resolve(cwd);
+
         if (scope === "project") {
             includeLive = (await this.projects.resolve(sessionCwd)) === project;
 
@@ -96,7 +116,7 @@ export class HistorySource {
             } catch {
                 state.failures++;
                 if (isRoot) state.storageUnavailable = true;
-                publish();
+                progress();
 
                 return;
             }
@@ -118,20 +138,26 @@ export class HistorySource {
 
                         if (!active()) return;
 
-                        for (const row of rows) {
-                            if (!active()) return;
-                            if (row.session === session) continue; // live getEntries includes all saved branches
-                            if (
-                                scope === "global" ||
-                                (await this.projects.resolve(row.cwd)) === project
-                            )
-                                state.rows.push(row);
+                        // A transcript has one header/cwd: resolve its project once, not per prompt.
+                        const first = rows.at(0);
+                        const included =
+                            scope === "global" ||
+                            (first !== undefined &&
+                                (await this.projects.resolve(first.cwd)) === project);
+
+                        if (!active()) return;
+
+                        if (included) {
+                            for (const row of rows) {
+                                // live getEntries includes all saved branches
+                                if (row.session !== session) state.rows.push(row);
+                            }
                         }
                     } catch {
                         state.failures++;
                     }
 
-                    publish();
+                    progress();
                 }
             };
 

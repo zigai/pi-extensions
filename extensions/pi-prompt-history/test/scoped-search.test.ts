@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdtemp, mkdir, writeFile, symlink, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import {
     extract,
     matching,
@@ -10,6 +10,7 @@ import {
     type Occurrence,
 } from "../src/search.ts";
 import { HistorySource, type SearchSnapshot } from "../src/source.ts";
+import { HistoryIndex } from "../src/history-index.ts";
 
 // Git subprocesses and async file fixtures need headroom on loaded CI hosts.
 const integrationTimeout = 60_000;
@@ -245,3 +246,79 @@ test(
     },
     integrationTimeout,
 );
+
+test(
+    "file progress is batched, final snapshots stay immutable and every open rescans storage",
+    async () => {
+        const root = await fixture();
+        await Promise.all(
+            Array.from({ length: 96 }, async (_, i) =>
+                writeFile(join(root, `${i}.jsonl`), transcript(`s${i}`, root, [`prompt ${i}`])),
+            ),
+        );
+        const source = new HistorySource({ root, session: "live", cwd: root, live: () => [] });
+        const snapshots: SearchSnapshot[] = [];
+        vi.useFakeTimers();
+        try {
+            await source.scan("global", (state) => {
+                snapshots.push(state);
+            });
+            expect(snapshots).toHaveLength(5); // initial + three 32-file batches + final
+            expect(snapshots[0]?.rows).toHaveLength(0);
+            expect(snapshots[1]?.rows).toHaveLength(32);
+            expect(snapshots.at(-1)?.rows).toHaveLength(96);
+            expect(snapshots.at(-1)?.loading).toBe(false);
+            expect(vi.getTimerCount()).toBe(0);
+            await rm(join(root, "0.jsonl"));
+            await writeFile(join(root, "new.jsonl"), transcript("new", root, ["fresh prompt"]));
+            await source.scan("global", (state) => {
+                snapshots.push(state);
+            });
+            expect(snapshots.at(-1)?.rows.some((row) => row.text === "prompt 0")).toBe(false);
+            expect(snapshots.at(-1)?.rows.some((row) => row.text === "fresh prompt")).toBe(true);
+            const pending = source.scan("global", (state) => {
+                snapshots.push(state);
+
+                if (state.rows.length > 0) source.cancel();
+            });
+            await pending;
+            const count = snapshots.length;
+            await vi.runAllTimersAsync();
+            expect(snapshots).toHaveLength(count);
+            expect(vi.getTimerCount()).toBe(0);
+        } finally {
+            source.cancel();
+            vi.useRealTimers();
+        }
+    },
+    integrationTimeout,
+);
+
+test("live replacement/deletion and reopen do not retain stale indexed prompts", async () => {
+    let live = [entry("old", "a"), entry("duplicate", "b"), entry("duplicate", "c", "2027-01-01")];
+    const source = new HistorySource({
+        root: "/unused",
+        session: "live",
+        cwd: "/fixture",
+        live: () => live,
+    });
+    const index = new HistoryIndex();
+    const update = (state: SearchSnapshot) => {
+        index.update(state.rows);
+    };
+    await source.scan("session", update);
+    expect(index.query("duplicate")[0]?.entry).toBe("c");
+    live = [entry("new", "a"), entry("duplicate", "b")];
+    source.refreshLive();
+    expect(index.query("old")).toEqual([]);
+    expect(index.query("duplicate")[0]?.entry).toBe("b");
+    expect(index.query("new")).toHaveLength(1);
+    live = [];
+    source.refreshLive();
+    expect(index.query("")).toEqual([]);
+    source.cancel();
+    live = [entry("fresh", "d")];
+    await source.scan("session", update);
+    expect(index.query("").map((row) => row.text)).toEqual(["fresh"]);
+    source.cancel();
+});
