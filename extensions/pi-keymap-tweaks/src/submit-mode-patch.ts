@@ -15,6 +15,8 @@ type SubmitModePatchHandle = {
 let installedHandle: SubmitModePatchHandle | undefined;
 
 function swappedStreamingBehavior(options: PromptOptions): PromptOptions {
+    if (options?.source !== undefined && options.source !== "interactive") return options;
+
     if (options?.streamingBehavior === "steer") {
         return { ...options, streamingBehavior: "followUp" };
     }

@@ -59,6 +59,8 @@ test("submit-mode patches transform input once and restore both predecessors", (
         void agentPrototype.prompt("hello", { streamingBehavior: "steer" });
         editorPrototype.handleInput("\n");
         assert.deepEqual(receivedOptions, { streamingBehavior: "followUp" });
+        void agentPrototype.prompt("hello", { streamingBehavior: "steer", source: "extension" });
+        assert.deepEqual(receivedOptions, { streamingBehavior: "steer", source: "extension" });
         assert.deepEqual(receivedInput, ["\r"]);
         assert.equal(applySubmitModeKeymap(), handle);
         handle.dispose();
