@@ -129,11 +129,11 @@ it("reuses the actual native Bash call renderer for declared shell tools while r
 
 it("uses the native asynchronous formatter for declared shell calls without native Bash events", async () => {
     bash.clear();
-    bash = createNativeBashFeature(
-        () =>
-            async ({ code }) =>
-                code.replace("unformatted", "formatted"),
-    );
+    let formatted = 0;
+    bash = createNativeBashFeature(() => async ({ code }) => {
+        formatted += 1;
+        return code.replace("unformatted", "formatted");
+    });
     const component = row("custom_background", "python - <<'PY'\nprint('unformatted')\nPY");
     component.setArgsComplete();
     component.updateResult({ content: [], isError: false, durationMs: 25 });
@@ -142,10 +142,13 @@ it("uses the native asynchronous formatter for declared shell calls without nati
     screen(component);
     await bash.settled();
 
+    const completedFormats = formatted;
     const rendered = screen(component).join("\n");
     expect(rendered).toContain("print('formatted')");
     expect(rendered).not.toContain("unformatted");
     expect(rendered).toContain("");
+    await bash.settled();
+    expect(formatted).toBe(completedFormats);
 });
 
 it("preserves an explicitly preserved tool instead of applying its Bash call style", () => {

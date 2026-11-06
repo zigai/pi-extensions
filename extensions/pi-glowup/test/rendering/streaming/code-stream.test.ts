@@ -13,10 +13,12 @@ import {
 import {
     createCodeStreamStore,
     type CodeStreamStore,
+    type CodeStreamInput,
 } from "../../../src/rendering/streaming/code-stream.ts";
 import {
     createCommandScriptFormatter,
     parseScriptFormatterCommandsValue,
+    type ScriptBlockFormatter,
 } from "../../../src/tools/built-in/bash/formatter.ts";
 
 // Failure matrix: independent formatting at final/resize/history, stale async results,
@@ -67,6 +69,47 @@ function formatter() {
         result,
         inputs: () => journalInputs(log),
     };
+}
+
+type PendingFormat = {
+    readonly code: string;
+    readonly width: number | undefined;
+    readonly signal: AbortSignal | undefined;
+    readonly finish: (text: string) => void;
+};
+
+function controlledFormatter() {
+    const calls: PendingFormat[] = [];
+    const pending: PendingFormat[] = [];
+    let waiting: ((call: PendingFormat) => void) | undefined;
+    const formatter: ScriptBlockFormatter = async (input, options) =>
+        new Promise<string>((finish) => {
+            const call = {
+                code: input.code,
+                width: options?.targetWidth,
+                signal: options?.signal,
+                finish,
+            };
+            calls.push(call);
+
+            if (waiting === undefined) pending.push(call);
+            else {
+                const receive = waiting;
+                waiting = undefined;
+                receive(call);
+            }
+        });
+
+    const next = async (): Promise<PendingFormat> => {
+        const call = pending.shift();
+        if (call !== undefined) return call;
+
+        return new Promise((resolve) => {
+            waiting = resolve;
+        });
+    };
+
+    return { formatter, calls, next };
 }
 
 describe("code stream store", () => {
@@ -291,6 +334,198 @@ describe("code stream store", () => {
         expect(subject.get({ ...input, targetWidth: 60 })).toBe("width60");
     });
 
+    it("withdraws display readiness when a published result synchronously requests a resize", async () => {
+        const subject = store();
+        const widths: Array<number | undefined> = [];
+        const readiness: boolean[] = [];
+        const input: CodeStreamInput = {
+            key: "reentrant-ready",
+            source: "const value=1;",
+            language: "javascript",
+            mode: "block",
+            complete: true,
+            targetWidth: 80,
+            formatter: async (_input, options) => {
+                widths.push(options?.targetWidth);
+                return `width${options?.targetWidth}`;
+            },
+        };
+        const latest = { ...input, targetWidth: 40 };
+        subject.get({
+            ...input,
+            invalidate: () => {
+                expect(subject.get(latest)).toBe("width80");
+                readiness.push(subject.ready(input.key));
+            },
+        });
+        await subject.settled();
+        expect(readiness).toEqual([false]);
+        expect(widths).toEqual([80, 40]);
+        expect(subject.get(latest)).toBe("width40");
+        expect(subject.ready(input.key)).toBe(true);
+    });
+
+    it("atomically rebuilds the latest width after append and completion during formatting", async () => {
+        const subject = store();
+        const external = controlledFormatter();
+        const first = "const first=1;";
+        const input: CodeStreamInput = {
+            key: "resize-append-complete",
+            source: first,
+            language: "javascript",
+            mode: "statement",
+            complete: false,
+            targetWidth: 80,
+            formatter: external.formatter,
+        };
+        subject.get(input);
+        (await external.next()).finish("const first = 1;");
+        await subject.settled();
+        const visible = subject.get(input);
+        const appended = { ...input, source: `${first}\nconst second=2;` };
+        expect(subject.get(appended)).toBe(visible);
+        const stale = await external.next();
+        expect(subject.get({ ...appended, targetWidth: 40 })).toBe(visible);
+        const latest = {
+            ...appended,
+            source: `${appended.source}\nconst third=3;`,
+            targetWidth: 40,
+            complete: true,
+        };
+        expect(subject.get(latest)).toBe(visible);
+        expect(subject.ready(input.key)).toBe(false);
+        expect(stale.signal?.aborted).toBe(false);
+        stale.finish("stale width80");
+
+        for (const name of ["first", "second", "third"]) {
+            const call = await external.next();
+            expect(call.width).toBe(40);
+            expect(call.code).toContain(`const ${name}=`);
+            expect(subject.get(latest)).toBe(visible);
+            expect(subject.ready(input.key)).toBe(false);
+            call.finish(`const ${name} = 40;`);
+        }
+
+        await subject.settled();
+        expect(subject.get(latest)).toBe(
+            "const first = 40;\nconst second = 40;\nconst third = 40;",
+        );
+
+        expect(subject.ready(input.key)).toBe(true);
+        expect(external.calls.map((call) => call.width)).toEqual([80, 80, 40, 40, 40]);
+    });
+
+    it.each(["clear", "cancel"])(
+        "retires a pending resize on %s before a same-key replacement publishes",
+        async (retirement) => {
+            const subject = store();
+            const external = controlledFormatter();
+            const owner = new AbortController();
+            const replacementOwner = new AbortController();
+            let invalidations = 0;
+            const input: CodeStreamInput = {
+                key: "resize-retire",
+                source: "const value=1;",
+                language: "javascript",
+                mode: "block",
+                complete: true,
+                targetWidth: 80,
+                signal: owner.signal,
+                formatter: external.formatter,
+                invalidate: () => {
+                    invalidations += 1;
+                },
+            };
+            subject.get(input);
+            (await external.next()).finish("original width80");
+            await subject.settled();
+            expect(subject.get({ ...input, targetWidth: 40 })).toBe("original width80");
+            const stale = await external.next();
+            expect(subject.get({ ...input, targetWidth: 20 })).toBe("original width80");
+
+            if (retirement === "clear") subject.clear();
+            else owner.abort();
+
+            expect(stale.signal?.aborted).toBe(true);
+            expect(subject.ready(input.key)).toBe(false);
+
+            const latest = { ...input, targetWidth: 60, signal: replacementOwner.signal };
+            expect(subject.get(latest)).toBe("");
+            const fresh = await external.next();
+            stale.finish("late width40");
+            expect(subject.get(latest)).toBe("");
+            fresh.finish("replacement width60");
+            await subject.settled();
+            expect(subject.get(latest)).toBe("replacement width60");
+            expect(subject.ready(input.key)).toBe(true);
+            expect(invalidations).toBe(2);
+            expect(external.calls.map((call) => call.width)).toEqual([80, 40, 60]);
+        },
+    );
+
+    it("keeps the visible revision through an in-flight formatter profile replacement", async () => {
+        const subject = store();
+        const previous = controlledFormatter();
+        const replacement = controlledFormatter();
+        const input: CodeStreamInput = {
+            key: "profile-replacement",
+            source: "const value=1;",
+            language: "javascript",
+            mode: "block",
+            complete: true,
+            targetWidth: 80,
+            formatter: previous.formatter,
+        };
+        subject.get(input);
+        (await previous.next()).finish("original");
+        await subject.settled();
+        expect(subject.get({ ...input, targetWidth: 40 })).toBe("original");
+        const stale = await previous.next();
+        const latest = { ...input, targetWidth: 40, formatter: replacement.formatter };
+        expect(subject.get(latest)).toBe("original");
+        expect(subject.ready(input.key)).toBe(false);
+        expect(stale.signal?.aborted).toBe(true);
+        const fresh = await replacement.next();
+        stale.finish("stale profile");
+        expect(subject.get(latest)).toBe("original");
+        fresh.finish("new profile");
+        await subject.settled();
+        expect(subject.get(latest)).toBe("new profile");
+        expect(subject.ready(input.key)).toBe(true);
+    });
+
+    it.each(["const first=1;", "const fresh=3;"])(
+        "resets consumed boundaries on a pending append replaced with %s",
+        async (source) => {
+            const subject = store();
+            const external = controlledFormatter();
+            const input: CodeStreamInput = {
+                key: "source-replacement",
+                source: "const first=1;",
+                language: "javascript",
+                mode: "statement",
+                complete: false,
+                formatter: external.formatter,
+            };
+            subject.get(input);
+            (await external.next()).finish("const first = 1;");
+            await subject.settled();
+            subject.get({ ...input, source: `${input.source}\nconst second=2;` });
+            const stale = await external.next();
+            const latest = { ...input, source, complete: true };
+            expect(subject.get(latest)).toBe("");
+            expect(subject.ready(input.key)).toBe(false);
+            expect(stale.signal?.aborted).toBe(true);
+            const fresh = await external.next();
+            expect(fresh.code).toBe(source);
+            stale.finish("stale append");
+            fresh.finish(source);
+            await subject.settled();
+            expect(subject.get(latest)).toBe(source);
+            expect(subject.ready(input.key)).toBe(true);
+        },
+    );
+
     // Handoff failures: late width/source updates must not be mistaken for work
     // already consumed; rejection, processing errors and disposal must remain terminal.
     it("processes the latest resize arriving during the running-to-idle handoff", async () => {
@@ -354,7 +589,11 @@ describe("code stream store", () => {
                 if (injected) return;
 
                 injected = true;
-                queueMicrotask(() => queueMicrotask(() => subject.get(latest)));
+                queueMicrotask(() =>
+                    queueMicrotask(() => {
+                        subject.get(latest);
+                    }),
+                );
             },
         });
         await subject.settled();
@@ -396,7 +635,9 @@ describe("code stream store", () => {
             const redraw = (): void => {
                 redraws += 1;
                 queueMicrotask(() =>
-                    queueMicrotask(() => subject.get({ ...input, invalidate: redraw })),
+                    queueMicrotask(() => {
+                        subject.get({ ...input, invalidate: redraw });
+                    }),
                 );
             };
             subject.get({ ...input, invalidate: redraw });
@@ -429,7 +670,9 @@ describe("code stream store", () => {
             invalidate: () => {
                 queueMicrotask(() => {
                     closing = subject.dispose();
-                    queueMicrotask(() => subject.get({ ...input, targetWidth: 40 }));
+                    queueMicrotask(() => {
+                        subject.get({ ...input, targetWidth: 40 });
+                    });
                 });
             },
         });
