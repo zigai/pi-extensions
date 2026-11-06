@@ -3,7 +3,7 @@ format:
     @npm --prefix ../.. run --silent format:files -- "$PWD"
     @git ls-files -co --exclude-standard -z | while IFS= read -r -d '' file; do if [[ -f $file ]]; then printf '%s\0' "$file"; fi; done | xargs -0 -r shfmt -f | xargs -r -d '\n' shfmt -w
     @git ls-files -co --exclude-standard -- Justfile justfile "*.just" | while IFS= read -r file; do just --justfile "$file" --fmt || exit $?; done
-    @just markdown fmt --exclude README.md
+    @just markdown fmt --exclude README.md,src/prompt,src/tools/web-run/web-run-description.md,src/tools/imagegen-description.md
 
 # Run every configured linter on the whole project, stopping on failure
 lint:
@@ -41,7 +41,7 @@ formatcheck:
     @npm --prefix ../.. run --silent format:files -- --check "$PWD"
     @git ls-files -co --exclude-standard -z | while IFS= read -r -d '' file; do if [[ -f $file ]]; then printf '%s\0' "$file"; fi; done | xargs -0 -r shfmt -f | xargs -r -d '\n' shfmt -d
     @git ls-files -co --exclude-standard -- Justfile justfile "*.just" | while IFS= read -r file; do just --justfile "$file" --fmt --check || exit $?; done
-    @just markdown check --exclude README.md
+    @just markdown check --exclude README.md,src/prompt,src/tools/web-run/web-run-description.md,src/tools/imagegen-description.md
 
 # Run the config check checks
 config-check:

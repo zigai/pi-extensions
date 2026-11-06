@@ -31,14 +31,14 @@ History-based ordering records autocomplete selections in `~/.pi/agent/state/pi-
 
 Global settings are stored in `~/.pi/agent/extension-settings/pi-mention-skill.json`.
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `trigger` | string | `"$"` | One or more non-whitespace, non-slash characters that start a skill mention. |
-| `hideSlashSkills` | boolean | `true` | Hide skill commands from slash-command completion. |
-| `completionSuffix` | string | `" "` | Text inserted after a completed skill mention. |
-| `initialSuggestions.strategy` | `frecency` \| `recent` \| `frequent` \| `alphabetical` \| `sourceOrder` | `"frecency"` | Ordering used before any skill query text is entered. |
-| `initialSuggestions.pinned` | string[] | `[]` | Skill names placed first, in this order, before the configured strategy. |
-| `initialSuggestions.projectSkillsFirst` | boolean | `false` | Place project-local skills before user and temporary skills in initial suggestions. |
+| Option                                  | Type                                                                    | Default      | Description                                                                         |
+| --------------------------------------- | ----------------------------------------------------------------------- | ------------ | ----------------------------------------------------------------------------------- |
+| `trigger`                               | string                                                                  | `"$"`        | One or more non-whitespace, non-slash characters that start a skill mention.        |
+| `hideSlashSkills`                       | boolean                                                                 | `true`       | Hide skill commands from slash-command completion.                                  |
+| `completionSuffix`                      | string                                                                  | `" "`        | Text inserted after a completed skill mention.                                      |
+| `initialSuggestions.strategy`           | `frecency` \| `recent` \| `frequent` \| `alphabetical` \| `sourceOrder` | `"frecency"` | Ordering used before any skill query text is entered.                               |
+| `initialSuggestions.pinned`             | string[]                                                                | `[]`         | Skill names placed first, in this order, before the configured strategy.            |
+| `initialSuggestions.projectSkillsFirst` | boolean                                                                 | `false`      | Place project-local skills before user and temporary skills in initial suggestions. |
 
 ```json
 {

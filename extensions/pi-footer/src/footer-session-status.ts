@@ -20,11 +20,25 @@ export function getNativeMcpServerCount(
     return servers.size;
 }
 
-export function getFooterRoute(ctx: FooterContext): FooterRoute | undefined {
-    if (ctx.routedModel !== undefined) return ctx.routedModel;
-    if (ctx.model?.api !== "pi-virtual" || ctx.sessionManager === undefined) return undefined;
+type FooterSessionManager = NonNullable<FooterContext["sessionManager"]>;
 
-    const messages = ctx.sessionManager.buildSessionProjection().messages;
+type FooterRouteRevision = {
+    readonly manager: WeakRef<FooterSessionManager>;
+    readonly sessionId: string;
+    readonly leafId: string | null;
+    readonly route: FooterRoute | undefined;
+};
+
+const footerRouteRevisions = new WeakMap<FooterContext, FooterRouteRevision>();
+
+function copyFooterRoute(route: FooterRoute | undefined): FooterRoute | undefined {
+    if (route === undefined) return undefined;
+
+    return { ...route };
+}
+
+function projectFooterRoute(manager: FooterSessionManager): FooterRoute | undefined {
+    const messages = manager.buildSessionProjection().messages;
     for (let index = messages.length - 1; index >= 0; index -= 1) {
         const message = messages[index];
         if (message.role !== "assistant") continue;
@@ -38,6 +52,37 @@ export function getFooterRoute(ctx: FooterContext): FooterRoute | undefined {
     }
 
     return undefined;
+}
+
+export function getFooterRoute(ctx: FooterContext): FooterRoute | undefined {
+    if (ctx.routedModel !== undefined) return ctx.routedModel;
+    if (ctx.model?.api !== "pi-virtual" || ctx.sessionManager === undefined) return undefined;
+
+    const manager = ctx.sessionManager;
+    if (manager.getSessionId === undefined || manager.getLeafId === undefined)
+        return projectFooterRoute(manager);
+
+    // Canonical appends, context edits and branch navigation change this revision.
+    // The context keys the footer lifetime; only route scalars survive a lookup.
+    const sessionId = manager.getSessionId();
+    const leafId = manager.getLeafId();
+    const previous = footerRouteRevisions.get(ctx);
+    if (
+        previous?.manager.deref() === manager &&
+        previous.sessionId === sessionId &&
+        previous.leafId === leafId
+    )
+        return copyFooterRoute(previous.route);
+
+    const route = projectFooterRoute(manager);
+    footerRouteRevisions.set(ctx, {
+        manager: new WeakRef(manager),
+        sessionId,
+        leafId,
+        route,
+    });
+
+    return copyFooterRoute(route);
 }
 
 // Kimi Coding plans authenticate with an API key but bill as a flat subscription.

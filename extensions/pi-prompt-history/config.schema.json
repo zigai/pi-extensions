@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/zigai/pi-tweaks/master/extensions/pi-prompt-history/config.schema.json",
+  "title": "Pi Prompt History settings",
+  "description": "Scoped user prompt search.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "default": "./schemas/pi-prompt-history.schema.json",
+      "description": "JSON Schema used by editors for this settings file."
+    },
+    "enabled": {
+      "type": "boolean",
+      "default": true,
+      "description": "Enable modal prompt search (arrow recall stays available)."
+    },
+    "defaultScope": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "session"
+        },
+        {
+          "type": "string",
+          "const": "project"
+        },
+        {
+          "type": "string",
+          "const": "global"
+        }
+      ],
+      "default": "project",
+      "description": "Scope used on each new picker opening; temporary scope cycling is not persisted."
+    }
+  }
+}

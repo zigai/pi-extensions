@@ -45,9 +45,9 @@ pi install npm:@zigai/pi-keymap-tweaks
 
 Global settings are stored in `~/.pi/agent/extension-settings/pi-keymap-tweaks.json`.
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `cycleThinkingBackwardKey` | string \| null | `null` | Keybinding to cycle thinking level backward (e.g. 'alt+shift+tab'). Unbound by default. |
+| Option                     | Type           | Default | Description                                                                             |
+| -------------------------- | -------------- | ------- | --------------------------------------------------------------------------------------- |
+| `cycleThinkingBackwardKey` | string \| null | `null`  | Keybinding to cycle thinking level backward (e.g. 'alt+shift+tab'). Unbound by default. |
 
 ```json
 {

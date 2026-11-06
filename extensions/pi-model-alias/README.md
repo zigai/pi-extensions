@@ -17,11 +17,11 @@ pi install npm:@zigai/pi-model-alias
 
 Global settings are stored in `~/.pi/agent/extension-settings/pi-model-alias.json`.
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `aliases` | { provider: string; model: string; alias: string; name?: string }[] | `[]` | Short model IDs with optional display-name overrides. |
-| `providerAliases` | { provider: string; name: string }[] | `[]` | Provider display-name overrides; provider IDs remain unchanged. |
-| `stableProviderColumn` | boolean | `true` | Keep the provider column stable when aliases are displayed. |
+| Option                 | Type                                                                | Default | Description                                                     |
+| ---------------------- | ------------------------------------------------------------------- | ------- | --------------------------------------------------------------- |
+| `aliases`              | { provider: string; model: string; alias: string; name?: string }[] | `[]`    | Short model IDs with optional display-name overrides.           |
+| `providerAliases`      | { provider: string; name: string }[]                                | `[]`    | Provider display-name overrides; provider IDs remain unchanged. |
+| `stableProviderColumn` | boolean                                                             | `true`  | Keep the provider column stable when aliases are displayed.     |
 
 ### Defaults
 

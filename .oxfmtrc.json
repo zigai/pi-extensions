@@ -22,6 +22,7 @@
     "extensions/pi-ui-tweaks/README.md",
     "extensions/pi-keymap-tweaks/README.md",
     "extensions/pi-input-corrections/README.md",
+    "extensions/pi-prompt-history/README.md",
     "extensions/pi-autoname-session/config.schema.json",
     "extensions/pi-autoname-session/README.md",
     "extensions/pi-settings-ui/config.schema.json",

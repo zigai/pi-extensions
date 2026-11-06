@@ -9,6 +9,8 @@ const controls = new RegExp(
     "gy",
 );
 const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+const printableAscii = /^[\x20-\x7e]*$/;
+const asciiRuns = / +|[^ ]+/g;
 
 type Token = { text: string; width: number; space: boolean };
 
@@ -30,10 +32,25 @@ function tokenize(line: string): Token[] | undefined {
         let end = next;
         if (end < 0) end = line.length;
 
-        for (const { segment } of segmenter.segment(line.slice(offset, end))) {
-            if (/\p{Cc}/u.test(segment)) return undefined;
+        const text = line.slice(offset, end);
 
-            tokens.push({ text: segment, width: visibleWidth(segment), space: segment === " " });
+        // Printable ASCII has one cell per character. Coalesce only all-ASCII
+        // spans; a combining mark can make a preceding space non-replaceable.
+        if (printableAscii.test(text)) {
+            for (const match of text.matchAll(asciiRuns)) {
+                const run = match[0];
+                tokens.push({ text: run, width: run.length, space: run.startsWith(" ") });
+            }
+        } else {
+            for (const { segment } of segmenter.segment(text)) {
+                if (/\p{Cc}/u.test(segment)) return undefined;
+
+                tokens.push({
+                    text: segment,
+                    width: visibleWidth(segment),
+                    space: segment === " ",
+                });
+            }
         }
 
         offset = end;

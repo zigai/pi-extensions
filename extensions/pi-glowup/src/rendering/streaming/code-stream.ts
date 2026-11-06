@@ -51,18 +51,96 @@ export type CodeStreamStore = {
     ): Promise<string>;
 };
 
+type EntryPass = { readonly input: CodeStreamInput };
+
+type EntryExecution =
+    | { readonly kind: "idle" }
+    | { readonly kind: "running"; readonly pass: EntryPass }
+    | { readonly kind: "retired" };
+
+// Source completion belongs to input. Readiness belongs to this display revision;
+// a completed source can still be streaming or awaiting an atomic replacement.
+type EntryPublication =
+    | { readonly kind: "streaming"; readonly display: string }
+    | { readonly kind: "replacing"; readonly display: string }
+    | { readonly kind: "ready"; readonly display: string };
+
+type EntryProgress = {
+    consumed: number;
+    indents: Map<number, string>;
+    lastKind: string;
+};
+
 type Entry = {
     input: CodeStreamInput;
     language: string;
-    display: string;
-    consumed: number;
     controller: AbortController;
-    indents: Map<number, string>;
-    atomic: boolean;
-    done: boolean;
-    lastKind: string;
-    running: boolean;
+    execution: EntryExecution;
+    publication: EntryPublication;
+    progress: EntryProgress;
 };
+
+type EntryUpdate =
+    | { readonly kind: "refresh" }
+    | { readonly kind: "resize" }
+    | { readonly kind: "append" }
+    | { readonly kind: "rebuild" }
+    | { readonly kind: "rewrite" }
+    | { readonly kind: "truncate" };
+
+function emptyProgress(): EntryProgress {
+    return { consumed: 0, indents: new Map(), lastKind: "" };
+}
+
+function updateFor(entry: Entry, input: CodeStreamInput, language: string): EntryUpdate {
+    const previous = entry.input;
+    const sameProfile =
+        previous.mode === input.mode &&
+        previous.formatter === input.formatter &&
+        previous.signal === input.signal &&
+        entry.language === language &&
+        previous.path === input.path;
+    const sameSource = previous.source === input.source && previous.complete === input.complete;
+
+    if (sameProfile && sameSource) {
+        if (previous.targetWidth === input.targetWidth) return { kind: "refresh" };
+
+        return { kind: "resize" };
+    }
+
+    if (
+        sameProfile &&
+        previous.targetWidth === input.targetWidth &&
+        !previous.complete &&
+        input.source.startsWith(previous.source)
+    )
+        return { kind: "append" };
+
+    if (
+        (!sameProfile || previous.targetWidth !== input.targetWidth) &&
+        input.source.startsWith(previous.source) &&
+        (input.source === previous.source || !previous.complete) &&
+        entry.language === language &&
+        (previous.mode === input.mode || input.complete)
+    )
+        return { kind: "rebuild" };
+
+    if (previous.source.startsWith(input.source) && input.source.length < previous.source.length)
+        return { kind: "truncate" };
+
+    return { kind: "rewrite" };
+}
+
+function requestReplacement(entry: Entry, input: CodeStreamInput): void {
+    entry.input = input;
+    entry.publication = { kind: "replacing", display: entry.publication.display };
+}
+
+function requestAppend(entry: Entry, input: CodeStreamInput): void {
+    entry.input = input;
+    if (entry.publication.kind === "ready")
+        entry.publication = { kind: "streaming", display: entry.publication.display };
+}
 
 function sourceAborted(input: CodeStreamInput): boolean {
     return input.signal?.aborted === true;
@@ -157,20 +235,49 @@ export function createCodeStreamStore(): CodeStreamStore {
 
     function current(entry: Entry): boolean {
         return (
-            !disposed && !entry.controller.signal.aborted && entries.get(entry.input.key) === entry
+            !disposed &&
+            entry.execution.kind !== "retired" &&
+            !entry.controller.signal.aborted &&
+            entries.get(entry.input.key) === entry
         );
     }
 
-    function publish(entry: Entry, display: string, consumed: number, done = false): void {
-        if (!current(entry)) return;
+    function currentPass(entry: Entry, pass: EntryPass): boolean {
+        return (
+            current(entry) &&
+            entry.execution.kind === "running" &&
+            entry.execution.pass === pass &&
+            pass.input.targetWidth === entry.input.targetWidth
+        );
+    }
 
-        const readyChanged = entry.done !== done;
+    function retire(entry: Entry): void {
+        entry.execution = { kind: "retired" };
+        entry.controller.abort();
+    }
 
-        entry.consumed = consumed;
-        entry.done = done;
-        if (entry.display === display && !readyChanged) return;
+    function publish(
+        entry: Entry,
+        pass: EntryPass,
+        display: string,
+        consumed: number,
+        finished = false,
+    ): void {
+        if (!currentPass(entry, pass)) return;
 
-        entry.display = display;
+        const previous = entry.publication;
+        const ready =
+            finished &&
+            entry.input.complete &&
+            pass.input.complete &&
+            pass.input.source === entry.input.source &&
+            consumed >= entry.input.source.length;
+
+        entry.progress.consumed = consumed;
+        if (ready) entry.publication = { kind: "ready", display };
+        else entry.publication = { kind: "streaming", display };
+
+        if (previous.display === display && (previous.kind === "ready") === ready) return;
 
         try {
             entry.input.invalidate?.();
@@ -180,8 +287,8 @@ export function createCodeStreamStore(): CodeStreamStore {
         }
     }
 
-    async function run(entry: Entry, initialDisplay: string): Promise<void> {
-        const input = entry.input;
+    async function run(entry: Entry, pass: EntryPass, initialDisplay: string): Promise<void> {
+        const input = pass.input;
         const signal = entry.controller.signal;
         if (input.mode === "block") {
             if (!input.complete) return;
@@ -220,19 +327,19 @@ export function createCodeStreamStore(): CodeStreamStore {
 
             if (input.targetWidth !== entry.input.targetWidth) return;
 
-            publish(entry, formatted.text, input.source.length, true);
+            publish(entry, pass, formatted.text, input.source.length, true);
 
             return;
         }
 
         const response = await parser.parse(input.source, entry.language, input.complete, signal);
 
-        if (!current(entry)) return;
+        if (!currentPass(entry, pass)) return;
 
         if (response === undefined || "error" in response) {
             // No parser means no trustworthy statement boundaries. Never send the growing
             // script to a formatter as a fallback; the service already emitted a diagnostic.
-            if (input.complete) publish(entry, input.source, input.source.length, true);
+            if (input.complete) publish(entry, pass, input.source, input.source.length, true);
             return;
         }
 
@@ -242,14 +349,15 @@ export function createCodeStreamStore(): CodeStreamStore {
 
         const programs = response.programs ?? [];
         let display = initialDisplay;
-        let consumed = entry.consumed;
-        let lastKind = entry.lastKind;
+        let consumed = entry.progress.consumed;
+        let lastKind = entry.progress.lastKind;
         for (const unit of response.units) {
             if (unit.end <= consumed) continue;
-            if (!current(entry)) return;
+            if (!currentPass(entry, pass)) return;
 
             let containerIndent: string | undefined;
-            if (unit.container !== undefined) containerIndent = entry.indents.get(unit.container);
+            if (unit.container !== undefined)
+                containerIndent = entry.progress.indents.get(unit.container);
 
             let indent = containerIndent ?? unit.indent;
             if (unit.container === undefined && (unit.kind === "header" || unit.kind === "close"))
@@ -297,10 +405,10 @@ export function createCodeStreamStore(): CodeStreamStore {
                 } else
                     formatted = await formatCodeUnit(input, entry.language, unit, signal, indent);
 
-                if (!current(entry) || input.targetWidth !== entry.input.targetWidth) return;
+                if (!currentPass(entry, pass)) return;
 
                 if (unit.body !== undefined && formatted.bodyIndent !== undefined)
-                    entry.indents.set(unit.body, formatted.bodyIndent);
+                    entry.progress.indents.set(unit.body, formatted.bodyIndent);
 
                 let gap = input.source.slice(consumed, unit.start);
                 const formattedLayout =
@@ -308,7 +416,7 @@ export function createCodeStreamStore(): CodeStreamStore {
                     containerIndent !== undefined ||
                     (unit.kind === "close" &&
                         unit.body !== undefined &&
-                        entry.indents.has(unit.body));
+                        entry.progress.indents.has(unit.body));
 
                 // An installed formatter may not support this language, or may
                 // decline a unit. In that case preserve its lexical gaps rather
@@ -345,57 +453,61 @@ export function createCodeStreamStore(): CodeStreamStore {
             consumed = unit.end;
             lastKind = unit.kind;
 
-            if (!entry.atomic) publish(entry, display, consumed);
+            if (entry.publication.kind !== "replacing") publish(entry, pass, display, consumed);
         }
 
-        entry.lastKind = lastKind;
-        entry.atomic = false;
-        publish(entry, display, consumed, input.complete && consumed >= input.source.length);
+        entry.progress.lastKind = lastKind;
+        publish(entry, pass, display, consumed, input.complete && consumed >= input.source.length);
     }
 
     function launch(entry: Entry, display: string): void {
-        entry.running = true;
+        if (entry.execution.kind !== "idle") return;
 
         const job = (async (): Promise<void> => {
+            let visible = display;
+
             try {
-                let visible = display;
-
                 while (current(entry)) {
-                    const input = entry.input;
-                    await run(entry, visible);
+                    const pass: EntryPass = { input: entry.input };
+                    entry.execution = { kind: "running", pass };
 
-                    if (entry.input.targetWidth !== input.targetWidth) {
-                        entry.consumed = 0;
-                        entry.indents.clear();
-                        entry.lastKind = "";
-                        entry.atomic = true;
+                    try {
+                        await run(entry, pass, visible);
+                    } catch (cause: unknown) {
+                        if (!current(entry)) return;
+
+                        recordRenderError("code-stream.run", cause, pass.input.toolCallId);
+                        reportExtensionDiagnostic(
+                            "[pi-glowup] Code stream processing failed; unfinished code is held until completion.",
+                        );
+
+                        if (pass.input.complete)
+                            publish(entry, pass, pass.input.source, pass.input.source.length, true);
+                    }
+
+                    if (!current(entry)) return;
+
+                    if (entry.input.targetWidth !== pass.input.targetWidth) {
+                        // The old pass owns its progress until it returns. Only then
+                        // reset indentation/boundaries and build the latest width offscreen.
+                        entry.progress = emptyProgress();
+                        requestReplacement(entry, entry.input);
                         visible = "";
                         continue;
                     }
 
                     if (
-                        entry.input.source === input.source &&
-                        entry.input.complete === input.complete
+                        entry.input.source === pass.input.source &&
+                        entry.input.complete === pass.input.complete
                     )
                         return;
 
-                    visible = entry.display;
+                    visible = entry.publication.display;
                 }
-            } catch (cause: unknown) {
-                if (!current(entry)) return;
-
-                recordRenderError("code-stream.run", cause, entry.input.toolCallId);
-
-                reportExtensionDiagnostic(
-                    "[pi-glowup] Code stream processing failed; unfinished code is held until completion.",
-                );
-
-                if (entry.input.complete)
-                    publish(entry, entry.input.source, entry.input.source.length, true);
             } finally {
-                // Publish idle in the same continuation as the final input check.
-                // Otherwise a late update can see running=true after the loop exited.
-                entry.running = false;
+                // Idle and the final input check share one continuation, so an
+                // update cannot be stranded behind a runner that already exited.
+                if (entry.execution.kind !== "retired") entry.execution = { kind: "idle" };
             }
         })();
 
@@ -407,7 +519,7 @@ export function createCodeStreamStore(): CodeStreamStore {
         externalController.abort();
         externalController = new AbortController();
 
-        for (const entry of entries.values()) entry.controller.abort();
+        for (const entry of entries.values()) retire(entry);
         entries.clear();
     }
 
@@ -424,99 +536,67 @@ export function createCodeStreamStore(): CodeStreamStore {
 
             const previous = entries.get(input.key);
             if (input.mode === "token") {
-                previous?.controller.abort();
+                if (previous !== undefined) retire(previous);
                 entries.delete(input.key);
+
                 return input.source;
             }
 
             const language = languageFor(input);
-            if (
-                previous !== undefined &&
-                previous.running &&
-                previous.input.mode === input.mode &&
-                previous.input.formatter === input.formatter &&
-                previous.input.signal === input.signal &&
-                previous.language === language &&
-                previous.input.path === input.path &&
-                previous.input.source === input.source &&
-                previous.input.complete === input.complete
-            ) {
-                // Width updates replace the pending target, not the running formatter.
-                // Its last published display remains visible until the latest width settles.
-                previous.input = input;
-                return previous.display;
-            }
+            let publication: EntryPublication = { kind: "streaming", display: "" };
+            if (previous !== undefined) {
+                const update = updateFor(previous, input, language);
+                switch (update.kind) {
+                    case "refresh":
+                        previous.input = input;
+                        return previous.publication.display;
+                    case "append":
+                        requestAppend(previous, input);
+                        entries.delete(input.key);
+                        entries.set(input.key, previous);
+                        launch(previous, previous.publication.display);
 
-            const reusable =
-                previous !== undefined &&
-                previous.input.mode === input.mode &&
-                previous.input.formatter === input.formatter &&
-                previous.input.signal === input.signal &&
-                previous.input.targetWidth === input.targetWidth &&
-                previous.language === language &&
-                previous.input.path === input.path;
-            if (
-                reusable &&
-                previous.input.source === input.source &&
-                previous.input.complete === input.complete
-            ) {
-                previous.input = input;
-                return previous.display;
-            }
+                        return previous.publication.display;
+                    case "resize":
+                        if (previous.execution.kind === "running") {
+                            // Coalesce targets without aborting the formatter. The
+                            // in-flight revision may finish but can no longer publish.
+                            requestReplacement(previous, input);
+                            return previous.publication.display;
+                        }
 
-            if (
-                reusable &&
-                !previous.input.complete &&
-                input.source.startsWith(previous.input.source)
-            ) {
-                previous.input = input;
-                entries.delete(input.key);
-                entries.set(input.key, previous);
+                        publication = { kind: "replacing", display: previous.publication.display };
+                        break;
+                    case "rebuild":
+                        publication = { kind: "replacing", display: previous.publication.display };
+                        break;
+                    case "rewrite":
+                    case "truncate":
+                        // Rewritten source has no reusable boundaries or indentation.
+                        break;
+                }
 
-                if (!previous.running) launch(previous, previous.display);
-                return previous.display;
-            }
-
-            previous?.controller.abort();
-
-            let display = "";
-            let atomic = false;
-            if (
-                previous !== undefined &&
-                !reusable &&
-                input.source.startsWith(previous.input.source) &&
-                (input.source === previous.input.source || !previous.input.complete) &&
-                previous.language === language &&
-                (previous.input.mode === input.mode || input.complete)
-            ) {
-                // A resize/profile change rebuilds from individual units, retaining the old
-                // ready display until replacement units become available.
-                display = previous.display;
-                atomic = true;
+                retire(previous);
             }
 
             const entry: Entry = {
                 input,
                 language,
-                display,
-                consumed: 0,
                 controller: new AbortController(),
-                indents: new Map(),
-                atomic,
-                done: false,
-                lastKind: "",
-                running: false,
+                execution: { kind: "idle" },
+                publication,
+                progress: emptyProgress(),
             };
 
             entries.delete(input.key);
             entries.set(input.key, entry);
 
-            const retire = (): void => {
+            const retireSource = (): void => {
                 if (entries.get(entry.input.key) === entry) entries.delete(entry.input.key);
-                entry.controller.abort();
+                retire(entry);
             };
 
-            input.signal?.addEventListener("abort", retire, {
+            input.signal?.addEventListener("abort", retireSource, {
                 once: true,
                 signal: entry.controller.signal,
             });
@@ -524,7 +604,7 @@ export function createCodeStreamStore(): CodeStreamStore {
             // An earlier owner's cancellation may synchronously retire this source
             // while get() replaces its entry. Do not miss an already-fired abort.
             if (sourceAborted(input)) {
-                retire();
+                retireSource();
                 return "";
             }
 
@@ -532,22 +612,24 @@ export function createCodeStreamStore(): CodeStreamStore {
                 const oldest = entries.keys().next().value;
                 if (oldest === undefined) break;
 
-                entries.get(oldest)?.controller.abort();
+                const evicted = entries.get(oldest);
+                if (evicted !== undefined) retire(evicted);
                 entries.delete(oldest);
             }
 
             launch(entry, "");
 
-            return entry.display;
+            return entry.publication.display;
         },
         formatEmbedded,
         ready(key): boolean {
             const entry = entries.get(key);
+
             return (
                 entry !== undefined &&
                 entry.input.complete &&
-                entry.done &&
-                entry.consumed >= entry.input.source.length
+                entry.publication.kind === "ready" &&
+                entry.progress.consumed >= entry.input.source.length
             );
         },
         clear,

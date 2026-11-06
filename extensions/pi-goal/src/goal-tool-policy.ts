@@ -85,6 +85,9 @@ export function createGoalToolPolicyController(
   let sessionId: string | undefined;
   let currentGoal: ThreadGoal | null = null;
   let delegated = false;
+  let declarationPublished = false;
+  let publishedStatus: ThreadGoal["status"] | "absent" | undefined;
+  let publishedTools: readonly string[] | undefined;
 
   const envelope = Compile(
     Type.Object(
@@ -92,28 +95,46 @@ export function createGoalToolPolicyController(
       { additionalProperties: false },
     ),
   );
-  const publish = (): void => {
+
+  // Declarations belong to a session/ready handshake, not to every tool call.
+  // Cache only our small protocol payload, never a runtime catalog snapshot.
+  const publish = (force = false): void => {
     if (sessionId === undefined) return;
 
-    events?.emit("pi-toggles:register-context-key", {
-      owner: "pi-goal",
-      key: "goal.status",
-      type: "string",
-      description: "Authoritative Goal lifecycle status; absent when no goal exists.",
-    });
+    const status = currentGoal?.status ?? "absent";
+    const statusChanged = publishedStatus !== status;
+    const toolsChanged = publishedTools !== configured.disabledTools;
+    const declare = force || !declarationPublished;
 
-    events?.emit("pi-toggles:set-context", {
-      owner: "pi-goal",
-      key: "goal.status",
-      value: currentGoal?.status ?? "absent",
-    });
+    declarationPublished = true;
+    publishedStatus = status;
+    publishedTools = configured.disabledTools;
 
-    events?.emit("pi-goal:tool-policy", {
-      version: 1,
-      sessionId,
-      status: currentGoal?.status ?? "absent",
-      disabledTools: configured.disabledTools,
-    });
+    if (declare) {
+      events?.emit("pi-toggles:register-context-key", {
+        owner: "pi-goal",
+        key: "goal.status",
+        type: "string",
+        description: "Authoritative Goal lifecycle status; absent when no goal exists.",
+      });
+    }
+
+    if (force || statusChanged) {
+      events?.emit("pi-toggles:set-context", {
+        owner: "pi-goal",
+        key: "goal.status",
+        value: status,
+      });
+    }
+
+    if (force || statusChanged || toolsChanged) {
+      events?.emit("pi-goal:tool-policy", {
+        version: 1,
+        sessionId,
+        status,
+        disabledTools: configured.disabledTools,
+      });
+    }
   };
 
   const setActiveToolsIfChanged = (
@@ -225,7 +246,7 @@ export function createGoalToolPolicyController(
       if (!envelope.Check(value)) return;
 
       const ready = envelope.Parse(value);
-      if (ready.sessionId === sessionId) publish();
+      if (ready.sessionId === sessionId) publish(true);
     }),
     events?.on("pi-goal:tool-policy-accepted", (value) => {
       if (!envelope.Check(value)) return;
@@ -262,6 +283,9 @@ export function createGoalToolPolicyController(
       sessionId = nextSessionId;
       delegated = false;
       currentGoal = null;
+      declarationPublished = false;
+      publishedStatus = undefined;
+      publishedTools = undefined;
       publish();
     },
     canInvoke: (name) =>

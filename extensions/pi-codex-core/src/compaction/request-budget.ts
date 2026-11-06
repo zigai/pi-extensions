@@ -32,7 +32,11 @@ import type {
 } from "./types.ts";
 
 const RETAINED_MESSAGE_TOKEN_BUDGET = 64_000;
-const COMPACTION_REQUEST_BUDGET_RATIO = 0.8;
+
+// Codex ModelInfo::usable_context_window defaults to 95%, independently of
+// auto_compact_token_limit. Pi exposes no per-model effective-window percentage;
+// retain that default headroom without reusing Pi's earlier 80% auto trigger.
+const COMPACTION_USABLE_CONTEXT_PERCENT = 95;
 const TRUNCATED_TOOL_OUTPUT_MESSAGE =
     "Output exceeded the available model context and was truncated";
 const TOKEN_ESTIMATE_CHUNK_CHARS = 512 * 1024;
@@ -614,9 +618,8 @@ function hasInputImageDetail(item: ResponsesInputItem): boolean {
 
 function compactRequestBudget(contextWindow: number | null | undefined): number | undefined {
     const parsed = JsonNumberDecoder.decode(contextWindow);
-    return parsed === undefined || parsed <= 0
-        ? undefined
-        : Math.floor(parsed * COMPACTION_REQUEST_BUDGET_RATIO);
+    if (parsed === undefined || !Number.isFinite(parsed) || parsed <= 0) return undefined;
+    return Math.floor((parsed * COMPACTION_USABLE_CONTEXT_PERCENT) / 100);
 }
 
 function isRewritableToolOutputItem(item: ResponsesInputItem): boolean {

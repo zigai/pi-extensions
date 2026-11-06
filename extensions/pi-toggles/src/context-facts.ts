@@ -109,12 +109,17 @@ export class ContextFacts {
     readonly #values = new Map<string, FactScalar>();
     readonly #contextKeys = new Map<string, RegisteredContextKey>();
     readonly #diagnostics: string[] = [];
+    #revision = 0;
     #cwd: string;
     #projectTrusted: boolean;
 
     constructor(cwd: string, projectTrusted: boolean) {
         this.#cwd = cwd;
         this.#projectTrusted = projectTrusted;
+    }
+
+    get revision(): number {
+        return this.#revision;
     }
 
     get diagnostics(): readonly string[] {
@@ -124,34 +129,39 @@ export class ContextFacts {
     updateProject(cwd: string, trusted: boolean): void {
         this.#cwd = cwd;
         this.#projectTrusted = trusted;
-        this.#values.set("project.cwd", cwd);
-        this.#values.set("project.trusted", trusted);
+        this.set("project.cwd", cwd);
+        this.set("project.trusted", trusted);
     }
 
     set(name: string, value: FactScalar | undefined): void {
         if (value === undefined) {
-            this.#values.delete(name);
+            if (this.#values.delete(name)) this.#revision += 1;
             return;
         }
+        if (this.#values.has(name) && Object.is(this.#values.get(name), value)) return;
         this.#values.set(name, value);
+        this.#revision += 1;
     }
 
-    registerContextKey(input: RegisterContextKeyInput): void {
+    registerContextKey(input: RegisterContextKeyInput): boolean {
         if (this.#values.has(input.key) || RESERVED_DYNAMIC_FACTS.has(input.key)) {
             this.addDiagnostic(`Context key ${input.key} is reserved by Pi Toggles.`);
-            return;
+            return false;
         }
         const current = this.#contextKeys.get(input.key);
         if (current !== undefined && current.owner !== input.owner) {
             this.addDiagnostic(
                 `Context key ${input.key} is already owned by ${current.owner}; ignored registration from ${input.owner}.`,
             );
-            return;
+            return false;
         }
+        if (current?.type === input.type && current.description === input.description) return true;
         this.#contextKeys.set(input.key, {
             ...input,
             ...(current?.value === undefined ? {} : { value: current.value }),
         });
+        this.#revision += 1;
+        return true;
     }
 
     setContext(input: SetContextInput): void {
@@ -170,14 +180,17 @@ export class ContextFacts {
             this.addDiagnostic(`Context key ${input.key} expected ${registered.type}.`);
             return;
         }
+        if (Object.is(registered.value, input.value)) return;
         this.#contextKeys.set(input.key, { ...registered, value: input.value });
+        this.#revision += 1;
     }
 
     clearContext(input: ClearContextInput): void {
         for (const [key, registered] of this.#contextKeys) {
             if (
                 registered.owner === input.owner &&
-                (input.key === undefined || input.key === key)
+                (input.key === undefined || input.key === key) &&
+                registered.value !== undefined
             ) {
                 this.#contextKeys.set(key, {
                     key: registered.key,
@@ -185,6 +198,7 @@ export class ContextFacts {
                     description: registered.description,
                     owner: registered.owner,
                 });
+                this.#revision += 1;
             }
         }
     }

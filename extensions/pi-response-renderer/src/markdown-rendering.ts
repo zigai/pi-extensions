@@ -10,6 +10,7 @@ const BEL = String.fromCharCode(0x07);
 const ANSI_OSC_REGEX = new RegExp(`${ESC}\\][^${BEL}]*${BEL}`, "g");
 const ANSI_CSI_REGEX = new RegExp(`${ESC}\\[[0-9;?]*[ -/]*[@-~]`, "g");
 const ANSI_SGR_REGEX = new RegExp(`${ESC}\\[([0-9;]*)m`, "g");
+const FENCE_LINE_REGEX = /^`{3,}[^`]*$/;
 const fencesHiddenInstances = new WeakSet();
 const tableBoundaryLineTextsByMarkdown = new WeakMap<Pick<Markdown, "render">, Set<string>>();
 
@@ -34,36 +35,11 @@ export function stripItalicAnsi(text: string): string {
 }
 
 export function isFenceLine(line: string): boolean {
-    return /^`{3,}[^`]*$/.test(stripAnsi(line).trim());
+    return FENCE_LINE_REGEX.test(stripAnsi(line).trim());
 }
 
 function isBlankRenderedLine(line: string): boolean {
     return stripAnsi(line).trim().length === 0;
-}
-
-function isIntroLine(line: string): boolean {
-    return stripAnsi(line).trimEnd().endsWith(":");
-}
-
-function isIntroducedBlockLine(line: string): boolean {
-    const plainLine = stripAnsi(line);
-    const trimmedStart = plainLine.trimStart();
-    return (
-        /^[-*+]\s+/.test(trimmedStart) ||
-        /^\d+[.)]\s+/.test(trimmedStart) ||
-        trimmedStart.startsWith("```") ||
-        trimmedStart.startsWith("|") ||
-        /^ {2,}\S/.test(plainLine)
-    );
-}
-
-function isMarkdownHeadingLine(line: string): boolean {
-    return /^#{1,6}\s+\S/.test(stripAnsi(line).trimStart());
-}
-
-function isTableLine(line: string): boolean {
-    // Rendered Markdown tables start with box-drawing characters.
-    return /^[\u2500-\u257F]/.test(stripAnsi(line).trimStart());
 }
 
 export type MarkdownRender = (this: Markdown, width: number) => string[];
@@ -468,86 +444,63 @@ export function resolveHeadingPrefix(instance: Markdown): string {
     return getStylePrefix(theme.heading);
 }
 
-function isRenderedHeadingLine(
-    line: string,
+type LineClassification = {
+    intro: boolean;
+    introduced: boolean;
+    paragraph: boolean;
+};
+
+type PresentedLine = {
+    raw: string;
+    plain: string;
+    trimmed: string;
+    classification?: LineClassification;
+};
+
+function classifyLine(
+    line: PresentedLine,
     headingPrefix: string,
     headingLineTexts: ReadonlySet<string>,
-): boolean {
-    if (headingPrefix.length > 0 && line.trimStart().startsWith(headingPrefix)) {
-        return true;
-    }
-
-    return headingLineTexts.has(normalizeRenderedLine(line));
+): LineClassification {
+    if (line.classification !== undefined) return line.classification;
+    const { raw, plain, trimmed } = line;
+    const start = plain.trimStart();
+    const intro = plain.trimEnd().endsWith(":");
+    const list = /^[-*+]\s+/.test(start) || /^\d+[.)]\s+/.test(start);
+    const fence = start.startsWith("```");
+    const pipe = start.startsWith("|");
+    const introduced = list || fence || pipe || /^ {2,}\S/.test(plain);
+    const heading =
+        /^#{1,6}\s+\S/.test(start) ||
+        (headingPrefix.length > 0 && raw.trimStart().startsWith(headingPrefix)) ||
+        headingLineTexts.has(trimmed);
+    const table = /^[\u2500-\u257F]/.test(start);
+    const microHeading =
+        trimmed.length > 0 &&
+        trimmed.length <= 48 &&
+        !heading &&
+        !table &&
+        !/[.!?;:]$/.test(trimmed) &&
+        !list &&
+        !pipe &&
+        !fence;
+    const paragraph =
+        trimmed.length > 0 && !heading && !table && !microHeading && !intro && !introduced;
+    const classification = { intro, introduced, paragraph };
+    line.classification = classification;
+    return classification;
 }
 
-function isMicroHeadingLine(
-    line: string,
-    headingPrefix: string,
-    headingLineTexts: ReadonlySet<string>,
-): boolean {
-    const text = stripAnsi(line).trim();
-
-    return (
-        text.length > 0 &&
-        text.length <= 48 &&
-        !isMarkdownHeadingLine(line) &&
-        !isRenderedHeadingLine(line, headingPrefix, headingLineTexts) &&
-        !isTableLine(line) &&
-        !/[.!?;:]$/.test(text) &&
-        !/^[-*+]\s+/.test(text) &&
-        !/^\d+[.)]\s+/.test(text) &&
-        !text.startsWith("|") &&
-        !text.startsWith("```")
-    );
-}
-
-function isPlainParagraphLine(
-    line: string,
-    headingPrefix: string,
-    headingLineTexts: ReadonlySet<string>,
-): boolean {
-    return (
-        !isBlankRenderedLine(line) &&
-        !isMarkdownHeadingLine(line) &&
-        !isRenderedHeadingLine(line, headingPrefix, headingLineTexts) &&
-        !isTableLine(line) &&
-        !isMicroHeadingLine(line, headingPrefix, headingLineTexts) &&
-        !isIntroLine(line) &&
-        !isIntroducedBlockLine(line)
-    );
-}
-
-function shouldCollapseBlankLine(
-    lines: string[],
-    index: number,
-    headingPrefix: string,
-    headingLineTexts: ReadonlySet<string>,
-    tableBoundaryLineTexts?: ReadonlySet<string>,
-): boolean {
-    // Array.at(-1) wraps; the first line has no predecessor.
-    if (index === 0) return false;
-
-    const previousLine = lines.at(index - 1);
-    const nextLine = lines.at(index + 1);
-    if (previousLine === undefined || nextLine === undefined) {
-        return false;
+function* presentedLines(
+    lines: readonly string[],
+    hideFences: boolean,
+): Generator<PresentedLine, undefined> {
+    for (const raw of lines) {
+        const plain = stripAnsi(raw);
+        const trimmed = plain.trim();
+        if (hideFences && FENCE_LINE_REGEX.test(trimmed)) continue;
+        yield { raw, plain, trimmed };
     }
-
-    if (
-        tableBoundaryLineTexts?.has(normalizeRenderedLine(previousLine)) === true ||
-        tableBoundaryLineTexts?.has(normalizeRenderedLine(nextLine)) === true
-    ) {
-        return false;
-    }
-
-    if (isIntroLine(previousLine) && isIntroducedBlockLine(nextLine)) {
-        return true;
-    }
-
-    return (
-        isPlainParagraphLine(previousLine, headingPrefix, headingLineTexts) &&
-        isPlainParagraphLine(nextLine, headingPrefix, headingLineTexts)
-    );
 }
 
 export function collapseAssistantBlankLines(
@@ -555,20 +508,34 @@ export function collapseAssistantBlankLines(
     headingPrefix: string,
     headingLineTexts: ReadonlySet<string>,
     tableBoundaryLineTexts?: ReadonlySet<string>,
+    hideFences = false,
 ): string[] {
-    return lines.filter((line, index) => {
-        if (!isBlankRenderedLine(line)) {
-            return true;
+    // A frame owns plain text and classifications. A three-line window suffices: each
+    // source line is stripped/classified at most once without retaining whole-frame metadata.
+    const presented = presentedLines(lines, hideFences);
+    const output: string[] = [];
+    let previous: PresentedLine | undefined;
+    let current = presented.next().value;
+    let next = presented.next().value;
+    while (current !== undefined) {
+        let collapse = false;
+        if (
+            current.trimmed.length === 0 &&
+            previous !== undefined &&
+            next !== undefined &&
+            tableBoundaryLineTexts?.has(previous.trimmed) !== true &&
+            tableBoundaryLineTexts?.has(next.trimmed) !== true
+        ) {
+            const left = classifyLine(previous, headingPrefix, headingLineTexts);
+            const right = classifyLine(next, headingPrefix, headingLineTexts);
+            collapse = (left.intro && right.introduced) || (left.paragraph && right.paragraph);
         }
-
-        return !shouldCollapseBlankLine(
-            lines,
-            index,
-            headingPrefix,
-            headingLineTexts,
-            tableBoundaryLineTexts,
-        );
-    });
+        if (!collapse) output.push(current.raw);
+        previous = current;
+        current = next;
+        next = presented.next().value;
+    }
+    return output;
 }
 
 export function recordTableBoundaryLines(

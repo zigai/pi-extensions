@@ -28,12 +28,12 @@ pi install npm:@zigai/pi-tree
 
 Global settings are stored in `~/.pi/agent/extension-settings/pi-tree.json`.
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `treeTimestampMode` | `off` \| `relative` \| `absolute` | `"relative"` | Timestamp style shown in tree entries. |
-| `treeSelectedPreview` | boolean | `false` | Show the selected tree entry preview. |
-| `treeMaxVisibleLines` | number | — | Maximum visible lines in the tree selector. |
-| `treePreviewFullHeight` | boolean | `true` | Allow the preview to use the selector's full available height. |
+| Option                  | Type                              | Default      | Description                                                    |
+| ----------------------- | --------------------------------- | ------------ | -------------------------------------------------------------- |
+| `treeTimestampMode`     | `off` \| `relative` \| `absolute` | `"relative"` | Timestamp style shown in tree entries.                         |
+| `treeSelectedPreview`   | boolean                           | `false`      | Show the selected tree entry preview.                          |
+| `treeMaxVisibleLines`   | number                            | —            | Maximum visible lines in the tree selector.                    |
+| `treePreviewFullHeight` | boolean                           | `true`       | Allow the preview to use the selector's full available height. |
 
 ```json
 {

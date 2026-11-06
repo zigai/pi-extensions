@@ -1,9 +1,4 @@
-import {
-    isDesiredStateAllowed,
-    selectorMatches,
-    type Capability,
-    type ObservedState,
-} from "./capability.ts";
+import { isDesiredStateAllowed, type Capability, type ObservedState } from "./capability.ts";
 import {
     mergeProfiles,
     mergePromptFragments,
@@ -251,21 +246,91 @@ function decisionTrace(
     };
 }
 
+/** One resolution owns this index: no configuration, fact, or catalog cache survives it. */
+class CandidateIndex {
+    private readonly ordered: readonly DecisionCandidate[];
+    private readonly buckets = new Map<number, Map<string, number[]>>();
+
+    constructor(candidates: readonly DecisionCandidate[]) {
+        this.ordered = candidates
+            .filter((candidate) => candidate.decision.state !== "inherit")
+            .sort(
+                (left, right) =>
+                    right.precedence - left.precedence ||
+                    right.priority - left.priority ||
+                    left.source.localeCompare(right.source),
+            );
+        for (const [rank, candidate] of this.ordered.entries()) {
+            const { kind, name, source, path } = candidate.decision.target;
+            let mask = 0;
+            if (name !== undefined) mask |= 1;
+            if (source !== undefined) mask |= 2;
+            if (path !== undefined) mask |= 4;
+            let shape = this.buckets.get(mask);
+            if (shape === undefined) {
+                shape = new Map();
+                this.buckets.set(mask, shape);
+            }
+            const key = JSON.stringify([kind, name, source, path]);
+            let bucket = shape.get(key);
+            if (bucket === undefined) {
+                bucket = [];
+                shape.set(key, bucket);
+            }
+            bucket.push(rank);
+        }
+    }
+
+    matching(capability: Capability): readonly DecisionCandidate[] {
+        const lists: { ranks: readonly number[]; cursor: number }[] = [];
+        for (const [mask, shape] of this.buckets) {
+            let name: string | undefined;
+            let source: string | undefined;
+            let path: string | undefined;
+            if ((mask & 1) !== 0) name = capability.name;
+            if ((mask & 2) !== 0) source = capability.source.source;
+            if ((mask & 4) !== 0) path = capability.source.path;
+            const ranks = shape.get(JSON.stringify([capability.kind, name, source, path]));
+            if (ranks !== undefined) lists.push({ ranks, cursor: 0 });
+        }
+        // Merge at most eight already ordered selector shapes. Global ranks preserve stable
+        // source ties, conflict diagnostic order, and duplicate traces without a per-row sort.
+        const matched: DecisionCandidate[] = [];
+        if (lists.length === 1) {
+            for (const rank of lists[0]?.ranks ?? []) {
+                const candidate = this.ordered[rank];
+                if (candidate !== undefined) matched.push(candidate);
+            }
+            return matched;
+        }
+        while (lists.length > 0) {
+            let selected = 0;
+            let rank = Number.POSITIVE_INFINITY;
+            for (let index = 0; index < lists.length; index++) {
+                const list = lists[index];
+                if (list === undefined) continue;
+                const next = list.ranks[list.cursor];
+                if (next !== undefined && next < rank) {
+                    selected = index;
+                    rank = next;
+                }
+            }
+            const candidate = this.ordered[rank];
+            if (candidate !== undefined) matched.push(candidate);
+            const list = lists[selected];
+            if (list === undefined) break;
+            list.cursor++;
+            if (list.cursor === list.ranks.length) lists.splice(selected, 1);
+        }
+        return matched;
+    }
+}
+
 function resolveCapability(
     capability: Capability,
-    allCandidates: readonly DecisionCandidate[],
+    candidates: readonly DecisionCandidate[],
     diagnostics: string[],
 ): EffectiveCapability {
-    const candidates = allCandidates
-        .filter((candidate) => candidate.decision.state !== "inherit")
-        .filter((candidate) => selectorMatches(candidate.decision.target, capability))
-        .sort(
-            (left, right) =>
-                right.precedence - left.precedence ||
-                right.priority - left.priority ||
-                left.source.localeCompare(right.source),
-        );
-
     const trace: DecisionTrace[] = [];
     let winner: DecisionCandidate | undefined;
     for (let index = 0; index < candidates.length;) {
@@ -273,10 +338,18 @@ function resolveCapability(
         if (first === undefined) {
             break;
         }
-        const group = candidates.filter(
-            (candidate) =>
-                candidate.precedence === first.precedence && candidate.priority === first.priority,
-        );
+        let end = index + 1;
+        while (end < candidates.length) {
+            const next = candidates[end];
+            if (
+                next === undefined ||
+                next.precedence !== first.precedence ||
+                next.priority !== first.priority
+            )
+                break;
+            end += 1;
+        }
+        const group = candidates.slice(index, end);
         const states = new Set(group.map((candidate) => candidate.decision.state));
         if (states.size > 1) {
             diagnostics.push(
@@ -285,7 +358,7 @@ function resolveCapability(
             for (const candidate of group) {
                 trace.push(decisionTrace(candidate, false, "conflict"));
             }
-            index += group.length;
+            index = end;
             continue;
         }
         winner = first;
@@ -293,22 +366,31 @@ function resolveCapability(
     }
 
     if (winner !== undefined) {
-        for (const candidate of candidates) {
-            if (
-                !trace.some(
-                    (entry) =>
-                        entry.source === candidate.source &&
-                        entry.state === candidate.decision.state,
-                )
-            ) {
-                trace.push(
-                    decisionTrace(
-                        candidate,
-                        candidate === winner,
-                        candidate === winner ? undefined : "shadowed",
-                    ),
-                );
+        // Conflicts may intentionally retain duplicate traces. Index their existing
+        // source/state pairs without changing that history or its ordering.
+        const tracedStates = new Map<string, Set<DesiredState>>();
+        for (const entry of trace) {
+            let states = tracedStates.get(entry.source);
+            if (states === undefined) {
+                states = new Set();
+                tracedStates.set(entry.source, states);
             }
+            states.add(entry.state);
+        }
+        for (const candidate of candidates) {
+            let states = tracedStates.get(candidate.source);
+            if (states?.has(candidate.decision.state)) continue;
+
+            const selected = candidate === winner;
+            let reason: string | undefined;
+            if (!selected) reason = "shadowed";
+            trace.push(decisionTrace(candidate, selected, reason));
+
+            if (states === undefined) {
+                states = new Set();
+                tracedStates.set(candidate.source, states);
+            }
+            states.add(candidate.decision.state);
         }
     }
 
@@ -484,8 +566,9 @@ export function resolveCapabilityPolicy(
         extensionProposals,
         diagnostics,
     );
+    const candidateIndex = new CandidateIndex(candidates);
     const capabilities = catalog.map((capability) =>
-        resolveCapability(capability, candidates, diagnostics),
+        resolveCapability(capability, candidateIndex.matching(capability), diagnostics),
     );
     const promptFragments = activeFragments(
         configuration,

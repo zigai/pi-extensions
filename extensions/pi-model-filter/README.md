@@ -15,10 +15,10 @@ pi install npm:@zigai/pi-model-filter
 
 Global settings are stored in `~/.pi/agent/extension-settings/pi-model-filter.json`.
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `include` | { provider: string; models: string[] }[] | `[]` | Provider and model glob rules that form inclusion allowlists. |
-| `exclude` | { provider: string; models: string[] }[] | `[]` | Provider and model glob rules that hide matching models. |
+| Option    | Type                                     | Default | Description                                                   |
+| --------- | ---------------------------------------- | ------- | ------------------------------------------------------------- |
+| `include` | { provider: string; models: string[] }[] | `[]`    | Provider and model glob rules that form inclusion allowlists. |
+| `exclude` | { provider: string; models: string[] }[] | `[]`    | Provider and model glob rules that hide matching models.      |
 
 ### Defaults
 

@@ -88,7 +88,7 @@ import {
     restoreExplorationSession,
 } from "./session.ts";
 import { createSyntaxLifecycle } from "./syntax-lifecycle.ts";
-import { createCodeStreamStore } from "../rendering/streaming/code-stream.ts";
+import { createCodeStreamStore, type CodeStreamStore } from "../rendering/streaming/code-stream.ts";
 import { installAssistantStreaming } from "../rendering/streaming/assistant-streaming.ts";
 import type { CodePreview } from "../rendering/streaming/presentation.ts";
 
@@ -152,6 +152,89 @@ function scriptBlockFormatter(
     );
 }
 
+type SessionResources = {
+    readonly phase: "owned";
+    formatter: ScriptBlockFormatter | undefined;
+    assistantStreaming: Awaited<ReturnType<typeof installAssistantStreaming>> | undefined;
+    streamingPolicy: { dispose(): void } | undefined;
+    restoreAbort: AbortController | undefined;
+    stopObservingRendering: (() => void) | undefined;
+};
+
+type SessionOwner = {
+    readonly generation: number;
+    readonly controller: AbortController;
+    readonly codeStreams: CodeStreamStore;
+
+    resources:
+        | SessionResources
+        | { readonly phase: "retiring"; readonly completion: Promise<void> }
+        | { readonly phase: "retired" };
+};
+
+type SessionLifecycle =
+    | {
+          readonly phase: "registered" | "resetting" | "activating" | "active";
+          readonly owner: SessionOwner;
+      }
+    | {
+          readonly phase: "shutting-down";
+          readonly generation: number;
+          readonly owner: SessionOwner;
+          readonly completion: Promise<void>;
+      }
+    | {
+          readonly phase: "stopped";
+          readonly generation: number;
+          readonly owner: SessionOwner;
+      };
+
+type SessionCleanup = {
+    readonly completion: Promise<void>;
+    readonly finish: (failures: ReadonlySet<unknown>) => void;
+};
+
+// Publish cleanup ownership before invoking extension/host callbacks. Completion
+// reports all failures, while ordering barriers can independently remain usable.
+function createSessionCleanup(message: string): SessionCleanup {
+    let finish: SessionCleanup["finish"] = () => {
+        throw new Error("Session cleanup completion was not initialized");
+    };
+
+    const completion = new Promise<void>((resolve, reject) => {
+        finish = (failures) => {
+            if (failures.size === 0) resolve();
+            else reject(new AggregateError(failures, message));
+        };
+    });
+
+    return { completion, finish };
+}
+
+function attemptSessionCleanup(action: () => void, failures: Set<unknown>): void {
+    try {
+        action();
+    } catch (cause: unknown) {
+        failures.add(cause);
+    }
+}
+
+function createSessionOwner(generation: number): SessionOwner {
+    return {
+        generation,
+        controller: new AbortController(),
+        codeStreams: createCodeStreamStore(),
+        resources: {
+            phase: "owned",
+            formatter: undefined,
+            assistantStreaming: undefined,
+            streamingPolicy: undefined,
+            restoreAbort: undefined,
+            stopObservingRendering: undefined,
+        },
+    };
+}
+
 export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
     // SAFETY: The symbol property is extension-private metadata on the concrete
     // ExtensionAPI object. It does not alter Pi's public API or handler semantics.
@@ -164,16 +247,81 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
 
     guardedPi[EXTENSION_LOADED_KEY] = true;
 
-    let codeStreams = createCodeStreamStore();
-    let assistantStreaming: Awaited<ReturnType<typeof installAssistantStreaming>> | undefined;
+    let session: SessionLifecycle = { phase: "registered", owner: createSessionOwner(0) };
+
+    // Assistant patch installation is serialized independently of session ownership.
+    // A retired attempt may finish installing, but can only dispose its late handle.
     let assistantActivation: Promise<void> = Promise.resolve();
-    const presentation = createStreamingPresentation(() => ({
-        prose: config.streaming.prose,
-        code: config.streaming.code,
-        streams: codeStreams,
-        formatter,
-    }));
-    let streamingPolicy: { dispose(): void } | undefined;
+    let shutdownBarrier: Promise<void> = Promise.resolve();
+    const retiringSessions = new Set<Promise<void>>();
+
+    function sessionGeneration(): number {
+        if (session.phase === "shutting-down" || session.phase === "stopped")
+            return session.generation;
+
+        return session.owner.generation;
+    }
+
+    function currentSessionResources(owner: SessionOwner): SessionResources | undefined {
+        if (
+            session.phase === "shutting-down" ||
+            session.phase === "stopped" ||
+            session.owner !== owner ||
+            owner.controller.signal.aborted ||
+            owner.resources.phase !== "owned"
+        )
+            return undefined;
+
+        return owner.resources;
+    }
+
+    function isCurrentSession(owner: SessionOwner): boolean {
+        return currentSessionResources(owner) !== undefined;
+    }
+
+    async function retireSession(owner: SessionOwner): Promise<void> {
+        const resources = owner.resources;
+        if (resources.phase === "retiring") return resources.completion;
+        if (resources.phase === "retired") return;
+
+        const retirement = createSessionCleanup("Session resource retirement failed");
+        owner.resources = { phase: "retiring", completion: retirement.completion };
+        retiringSessions.add(retirement.completion);
+
+        const failures = new Set<unknown>();
+        for (const release of [
+            () => owner.controller.abort(),
+            () => resources.stopObservingRendering?.(),
+            () => resources.restoreAbort?.abort(),
+            () => resources.streamingPolicy?.dispose(),
+            () => resources.assistantStreaming?.dispose(),
+            () => owner.codeStreams.clear(),
+        ])
+            attemptSessionCleanup(release, failures);
+
+        const retired = (): void => {
+            owner.resources = { phase: "retired" };
+            retiringSessions.delete(retirement.completion);
+            retirement.finish(failures);
+        };
+
+        // Even a synchronous disposer throw must not skip the remaining releases.
+        let disposal = Promise.resolve();
+
+        try {
+            disposal = owner.codeStreams.dispose();
+        } catch (cause: unknown) {
+            failures.add(cause);
+        }
+
+        void disposal.then(retired, (cause: unknown) => {
+            failures.add(cause);
+            retired();
+        });
+
+        return retirement.completion;
+    }
+
     const streamCode: CodePreview = (input) => presentGlowupContent({ ...input, kind: "code" });
     const streamingToolCallIds = new Set<string>();
     const isStreamingCall = (toolCallId: string): boolean => streamingToolCallIds.has(toolCallId);
@@ -188,7 +336,8 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
     const edit = createNativeEditFeature();
     const bash = createNativeBashFeature(
         () => formatter,
-        (input, backend, options) => codeStreams.formatEmbedded(input, backend, options),
+        async (input, backend, options) =>
+            session.owner.codeStreams.formatEmbedded(input, backend, options),
     );
     const codemode = createCodemodePreview(() => formatter);
     const deletion = createNativeDeleteFeature();
@@ -213,32 +362,35 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         exploration,
     });
 
-    let restoreAbort: AbortController | undefined;
-    let stopObservingRendering: (() => void) | undefined;
-    const clearSessionState = async (): Promise<void> => {
-        assistantStreaming?.dispose();
-        assistantStreaming = undefined;
-        streamingPolicy?.dispose();
-        streamingPolicy = undefined;
-        codeStreams.clear();
-        configureRetainedOutputDiagnostics(undefined);
-        syntax.cancel();
-        stopObservingRendering?.();
-        stopObservingRendering = undefined;
-        clearProtocolRenderingState();
-        clearToolRows();
-        streamingToolCallIds.clear();
-        restoreAbort?.abort();
-        restoreAbort = undefined;
-        edit.clear();
-        bash.clear();
-        codemode.clear();
-        deletion.clear();
-        exploration.clear();
-        clearQueuedDiffHighlights();
-        resetRenderDiagnostics();
+    const clearSessionState = async (owner: SessionOwner): Promise<void> => {
+        const retirement = retireSession(owner);
+        const failures = new Set<unknown>();
+        for (const clear of [
+            () => configureRetainedOutputDiagnostics(undefined),
+            () => syntax.cancel(),
+            clearProtocolRenderingState,
+            clearToolRows,
+            () => streamingToolCallIds.clear(),
+            () => edit.clear(),
+            () => bash.clear(),
+            () => codemode.clear(),
+            () => deletion.clear(),
+            () => exploration.clear(),
+            clearQueuedDiffHighlights,
+            resetRenderDiagnostics,
+        ])
+            attemptSessionCleanup(clear, failures);
 
-        return bash.settled();
+        // Overlapping resets must drain all retired stores, even after one fails.
+        const outcomes = await Promise.allSettled([
+            retirement,
+            ...retiringSessions,
+            bash.settled(),
+        ]);
+        for (const outcome of outcomes)
+            if (outcome.status === "rejected") failures.add(outcome.reason);
+
+        if (failures.size > 0) throw new AggregateError(failures, "Session reset failed");
     };
 
     const reportWarning = (message: string): void => reportExtensionDiagnostic(message);
@@ -263,11 +415,10 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
     configureDebugLog(config);
 
     let formatter = scriptBlockFormatter(config, reportWarning);
-    let sessionGeneration = 0;
     let extensionLoadedRecorded = false;
 
     const syntax = createSyntaxLifecycle({
-        generation: () => sessionGeneration,
+        generation: sessionGeneration,
         debugLogger,
         diagnosticSnapshot,
         reportWarning,
@@ -281,14 +432,16 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         configureToolCallIndicator(config.toolCallIndicator);
         configureDebugLog(config);
         configureRetainedOutputDiagnostics((diagnostic) => {
-            const generation = sessionGeneration;
+            const owner = session.owner;
 
             queueMicrotask(() => {
-                if (generation === sessionGeneration)
-                    debugLogger.record("retained_output", diagnostic);
+                if (isCurrentSession(owner)) debugLogger.record("retained_output", diagnostic);
             });
         });
         formatter = scriptBlockFormatter(config, reportWarning);
+
+        const resources = currentSessionResources(session.owner);
+        if (resources !== undefined) resources.formatter = formatter;
 
         configureAssistantSeparatorPatch(config.patches.assistantSeparator);
         configureWorkingWidgetSpacingPatch(config.patches.workingWidgetSpacing);
@@ -331,6 +484,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
             isStreamingCall,
             observeRow: (row, toolCallId, toolName) => {
                 observeToolRow(row);
+
                 // Boundaries must follow completed argument order, not constructor order.
                 // Still retain incomplete rows so message/turn end can release held previews.
                 if (
@@ -394,8 +548,10 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         }));
     };
 
-    const restoreBashPreviews = (ctx: ExtensionContext): void => {
-        if (formatter === undefined || config.streaming.code !== "token") return;
+    const restoreBashPreviews = (ctx: ExtensionContext, owner: SessionOwner): void => {
+        const resources = currentSessionResources(owner);
+        if (resources === undefined || formatter === undefined || config.streaming.code !== "token")
+            return;
 
         function* calls(): IterableIterator<{ toolCallId: string; command: string }> {
             const branch = ctx.sessionManager.getBranch();
@@ -423,15 +579,15 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         }
 
         const controller = new AbortController();
-        restoreAbort = controller;
 
-        const generation = sessionGeneration;
+        resources.restoreAbort?.abort();
+        resources.restoreAbort = controller;
 
         void bash.restore({
             calls: calls(),
             formatter,
             signal: controller.signal,
-            isCurrent: () => sessionGeneration === generation && !controller.signal.aborted,
+            isCurrent: () => isCurrentSession(owner) && !controller.signal.aborted,
             invalidate: (toolCallId) => refreshToolRows(ctx, toolCallId),
         });
     };
@@ -446,10 +602,12 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         if (event.message.role !== "assistant") return;
 
         finishToolArguments(ctx);
+
         for (const block of event.message.content) {
             if (block.type === "toolCall") streamingToolCallIds.add(block.id);
         }
     });
+
     pi.on("message_update", (event) => {
         if (event.message.role !== "assistant") return;
 
@@ -457,20 +615,27 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
             if (block.type === "toolCall") streamingToolCallIds.add(block.id);
         }
     });
+
     pi.on("message_end", (event, ctx) => {
         if (event.message.role === "assistant") finishToolArguments(ctx);
     });
+
     pi.on("agent_end", async (_event, ctx) => {
-        const generation = sessionGeneration;
+        const owner = session.owner;
         const completed = [...streamingToolCallIds];
+
         // Final publication may still be queued from the last argument render.
         // Rebuild after that microtask batch, not inside its pending completion.
         await setImmediate();
-        if (generation === sessionGeneration) finishToolArguments(ctx, completed);
+
+        if (isCurrentSession(owner)) finishToolArguments(ctx, completed);
     });
 
     // Only mutation calls wait for asynchronous preimage capture.
     pi.on("tool_call", (event, ctx): Promise<void> | undefined => {
+        const owner = session.owner;
+        if (!isCurrentSession(owner)) return undefined;
+
         startPendingSyntaxHighlighting();
 
         const command = commandField(event.input);
@@ -506,13 +671,11 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
             const record = jsonObjectParser.parse(input);
             const code = record === undefined ? undefined : getString(record, "code");
             if (code !== undefined) {
-                const formatterGeneration = sessionGeneration;
-
                 codemode.schedule({
                     toolCallId: event.toolCallId,
                     code,
                     formatter,
-                    isCurrent: () => sessionGeneration === formatterGeneration,
+                    isCurrent: () => isCurrentSession(owner),
                     invalidate: () => refreshToolRows(ctx, event.toolCallId),
                 });
             }
@@ -526,14 +689,12 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         }
 
         if (command !== undefined && config.streaming.code === "token") {
-            const formatterGeneration = sessionGeneration;
-
             bash.schedule({
                 toolCallId: event.toolCallId,
                 command,
                 formatter,
                 signal: ctx.signal,
-                isCurrent: () => sessionGeneration === formatterGeneration,
+                isCurrent: () => isCurrentSession(owner),
                 invalidate: () => refreshToolRows(ctx, event.toolCallId),
             });
 
@@ -548,6 +709,9 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
     });
 
     pi.on("tool_result", async (event, ctx) => {
+        const owner = session.owner;
+        if (!isCurrentSession(owner)) return undefined;
+
         let scheduledFormattedPreview = false;
         let storedEditPreview = false;
         let persistedEditPierrePayload: PierreDiffPayload | undefined;
@@ -557,14 +721,12 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
             const record = jsonObjectParser.parse(input);
             const code = record === undefined ? undefined : getString(record, "code");
             if (code !== undefined) {
-                const formatterGeneration = sessionGeneration;
-
                 codemode.schedule({
                     toolCallId: event.toolCallId,
                     code,
                     formatter,
                     completed: true,
-                    isCurrent: () => sessionGeneration === formatterGeneration,
+                    isCurrent: () => isCurrentSession(owner),
                     invalidate: () => refreshToolRows(ctx, event.toolCallId),
                 });
             }
@@ -576,14 +738,12 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         ) {
             const command = commandField(event.input);
             if (command !== undefined) {
-                const formatterGeneration = sessionGeneration;
-
                 scheduledFormattedPreview = bash.schedule({
                     toolCallId: event.toolCallId,
                     command,
                     formatter,
                     signal: ctx.signal,
-                    isCurrent: () => sessionGeneration === formatterGeneration,
+                    isCurrent: () => isCurrentSession(owner),
                     invalidate: () => refreshToolRows(ctx, event.toolCallId),
                 });
             }
@@ -598,6 +758,8 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
                 config.mutations,
                 diffDetailsParser.parse(event.details),
             );
+
+            if (!isCurrentSession(owner)) return undefined;
         }
 
         const completedDiff =
@@ -636,9 +798,9 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
     });
 
     pi.on("session_start", async (_event, ctx) => {
-        sessionGeneration += 1;
-
-        const currentGeneration = sessionGeneration;
+        const predecessor = session.owner;
+        const owner = createSessionOwner(sessionGeneration() + 1);
+        session = { phase: "resetting", owner };
 
         const nextConfig = readGlowupConfig(
             { cwd: ctx.cwd, reportWarning },
@@ -657,15 +819,16 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
             ...diagnosticSnapshot(),
         }));
 
-        await clearSessionState();
+        await clearSessionState(predecessor);
 
-        if (currentGeneration !== sessionGeneration) return;
+        if (!isCurrentSession(owner)) return;
 
-        await codeStreams.dispose();
+        // A new activation must not race a prior shutdown's global syntax disposal.
+        await shutdownBarrier;
 
-        if (currentGeneration !== sessionGeneration) return;
+        if (!isCurrentSession(owner)) return;
 
-        codeStreams = createCodeStreamStore();
+        session = { phase: "activating", owner };
         restoreExplorationSession(exploration, ctx.sessionManager);
         debugLogger.record("session_start", () => ({
             phase: "after_reset",
@@ -679,46 +842,68 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
             selectGlowupPresentation("compact");
         }
 
-        applyConfig(nextConfig);
-        if (ctx.hasUI) streamingPolicy = registerGlowupStreamingPolicy(presentation);
+        // Presentation listeners may synchronously reset or shut down the session.
+        if (!isCurrentSession(owner)) return;
 
-        const activationGeneration = sessionGeneration;
+        applyConfig(nextConfig);
+
+        const resources = currentSessionResources(owner);
+        if (resources === undefined) return;
+
+        const presentation = createStreamingPresentation(() => ({
+            prose: nextConfig.streaming.prose,
+            code: nextConfig.streaming.code,
+            streams: owner.codeStreams,
+            formatter: resources.formatter,
+        }));
+        if (ctx.hasUI) resources.streamingPolicy = registerGlowupStreamingPolicy(presentation);
 
         assistantActivation = assistantActivation
             .then(async () => {
-                if (activationGeneration !== sessionGeneration || !ctx.hasUI) return;
-                if (config.streaming.prose === "token" && config.streaming.code === "token") return;
+                if (!isCurrentSession(owner) || !ctx.hasUI) return;
+
+                if (nextConfig.streaming.prose === "token" && nextConfig.streaming.code === "token")
+                    return;
 
                 const handle = await installAssistantStreaming({
                     presentation: { present: presentGlowupContent },
-                    prose: config.streaming.prose,
-                    code: config.streaming.code,
-                    streams: codeStreams,
-                    ...(formatter !== undefined && { formatter }),
+                    prose: nextConfig.streaming.prose,
+                    code: nextConfig.streaming.code,
+                    streams: owner.codeStreams,
+                    ...(resources.formatter !== undefined && { formatter: resources.formatter }),
                     invalidate: () => {
-                        if (activationGeneration === sessionGeneration)
+                        if (isCurrentSession(owner))
                             ctx.ui.setStatus("glowup-streaming", undefined);
                     },
                 });
-                if (activationGeneration !== sessionGeneration) {
+                const current = currentSessionResources(owner);
+                if (current === undefined) {
                     handle.dispose();
                     return;
                 }
 
-                assistantStreaming = handle;
+                current.assistantStreaming = handle;
             })
             .catch(() => {
-                reportWarning("[pi-glowup] Assistant streaming activation failed.");
+                if (isCurrentSession(owner))
+                    reportWarning("[pi-glowup] Assistant streaming activation failed.");
             });
         await assistantActivation;
 
+        // Every post-await publication belongs to this attempt, not just the patch handle.
+        if (!isCurrentSession(owner)) return;
+
+        session = { phase: "active", owner };
+
         if (ctx.hasUI)
-            stopObservingRendering = observeGlowupRendering(() => {
-                applyConfig(config);
+            resources.stopObservingRendering = observeGlowupRendering(() => {
+                if (!isCurrentSession(owner)) return;
+
+                applyConfig(nextConfig);
                 refreshToolRows(ctx);
             });
 
-        restoreBashPreviews(ctx);
+        restoreBashPreviews(ctx, owner);
         refreshToolRows(ctx);
 
         scheduleSyntaxHighlighting({ config: nextConfig, cwd: ctx.cwd, reportWarning }, ctx);
@@ -729,10 +914,14 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
     });
 
     pi.on("session_tree", (_event, ctx) => {
-        codeStreams.clear();
+        const owner = session.owner;
+        const resources = currentSessionResources(owner);
+        if (resources === undefined) return;
+
+        owner.codeStreams.clear();
         finishToolArguments(ctx);
-        restoreAbort?.abort();
-        restoreBashPreviews(ctx);
+        resources.restoreAbort?.abort();
+        restoreBashPreviews(ctx, owner);
     });
 
     pi.on("agent_start", () => {
@@ -749,37 +938,105 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         debugLogger.record("turn_end", diagnosticSnapshot);
     });
 
-    pi.on("session_shutdown", async () => {
-        sessionGeneration += 1;
-        debugLogger.stopMemorySampling();
-        debugLogger.record("session_shutdown", () => ({
-            phase: "before_reset",
-            ...diagnosticSnapshot(),
-        }));
+    function finishSessionShutdown(
+        owner: SessionOwner,
+        generation: number,
+        failures: Set<unknown>,
+    ): void {
+        if (
+            session.phase !== "shutting-down" ||
+            session.owner !== owner ||
+            session.generation !== generation
+        )
+            return;
 
-        const cleanup = clearSessionState();
+        const stopping = session;
 
-        syntax.cancel();
-        configureAssistantSeparatorPatch(false);
-        configureWorkingWidgetSpacingPatch(false);
-        configureAutocompleteCleanupPatch(false);
-        configureMarkdownSyntaxPatch(false);
-        configureBuiltInToolRendererPatch(false);
-        configureThirdPartyToolRendererPatch(false);
-        await cleanup;
-        await syntax.settle();
-        await assistantActivation;
-        await codeStreams.dispose();
-        codeStreams = createCodeStreamStore();
+        attemptSessionCleanup(
+            () =>
+                debugLogger.record("session_shutdown", () => ({
+                    phase: "after_reset",
+                    ...diagnosticSnapshot(),
+                })),
+            failures,
+        );
 
-        await disposeSyntaxHighlighting();
+        if (session !== stopping) return;
 
-        debugLogger.record("session_shutdown", () => ({
-            phase: "after_reset",
-            ...diagnosticSnapshot(),
-        }));
+        attemptSessionCleanup(() => configureRenderDiagnostics(undefined), failures);
 
-        configureRenderDiagnostics(undefined);
+        if (session !== stopping) return;
+
         guardedPi[EXTENSION_LOADED_KEY] = false;
+        session = { phase: "stopped", generation, owner };
+    }
+
+    pi.on("session_shutdown", async () => {
+        if (session.phase === "shutting-down") return session.completion;
+        if (session.phase === "stopped") return;
+
+        const owner = session.owner;
+        const generation = sessionGeneration() + 1;
+        const previousShutdown = shutdownBarrier;
+        const shutdown = createSessionCleanup("Session shutdown failed");
+        session = { phase: "shutting-down", generation, owner, completion: shutdown.completion };
+
+        // Callers still receive cleanup failures, but later activations wait on a
+        // non-rejecting ordering barrier rather than inheriting an old failure.
+        shutdownBarrier = shutdown.completion.then(
+            () => {},
+            () => {},
+        );
+
+        const failures = new Set<unknown>();
+
+        attemptSessionCleanup(() => debugLogger.stopMemorySampling(), failures);
+        attemptSessionCleanup(
+            () =>
+                debugLogger.record("session_shutdown", () => ({
+                    phase: "before_reset",
+                    ...diagnosticSnapshot(),
+                })),
+            failures,
+        );
+
+        const cleanup = clearSessionState(owner);
+
+        for (const disable of [
+            () => configureAssistantSeparatorPatch(false),
+            () => configureWorkingWidgetSpacingPatch(false),
+            () => configureAutocompleteCleanupPatch(false),
+            () => configureMarkdownSyntaxPatch(false),
+            () => configureBuiltInToolRendererPatch(false),
+            () => configureThirdPartyToolRendererPatch(false),
+        ])
+            attemptSessionCleanup(disable, failures);
+
+        const drain = async (): Promise<void> => {
+            for (const settle of [
+                async () => cleanup,
+                async () => syntax.settle(),
+                async () => assistantActivation,
+                async () => previousShutdown,
+                disposeSyntaxHighlighting,
+            ]) {
+                try {
+                    await settle();
+                } catch (cause: unknown) {
+                    failures.add(cause);
+                }
+            }
+
+            // A replacement waits on this barrier but owns its own diagnostics.
+            finishSessionShutdown(owner, generation, failures);
+            shutdown.finish(failures);
+        };
+
+        void drain().catch((cause: unknown) => {
+            failures.add(cause);
+            shutdown.finish(failures);
+        });
+
+        return shutdown.completion;
     });
 }

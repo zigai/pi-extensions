@@ -48,15 +48,31 @@ type CodemodeSchedule = {
 };
 
 type CodemodeInvalidation = { callback: () => void; readonly invalidate: () => void };
+type CodemodeExecution = { readonly status: "active" } | { readonly status: "complete" };
+
+type CodemodeFormatting =
+    | { readonly status: "unformatted" }
+    | { readonly status: "unavailable" }
+    | { readonly status: "ready"; readonly width: number };
+
+type CodemodeRunningWorker = {
+    readonly status: "running";
+    controller: AbortController;
+};
+
+type CodemodeWorker = { readonly status: "idle" } | CodemodeRunningWorker;
 
 type CodemodeWork = {
     options: CodemodeSchedule;
     width: number | undefined;
-    controller: AbortController;
-    completed: boolean;
-    ready: boolean;
-    running: boolean;
+    execution: CodemodeExecution;
+    formatting: CodemodeFormatting;
+    worker: CodemodeWorker;
 };
+
+function retireCodemodeWorker(work: CodemodeWork): void {
+    if (work.worker.status === "running") work.worker.controller.abort();
+}
 
 export type CodemodePreviewReadOptions = {
     readonly contentWidth: number;
@@ -80,21 +96,25 @@ export function createCodemodePreview(formatterAccessor?: () => ScriptBlockForma
     }
 
     function complete(work: CodemodeWork): void {
-        if (work.completed) return;
+        if (work.execution.status === "complete") return;
 
-        work.completed = true;
-        if (work.ready)
+        work.execution = { status: "complete" };
+        if (work.formatting.status === "ready")
             queueMicrotask(() => {
-                if (scheduled.get(work.options.toolCallId) === work && work.options.isCurrent())
+                if (
+                    scheduled.get(work.options.toolCallId) === work &&
+                    work.options.isCurrent() &&
+                    work.options.signal?.aborted !== true
+                )
                     invalidate(work);
             });
     }
 
-    async function format(work: CodemodeWork): Promise<void> {
+    async function format(work: CodemodeWork, worker: CodemodeRunningWorker): Promise<void> {
         if (work.width === undefined) return;
 
         const controller = new AbortController();
-        work.controller = controller;
+        worker.controller = controller;
 
         const { options, width } = work;
         let signal = controller.signal;
@@ -119,25 +139,35 @@ export function createCodemodePreview(formatterAccessor?: () => ScriptBlockForma
 
                 return undefined;
             });
+
         if (
-            code === undefined ||
             signal.aborted ||
             scheduled.get(options.toolCallId) !== work ||
-            work.controller !== controller ||
+            work.worker !== worker ||
+            worker.controller !== controller ||
             work.width !== width ||
             !work.options.isCurrent()
         )
             return;
 
+        if (code === undefined) {
+            if (work.formatting.status !== "ready") work.formatting = { status: "unavailable" };
+            return;
+        }
+
         previews.set(options.toolCallId, { work, code });
-        work.ready = true;
-        if (work.completed) invalidate(work);
+        work.formatting = { status: "ready", width };
+        if (work.execution.status === "complete") invalidate(work);
     }
 
     function requestFormatting(work: CodemodeWork): void {
-        if (work.running) return;
+        if (work.worker.status === "running") return;
 
-        work.running = true;
+        const worker: CodemodeRunningWorker = {
+            status: "running",
+            controller: new AbortController(),
+        };
+        work.worker = worker;
         void (async () => {
             while (
                 scheduled.get(work.options.toolCallId) === work &&
@@ -145,12 +175,12 @@ export function createCodemodePreview(formatterAccessor?: () => ScriptBlockForma
                 work.options.signal?.aborted !== true
             ) {
                 const width = work.width;
-                await format(work);
+                await format(work, worker);
 
                 if (work.width === width) return;
             }
         })().finally(() => {
-            work.running = false;
+            if (work.worker === worker) work.worker = { status: "idle" };
         });
     }
 
@@ -216,7 +246,12 @@ export function createCodemodePreview(formatterAccessor?: () => ScriptBlockForma
                 }
             }
 
-            if (work === undefined || work.options.code !== source || !work.options.isCurrent())
+            if (
+                work === undefined ||
+                work.options.code !== source ||
+                !work.options.isCurrent() ||
+                work.options.signal?.aborted === true
+            )
                 return undefined;
 
             if (read !== undefined) {
@@ -237,7 +272,10 @@ export function createCodemodePreview(formatterAccessor?: () => ScriptBlockForma
                 if (read.expanded) return undefined;
             }
 
-            if (!work.completed || !work.ready) return undefined;
+            // Keep the last ready width visible while the single worker converges
+            // to a resize target. Execution completion remains a separate gate.
+            if (work.execution.status !== "complete" || work.formatting.status !== "ready")
+                return undefined;
 
             const preview = previews.get(toolCallId);
             if (preview?.work !== work) return undefined;
@@ -269,7 +307,8 @@ export function createCodemodePreview(formatterAccessor?: () => ScriptBlockForma
             const previous = scheduled.get(options.toolCallId);
             if (
                 previous?.options.code === options.code &&
-                previous.options.formatter === options.formatter
+                previous.options.formatter === options.formatter &&
+                previous.options.signal === options.signal
             ) {
                 previous.options = options;
 
@@ -277,7 +316,7 @@ export function createCodemodePreview(formatterAccessor?: () => ScriptBlockForma
                 return;
             }
 
-            previous?.controller.abort();
+            if (previous !== undefined) retireCodemodeWorker(previous);
             scheduled.delete(options.toolCallId);
 
             if (options.formatter === undefined) return;
@@ -285,18 +324,20 @@ export function createCodemodePreview(formatterAccessor?: () => ScriptBlockForma
             const work: CodemodeWork = {
                 options,
                 width: previous?.width,
-                controller: new AbortController(),
-                completed: options.completed ?? false,
-                ready: false,
-                running: false,
+                execution: { status: "active" },
+                formatting: { status: "unformatted" },
+                worker: { status: "idle" },
             };
 
             scheduled.set(options.toolCallId, work);
 
+            if (options.completed === true) complete(work);
+
             if (scheduled.size > 300) {
                 const oldest = scheduled.keys().next().value;
                 if (oldest !== undefined) {
-                    scheduled.get(oldest)?.controller.abort();
+                    const evicted = scheduled.get(oldest);
+                    if (evicted !== undefined) retireCodemodeWorker(evicted);
                     scheduled.delete(oldest);
                 }
             }
@@ -306,7 +347,7 @@ export function createCodemodePreview(formatterAccessor?: () => ScriptBlockForma
         clear(): void {
             generation += 1;
 
-            for (const work of scheduled.values()) work.controller.abort();
+            for (const work of scheduled.values()) retireCodemodeWorker(work);
             previews.clear();
             invalidations.clear();
             scheduled.clear();

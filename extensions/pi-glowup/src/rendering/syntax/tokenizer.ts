@@ -66,6 +66,38 @@ type TokenizeCancellation = {
     readonly onState?: ((state: "queued" | "running") => void) | undefined;
 };
 
+type CleanupResult = "complete" | "timeout" | "failed";
+
+type RestingWorker =
+    | { readonly kind: "idle" }
+    | { readonly kind: "cooldown"; readonly retry: ReturnType<typeof setTimeout> }
+    | {
+          readonly kind: "failed" | "disposed";
+          readonly reason: TokenizeUnavailableReason;
+          readonly cleanup: CleanupResult;
+      };
+
+type WorkerLifecycle =
+    | RestingWorker
+    | { readonly kind: "starting"; readonly pending: Promise<CleanupResult> }
+    | {
+          readonly kind: "initializing";
+          readonly worker: Worker;
+          readonly deadline: ReturnType<typeof setTimeout>;
+      }
+    | { readonly kind: "ready"; readonly worker: Worker }
+    | {
+          readonly kind: "running";
+          readonly worker: Worker;
+          readonly work: Work;
+          readonly deadline: ReturnType<typeof setTimeout>;
+      }
+    | {
+          readonly kind: "stopping";
+          readonly pending: Promise<CleanupResult>;
+          next: RestingWorker;
+      };
+
 export function createSyntaxTokenizer(
     theme: ThemeRegistration | undefined,
     options: {
@@ -107,8 +139,8 @@ export function createSyntaxTokenizer(
 
     function scheduleCapacityNotification(): void {
         if (
-            disposed ||
-            startupPaused ||
+            isDisposed() ||
+            isCoolingDown() ||
             capacityRetries.size === 0 ||
             capacityNotificationScheduled
         )
@@ -118,7 +150,7 @@ export function createSyntaxTokenizer(
         queueMicrotask(() => {
             capacityNotificationScheduled = false;
 
-            if (disposed || startupPaused) return;
+            if (isDisposed() || isCoolingDown()) return;
 
             const retries = [...capacityRetries];
             for (const entry of retries) {
@@ -137,35 +169,58 @@ export function createSyntaxTokenizer(
         });
     }
 
-    const terminations = new Set<Promise<"complete" | "timeout" | "failed">>();
-    let active: Work | undefined;
-    let worker: Worker | undefined;
-    let ready = false;
-    let starting: Promise<void> | undefined;
+    // Worker ownership is exclusive: initialization, one running job, or one cleanup
+    // barrier. Admission, byte accounting, and capacity demand remain independent.
+    let lifecycle: WorkerLifecycle = { kind: "idle" };
     let nextId = 0;
     let bytes = 0;
-    let disposed = false;
-    let failed = false;
-    let failureReason: TokenizeUnavailableReason = "failed";
-    let cleanupFailure: "timeout" | "failed" | undefined;
-    let startupPaused = false;
-    let startupRetry: ReturnType<typeof setTimeout> | undefined;
     let warnedTimeout = false;
-    let deadline: ReturnType<typeof setTimeout> | undefined;
     let contentionDeadline: ReturnType<typeof setTimeout> | undefined;
 
+    function restingState(): RestingWorker | undefined {
+        if (lifecycle.kind === "stopping") return lifecycle.next;
+
+        switch (lifecycle.kind) {
+            case "idle":
+            case "cooldown":
+            case "failed":
+            case "disposed":
+                return lifecycle;
+            case "starting":
+            case "initializing":
+            case "ready":
+            case "running":
+                return undefined;
+            default:
+                return lifecycle satisfies never;
+        }
+    }
+
+    function isDisposed(): boolean {
+        return restingState()?.kind === "disposed";
+    }
+
+    function isCoolingDown(): boolean {
+        return restingState()?.kind === "cooldown";
+    }
+
+    function activeWork(): Work | undefined {
+        if (lifecycle.kind === "running") return lifecycle.work;
+        return undefined;
+    }
+
     function clearDeadline(): void {
-        if (deadline !== undefined) clearTimeout(deadline);
+        if (lifecycle.kind === "initializing" || lifecycle.kind === "running")
+            clearTimeout(lifecycle.deadline);
+
         if (contentionDeadline !== undefined) clearTimeout(contentionDeadline);
-        deadline = undefined;
         contentionDeadline = undefined;
     }
 
     function timeout(work: Work): void {
-        if (active !== work) return;
+        if (activeWork() !== work) return;
 
-        active = undefined;
-        stopWorker();
+        stopWorker({ kind: "idle" });
         finish(work, undefined, "timeout");
 
         if (!warnedTimeout) {
@@ -194,7 +249,7 @@ export function createSyntaxTokenizer(
     }
 
     function protectQueuedWork(): void {
-        const work = active;
+        const work = activeWork();
         if (work === undefined || contentionDeadline !== undefined) return;
 
         contentionDeadline = setTimeout(() => {
@@ -243,67 +298,102 @@ export function createSyntaxTokenizer(
         });
     }
 
+    function cleanupUnavailable(reason: "timeout" | "failed"): TokenizeUnavailableReason {
+        if (reason === "timeout") return "cleanup-timeout";
+        return "cleanup-failed";
+    }
+
     function failCleanup(reason: "timeout" | "failed"): void {
-        if (cleanupFailure !== undefined) return;
+        const resting = restingState();
+        if (
+            (resting?.kind === "failed" || resting?.kind === "disposed") &&
+            resting.cleanup !== "complete"
+        )
+            return;
 
-        cleanupFailure = reason;
+        if (resting?.kind === "cooldown") clearTimeout(resting.retry);
 
-        let unavailable: TokenizeUnavailableReason = "cleanup-failed";
-        if (reason === "timeout") unavailable = "cleanup-timeout";
+        const unavailable = cleanupUnavailable(reason);
+        if (resting?.kind === "disposed") {
+            lifecycle = { kind: "disposed", reason: resting.reason, cleanup: reason };
+        } else {
+            lifecycle = { kind: "failed", reason: unavailable, cleanup: reason };
+            wakeCapacityWaiters();
+            scheduleCapacityNotification();
 
-        if (failed) failureReason = unavailable;
-        else fail(unavailable);
+            for (const work of queue.splice(0)) finish(work, undefined, unavailable);
+        }
 
         options.reportWarning?.(
             "[pi-glowup] Syntax worker cleanup did not complete; restart to retry highlighting",
         );
     }
 
-    function stopWorker(): void {
-        clearDeadline();
+    function awaitStopped(pending: Promise<CleanupResult>, next: RestingWorker): void {
+        const stopping: WorkerLifecycle = { kind: "stopping", pending, next };
+        lifecycle = stopping;
+        void pending.then((result) => {
+            if (lifecycle !== stopping) return;
 
-        const previous = worker;
-        worker = undefined;
-        ready = false;
+            if (result !== "complete") {
+                failCleanup(result);
+                return;
+            }
 
-        if (previous === undefined) return;
-
-        previous.unref();
-
-        let termination: Promise<"complete" | "timeout" | "failed">;
-        try {
-            termination = waitForCleanup(previous.terminate());
-        } catch {
-            failCleanup("failed");
-            return;
-        }
-
-        terminations.add(termination);
-        void termination.then((result) => {
-            terminations.delete(termination);
-
-            if (result === "complete") dispatch();
-            else failCleanup(result);
+            lifecycle = stopping.next;
+            dispatch();
         });
     }
 
+    function stopWorker(next: RestingWorker): void {
+        clearDeadline();
+
+        const previous = lifecycle;
+        switch (previous.kind) {
+            case "starting":
+                awaitStopped(previous.pending, next);
+                return;
+            case "stopping":
+                previous.next = next;
+                return;
+            case "initializing":
+            case "ready":
+            case "running": {
+                previous.worker.unref();
+
+                let pending: Promise<CleanupResult>;
+                try {
+                    pending = waitForCleanup(previous.worker.terminate());
+                } catch {
+                    pending = Promise.resolve("failed");
+                }
+
+                awaitStopped(pending, next);
+
+                return;
+            }
+            case "idle":
+            case "cooldown":
+            case "failed":
+            case "disposed":
+                lifecycle = next;
+        }
+    }
+
     function fail(reason: TokenizeUnavailableReason = "failed"): void {
-        if (failed || disposed) return;
+        const resting = restingState();
+        if (resting?.kind === "failed" || resting?.kind === "disposed") return;
 
-        failed = true;
-        failureReason = reason;
-        startupPaused = false;
+        const work = activeWork();
 
-        if (startupRetry !== undefined) clearTimeout(startupRetry);
-        startupRetry = undefined;
+        if (resting?.kind === "cooldown") clearTimeout(resting.retry);
+        stopWorker({ kind: "failed", reason, cleanup: "complete" });
         wakeCapacityWaiters();
         scheduleCapacityNotification();
 
-        if (active !== undefined) finish(active, undefined, reason);
-        active = undefined;
+        if (work !== undefined) finish(work, undefined, reason);
 
-        for (const work of queue.splice(0)) finish(work, undefined, reason);
-        stopWorker();
+        for (const queued of queue.splice(0)) finish(queued, undefined, reason);
 
         if (reason === "failed")
             options.reportWarning?.(
@@ -311,67 +401,104 @@ export function createSyntaxTokenizer(
             );
     }
 
-    async function startWorker(): Promise<void> {
+    function startupTimeout(current: Worker): void {
+        if (lifecycle.kind !== "initializing" || lifecycle.worker !== current) return;
+
+        const cooldown: RestingWorker = {
+            kind: "cooldown",
+            retry: setTimeout(() => {
+                if (lifecycle === cooldown) lifecycle = { kind: "idle" };
+                else if (lifecycle.kind === "stopping" && lifecycle.next === cooldown)
+                    lifecycle.next = { kind: "idle" };
+                else return;
+
+                scheduleCapacityNotification();
+            }, WORKER_START_LIMIT_MS),
+        };
+
+        stopWorker(cooldown);
+
+        for (const work of queue.splice(0)) finish(work, undefined, "startup-timeout");
+        wakeCapacityWaiters();
+        options.reportWarning?.(
+            "[pi-glowup] Syntax worker startup timed out; a later request can retry",
+        );
+    }
+
+    function ownsWorker(current: Worker): boolean {
+        switch (lifecycle.kind) {
+            case "initializing":
+            case "ready":
+            case "running":
+                return lifecycle.worker === current;
+            case "idle":
+            case "starting":
+            case "stopping":
+            case "cooldown":
+            case "failed":
+            case "disposed":
+                return false;
+            default:
+                return lifecycle satisfies never;
+        }
+    }
+
+    function receive(current: Worker, response: TokenizeResponse): void {
+        if (!ownsWorker(current)) return;
+
+        if ("type" in response) {
+            if (lifecycle.kind !== "initializing") return;
+
+            clearDeadline();
+            lifecycle = { kind: "ready", worker: current };
+            dispatch();
+
+            return;
+        }
+
+        if (lifecycle.kind !== "running" || lifecycle.work.request.id !== response.id) return;
+
+        clearDeadline();
+
+        const completed = lifecycle.work;
+        lifecycle = { kind: "ready", worker: current };
+
+        if ("error" in response) {
+            finish(completed, undefined, "failed", response.error);
+            fail();
+        } else {
+            finish(completed, response.lines);
+            dispatch();
+        }
+    }
+
+    function initializeWorker(): void {
+        const initial = queue[0];
+        if (initial === undefined) {
+            lifecycle = { kind: "idle" };
+            return;
+        }
+
         try {
-            let previous: Promise<void>;
-            try {
-                previous = options.waitForDisposals();
-            } catch {
-                failCleanup("failed");
-                return;
-            }
-
-            const prior = await waitForCleanup(previous);
-            if (prior !== "complete") {
-                failCleanup(prior);
-                return;
-            }
-
-            const initial = queue[0];
-            if (disposed || failed || initial === undefined) return;
-
             const url = new URL(
                 import.meta.glowupSyntaxWorker ?? "./tokenize-worker.ts",
                 import.meta.url,
             );
             const current = options.createWorker?.(url) ?? new Worker(url, { execArgv: [] });
-            worker = current;
+
+            lifecycle = {
+                kind: "initializing",
+                worker: current,
+                deadline: setTimeout(() => startupTimeout(current), WORKER_START_LIMIT_MS),
+            };
             current.on("error", () => {
-                if (worker === current) fail();
+                if (ownsWorker(current)) fail();
             });
 
             current.on("exit", () => {
-                if (worker === current) fail();
+                if (ownsWorker(current)) fail();
             });
-
-            current.on("message", (response: TokenizeResponse) => {
-                if (worker !== current) return;
-
-                if ("type" in response) {
-                    if (ready) return;
-
-                    clearDeadline();
-                    ready = true;
-                    dispatch();
-
-                    return;
-                }
-
-                if (active?.request.id !== response.id) return;
-
-                clearDeadline();
-
-                const completed = active;
-                active = undefined;
-
-                if ("error" in response) {
-                    finish(completed, undefined, "failed", response.error);
-                    fail();
-                } else {
-                    finish(completed, response.lines);
-                    dispatch();
-                }
-            });
+            current.on("message", (response: TokenizeResponse) => receive(current, response));
 
             let language: SyntaxLanguage = "python";
             if (initial.request.operation === "highlight") language = initial.request.language;
@@ -381,24 +508,6 @@ export function createSyntaxTokenizer(
                 language,
                 theme,
             };
-
-            deadline = setTimeout(() => {
-                if (worker !== current || ready) return;
-
-                startupPaused = true;
-                startupRetry = setTimeout(() => {
-                    startupPaused = false;
-                    startupRetry = undefined;
-                    scheduleCapacityNotification();
-                }, WORKER_START_LIMIT_MS);
-                stopWorker();
-
-                for (const work of queue.splice(0)) finish(work, undefined, "startup-timeout");
-                wakeCapacityWaiters();
-                options.reportWarning?.(
-                    "[pi-glowup] Syntax worker startup timed out; a later request can retry",
-                );
-            }, WORKER_START_LIMIT_MS);
             current.postMessage(initialization);
         } catch (cause: unknown) {
             recordRenderError("syntax.worker-start", cause);
@@ -406,54 +515,64 @@ export function createSyntaxTokenizer(
         }
     }
 
+    function startWorker(): void {
+        let pending: Promise<CleanupResult>;
+        try {
+            pending = waitForCleanup(options.waitForDisposals());
+        } catch {
+            failCleanup("failed");
+            return;
+        }
+
+        const starting: WorkerLifecycle = { kind: "starting", pending };
+        lifecycle = starting;
+        void pending.then((result) => {
+            // Disposal can take ownership of this same barrier before it settles.
+            if (lifecycle !== starting) return;
+
+            if (result !== "complete") failCleanup(result);
+            else initializeWorker();
+        });
+    }
+
     function dispatch(): void {
-        if (
-            disposed ||
-            failed ||
-            active !== undefined ||
-            terminations.size > 0 ||
-            starting !== undefined
-        )
-            return;
-
-        if (queue.length === 0) {
-            worker?.unref();
-            return;
+        switch (lifecycle.kind) {
+            case "idle":
+                if (queue.length > 0) startWorker();
+                return;
+            case "initializing":
+                if (queue.length > 0) lifecycle.worker.ref();
+                return;
+            case "starting":
+            case "stopping":
+            case "running":
+            case "cooldown":
+            case "failed":
+            case "disposed":
+                return;
+            case "ready":
+                break;
         }
 
-        if (worker === undefined) {
-            const start = startWorker();
-            starting = start;
-            void start.then(
-                () => {
-                    if (starting === start) starting = undefined;
-                    dispatch();
-                },
-                () => {
-                    if (starting === start) starting = undefined;
-                    fail();
-                },
-            );
-
-            return;
-        }
-
-        if (!ready) {
-            worker.ref();
-            return;
-        }
-
+        const current = lifecycle.worker;
         const work = queue.shift();
-        if (work === undefined) return;
+        if (work === undefined) {
+            current.unref();
+            return;
+        }
 
-        active = work;
+        lifecycle = {
+            kind: "running",
+            worker: current,
+            work,
+            deadline: setTimeout(() => timeout(work), WORKER_JOB_LIMIT_MS),
+        };
 
         try {
-            worker.ref();
-            deadline = setTimeout(() => timeout(work), WORKER_JOB_LIMIT_MS);
+            current.ref();
 
             if (hasWaitingDemand()) protectQueuedWork();
-            worker.postMessage(work.request);
+            current.postMessage(work.request);
             work.onState?.("running");
         } catch (cause: unknown) {
             recordRenderError("syntax.worker-dispatch", cause);
@@ -466,9 +585,9 @@ export function createSyntaxTokenizer(
         cancellation: TokenizeCancellation,
     ): Promise<string[] | undefined> {
         const size = Buffer.byteLength(request.code, "utf8");
-
-        if (disposed || failed) {
-            cancellation.onUnavailable?.(failureReason, "syntax worker unavailable");
+        const resting = restingState();
+        if (resting?.kind === "disposed" || resting?.kind === "failed") {
+            cancellation.onUnavailable?.(resting.reason, "syntax worker unavailable");
             return undefined;
         }
 
@@ -477,7 +596,7 @@ export function createSyntaxTokenizer(
             return undefined;
         }
 
-        if (startupPaused) {
+        if (isCoolingDown()) {
             cancellation.onUnavailable?.("startup-cooldown");
             return undefined;
         }
@@ -485,7 +604,7 @@ export function createSyntaxTokenizer(
         // The byte budget bounds concurrent work, not the size of an individual source.
         // An oversized source runs alone rather than waiting for impossible capacity.
         if (
-            queue.length + Number(active !== undefined) >= options.maxJobs ||
+            queue.length + Number(activeWork() !== undefined) >= options.maxJobs ||
             (bytes > 0 && bytes + size > options.maxBytes)
         ) {
             releaseContention();
@@ -576,9 +695,8 @@ export function createSyntaxTokenizer(
                 onUnavailable: cancellation.onUnavailable,
                 onState: cancellation.onState,
                 cancel: () => {
-                    if (active === work) {
-                        active = undefined;
-                        stopWorker();
+                    if (activeWork() === work) {
+                        stopWorker({ kind: "idle" });
                         finish(work, undefined, "cancelled");
                         dispatch();
                         return;
@@ -597,7 +715,7 @@ export function createSyntaxTokenizer(
             cancellation.signal?.addEventListener("abort", work.cancel, { once: true });
             queue.push(work);
 
-            if (active !== undefined) protectQueuedWork();
+            if (activeWork() !== undefined) protectQueuedWork();
             work.onState?.("queued");
             dispatch();
         });
@@ -628,24 +746,29 @@ export function createSyntaxTokenizer(
     }
 
     async function dispose(): Promise<void> {
-        disposed = true;
+        const resting = restingState();
+        const work = activeWork();
+        let reason: TokenizeUnavailableReason = "failed";
+        let cleanup: CleanupResult = "complete";
+        if (resting?.kind === "failed" || resting?.kind === "disposed") {
+            reason = resting.reason;
+            cleanup = resting.cleanup;
+        }
 
-        if (startupRetry !== undefined) clearTimeout(startupRetry);
+        if (resting?.kind === "cooldown") clearTimeout(resting.retry);
+        stopWorker({ kind: "disposed", reason, cleanup });
         clearCapacityRetries();
         wakeCapacityWaiters();
 
-        if (active !== undefined) finish(active, undefined, "cancelled");
-        active = undefined;
+        if (work !== undefined) finish(work, undefined, "cancelled");
 
-        for (const work of queue.splice(0)) finish(work, undefined, "cancelled");
-        stopWorker();
+        for (const queued of queue.splice(0)) finish(queued, undefined, "cancelled");
 
-        const closing: Array<Promise<unknown>> = [...terminations];
-        if (starting !== undefined) closing.push(starting);
-        await Promise.all(closing);
+        if (lifecycle.kind === "stopping") await lifecycle.pending;
 
-        if (cleanupFailure !== undefined)
-            throw new Error(`Syntax worker cleanup ${cleanupFailure}`);
+        const settled = restingState();
+        if (settled?.kind === "disposed" && settled.cleanup !== "complete")
+            throw new Error(`Syntax worker cleanup ${settled.cleanup}`);
     }
 
     return { tokenize, compactPython, dispose };

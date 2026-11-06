@@ -15,8 +15,10 @@ const componentSchema = Type.Object({
 
 const hostSchema = Type.Object({
     sessionManager: Type.Object({ getSessionId: Type.Function([], Type.String()) }),
-    chatContainer: Type.Object({ children: Type.Array(componentSchema) }),
-    streamingComponent: Type.Optional(componentSchema),
+    // Rows are mutable and may be numerous. Validate only the component being used,
+    // not the entire history on every host call.
+    chatContainer: Type.Object({ children: Type.Unknown() }),
+    streamingComponent: Type.Optional(Type.Unknown()),
     ui: Type.Object({ requestRender: Type.Function([], Type.Void()) }),
 });
 
@@ -35,7 +37,12 @@ const assistantEventSchema = Type.Object({
     message: Type.Object({ role: Type.Literal("assistant") }),
 });
 
-type Host = StaticDecode<typeof hostSchema>;
+type Host = StaticDecode<typeof hostSchema> & { chatContainer: { children: unknown[] } };
+
+function isHost(value: unknown): value is Host {
+    return Value.Check(hostSchema, value) && Array.isArray(value.chatContainer.children);
+}
+
 type Component = StaticDecode<typeof componentSchema>;
 type Moment = number | string;
 
@@ -90,7 +97,7 @@ export class Timestamps {
                     (previous) =>
                         function (message, options) {
                             let host: Host | undefined;
-                            if (Value.Check(hostSchema, this)) host = matchHost(this);
+                            if (isHost(this)) host = matchHost(this);
                             else warnHost();
 
                             const count = host?.chatContainer.children.length;
@@ -105,10 +112,14 @@ export class Timestamps {
 
                             const added = host.chatContainer.children.slice(count);
                             const row = added.at(-1);
-                            if (!row) return;
+                            if (row === undefined) return;
 
                             const timestamp = timestampFor(message);
-                            if (timestamp !== undefined) attach(row, timestamp, message.role);
+                            if (timestamp !== undefined) {
+                                if (Value.Check(componentSchema, row))
+                                    attach(row, timestamp, message.role);
+                                else warnHost();
+                            }
                         },
                 ),
             );
@@ -118,29 +129,43 @@ export class Timestamps {
                     "handleEvent",
                     (previous) =>
                         async function (event) {
+                            if (!Value.Check(assistantEventSchema, event)) {
+                                await previous.call(this, event);
+                                return;
+                            }
+
                             let host: Host | undefined;
-                            if (Value.Check(hostSchema, this)) host = matchHost(this);
+                            if (isHost(this)) host = matchHost(this);
                             else warnHost();
 
-                            const streaming = host?.streamingComponent;
+                            let streaming: unknown;
+                            if (event.type === "message_end") streaming = host?.streamingComponent;
 
                             // Capture observation time before awaiting host event handling.
                             const completed = Date.now();
 
                             await previous.call(this, event);
 
-                            if (
-                                !host ||
-                                !matchHost(host) ||
-                                !Value.Check(assistantEventSchema, event)
-                            )
+                            if (!host || !Value.Check(assistantEventSchema, event)) return;
+
+                            if (!isHost(host)) {
+                                warnHost();
                                 return;
+                            }
+
+                            if (!matchHost(host)) return;
 
                             if (event.type === "message_start") {
                                 const started = host.streamingComponent;
-                                if (started) attach(started, undefined, "assistant");
-                            } else if (streaming) {
-                                complete(host, streaming, event.message, completed);
+                                if (started !== undefined) {
+                                    if (Value.Check(componentSchema, started))
+                                        attach(started, undefined, "assistant");
+                                    else warnHost();
+                                }
+                            } else if (streaming !== undefined) {
+                                if (Value.Check(componentSchema, streaming))
+                                    complete(host, streaming, event.message, completed);
+                                else warnHost();
                             }
                         },
                 ),
@@ -237,6 +262,8 @@ export class Timestamps {
         timestamp: Moment | undefined,
         role: "user" | "assistant",
     ): void {
+        if (this.disposed) return;
+
         const existing = this.rows.get(component);
         if (existing !== undefined) {
             existing.timestamp = timestamp;

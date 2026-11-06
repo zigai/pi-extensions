@@ -72,7 +72,7 @@ const FILEPATH_REGEX = new RegExp(
     String.raw`(^|[\s([{<"'\x60])((?:${SPACED_PREFIXED_FILE_PATH_PATTERN}|${PREFIXED_PATH_PATTERN}|${RELATIVE_FILE_PATH_PATTERN}|${BARE_FILENAME_PATTERN})${LINE_SUFFIX_PATTERN})(?=$|[\s)\]}>"'\x60,.;:!?])`,
     "g",
 );
-const CODE_VALUE_PREFIX_PATTERN = /[:=]\s*$/;
+const WHITESPACE_CHARACTER = /\s/u;
 const TRAILING_URL_PUNCTUATION = /[.,;:!?]+$/;
 const TRAILING_PATH_PUNCTUATION = /[.,;!?]+$/;
 const MAX_WRAPPED_HIGHLIGHT_LINES = 5;
@@ -346,20 +346,21 @@ function addHighlightRange(ranges: HighlightRange[], range: HighlightRange): voi
     ranges.push(range);
 }
 
-function getLinePrefix(text: string, end: number): string {
-    const lineStart = text.lastIndexOf("\n", Math.max(0, end - 1)) + 1;
-    return text.slice(lineStart, end);
-}
-
 function isBareExtensionFilepath(text: string): boolean {
     if (text.includes("/")) return false;
     return BARE_EXTENSION_FILEPATH_REGEX.test(text);
 }
 
 function isCodeValueContext(plainText: string, start: number): boolean {
-    const prefix = getLinePrefix(plainText, start);
-    if (prefix.trimStart().length === 0) return false;
-    return CODE_VALUE_PREFIX_PATTERN.test(prefix);
+    // Only the previous non-whitespace character matters. Avoid repeatedly
+    // searching and scanning the entire prefix of a long, single-line draft.
+    for (let index = start - 1; index >= 0; index -= 1) {
+        const character = plainText.charAt(index);
+        if (character === "\n") return false;
+        if (!WHITESPACE_CHARACTER.test(character)) return character === ":" || character === "=";
+    }
+
+    return false;
 }
 
 function shouldSkipFilepathMatch(plainText: string, start: number, filepath: string): boolean {
@@ -367,18 +368,16 @@ function shouldSkipFilepathMatch(plainText: string, start: number, filepath: str
     return isCodeValueContext(plainText, start);
 }
 
-function addRange(
-    ranges: HighlightRange[],
+function toHighlightRange(
     start: number,
     rawText: string,
     kind: "url" | "filepath",
     style: string,
-): void {
+): HighlightRange | undefined {
     const text = trimMatchEnd(rawText, kind);
-    if (text.length === 0 || style.length === 0) return;
+    if (text.length === 0 || style.length === 0) return undefined;
 
-    const end = start + text.length;
-    addHighlightRange(ranges, { start, end, style });
+    return { start, end: start + text.length, style };
 }
 
 export function collectHighlightRanges(
@@ -389,10 +388,16 @@ export function collectHighlightRanges(
 
     if (styles.url.length > 0) {
         for (const match of plainText.matchAll(URL_REGEX)) {
-            addRange(ranges, match.index, match[0], "url", styles.url);
+            const range = toHighlightRange(match.index, match[0], "url", styles.url);
+            if (range !== undefined) ranges.push(range);
         }
     }
 
+    // Each regex yields non-overlapping matches in source order. Paths need only
+    // check the sorted URL prefix, not every range already accepted. URL priority
+    // is unchanged, including paths nested in a URL's parentheses.
+    const urlCount = ranges.length;
+    let urlIndex = 0;
     if (styles.filepath.length > 0) {
         for (const match of plainText.matchAll(FILEPATH_REGEX)) {
             const prefix = match.at(1) ?? "";
@@ -401,7 +406,23 @@ export function collectHighlightRanges(
 
             const start = match.index + prefix.length;
             if (shouldSkipFilepathMatch(plainText, start, filepath)) continue;
-            addRange(ranges, start, filepath, "filepath", styles.filepath);
+
+            const range = toHighlightRange(start, filepath, "filepath", styles.filepath);
+            if (range === undefined) continue;
+
+            while (urlIndex < urlCount) {
+                const url = ranges.at(urlIndex);
+                if (url === undefined || url.end > range.start) break;
+
+                urlIndex += 1;
+            }
+
+            if (urlIndex < urlCount) {
+                const url = ranges.at(urlIndex);
+                if (url !== undefined && range.end > url.start) continue;
+            }
+
+            ranges.push(range);
         }
     }
 

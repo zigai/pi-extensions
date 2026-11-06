@@ -11,9 +11,7 @@ export type ProjectDirectory = {
     root: string;
 };
 
-function compareProjectNames(left: string, right: string): number {
-    return left.localeCompare(right, undefined, { sensitivity: "base" });
-}
+const compareProjectNames = new Intl.Collator(undefined, { sensitivity: "base" }).compare;
 
 export type ProjectDirectoryLoadOptions = {
     readonly signal?: AbortSignal;

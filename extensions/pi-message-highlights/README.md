@@ -19,8 +19,8 @@ pi install npm:@zigai/pi-message-highlights
 
 Global settings are stored in `~/.pi/agent/extension-settings/pi-message-highlights.json`.
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
+| Option     | Type              | Default     | Description                                                                                           |
+| ---------- | ----------------- | ----------- | ----------------------------------------------------------------------------------------------------- |
 | `urlColor` | integer \| string | `"#87d7ff"` | URL color as an ANSI-256 index, hex color, theme color name, or empty string to disable highlighting. |
 
 ```json

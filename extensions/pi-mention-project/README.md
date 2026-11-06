@@ -31,15 +31,15 @@ History-based ordering records autocomplete selections in `~/.pi/agent/state/pi-
 
 Global settings are stored in `~/.pi/agent/extension-settings/pi-mention-project.json`.
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `trigger` | string | `"#"` | One or more non-whitespace, non-slash characters that start a project mention. |
-| `roots` | string \| string[] | `[]` | Project root directory or directories searched for projects. |
-| `gitReposOnly` | boolean | `true` | Include only directories containing Git repositories. |
-| `includeDotFolders` | boolean | `false` | Include project directories whose names start with a dot. |
-| `completionSuffix` | string | `" "` | Text inserted after a completed project mention. |
-| `initialSuggestions.strategy` | `frecency` \| `recent` \| `frequent` \| `alphabetical` \| `sourceOrder` | `"frecency"` | Ordering used before any project query text is entered. |
-| `initialSuggestions.pinned` | string[] | `[]` | Project names placed first, in this order, before the configured strategy. |
+| Option                        | Type                                                                    | Default      | Description                                                                    |
+| ----------------------------- | ----------------------------------------------------------------------- | ------------ | ------------------------------------------------------------------------------ |
+| `trigger`                     | string                                                                  | `"#"`        | One or more non-whitespace, non-slash characters that start a project mention. |
+| `roots`                       | string \| string[]                                                      | `[]`         | Project root directory or directories searched for projects.                   |
+| `gitReposOnly`                | boolean                                                                 | `true`       | Include only directories containing Git repositories.                          |
+| `includeDotFolders`           | boolean                                                                 | `false`      | Include project directories whose names start with a dot.                      |
+| `completionSuffix`            | string                                                                  | `" "`        | Text inserted after a completed project mention.                               |
+| `initialSuggestions.strategy` | `frecency` \| `recent` \| `frequent` \| `alphabetical` \| `sourceOrder` | `"frecency"` | Ordering used before any project query text is entered.                        |
+| `initialSuggestions.pinned`   | string[]                                                                | `[]`         | Project names placed first, in this order, before the configured strategy.     |
 
 ```json
 {

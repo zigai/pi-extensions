@@ -415,7 +415,8 @@ describe("actual Pi CLI in a real PTY", () => {
                             (row) =>
                                 row.text.includes("$ printf 'CHAIN_ALPHA\\n' &&") &&
                                 !row.text.includes("CHAIN_BETA"),
-                        ),
+                        ) &&
+                        frame.rows.some((row) => row.text.includes("printf 'CHAIN_BETA\\n'")),
                     PTY_TIMEOUT_MS,
                     narrowSequence,
                 );
@@ -437,7 +438,11 @@ describe("actual Pi CLI in a real PTY", () => {
                 const restored = await pi.waitForFrame(
                     (frame) =>
                         frame.columns === 160 &&
-                        frame.rows.some((row) => row.text.includes("$ printf 'CHAIN_ALPHA")),
+                        frame.rows.some(
+                            (row) =>
+                                row.text.includes("$ printf 'CHAIN_ALPHA") &&
+                                row.text.includes("&& printf 'CHAIN_BETA"),
+                        ),
                     PTY_TIMEOUT_MS,
                     restoredSequence,
                 );

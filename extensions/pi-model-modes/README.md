@@ -35,19 +35,19 @@ Mode picker pins are independent UI settings and are not changed automatically.
 
 Global settings are stored in `~/.pi/agent/extension-settings/pi-model-modes.json`.
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `version` | number | `1` | Settings format version. |
-| `currentMode` | string | `"default"` | Currently selected mode ID. |
-| `defaultModel.provider` | string | — | Legacy startup model provider; ignored. The first cycle mode is used instead. |
-| `defaultModel.modelId` | string | — | Legacy startup model ID; ignored. The first cycle mode is used instead. |
-| `defaultModel.thinkingLevel` | `off` \| `minimal` \| `low` \| `medium` \| `high` \| `xhigh` \| `max` | — | Pi thinking level for the default model, clamped to that model's capabilities. |
-| `modeUseThinkingBorderColors` | boolean | `false` | Use thinking-level colors instead of mode colors for borders. |
-| `modeShowThinkingLevelStatus` | boolean | `false` | Show thinking level alongside mode status. |
-| `shortcuts.forward` | string | — | Shortcut for cycling modes forward. |
-| `shortcuts.backward` | string | — | Shortcut for cycling modes backward. |
-| `deletedModes` | string[] | — | Global mode names hidden by this project configuration. |
-| `modes` | Record<string, [ModelMode](#settings-type-ModelMode)> | `{}` | Named model modes in cycle order. The first configured mode is used on fresh startup and /new; resumed sessions keep their selection. |
+| Option                        | Type                                                                  | Default     | Description                                                                                                                           |
+| ----------------------------- | --------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `version`                     | number                                                                | `1`         | Settings format version.                                                                                                              |
+| `currentMode`                 | string                                                                | `"default"` | Currently selected mode ID.                                                                                                           |
+| `defaultModel.provider`       | string                                                                | —           | Legacy startup model provider; ignored. The first cycle mode is used instead.                                                         |
+| `defaultModel.modelId`        | string                                                                | —           | Legacy startup model ID; ignored. The first cycle mode is used instead.                                                               |
+| `defaultModel.thinkingLevel`  | `off` \| `minimal` \| `low` \| `medium` \| `high` \| `xhigh` \| `max` | —           | Pi thinking level for the default model, clamped to that model's capabilities.                                                        |
+| `modeUseThinkingBorderColors` | boolean                                                               | `false`     | Use thinking-level colors instead of mode colors for borders.                                                                         |
+| `modeShowThinkingLevelStatus` | boolean                                                               | `false`     | Show thinking level alongside mode status.                                                                                            |
+| `shortcuts.forward`           | string                                                                | —           | Shortcut for cycling modes forward.                                                                                                   |
+| `shortcuts.backward`          | string                                                                | —           | Shortcut for cycling modes backward.                                                                                                  |
+| `deletedModes`                | string[]                                                              | —           | Global mode names hidden by this project configuration.                                                                               |
+| `modes`                       | Record<string, [ModelMode](#settings-type-ModelMode)>                 | `{}`        | Named model modes in cycle order. The first configured mode is used on fresh startup and /new; resumed sessions keep their selection. |
 
 ### Defaults
 
@@ -93,12 +93,12 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-model-modes.jso
 
 Additional fields are not allowed.
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `provider` | string | No |  |
-| `modelId` | string | No |  |
-| `thinkingLevel` | `off` \| `minimal` \| `low` \| `medium` \| `high` \| `xhigh` \| `max` \| null | No | Pi thinking level for this mode; null clears an inherited project value. |
-| `color` | string | No | Pi theme foreground color used for this mode. |
+| Field           | Type                                                                          | Required | Description                                                              |
+| --------------- | ----------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------ |
+| `provider`      | string                                                                        | No       |                                                                          |
+| `modelId`       | string                                                                        | No       |                                                                          |
+| `thinkingLevel` | `off` \| `minimal` \| `low` \| `medium` \| `high` \| `xhigh` \| `max` \| null | No       | Pi thinking level for this mode; null clears an inherited project value. |
+| `color`         | string                                                                        | No       | Pi theme foreground color used for this mode.                            |
 <!-- pi-extension-settings:end -->
 
 ## License

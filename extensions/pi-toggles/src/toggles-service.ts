@@ -76,6 +76,65 @@ function sameStringSet(left: ReadonlySet<string>, right: ReadonlySet<string>): b
     return left.size === right.size && [...left].every((value) => right.has(value));
 }
 
+function sameGoalPolicy(left: GoalPolicy | undefined, right: GoalPolicy): boolean {
+    return (
+        left?.sessionId === right.sessionId &&
+        left.status === right.status &&
+        left.disabledTools.length === right.disabledTools.length &&
+        left.disabledTools.every((name, index) => name === right.disabledTools[index])
+    );
+}
+
+function sameProposal(
+    left: ExtensionActivationProposal | undefined,
+    right: ExtensionActivationProposal,
+): boolean {
+    return (
+        left?.sessionId === right.sessionId &&
+        left.decisions.length === right.decisions.length &&
+        left.decisions.every((decision, index) => {
+            const other = right.decisions[index];
+            return (
+                other !== undefined &&
+                decision.state === other.state &&
+                decision.target.kind === other.target.kind &&
+                decision.target.name === other.target.name &&
+                decision.target.source === other.target.source &&
+                decision.target.path === other.target.path
+            );
+        })
+    );
+}
+
+// This comparison runs only after discovery or an observed tool transition,
+// never on each context/policy event. No catalog/config serialization is used.
+function sameCatalog(left: readonly Capability[], right: readonly Capability[]): boolean {
+    return (
+        left.length === right.length &&
+        left.every((entry, index) => {
+            const other = right[index];
+            return (
+                other !== undefined &&
+                entry.id === other.id &&
+                entry.kind === other.kind &&
+                entry.name === other.name &&
+                entry.description === other.description &&
+                entry.searchText === other.searchText &&
+                entry.observedState === other.observedState &&
+                entry.exposure === other.exposure &&
+                entry.declared === other.declared &&
+                entry.supported === other.supported &&
+                entry.protected === other.protected &&
+                entry.source.source === other.source.source &&
+                entry.source.scope === other.source.scope &&
+                entry.source.origin === other.source.origin &&
+                entry.source.path === other.source.path &&
+                entry.source.baseDir === other.source.baseDir
+            );
+        })
+    );
+}
+
 function writeResultToMutation(result: SettingsWriteResult): MutationResult {
     return result.status === "saved"
         ? { status: "applied" }
@@ -102,7 +161,16 @@ export class TogglesService {
     #sessionPolicy: SessionPolicy;
     #sessionDiagnostics: readonly string[];
     #configuration: PolicyConfiguration;
+    #discoveredCatalog: readonly Capability[] = [];
     #catalog: readonly Capability[] = [];
+    #catalogRevision = 0;
+    #policyRevision = 0;
+    #freshnessRevision = 0;
+    #planRevision = 0;
+    #plannedCatalogRevision = -1;
+    #plannedPolicyRevision = -1;
+    #plannedFactRevision = -1;
+    #plannedFreshnessRevision = -1;
     #skills: readonly Skill[] | undefined;
     #plan: PolicyPlan = {
         capabilities: [],
@@ -146,8 +214,20 @@ export class TogglesService {
         this.#sessionDiagnostics = restored.diagnostics;
         this.#facts = new ContextFacts(ctx.cwd, ctx.isProjectTrusted());
         this.#configuration = this.createConfiguration();
+        this.#policyRevision += 1;
         this.updateStaticFacts();
         this.refreshCatalogAndPlan();
+    }
+
+    /** Revisions of meaningful inputs; freshness explicitly rechecks dynamic facts. */
+    get revisions() {
+        return {
+            catalog: this.#catalogRevision,
+            policy: this.#policyRevision,
+            facts: this.#facts.revision,
+            freshness: this.#freshnessRevision,
+            plan: this.#planRevision,
+        };
     }
 
     get catalog(): readonly Capability[] {
@@ -206,6 +286,10 @@ export class TogglesService {
 
     async initialize(): Promise<void> {
         await this.refreshGitFacts();
+        if (this.#disposed) return;
+        // Registrations may arrive while initial asynchronous facts are settling.
+        // Initialization is a discovery boundary, not just a fact-plan refresh.
+        this.refreshCatalogAndPlan();
         await this.reconcile();
     }
 
@@ -217,8 +301,18 @@ export class TogglesService {
         ) {
             return false;
         }
-        this.#extensionActivationProposals.set(proposal.owner, proposal);
-        this.refreshCatalogAndPlan();
+        if (sameProposal(this.#extensionActivationProposals.get(proposal.owner), proposal)) {
+            return true;
+        }
+        this.#extensionActivationProposals.set(proposal.owner, {
+            ...proposal,
+            decisions: proposal.decisions.map((decision) => ({
+                ...decision,
+                target: { ...decision.target },
+            })),
+        });
+        this.#policyRevision += 1;
+        this.refreshPlan(true);
         // Reconciliation owns its rejection path and is retained by #reconcileTail.
         void this.reconcile();
         return true;
@@ -232,7 +326,8 @@ export class TogglesService {
         ) {
             return false;
         }
-        this.refreshCatalogAndPlan();
+        this.#policyRevision += 1;
+        this.refreshPlan(true);
         // Reconciliation owns its rejection path and is retained by #reconcileTail.
         void this.reconcile();
         return true;
@@ -249,8 +344,10 @@ export class TogglesService {
             version: 1,
             sessionId: policy.sessionId,
         });
-        this.#goalPolicy = policy;
-        this.refreshCatalogAndPlan();
+        if (sameGoalPolicy(this.#goalPolicy, policy)) return;
+        this.#goalPolicy = { ...policy, disabledTools: [...policy.disabledTools] };
+        this.#policyRevision += 1;
+        this.refreshPlan();
         void this.reconcile();
     }
 
@@ -320,8 +417,14 @@ export class TogglesService {
     }
 
     registerContextKey(input: RegisterContextKeyInput): void {
+        if (this.#disposed) return;
+        const before = this.#facts.revision;
         this.#facts.registerContextKey(input);
-        this.refreshCatalogAndPlan();
+        if (this.#facts.revision === before) {
+            this.updateStatus();
+            return;
+        }
+        this.refreshPlan();
     }
 
     addDiagnostic(message: string): void {
@@ -330,6 +433,7 @@ export class TogglesService {
     }
 
     setContext(input: SetContextInput): void {
+        if (this.#disposed) return;
         if (input.owner === "pi-model-modes" && input.key === "mode.active") {
             if (this.#presetSelection.getStore() !== true) {
                 if (!this.#modeContextInitialized && !this.#promptStarted) {
@@ -340,14 +444,22 @@ export class TogglesService {
             }
             this.#modeContextInitialized = true;
         }
+        const before = this.#facts.revision;
         this.#facts.setContext(input);
-        this.refreshCatalogAndPlan();
+        if (this.#facts.revision === before) {
+            this.updateStatus();
+            return;
+        }
+        this.refreshPlan();
         void this.reconcile();
     }
 
     clearContext(input: ClearContextInput): void {
+        if (this.#disposed) return;
+        const before = this.#facts.revision;
         this.#facts.clearContext(input);
-        this.refreshCatalogAndPlan();
+        if (this.#facts.revision === before) return;
+        this.refreshPlan();
         void this.reconcile();
     }
 
@@ -420,6 +532,7 @@ export class TogglesService {
             this.#sessionPolicy = updateSessionOverrides(this.#sessionPolicy, normalizedDecisions);
             persistSessionPolicy(this.pi, this.#sessionPolicy);
             this.#configuration = this.createConfiguration();
+            this.#policyRevision += 1;
             this.refreshCatalogAndPlan();
             await this.reconcile();
             return { status: "applied" };
@@ -430,6 +543,7 @@ export class TogglesService {
             return writeResultToMutation(result);
         }
         this.#configuration = this.createConfiguration();
+        this.#policyRevision += 1;
         this.refreshCatalogAndPlan();
         await this.reconcile();
         return { status: "applied" };
@@ -605,6 +719,7 @@ export class TogglesService {
         this.#manualModel = false;
         this.#appliedPreset = undefined;
         this.#configuration = this.createConfiguration();
+        this.#policyRevision += 1;
         this.updateProfileFact();
         this.refreshCatalogAndPlan();
         await this.reconcile();
@@ -638,6 +753,7 @@ export class TogglesService {
         this.#manualModel = false;
         this.#appliedPreset = undefined;
         this.#configuration = this.createConfiguration();
+        this.#policyRevision += 1;
         this.updateProfileFact();
         this.refreshCatalogAndPlan();
         await this.reconcile();
@@ -679,6 +795,7 @@ export class TogglesService {
             this.#appliedPreset = undefined;
         }
         this.#configuration = this.createConfiguration();
+        this.#policyRevision += 1;
         this.updateProfileFact();
         this.refreshCatalogAndPlan();
         await this.reconcile();
@@ -1140,7 +1257,61 @@ export class TogglesService {
         return facts;
     }
 
+    private updateCatalog(catalog: readonly Capability[]): void {
+        if (sameCatalog(this.#catalog, catalog)) return;
+        this.#catalog = catalog;
+        this.#catalogRevision += 1;
+    }
+
+    /** Explicit freshness boundary: discover external registrations/metadata and
+     * re-evaluate dynamic file/env facts even when declarations are identical. */
     private refreshCatalogAndPlan(): void {
+        this.#freshnessRevision += 1;
+        this.#discoveredCatalog = buildCapabilityCatalog({
+            tools: this.pi.getAllTools(),
+            activeToolNames: new Set(this.pi.getActiveTools()),
+            commands: this.pi.getCommands(),
+            ...(this.#skills === undefined ? {} : { skills: this.#skills }),
+            promptFragments: mergePromptFragments(this.#configuration),
+        });
+        this.refreshPlan(true);
+    }
+
+    /** Reconciliation changes declarations, not tool descriptions/schemas. */
+    private refreshObservedCatalogAndPlan(): void {
+        const active = new Set(this.pi.getActiveTools());
+        this.#discoveredCatalog = this.#discoveredCatalog.map((capability) => {
+            if (capability.kind !== "tool") return capability;
+            const declared = active.has(capability.name);
+            let observedState: Capability["observedState"] = "inactive";
+            if (capability.exposure === "hidden") observedState = "unavailable";
+            else if (
+                declared ||
+                capability.exposure === "codemode" ||
+                capability.exposure === "deferred"
+            )
+                observedState = "active";
+            if (declared === capability.declared && observedState === capability.observedState)
+                return capability;
+            return { ...capability, declared, observedState };
+        });
+        this.refreshPlan(true);
+    }
+
+    private refreshPlan(updateUnavailable = false): void {
+        if (updateUnavailable)
+            this.updateCatalog(this.addUnavailableOverrides(this.#discoveredCatalog));
+        if (
+            this.#plannedCatalogRevision === this.#catalogRevision &&
+            this.#plannedPolicyRevision === this.#policyRevision &&
+            this.#plannedFactRevision === this.#facts.revision &&
+            this.#plannedFreshnessRevision === this.#freshnessRevision
+        )
+            return;
+        this.#plannedCatalogRevision = this.#catalogRevision;
+        this.#plannedPolicyRevision = this.#policyRevision;
+        this.#plannedFreshnessRevision = this.#freshnessRevision;
+        this.#planRevision += 1;
         if (this.#configuration.enabled && !this.#disposed) {
             this.#compactionSelection ??= registerCompactionSelector(this.pi, "pi-toggles", () =>
                 selectCompactionHandler(this.#configuration, this.#facts.resolve),
@@ -1151,15 +1322,7 @@ export class TogglesService {
         }
         this.#preset = selectPreset(this.#configuration, this.#facts.resolve);
         this.#facts.set("preset.active", this.#preset?.name ?? null);
-        const fragments = mergePromptFragments(this.#configuration);
-        const discovered = buildCapabilityCatalog({
-            tools: this.pi.getAllTools(),
-            activeToolNames: new Set(this.pi.getActiveTools()),
-            commands: this.pi.getCommands(),
-            ...(this.#skills === undefined ? {} : { skills: this.#skills }),
-            promptFragments: fragments,
-        });
-        this.#catalog = this.addUnavailableOverrides(discovered);
+        this.#plannedFactRevision = this.#facts.revision;
         const plan = resolveCapabilityPolicy(
             this.#catalog,
             this.#configuration,
@@ -1274,8 +1437,10 @@ export class TogglesService {
         const operation = this.#reconcileTail.then(async () => {
             while (this.#reconcileDirty && !this.#disposed) {
                 this.#reconcileDirty = false;
-                await this.applyToolPlan();
-                this.refreshCatalogAndPlan();
+                // Rebuild observed state only after an actual runtime transition.
+                // Explicit refresh/discovery paths still always rescan external tools
+                // and dynamic facts, even when every declaration is unchanged.
+                if (await this.applyToolPlan()) this.refreshObservedCatalogAndPlan();
             }
         });
         const handled = operation.catch((cause: unknown) => {
@@ -1293,7 +1458,7 @@ export class TogglesService {
         return pending;
     }
 
-    private async applyToolPlan(): Promise<void> {
+    private async applyToolPlan(): Promise<boolean> {
         const current = new Set(this.pi.getActiveTools());
         const desired = new Set(current);
         const toolEntries = this.#plan.capabilities.filter(
@@ -1352,6 +1517,7 @@ export class TogglesService {
                 `Active tool drift after reconciliation. Desired: ${[...desired].sort().join(", ")}; observed: ${[...observed].sort().join(", ")}.`,
             );
         }
+        return !sameStringSet(current, observed);
     }
 
     private recordDiagnostics(...messages: readonly string[]): void {

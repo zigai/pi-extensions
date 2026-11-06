@@ -31,7 +31,7 @@ export function defineTypedCommand<
         ...definition,
         args: compiled.command.definitions,
     };
-    const command = normalizeRegisteredCommand(normalizedDefinition);
+    const command = normalizeRegisteredCommand(normalizedDefinition, compiled.command);
     const defined = {
         ...normalizedDefinition,
         parse(rawArgs: string) {

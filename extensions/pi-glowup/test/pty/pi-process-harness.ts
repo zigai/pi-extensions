@@ -69,13 +69,14 @@ function processEnvironment(agentDir: string): PiProcessEnvironment {
     return environment;
 }
 
-function screenRows(terminal: HeadlessTerminal): readonly PtyScreenRow[] {
+export function screenRows(terminal: HeadlessTerminal): readonly PtyScreenRow[] {
     const buffer = terminal.buffer.active;
     const rows: PtyScreenRow[] = [];
     for (let viewportRow = 0; viewportRow < terminal.rows; viewportRow += 1) {
         const line = buffer.getLine(buffer.viewportY + viewportRow);
         rows.push({
-            text: line?.translateToString(true) ?? "",
+            // Alternate-buffer lines can retain cells beyond the resized viewport.
+            text: line?.translateToString(true, 0, terminal.cols) ?? "",
             isWrapped: line?.isWrapped ?? false,
         });
     }
