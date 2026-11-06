@@ -199,7 +199,11 @@ function normalizeSubcommands<
     return Object.freeze(Object.fromEntries(normalizedEntries));
 }
 
-/** Normalize a user command definition into metadata consumed by Pi registration and UX adapters. */
+/**
+ * Normalize command metadata, optionally reusing this operation's immutable root snapshot.
+ * A prepared grammar is reusable only for its exact definition graph and command header; raw
+ * definitions and caller-owned subcommands are always freshly compiled. This is not a cache.
+ */
 export function normalizeRegisteredCommand<
     TDefinitions extends ArgumentDefinitions,
     TSubcommands extends TypedSubcommandDefinitions<TDefinitions>,
@@ -207,18 +211,29 @@ export function normalizeRegisteredCommand<
     definition:
         | TypedCommandDefinition<TDefinitions, TSubcommands>
         | DefinedTypedCommand<TDefinitions, TSubcommands>,
+    preparedRoot?: CompiledCommand<TDefinitions>,
 ): RegisteredTypedCommand<TDefinitions> & { readonly compiled: CompiledCommand<TDefinitions> } {
     if (invalidCommandSpelling(definition.name)) {
         throw new TypeError(`Invalid command name ${JSON.stringify(definition.name)}`);
     }
 
-    const compiled = compileTypedCommandDefinition({
-        name: definition.name,
-        description: definition.description,
-        args: definition.args,
-    });
-    if (!compiled.ok) {
-        throw definitionError(definition.name, compiled.diagnostics);
+    let compiled = preparedRoot;
+    if (
+        compiled === undefined ||
+        compiled.definitions !== definition.args ||
+        compiled.name !== definition.name ||
+        compiled.description !== definition.description
+    ) {
+        const result = compileTypedCommandDefinition({
+            name: definition.name,
+            description: definition.description,
+            args: definition.args,
+        });
+        if (!result.ok) {
+            throw definitionError(definition.name, result.diagnostics);
+        }
+
+        compiled = result.command;
     }
 
     const refine = maybeWrapGroupedRefinement(definition.args, definition.refine);
@@ -262,10 +277,10 @@ export function normalizeRegisteredCommand<
         };
     }
 
-    const subcommands = normalizeSubcommands(definition, compiled.command.definitions);
+    const subcommands = normalizeSubcommands(definition, compiled.definitions);
     if (
         subcommands !== undefined &&
-        Object.values(compiled.command.args).some((argument) => argument.position !== undefined)
+        Object.values(compiled.args).some((argument) => argument.position !== undefined)
     ) {
         throw new TypeError(
             `Typed command /${definition.name} may not combine shared positional arguments with subcommands`,
@@ -286,8 +301,8 @@ export function normalizeRegisteredCommand<
     } = {
         name: definition.name,
         description: definition.description,
-        args: compiled.command.args,
-        compiled: compiled.command,
+        args: compiled.args,
+        compiled,
         formSymbols: { ...DEFAULT_FORM_SYMBOLS, ...definition.formSymbols },
         source: "extension",
         hasRootHandler: run !== undefined,
