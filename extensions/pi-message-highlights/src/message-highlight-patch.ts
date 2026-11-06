@@ -1,6 +1,7 @@
 import { AssistantMessageComponent, UserMessageComponent } from "@earendil-works/pi-coding-agent";
 import { Container, Editor, Markdown, MouseRegion, Text } from "@earendil-works/pi-tui";
 import {
+    installLinkedMethodPatch,
     installLinkedRenderPatch,
     type LinkedMethodPatchHandle,
 } from "@zigai/pi-extension-internals";
@@ -52,24 +53,37 @@ type CachedHighlight = {
 
 class HighlightRenderCache {
     private entries = new WeakMap<RenderableInstance, CachedHighlight>();
-    private frames = new WeakMap<RenderableInstance, Set<RenderableInstance>>();
+    private frames = new WeakMap<RenderableInstance, Set<WeakRef<RenderableInstance>>>();
     private activeFrame: Set<RenderableInstance> | undefined;
 
     renderFrame(target: RenderableInstance, render: () => string[]): string[] {
         const previousActive = this.activeFrame;
         const frame = new Set<RenderableInstance>();
         this.activeFrame = frame;
+
         try {
             return render();
         } finally {
             this.activeFrame = previousActive;
+
             const previous = this.frames.get(target);
+            let unchanged = previous?.size === frame.size;
             if (previous !== undefined) {
-                for (const child of previous) {
-                    if (!frame.has(child)) this.entries.delete(child);
+                for (const reference of previous) {
+                    const child = reference.deref();
+                    if (child === undefined || !frame.has(child)) {
+                        unchanged = false;
+
+                        if (child !== undefined) this.entries.delete(child);
+                    }
                 }
             }
-            this.frames.set(target, frame);
+
+            // Keep weak membership stable as well as the render patches. Rebuilding
+            // these sets on every cached historical row allocates new WeakRefs despite
+            // identical ownership; changed/dead members still replace the whole frame.
+            if (!unchanged)
+                this.frames.set(target, new Set([...frame].map((child) => new WeakRef(child))));
         }
     }
 
@@ -81,6 +95,7 @@ class HighlightRenderCache {
         source?: string,
     ): string[] {
         this.activeFrame?.add(target);
+
         const cached = this.entries.get(target);
         if (
             cached !== undefined &&
@@ -100,6 +115,7 @@ class HighlightRenderCache {
             source,
             result: [...result],
         });
+
         return result;
     }
 
@@ -136,11 +152,292 @@ function patchRenderablePrototype(
             function highlightedRender(this: RenderableInstance, width: number): string[] {
                 const lines = predecessor.call(this, width);
                 const styles = getStyles();
+
                 return cache.render(this, lines, styles, () =>
                     highlightMessageLines(lines, styles),
                 );
             },
     );
+}
+
+// Linked handles close over their targets. Keep them only in an ephemeron, not a
+// session-long array: even an unrendered, removed child must be collectible. The
+// weak registry permits deterministic disposal of live targets without retaining
+// old transcripts. Finalization only prunes registry bookkeeping, never patches.
+type DisposablePatch = { dispose(): void };
+
+type OwnedRenderPatch = {
+    target: WeakRef<RenderableInstance>;
+    handle: DisposablePatch;
+};
+
+class WeakRenderPatches {
+    private entries = new WeakMap<RenderableInstance, OwnedRenderPatch>();
+    private readonly references = new Set<WeakRef<OwnedRenderPatch>>();
+
+    private readonly finalizer = new FinalizationRegistry<WeakRef<OwnedRenderPatch>>(
+        (reference) => {
+            this.references.delete(reference);
+        },
+    );
+
+    install(target: RenderableInstance, create: () => DisposablePatch): void {
+        if (this.entries.has(target)) return;
+
+        const entry = { target: new WeakRef(target), handle: create() };
+        const reference = new WeakRef(entry);
+
+        this.entries.set(target, entry);
+        this.references.add(reference);
+        this.finalizer.register(target, reference, entry);
+    }
+
+    remove(target: RenderableInstance): void {
+        const entry = this.entries.get(target);
+        if (entry === undefined) return;
+
+        entry.handle.dispose();
+        this.entries.delete(target);
+        this.finalizer.unregister(entry);
+
+        // Mutation-only path: ordinary redraws never scan this registry.
+        for (const reference of this.references) {
+            if (reference.deref() === entry) this.references.delete(reference);
+        }
+    }
+
+    retain(targets: readonly RenderableInstance[]): void {
+        const current = new Set(targets);
+
+        this.visit((entry) => {
+            const target = entry.target.deref();
+            if (target !== undefined && current.has(target)) return false;
+
+            entry.handle.dispose();
+
+            if (target !== undefined) this.entries.delete(target);
+            return true;
+        });
+    }
+
+    dispose(): void {
+        this.visit((entry) => {
+            entry.handle.dispose();
+            return true;
+        });
+        this.entries = new WeakMap();
+    }
+
+    private visit(remove: (entry: OwnedRenderPatch) => boolean): void {
+        for (const reference of this.references) {
+            const entry = reference.deref();
+            if (entry === undefined) {
+                this.references.delete(reference);
+            } else if (remove(entry)) {
+                this.finalizer.unregister(entry);
+                this.references.delete(reference);
+            }
+        }
+    }
+}
+
+// A child's container may be collected while another extension retains the
+// child. Session disposal must still find that child's live handle. This second
+// ephemeron registry is independent of container lifetime, and supports multiple
+// container-owned handles for the same (shared) child without pinning either.
+class WeakChildPatchDisposals {
+    private handles = new WeakMap<RenderableInstance, Set<DisposablePatch>>();
+    private readonly references = new Set<WeakRef<DisposablePatch>>();
+
+    private readonly finalizer = new FinalizationRegistry<WeakRef<DisposablePatch>>((reference) => {
+        this.references.delete(reference);
+    });
+
+    track(target: RenderableInstance, handle: DisposablePatch): DisposablePatch {
+        const handles = this.handles.get(target) ?? new Set<DisposablePatch>();
+        this.handles.set(target, handles);
+        handles.add(handle);
+
+        const reference = new WeakRef(handle);
+        this.references.add(reference);
+        this.finalizer.register(target, reference, handle);
+
+        return {
+            dispose: (): void => {
+                handle.dispose();
+                handles.delete(handle);
+                this.references.delete(reference);
+                this.finalizer.unregister(handle);
+            },
+        };
+    }
+
+    dispose(): void {
+        for (const reference of this.references) {
+            const handle = reference.deref();
+            if (handle !== undefined) {
+                handle.dispose();
+                this.finalizer.unregister(handle);
+            }
+        }
+
+        this.references.clear();
+        this.handles = new WeakMap();
+    }
+}
+
+type AssistantRenderGate = { depth: number; styles: HighlightStyles[] };
+
+const THINKING_HIGHLIGHT_STYLES: HighlightStyles = { url: "\u001b[1m", filepath: "\u001b[1m" };
+
+// Keep this factory outside the container installer. A retained child must not
+// close over the installer's lexical context (container, siblings, or handles).
+function patchAssistantChild(
+    child: RenderableInstance,
+    gate: AssistantRenderGate,
+    thinking: { active: number },
+    cache: HighlightRenderCache,
+): RenderPatchHandle {
+    const isThinking = child instanceof MouseRegion;
+    let active = true;
+    const patch = installLinkedRenderPatch(
+        child,
+        (render) =>
+            function (this: RenderableInstance, width: number): string[] {
+                if (!active || gate.depth === 0) return render.call(this, width);
+
+                let styles = gate.styles.at(-1);
+                if (isThinking) styles = THINKING_HIGHLIGHT_STYLES;
+                if (styles === undefined) return render.call(this, width);
+                if (isThinking) thinking.active += 1;
+
+                try {
+                    const lines = render.call(this, width);
+
+                    return cache.render(this, lines, styles, () =>
+                        highlightMessageLines(lines, styles),
+                    );
+                } finally {
+                    if (isThinking) thinking.active -= 1;
+                }
+            },
+    );
+
+    return {
+        ...patch,
+        dispose(): void {
+            // An opaque replacement can retain the old function without taking
+            // part in linked rewiring. Retire its behavior before unlinking it.
+            active = false;
+            patch.dispose();
+        },
+    };
+}
+
+function patchAssistantContainer(
+    container: Container,
+    gate: AssistantRenderGate,
+    thinking: { active: number },
+    cache: HighlightRenderCache,
+    childDisposals: WeakChildPatchDisposals,
+): DisposablePatch {
+    let active = true;
+    const children = new WeakRenderPatches();
+    const visibleMethods = new WeakMap<RenderableInstance, WeakRef<RenderableInstance["render"]>>();
+    let snapshot: Array<WeakRef<RenderableInstance>> = [];
+    const synchronize = (): void => {
+        if (!active) return;
+
+        if (
+            snapshot.length === container.children.length &&
+            snapshot.every((reference, index) => {
+                const child = container.children[index];
+                return (
+                    reference.deref() === child &&
+                    visibleMethods.get(child)?.deref() === child.render
+                );
+            })
+        )
+            return;
+
+        children.retain(container.children);
+
+        for (const child of container.children) {
+            const observed = visibleMethods.get(child);
+            if (observed !== undefined && observed.deref() !== child.render) children.remove(child);
+
+            children.install(child, () =>
+                childDisposals.track(child, patchAssistantChild(child, gate, thinking, cache)),
+            );
+
+            // oxlint-disable-next-line typescript/unbound-method -- Store weak method identity only, never invoke it unbound.
+            visibleMethods.set(child, new WeakRef(child.render));
+        }
+
+        snapshot = container.children.map((child) => new WeakRef(child));
+    };
+
+    const containerPatch = installLinkedRenderPatch(
+        container,
+        (render) =>
+            function (this: Container, width: number) {
+                if (!active || gate.styles.length === 0) return render.call(this, width);
+
+                // Predecessors may replace/add children during assistant
+                // rendering. Discover them at the actual layout boundary.
+                synchronize();
+                gate.depth += 1;
+
+                try {
+                    return render.call(this, width);
+                } finally {
+                    gate.depth -= 1;
+                    synchronize();
+                }
+            },
+    );
+    const mutations: Array<{ dispose(): void }> = [];
+
+    try {
+        for (const key of ["addChild", "removeChild", "clear"] as const) {
+            mutations.push(
+                installLinkedMethodPatch(
+                    container,
+                    key,
+                    (mutate) =>
+                        function (this: Container, ...args) {
+                            if (!active) return mutate.apply(this, args);
+                            try {
+                                return mutate.apply(this, args);
+                            } finally {
+                                // SDK streaming clears then adds all children. Defer
+                                // additions to the layout boundary, except while an
+                                // in-progress layout can visit the new child now.
+                                if (key !== "addChild" || gate.depth > 0) synchronize();
+                            }
+                        },
+                ),
+            );
+        }
+    } catch (cause) {
+        active = false;
+
+        for (const mutation of mutations) mutation.dispose();
+        children.dispose();
+        containerPatch.dispose();
+
+        throw cause;
+    }
+
+    return {
+        dispose(): void {
+            active = false;
+
+            for (const mutation of mutations) mutation.dispose();
+            children.dispose();
+            containerPatch.dispose();
+        },
+    };
 }
 
 function patchAssistantPrototype(
@@ -150,19 +447,24 @@ function patchAssistantPrototype(
     cache: HighlightRenderCache,
     webCache: HighlightRenderCache,
 ): RenderPatchHandle {
-    return installLinkedRenderPatch(
+    let active = true;
+    const containers = new WeakRenderPatches();
+    const visibleMethods = new WeakMap<Container, WeakRef<Container["render"]>>();
+    const childDisposals = new WeakChildPatchDisposals();
+    const gates = new WeakMap<Container, AssistantRenderGate>();
+    const patch = installLinkedRenderPatch(
         prototype,
         (predecessor) =>
             function highlightedAssistantRender(this: RenderableInstance, width: number): string[] {
+                if (!active) return predecessor.call(this, width);
                 return cache.renderFrame(this, () =>
                     webCache.renderFrame(this, () => {
-                        // Pi's clickable thinking runs are MouseRegions inside the content container.
-                        // Decorate at that boundary rather than recoloring the flattened transcript.
                         if (
                             !("contentContainer" in this) ||
                             !(this.contentContainer instanceof Container)
                         ) {
                             thinking.active += 1;
+
                             try {
                                 return predecessor.call(this, width);
                             } finally {
@@ -170,57 +472,51 @@ function patchAssistantPrototype(
                             }
                         }
 
-                        const patches: RenderPatchHandle[] = [];
+                        const container = this.contentContainer;
+                        const gate = gates.get(container) ?? { styles: [], depth: 0 };
+                        gates.set(container, gate);
+
+                        const observed = visibleMethods.get(container)?.deref();
+                        if (observed !== container.render) containers.remove(container);
+
+                        containers.install(container, () =>
+                            patchAssistantContainer(
+                                container,
+                                gate,
+                                thinking,
+                                cache,
+                                childDisposals,
+                            ),
+                        );
+
+                        if (observed !== container.render) {
+                            // oxlint-disable-next-line typescript/unbound-method -- Observe weak method identity only.
+                            visibleMethods.set(container, new WeakRef(container.render));
+                        }
+
+                        // Snapshot once per assistant frame, before any predecessor or
+                        // child side effects. Nested frames restore the prior policy.
+                        gate.styles.push(getStyles());
 
                         try {
-                            for (const child of this.contentContainer.children) {
-                                let styles = getStyles();
-                                if (child instanceof MouseRegion) {
-                                    styles = { url: "\u001b[1m", filepath: "\u001b[1m" };
-                                    const thinkingStyles = styles;
-                                    const renderable: RenderablePrototype = child;
-                                    patches.push(
-                                        installLinkedRenderPatch(
-                                            renderable,
-                                            (render) =>
-                                                function (
-                                                    this: RenderableInstance,
-                                                    width: number,
-                                                ): string[] {
-                                                    thinking.active += 1;
-                                                    try {
-                                                        const lines = render.call(this, width);
-                                                        return cache.render(
-                                                            this,
-                                                            lines,
-                                                            thinkingStyles,
-                                                            () =>
-                                                                highlightMessageLines(
-                                                                    lines,
-                                                                    thinkingStyles,
-                                                                ),
-                                                        );
-                                                    } finally {
-                                                        thinking.active -= 1;
-                                                    }
-                                                },
-                                        ),
-                                    );
-                                } else {
-                                    patches.push(
-                                        patchRenderablePrototype(child, () => styles, cache),
-                                    );
-                                }
-                            }
-
                             return predecessor.call(this, width);
                         } finally {
-                            for (const patch of patches) patch.dispose();
+                            gate.styles.pop();
                         }
                     }),
                 );
             },
     );
+
+    return {
+        ...patch,
+        dispose(): void {
+            active = false;
+            containers.dispose();
+            childDisposals.dispose();
+            patch.dispose();
+        },
+    };
 }
 
 function patchEditorPrototype(
@@ -277,7 +573,8 @@ export function installMessageHighlightPatch(
                     (predecessor) =>
                         function (this: RenderableInstance, width: number): string[] {
                             const lines = predecessor.call(this, width);
-                            if (thinking.active > 0) return lines;
+                            if (disposed || thinking.active > 0) return lines;
+
                             const styles = getStyles();
                             const urlOnly = { url: styles.url, filepath: "" };
                             let source: string | undefined;
@@ -291,6 +588,7 @@ export function installMessageHighlightPatch(
                                     if (Value.Check(Type.String(), value)) source = value;
                                 }
                             }
+
                             return webCache.render(
                                 this,
                                 lines,
@@ -307,6 +605,7 @@ export function installMessageHighlightPatch(
                                             styles.url,
                                         );
                                     }
+
                                     return result;
                                 },
                                 source,
@@ -315,6 +614,7 @@ export function installMessageHighlightPatch(
                 ),
             );
         }
+
         patches.push(
             patchAssistantPrototype(
                 targets.assistantPrototype,
