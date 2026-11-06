@@ -32,9 +32,7 @@ export type SelectionHistoryOptions = {
     readonly onError?: (message: string) => void;
 };
 
-function compareNames(left: string, right: string): number {
-    return left.localeCompare(right, undefined, { sensitivity: "base" });
-}
+const compareNames = new Intl.Collator(undefined, { sensitivity: "base" }).compare;
 
 function historyRankingNeeded(strategy: InitialSuggestionStrategy): boolean {
     return strategy === "frecency" || strategy === "recent" || strategy === "frequent";

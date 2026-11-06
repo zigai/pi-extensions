@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test, vi } from "vitest";
@@ -160,5 +160,27 @@ test("listProjectDirectories returns no projects when already aborted", async ()
         assert.deepEqual(projects, []);
     } finally {
         await rm(dir, { recursive: true, force: true });
+    }
+});
+
+test("project discovery preserves locale-aware base-sensitivity ordering", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "pi-mention-project-collation-"));
+    try {
+        for (const name of ["zeta", "Ångström", "apple", "Beta", "Résumé", "工具"])
+            await mkdir(path.join(root, name));
+
+        const expected = (await readdir(root)).sort((left, right) =>
+            left.localeCompare(right, undefined, { sensitivity: "base" }),
+        );
+        const projects = await listProjectDirectories(
+            settings([root], { gitReposOnly: false }),
+            root,
+        );
+        assert.deepEqual(
+            projects.map((project) => project.name),
+            expected,
+        );
+    } finally {
+        await rm(root, { recursive: true, force: true });
     }
 });
