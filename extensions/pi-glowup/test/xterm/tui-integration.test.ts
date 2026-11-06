@@ -3046,7 +3046,7 @@ export const grownWriteTwelve = 12;
 -const previousValue = formatValue(oldToken);
 +export const nextValue = formatValue(newToken);
 +
-+	
++\t
  const unchangedC = true;
 +	return tabIndentedValue;
 `,
