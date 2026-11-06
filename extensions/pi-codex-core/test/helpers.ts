@@ -146,6 +146,21 @@ type ExtensionHarness = {
     ) => Promise<string>;
 };
 
+const activeHarnessSessions = new Map<ExtensionHarness, ExtensionContext>();
+
+/** Dispose every started fixture, including tests that fail before their own cleanup. */
+export async function shutdownExtensionHarnesses(): Promise<void> {
+    const outcomes = await Promise.allSettled(
+        [...activeHarnessSessions].map(([harness, ctx]) => harness.shutdownSession("quit", ctx)),
+    );
+    const failures: unknown[] = [];
+    for (const outcome of outcomes) {
+        if (outcome.status === "rejected") failures.push(outcome.reason);
+    }
+
+    if (failures.length > 0) throw new AggregateError(failures, "Extension harness cleanup failed");
+}
+
 export function makeExtensionHarness(initialActiveTools: readonly string[] = []): ExtensionHarness {
     let activeTools: string[] = [...initialActiveTools];
     const events = createEventBus();
@@ -159,6 +174,7 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
     let beforeAgentStart: ExtensionEventHandler | undefined;
     let sessionBeforeCompact: ExtensionEventHandler | undefined;
     let sessionCompact: ExtensionEventHandler | undefined;
+    const pendingCompactions = new Set<AbortController>();
     const api = {
         events,
         registerTool() {},
@@ -201,7 +217,7 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
         getAllTools: () => [],
     };
 
-    return {
+    const harness: ExtensionHarness = {
         api: testDouble<ExtensionAPI>(api),
         events,
         get activeTools() {
@@ -211,6 +227,7 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
         sentUserMessages,
         async startSession(ctx: ExtensionContext): Promise<void> {
             assert.ok(sessionStart);
+            activeHarnessSessions.set(harness, ctx);
             await sessionStart({ type: "session_start" }, ctx);
         },
         async selectModel(ctx: ExtensionContext): Promise<void> {
@@ -245,7 +262,12 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
             );
         },
         async shutdownSession(reason: string, ctx: ExtensionContext): Promise<void> {
+            for (const controller of pendingCompactions) {
+                controller.abort(new Error("Extension harness session shut down"));
+            }
+
             await dispatch("session_shutdown", { type: "session_shutdown", reason }, ctx);
+            activeHarnessSessions.delete(harness);
         },
         renderMessage(
             type: string,
@@ -285,38 +307,44 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
         ): Promise<Readonly<Record<string, JsonValue | undefined>> | undefined> {
             assert.ok(sessionBeforeCompact);
 
-            const result = await sessionBeforeCompact(
-                {
-                    type: "session_before_compact",
-                    reason: "manual",
-                    customInstructions: undefined,
-                    signal: new AbortController().signal,
-                    branchEntries: [
-                        {
-                            type: "message",
-                            id: "entry-1",
-                            parentId: null,
-                            timestamp: "2026-01-01T00:00:00.000Z",
-                            message: {
-                                role: "user",
-                                content: [{ type: "text", text: "hello" }],
-                                timestamp: 0,
+            const controller = new AbortController();
+            pendingCompactions.add(controller);
+            try {
+                const result = await sessionBeforeCompact(
+                    {
+                        type: "session_before_compact",
+                        reason: "manual",
+                        customInstructions: undefined,
+                        signal: controller.signal,
+                        branchEntries: [
+                            {
+                                type: "message",
+                                id: "entry-1",
+                                parentId: null,
+                                timestamp: "2026-01-01T00:00:00.000Z",
+                                message: {
+                                    role: "user",
+                                    content: [{ type: "text", text: "hello" }],
+                                    timestamp: 0,
+                                },
                             },
+                        ],
+                        preparation: {
+                            firstKeptEntryId: "entry-1",
+                            tokensBefore: 1,
+                            previousSummary: undefined,
+                            messagesToSummarize: [],
+                            turnPrefixMessages: [],
+                            fileOps: { read: [], written: [], edited: [] },
                         },
-                    ],
-                    preparation: {
-                        firstKeptEntryId: "entry-1",
-                        tokensBefore: 1,
-                        previousSummary: undefined,
-                        messagesToSummarize: [],
-                        turnPrefixMessages: [],
-                        fileOps: { read: [], written: [], edited: [] },
                     },
-                },
-                ctx,
-            );
+                    ctx,
+                );
 
-            return JsonObjectDecoder.decode(result);
+                return JsonObjectDecoder.decode(result);
+            } finally {
+                pendingCompactions.delete(controller);
+            }
         },
         async finishCompaction(ctx: ExtensionContext): Promise<void> {
             assert.ok(sessionCompact);
@@ -350,6 +378,8 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
             return preparedPrompt;
         },
     };
+
+    return harness;
 
     async function dispatch(
         eventName: string,
