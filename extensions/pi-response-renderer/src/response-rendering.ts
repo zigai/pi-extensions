@@ -26,7 +26,6 @@ import {
 import {
     collapseAssistantBlankLines,
     getTableBoundaryLineTexts,
-    isFenceLine,
     invalidateThinkingMarkdown,
     markFencesHidden,
     resolveHeadingLineTexts,
@@ -106,8 +105,7 @@ function hideForeignMarkdownFences(patch: MarkdownFencesPatchRecord, component: 
             const source = predecessor.call(this, width);
             if (frame !== undefined && sameRenderFrame(frame, width, source)) return frame.output;
 
-            const lines = source.filter((line) => !isFenceLine(line));
-            const output = collapseAssistantBlankLines(lines, "", new Set());
+            const output = collapseAssistantBlankLines(source, "", new Set(), undefined, true);
             frame = { width, source: [...source], output };
             return output;
         };
@@ -245,15 +243,12 @@ async function patchMarkdownFences(owner: symbol): Promise<MarkdownFencesPatchRe
                     return frame.output;
                 }
 
-                let lines = source;
-
-                if (fencesHidden) lines = lines.filter((line) => !isFenceLine(line));
-
                 const output = collapseAssistantBlankLines(
-                    lines,
+                    source,
                     resolveHeadingPrefix(this),
                     resolveHeadingLineTexts(this, width, predecessor),
                     getTableBoundaryLineTexts(this),
+                    fencesHidden,
                 );
                 markdownFrames.set(this, { width, source, output, fencesHidden });
 

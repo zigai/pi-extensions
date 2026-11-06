@@ -86,45 +86,80 @@ export function resetHeadingFolds(group: HeadingGroup): void {
 }
 
 export function prepareHeadingGroup(group: HeadingGroup, width: number): void {
-    if (group.width === width) return;
-
+    const previousWidth = group.width;
+    if (previousWidth === width) return;
     group.width = width;
 
-    const depths = new Set<number>();
-    const signatures: HeadingSignature[][] = [];
-    for (const markdown of group.children) {
-        markdown.render(width);
+    try {
+        const renderedDepths = group.depths;
+        const hadFolds = [...group.folds.values()].some((collapsed) => collapsed.size > 0);
+        const depths = new Set<number>();
+        const signatures: HeadingSignature[][] = [];
+        const unsupported = new Set<Markdown>();
+        for (const markdown of group.children) {
+            // A new group can reuse SDK Markdown blocks from the preceding streamed content.
+            // Their cached heading ranks/ordinals belong to that old group. Clear them before
+            // discovery so its render can be reused instead of discovering stale markers.
+            if (previousWidth === undefined) markdown.invalidate();
+            markdown.render(width);
 
-        const cache: unknown = Object.getOwnPropertyDescriptor(markdown, "cachedTokens")?.value;
-        if (!(cache instanceof WeakRef)) {
+            const cache: unknown = Object.getOwnPropertyDescriptor(markdown, "cachedTokens")?.value;
+            if (!(cache instanceof WeakRef)) {
+                clearHeadingFolds(group.folds);
+                unsupported.add(markdown);
+                signatures.push([]);
+                continue;
+            }
+
+            const value: unknown = cache.deref();
+            if (!Value.Check(tokenCacheSchema, value)) {
+                clearHeadingFolds(group.folds);
+                unsupported.add(markdown);
+                signatures.push([]);
+                continue;
+            }
+            const headings: HeadingSignature[] = [];
+            for (const token of value.tokens) {
+                if (!Value.Check(headingSchema, token)) continue;
+                depths.add(token.depth);
+                headings.push({ depth: token.depth, text: token.text });
+            }
+            signatures.push(headings);
+        }
+
+        const previous = group.history.signatures;
+        if (previous !== undefined && !headingsPreserved(previous, signatures)) {
             clearHeadingFolds(group.folds);
-            signatures.push([]);
-            continue;
         }
 
-        const value: unknown = cache.deref();
-        if (!Value.Check(tokenCacheSchema, value)) {
-            clearHeadingFolds(group.folds);
-            signatures.push([]);
-            continue;
+        group.history.signatures = signatures;
+        const nextDepths = [...depths].sort((a, b) => a - b);
+        group.depths = nextDepths;
+        const foldsCleared =
+            hadFolds && ![...group.folds.values()].some((collapsed) => collapsed.size > 0);
+        for (const [block, markdown] of group.children.entries()) {
+            const headings = signatures[block] ?? [];
+            const previousDepths =
+                renderedDepths ??
+                [...new Set(headings.map((heading) => heading.depth))].sort((a, b) => a - b);
+            // The discovery render already produced the final lines when heading ranks and
+            // fold indicators are unchanged. Invalidate only if those inputs actually changed;
+            // keep normal theme/syntax/setText invalidation owned by the SDK and its callers.
+            if (
+                unsupported.has(markdown) ||
+                foldsCleared ||
+                headings.some(
+                    (heading) =>
+                        previousDepths.indexOf(heading.depth) !== nextDepths.indexOf(heading.depth),
+                )
+            )
+                markdown.invalidate();
         }
-        const headings: HeadingSignature[] = [];
-        for (const token of value.tokens) {
-            if (!Value.Check(headingSchema, token)) continue;
-            depths.add(token.depth);
-            headings.push({ depth: token.depth, text: token.text });
-        }
-        signatures.push(headings);
+        group.width = width;
+    } catch (cause: unknown) {
+        group.width = previousWidth;
+        throw cause;
     }
-
-    const previous = group.history.signatures;
-    if (previous !== undefined && !headingsPreserved(previous, signatures)) {
-        clearHeadingFolds(group.folds);
-    }
-
-    group.history.signatures = signatures;
-    group.depths = [...depths].sort((a, b) => a - b);
-    for (const markdown of group.children) markdown.invalidate();
 }
 
 function headingsPreserved(previous: HeadingSignature[][], current: HeadingSignature[][]): boolean {
@@ -143,6 +178,30 @@ function headingsPreserved(previous: HeadingSignature[][], current: HeadingSigna
     );
 }
 
+type HeadingIndex = {
+    ordinals: WeakMap<object, number>;
+    depths: number[];
+};
+
+type HeadingRender = {
+    cache?: object;
+    index?: HeadingIndex;
+};
+
+function indexHeadings(tokens: unknown[]): HeadingIndex {
+    const ordinals = new WeakMap<object, number>();
+    const depths = new Set<number>();
+    let ordinal = 0;
+    for (const token of tokens) {
+        if (!Value.Check(headingSchema, token)) continue;
+        // Preserve indexOf's first ordinal even for unsupported duplicate token identities.
+        if (!ordinals.has(token)) ordinals.set(token, ordinal);
+        ordinal += 1;
+        depths.add(token.depth);
+    }
+    return { ordinals, depths: [...depths].sort((a, b) => a - b) };
+}
+
 const markerPattern = /\u001b\]9999;pi-fold:(\d+):(\d+)\u0007/g;
 const endMarker = "\u001b]9999;pi-fold-end\u0007";
 
@@ -155,68 +214,116 @@ export function installHeadingRendering(): { dispose(): void } | undefined {
     }
     const host = candidate;
 
-    return installLinkedMethodPatch(
+    // The SDK owns mutable tokens and retains them only weakly. Index them for one
+    // synchronous render, never across renders (even when the cache identity survives).
+    // This also observes foreign in-place token edits on the next render without
+    // pinning the token tree for the lifetime of a transcript's Markdown component.
+    const renders = new WeakMap<object, HeadingRender>();
+    const renderPatch = installLinkedMethodPatch(
         host,
-        "renderToken",
+        "render",
         (predecessor) =>
-            function (this: HeadingHost, token, width, next, context) {
-                if (!shouldHideFences(this) || !Value.Check(headingSchema, token)) {
-                    return predecessor.call(this, token, width, next, context);
-                }
-
-                const cache: unknown = Object.getOwnPropertyDescriptor(this, "cachedTokens")?.value;
-                if (!(cache instanceof WeakRef))
-                    return predecessor.call(this, token, width, next, context);
-                const value: unknown = cache.deref();
-                if (!Value.Check(tokenCacheSchema, value) || !value.tokens.includes(token)) {
-                    return predecessor.call(this, token, width, next, context);
-                }
-                const theme: unknown = Object.getOwnPropertyDescriptor(this, "theme")?.value;
-                if (!Value.Check(themeSchema, theme))
-                    return predecessor.call(this, token, width, next, context);
-                const headings = value.tokens.filter((item) => Value.Check(headingSchema, item));
-                const depths =
-                    groups.get(this)?.depths ??
-                    [...new Set(headings.map((heading) => heading.depth))].sort((a, b) => a - b);
-                const rank = depths.indexOf(token.depth);
-                const yellow = (text: string): string =>
-                    styleText(text, { fg: parseColor("#ffff00") }, "truecolor");
-
-                const identity = (text: string): string => text;
-                let bold = theme.bold;
-                if (rank === 1) bold = identity;
-                Reflect.set(this, "theme", {
-                    ...theme,
-                    heading: yellow,
-                    bold,
-                    underline: identity,
-                });
-
-                let lines: string[];
-
+            function (this: HeadingHost, width) {
+                if (!shouldHideFences(this)) return predecessor.call(this, width);
+                const previous = renders.get(this);
+                renders.set(this, {});
                 try {
-                    // The first two distinct depths omit markers; deeper headings keep their real depth.
-                    let renderedToken = token;
-                    if (rank >= 0 && rank < 2) renderedToken = { ...token, depth: 2 };
-                    lines = predecessor.call(this, renderedToken, width, next, context);
+                    return predecessor.call(this, width);
                 } finally {
-                    Reflect.set(this, "theme", theme);
+                    if (previous === undefined) renders.delete(this);
+                    else renders.set(this, previous);
                 }
-
-                const collapsed = foldable.get(this);
-                if (collapsed !== undefined && lines.length > 0) {
-                    const ordinal = headings.indexOf(token);
-                    let indicator = "";
-                    if (collapsed.has(ordinal)) indicator = yellow("▸ ");
-                    return [
-                        `\u001b]9999;pi-fold:${token.depth}:${ordinal}\u0007${indicator}${lines[0]}${endMarker}`,
-                        ...lines.slice(1),
-                    ];
-                }
-
-                return lines;
             },
     );
+    try {
+        const tokenPatch = installLinkedMethodPatch(
+            host,
+            "renderToken",
+            (predecessor) =>
+                function (this: HeadingHost, token, width, next, context) {
+                    if (!shouldHideFences(this) || !Value.Check(headingSchema, token)) {
+                        return predecessor.call(this, token, width, next, context);
+                    }
+
+                    const cache: unknown = Object.getOwnPropertyDescriptor(
+                        this,
+                        "cachedTokens",
+                    )?.value;
+                    if (!(cache instanceof WeakRef))
+                        return predecessor.call(this, token, width, next, context);
+                    const value: unknown = cache.deref();
+                    const render = renders.get(this);
+                    let index = render?.index;
+                    if (index === undefined || render?.cache !== value) {
+                        if (!Value.Check(tokenCacheSchema, value)) {
+                            return predecessor.call(this, token, width, next, context);
+                        }
+                        index = indexHeadings(value.tokens);
+                        if (render !== undefined) {
+                            render.cache = value;
+                            render.index = index;
+                        }
+                    }
+                    const ordinal = index.ordinals.get(token);
+                    // Only top-level headings have ranks and fold ordinals. Nested headings
+                    // still belong to their quote/list renderer and must use the predecessor.
+                    if (ordinal === undefined)
+                        return predecessor.call(this, token, width, next, context);
+                    const theme: unknown = Object.getOwnPropertyDescriptor(this, "theme")?.value;
+                    if (!Value.Check(themeSchema, theme))
+                        return predecessor.call(this, token, width, next, context);
+                    const depths = groups.get(this)?.depths ?? index.depths;
+                    const rank = depths.indexOf(token.depth);
+                    const yellow = (text: string): string =>
+                        styleText(text, { fg: parseColor("#ffff00") }, "truecolor");
+
+                    const identity = (text: string): string => text;
+                    let bold = theme.bold;
+                    if (rank === 1) bold = identity;
+                    Reflect.set(this, "theme", {
+                        ...theme,
+                        heading: yellow,
+                        bold,
+                        underline: identity,
+                    });
+
+                    let lines: string[];
+
+                    try {
+                        // The first two distinct depths omit markers; deeper headings keep their real depth.
+                        let renderedToken = token;
+                        if (rank >= 0 && rank < 2) renderedToken = { ...token, depth: 2 };
+                        lines = predecessor.call(this, renderedToken, width, next, context);
+                    } finally {
+                        Reflect.set(this, "theme", theme);
+                    }
+
+                    const collapsed = foldable.get(this);
+                    if (collapsed !== undefined && lines.length > 0) {
+                        let indicator = "";
+                        if (collapsed.has(ordinal)) indicator = yellow("▸ ");
+                        return [
+                            `\u001b]9999;pi-fold:${token.depth}:${ordinal}\u0007${indicator}${lines[0]}${endMarker}`,
+                            ...lines.slice(1),
+                        ];
+                    }
+
+                    return lines;
+                },
+        );
+        return {
+            dispose(): void {
+                try {
+                    tokenPatch.dispose();
+                } finally {
+                    renderPatch.dispose();
+                }
+            },
+        };
+    } catch (cause: unknown) {
+        renderPatch.dispose();
+        throw cause;
+    }
 }
 
 /** Mouse rows are derived from Pi's own wrapped render, not guessed from source text. */
