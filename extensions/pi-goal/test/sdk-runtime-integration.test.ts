@@ -183,7 +183,10 @@ test("custom starts run authoritative Goal work and reject stale continuations w
         {
           customType: CUSTOM_ENTRY_TYPE,
           content: [
-            { type: "text", text: '<pi_goal_continuation goal_id="different-content-id">' },
+            {
+              type: "text",
+              text: '<pi_goal_continuation goal_id="different-content-id">',
+            },
           ],
           display: false,
           details: { kind: "continuation", goalId },

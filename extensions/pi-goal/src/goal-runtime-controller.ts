@@ -272,7 +272,10 @@ export function registerGoalRuntimeController(pi: ExtensionAPI): void {
     controller.syncGoalToolPolicy();
 
     if (!controller.canInvokeTool(event.toolName)) {
-      return { block: true, reason: `Goal blocked ${event.toolName} while a goal is active.` };
+      return {
+        block: true,
+        reason: `Goal blocked ${event.toolName} while a goal is active.`,
+      };
     }
 
     return undefined;

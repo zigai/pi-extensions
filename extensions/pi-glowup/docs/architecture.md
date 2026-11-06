@@ -35,4 +35,4 @@ File reads used to capture mutation previews live in `tools/built-in/file-snapsh
 
 Component tests mirror the source areas. `test/xterm/` checks interpreted terminal output, and `test/pty/` exercises the actual Pi process. `test/architecture.test.ts` checks dependency direction and cycles, including type-only imports. The package check packs the project and typechecks and executes a protocol consumer outside the repository, with only its schema peer supplied.
 
-Run `just check` and `just benchmark-quick` after structural changes. Changes to source asset locations must also preserve packed-package theme resolution.
+Run `just check` and `just bench-quick` after structural changes. Changes to source asset locations must also preserve packed-package theme resolution.

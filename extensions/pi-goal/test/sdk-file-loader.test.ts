@@ -42,7 +42,10 @@ test("standalone Goal blocks a deferred question through the real nested-tool pi
               parameters: Type.Object({}),
               async execute() {
                 questionCalls += 1;
-                return { content: [{ type: "text", text: "answer" }], details: undefined };
+                return {
+                  content: [{ type: "text", text: "answer" }],
+                  details: undefined,
+                };
               },
             });
             pi.registerTool({

@@ -72,7 +72,7 @@ Hosted CI runs `platform-build` on each platform. The optional Crabbox harness r
 
 1. Verify Node major version is at least the configured Node 24 validation baseline.
 2. Run `npm ci` at the synced monorepo root, using its shared lockfile.
-3. Run root `npm run build` to build shared runtime dependencies, then workspace `npm run verify`.
+3. Run root `npm run build` to build shared runtime dependencies, then workspace `just check`.
 4. Pack this workspace and its built local settings, Glowup, and typed-args dependencies. The packages keep normal exact runtime dependency declarations, not bundled workspace sources.
 5. Create a clean target-local pi project.
 6. Install those tarballs into that project with `npm install --ignore-scripts --no-save`, so the check exercises the current local dependency closure rather than registry copies.

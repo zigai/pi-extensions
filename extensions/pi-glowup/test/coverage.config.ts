@@ -5,7 +5,6 @@ export default defineConfig({
     root: resolve(import.meta.dirname, ".."),
     test: {
         include: ["test/**/*.test.ts"],
-        exclude: ["test/pty/**"],
         coverage: {
             provider: "v8",
             include: ["src/**/*.ts"],
@@ -14,7 +13,7 @@ export default defineConfig({
                 "src/rendering/syntax/bundled-language-names.ts",
             ],
             reportsDirectory: "coverage/in-process",
-            reporter: ["text", "json", "json-summary", "html"],
+            reporter: ["text"],
             reportOnFailure: true,
         },
     },

@@ -85,7 +85,7 @@ For compatibility with the previous appearance, `addedRowBackground` and
 | `toolCallIndicator.bold`                  | `true`           | Render the tool-call indicator in bold.                         |
 | `toolLabels.mode`                         | `"static"`       | Use stable or lifecycle-aware tool labels.                      |
 | `writePreview.movingViewport`             | `true`           | Follow the newest rows while writes stream.                     |
-| `syntax.preloadLanguages`                 | _See JSON below_ | Languages available for synchronous highlighting.               |
+| `syntax.preloadLanguages`                 | *See JSON below* | Languages available for synchronous highlighting.               |
 | `syntax.bracketPairColoring`              | `true`           | Color matching brackets; disable to use the syntax theme color. |
 | `syntax.projectLanguageDetection.enabled` | `true`           | Add languages inferred from project files.                      |
 | `patches.assistantSeparator`              | `true`           | Add spacing and separators around assistant messages.           |

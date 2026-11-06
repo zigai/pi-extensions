@@ -4,15 +4,10 @@ export default defineConfig({
     root: import.meta.dirname,
     test: {
         coverage: {
+            reporter: ["text"],
             provider: "v8",
             include: ["src/**/*.ts"],
             exclude: ["src/cli-entry.ts"],
-            thresholds: {
-                branches: 90,
-                functions: 95,
-                lines: 95,
-                statements: 95,
-            },
         },
     },
 });

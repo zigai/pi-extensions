@@ -233,8 +233,16 @@ test("doctor applicability omits provider and model checks when no targets or mo
 });
 
 test.each([
-  { targets: ["ubuntu"], providers: ["ssh"], message: "crabbox provider missing: local-container" },
-  { targets: ["macos"], providers: ["local-container"], message: "crabbox provider missing: ssh" },
+  {
+    targets: ["ubuntu"],
+    providers: ["ssh"],
+    message: "crabbox provider missing: local-container",
+  },
+  {
+    targets: ["macos"],
+    providers: ["local-container"],
+    message: "crabbox provider missing: ssh",
+  },
   {
     targets: ["windows-native"],
     providers: ["ssh"],
@@ -385,7 +393,8 @@ test("platform verification config and package scripts require macOS, Ubuntu, an
     "node scripts/platform-verification/check.mjs",
   );
   assert.match(packageJson.scripts?.["check:code"] ?? "", /check:platform-verification/);
-  assert.equal(packageJson.scripts?.verify, "npm run check");
+  assert.equal(packageJson.scripts?.verify, undefined);
+  assert.equal(packageJson.scripts?.check, undefined);
   assert.equal(
     packageJson.scripts?.["verify:platform:doctor"],
     "node scripts/platform-verification.mjs doctor",

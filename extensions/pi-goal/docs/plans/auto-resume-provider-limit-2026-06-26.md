@@ -95,7 +95,7 @@ Do not add provider API polling, persistence, exponential backoff, user config, 
    - Extend `test/support/runtime-harness.ts` with a small fire helper so tests do not wait five minutes.
 
 10. **Verify**
-    - Run `npm run verify`.
+    - Run `just check`.
 
 ## Open Questions
 

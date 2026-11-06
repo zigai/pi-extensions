@@ -16,6 +16,7 @@ export default defineConfig({
             ...[...isolatedDirectories].map((directory) => `${directory}/**`),
         ],
         coverage: {
+            reporter: ["text"],
             provider: "v8",
             include: [
                 "extensions/**/*.ts",

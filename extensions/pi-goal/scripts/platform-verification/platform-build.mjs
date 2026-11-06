@@ -96,7 +96,17 @@ const npmCi = run(npm, ["ci"], { cwd: repositoryRoot });
 console.log(`PLATFORM_NPM_CI_EXIT=${npmCi.status}`);
 const build = run(npm, ["run", "build"], { cwd: repositoryRoot });
 console.log(`PLATFORM_WORKSPACE_BUILD_EXIT=${build.status}`);
-const verify = run(npm, ["run", "verify"], { cwd: sourceRoot });
+const verificationSteps = [
+  "format:check",
+  "check:platform-verification",
+  "lint",
+  "typecheck",
+  "test",
+];
+const verificationResults = verificationSteps.map((script) =>
+  run(npm, ["run", script], { cwd: sourceRoot }),
+);
+const verify = { status: verificationResults.find((result) => result.status !== 0)?.status ?? 0 };
 console.log(`PLATFORM_VERIFY_EXIT=${verify.status}`);
 const packStderr = join(packDir, "npm-pack.stderr.txt");
 const pack = run(npm, ["pack", "--silent", "--pack-destination", packDir], {

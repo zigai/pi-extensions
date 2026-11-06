@@ -73,7 +73,7 @@ export function runWorkspaceTask(root: string, task: string, args: readonly stri
         task = task.slice(0, -5);
     }
 
-    if (["lint", "lint:fix", "format", "format:check"].includes(task)) {
+    if (["lint", "lint:fix"].includes(task)) {
         run(root, "node", ["scripts/tracked-check.ts", task, ...args]);
         return;
     }

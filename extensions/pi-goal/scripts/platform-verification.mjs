@@ -38,7 +38,7 @@ Targets:
   macos, ubuntu, windows-native
 
 Suites:
-  platform-build             npm ci, npm run verify, npm pack, packed pi install/list with project trust approval
+  platform-build             npm ci, npm quality scripts, npm pack, packed pi install/list with project trust approval
   goal-runtime-verification         real model run through packed @zigai/pi-goal install
 
 Options:
