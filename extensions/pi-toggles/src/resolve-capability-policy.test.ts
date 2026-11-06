@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { Capability } from "./capability.ts";
+import { selectorMatches, type Capability } from "./capability.ts";
+import type { CapabilitySelector, PolicyDecision } from "./settings.ts";
 import type { PolicyConfiguration } from "./capability-policy.ts";
 import type { FactArguments, FactResolution } from "./condition.ts";
 import { decideToolInvocation } from "./lazy-tool-search.ts";
@@ -324,4 +325,248 @@ describe("resolveCapabilityPolicy", () => {
             allowed: true,
         });
     });
+});
+
+function matchingToolRule(
+    id: string,
+    priority: number,
+    states: ("on" | "off")[],
+): PolicyConfiguration["global"]["rules"][number] {
+    return {
+        id,
+        priority,
+        when: { fact: "prompt.text", contains: "review" },
+        decisions: states.map((state) => ({ target: { kind: "tool", name: "read" }, state })),
+        activateProfiles: [],
+    };
+}
+
+it("keeps source/state trace deduplication independent of scope", () => {
+    const base = emptyConfiguration();
+    const configuration: PolicyConfiguration = {
+        ...base,
+        global: { ...base.global, rules: [matchingToolRule("shared", 0, ["on"])] },
+        project: { ...base.project, rules: [matchingToolRule("shared", 0, ["on"])] },
+    };
+    const same = resolveCapabilityPolicy([readTool], configuration, resolveFact);
+    expect(same.capabilities[0]?.trace).toEqual([
+        { scope: "project", origin: "rule", source: "shared", state: "on", selected: true },
+    ]);
+
+    const different = resolveCapabilityPolicy(
+        [readTool],
+        {
+            ...configuration,
+            global: { ...base.global, rules: [matchingToolRule("shared", 0, ["off"])] },
+        },
+        resolveFact,
+    );
+    expect(different.capabilities[0]?.trace).toEqual([
+        { scope: "project", origin: "rule", source: "shared", state: "on", selected: true },
+        {
+            scope: "global",
+            origin: "rule",
+            source: "shared",
+            state: "off",
+            selected: false,
+            reason: "shadowed",
+        },
+    ]);
+});
+
+it("preserves duplicate conflict traces even when they share the fallback winner's source/state", () => {
+    const base = emptyConfiguration();
+    const plan = resolveCapabilityPolicy(
+        [readTool],
+        {
+            ...base,
+            global: { ...base.global, rules: [matchingToolRule("shared", 0, ["on"])] },
+            project: {
+                ...base.project,
+                rules: [matchingToolRule("shared", 10, ["on", "on", "off"])],
+            },
+        },
+        resolveFact,
+    );
+    const entry = plan.capabilities[0];
+    expect(entry?.winner).toEqual({
+        scope: "global",
+        origin: "rule",
+        source: "shared",
+        state: "on",
+        selected: true,
+    });
+    expect(entry?.trace).toEqual(
+        ["on", "on", "off"].map((state) => ({
+            scope: "project",
+            origin: "rule",
+            source: "shared",
+            state,
+            selected: false,
+            reason: "conflict",
+        })),
+    );
+    expect(plan.diagnostics).toHaveLength(1);
+    expect(plan.diagnostics[0]).toContain("shared=on, shared=on, shared=off");
+});
+
+it("walks all conflicting precedence groups in order before selecting a lower-priority fallback", () => {
+    const base = emptyConfiguration();
+    const plan = resolveCapabilityPolicy(
+        [readTool],
+        {
+            ...base,
+            project: {
+                ...base.project,
+                rules: [
+                    matchingToolRule("higher", 20, ["on", "off"]),
+                    matchingToolRule("middle", 10, ["on", "off"]),
+                    matchingToolRule("fallback", 0, ["on"]),
+                ],
+            },
+        },
+        resolveFact,
+    );
+    expect(
+        plan.capabilities[0]?.trace.map((entry) => [
+            entry.source,
+            entry.state,
+            entry.selected,
+            entry.reason,
+        ]),
+    ).toEqual([
+        ["higher", "on", false, "conflict"],
+        ["higher", "off", false, "conflict"],
+        ["middle", "on", false, "conflict"],
+        ["middle", "off", false, "conflict"],
+        ["fallback", "on", true, undefined],
+    ]);
+    expect(plan.diagnostics).toHaveLength(2);
+});
+
+it("indexes literal source names without prototype keys or cross-state collisions", () => {
+    const base = emptyConfiguration();
+    const plan = resolveCapabilityPolicy(
+        [readTool],
+        {
+            ...base,
+            global: { ...base.global, rules: [matchingToolRule("constructor", 0, ["on"])] },
+        },
+        resolveFact,
+        ["__proto__", "constructor", "toString"].map((owner) => ({
+            version: 1,
+            sessionId: "synthetic-session",
+            owner,
+            decisions: [{ target: { kind: "tool", name: "read" }, state: "off" }],
+        })),
+    );
+    expect(plan.capabilities[0]?.trace.map((entry) => [entry.source, entry.state])).toEqual([
+        ["constructor", "on"],
+        ["__proto__", "off"],
+        ["constructor", "off"],
+        ["toString", "off"],
+    ]);
+    expect(plan.capabilities[0]?.desiredState).toBe("on");
+});
+
+it("merges all eight selector shapes in legacy stable trace order", () => {
+    const selectors = Array.from({ length: 8 }, (_, mask) => {
+        const target: CapabilitySelector = { kind: readTool.kind };
+        if ((mask & 1) !== 0) target.name = readTool.name;
+        if ((mask & 2) !== 0) target.source = readTool.source.source;
+        if ((mask & 4) !== 0) target.path = readTool.source.path;
+        return target;
+    });
+    const base = emptyConfiguration();
+    const configuration: PolicyConfiguration = {
+        ...base,
+        global: {
+            ...base.global,
+            rules: selectors.map((target, index) => ({
+                id: `rule-${7 - index}`,
+                priority: 0,
+                when: { fact: "prompt.text", equals: "review this change" },
+                decisions: [{ target, state: "on" }],
+                activateProfiles: [],
+            })),
+        },
+    };
+    const plan = resolveCapabilityPolicy([readTool], configuration, resolveFact);
+    expect(plan.capabilities[0]?.trace.map((entry) => entry.source)).toEqual(
+        Array.from({ length: 8 }, (_, index) => `rule-${index}`),
+    );
+    expect(plan.capabilities[0]?.winner?.source).toBe("rule-0");
+});
+
+it("matches prefiltered wildcard policies across mixed exact and partial selectors", () => {
+    for (let seed = 1; seed <= 100; seed++) {
+        let value = seed;
+        const random = (maximum: number) => {
+            value = (Math.imul(value, 1664525) + 1013904223) >>> 0;
+            return value % maximum;
+        };
+        const catalog = [
+            readTool,
+            writeTool,
+            command,
+            {
+                ...readTool,
+                id: "other-read",
+                source: { ...readTool.source, source: "__proto__", path: "" },
+            },
+        ];
+        const decisions = (): PolicyDecision[] =>
+            Array.from({ length: 40 }, () => {
+                const capability = catalog[random(catalog.length)] ?? readTool;
+                const mask = random(8);
+                const states = ["on", "off", "inherit", "lazy"] as const;
+                const target: CapabilitySelector = { kind: capability.kind };
+                if ((mask & 1) !== 0) target.name = capability.name;
+                if ((mask & 2) !== 0) target.source = capability.source.source;
+                if ((mask & 4) !== 0) target.path = capability.source.path;
+                return { target, state: states[random(states.length)] ?? "on" };
+            });
+        const base = emptyConfiguration();
+        const configuration: PolicyConfiguration = {
+            ...base,
+            global: {
+                ...base.global,
+                overrides: decisions(),
+                rules: Array.from({ length: 6 }, () => ({
+                    id: `rule-${random(3)}`,
+                    priority: random(3),
+                    when: { fact: "prompt.text", equals: "review this change" },
+                    decisions: decisions(),
+                    activateProfiles: [],
+                })),
+            },
+            project: { ...base.project, overrides: decisions() },
+            session: { overrides: decisions() },
+        };
+        for (const capability of catalog) {
+            const prefilter = (input: readonly PolicyDecision[]): PolicyDecision[] =>
+                input
+                    .filter((decision) => selectorMatches(decision.target, capability))
+                    .map((decision) => ({ ...decision, target: { kind: capability.kind } }));
+            const reference: PolicyConfiguration = {
+                ...configuration,
+                global: {
+                    ...configuration.global,
+                    overrides: prefilter(configuration.global.overrides),
+                    rules: configuration.global.rules.map((rule) => ({
+                        ...rule,
+                        decisions: prefilter(rule.decisions),
+                    })),
+                },
+                project: {
+                    ...configuration.project,
+                    overrides: prefilter(configuration.project.overrides),
+                },
+                session: { overrides: prefilter(configuration.session.overrides) },
+            };
+            expect(resolveCapabilityPolicy([capability], configuration, resolveFact)).toEqual(
+                resolveCapabilityPolicy([capability], reference, resolveFact),
+            );
+        }
+    }
 });
