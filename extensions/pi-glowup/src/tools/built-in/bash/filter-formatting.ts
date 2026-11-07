@@ -730,6 +730,7 @@ async function formatJq<R extends FilterRunResult>(
     let best: { readonly output: string; readonly run: R } | undefined;
     const fallback = (result: FilterFormatResult<R>): FilterFormatResult<R> => {
         if (best === undefined) return result;
+
         return { kind: "formatted", ...best };
     };
 

@@ -40,6 +40,7 @@ test("Codex request-tier wrapper is idempotent, removable, and preserves a later
 
 test("Codex raw streams price concurrent requests by their final payload, without mutating caller options", async () => {
     const provider = openaiCodexProvider();
+
     // This exercises request hooks/pricing, not membership of a retired catalog ID.
     const model = provider
         .getModels()
@@ -113,6 +114,7 @@ test("Codex raw streams price concurrent requests by their final payload, withou
         const prioritized = await priority;
         assert.equal(regular.stopReason, "stop", regular.errorMessage);
         assert.equal(prioritized.stopReason, "stop", prioritized.errorMessage);
+
         // Pi 1.5 additionally reports totalFromProvider; this test owns tier pricing.
         assert.partialDeepStrictEqual(regular.usage.cost, {
             input: 1,
@@ -138,6 +140,7 @@ test("Codex raw streams price concurrent requests by their final payload, withou
 
 test("Codex refuses requests when the SDK loses the payload hook receiver", async () => {
     const provider = openaiCodexProvider();
+
     // This exercises request hooks/pricing, not membership of a retired catalog ID.
     const model = provider
         .getModels()

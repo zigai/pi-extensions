@@ -10,17 +10,21 @@ import { build } from "esbuild";
 const current = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const baseline = process.argv[2];
 if (baseline === undefined) throw new Error("Pass the baseline extension directory");
+
 const temporary = await mkdtemp(path.join(tmpdir(), "glowup-extraction-"));
+
 try {
     await symlink(
         path.resolve(current, "../../node_modules"),
         path.join(temporary, "node_modules"),
     );
+
     for (const [label, root] of [
         ["baseline", path.resolve(baseline)],
         ["current", current],
     ]) {
         if (root === undefined) continue;
+
         const fake = path.join(temporary, `${label}-worker.ts`);
         await writeFile(
             fake,
@@ -40,7 +44,9 @@ export class Worker extends EventEmitter {
 }
 `,
         );
+
         const entry = path.join(temporary, `${label}-entry.ts`);
+
         await writeFile(
             entry,
             `
@@ -114,7 +120,9 @@ const module = { createStatementService, createEmbeddedProgramService, extractEm
         );
 `,
         );
+
         const outfile = path.join(temporary, `${label}.mjs`);
+
         await build({
             entryPoints: [entry],
             outfile,
@@ -147,6 +155,7 @@ const module = { createStatementService, createEmbeddedProgramService, extractEm
  audit: () => ({ entries: entries.size, pending: [...entries.values()].filter(entry => !entry.settled).length, sourceBytes: [...entries.keys()].reduce((sum, source) => sum + Buffer.byteLength(source), 0) }),`,
                                     );
                                 }
+
                                 return {
                                     contents,
                                     loader: "ts",

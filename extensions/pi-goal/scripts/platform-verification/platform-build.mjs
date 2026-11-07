@@ -96,6 +96,7 @@ const npmCi = run(npm, ["ci"], { cwd: repositoryRoot });
 console.log(`PLATFORM_NPM_CI_EXIT=${npmCi.status}`);
 const build = run(npm, ["run", "build"], { cwd: repositoryRoot });
 console.log(`PLATFORM_WORKSPACE_BUILD_EXIT=${build.status}`);
+
 const verificationSteps = [
   "format:check",
   "check:platform-verification",
@@ -103,6 +104,7 @@ const verificationSteps = [
   "typecheck",
   "test",
 ];
+
 const verificationResults = verificationSteps.map((script) =>
   run(npm, ["run", script], { cwd: sourceRoot }),
 );

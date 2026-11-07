@@ -7,6 +7,7 @@ const sources = [
     { id: "ticket", trigger: "ticket:", separator: "/" },
     { id: "teams", trigger: "%", separator: ":" },
 ];
+
 const color = "\x1b[35m";
 
 test("colors dynamically registered syntax, quoted segments and wrapped content without altering text", () => {
@@ -31,10 +32,12 @@ test("preserves and restores existing colors, handles incomplete mentions and tr
 
 test("patch colors a real user component and observes source changes", async () => {
     const { UserMessageComponent, initTheme } = await import("@earendil-works/pi-coding-agent");
+
     const keys = [
         Symbol.for("@earendil-works/pi-coding-agent:theme"),
         Symbol.for("@mariozechner/pi-coding-agent:theme"),
     ];
+
     const previous = keys.map((key) => Object.getOwnPropertyDescriptor(globalThis, key));
     initTheme(undefined, false);
     const { installUserMentionRendering } = await import("../src/message-rendering.ts");
@@ -87,10 +90,12 @@ test("web URL ranges take precedence over overlapping custom mentions", () => {
 
 test("colors visible Markdown mentions without coloring hidden link destinations", async () => {
     const { UserMessageComponent, initTheme } = await import("@earendil-works/pi-coding-agent");
+
     const keys = [
         Symbol.for("@earendil-works/pi-coding-agent:theme"),
         Symbol.for("@mariozechner/pi-coding-agent:theme"),
     ];
+
     const previous = keys.map((key) => Object.getOwnPropertyDescriptor(globalThis, key));
     initTheme(undefined, false);
     const { installUserMentionRendering } = await import("../src/message-rendering.ts");
@@ -116,10 +121,12 @@ test("colors visible Markdown mentions without coloring hidden link destinations
 
 test("colors a Markdown mention across real wrapped lines", async () => {
     const { UserMessageComponent, initTheme } = await import("@earendil-works/pi-coding-agent");
+
     const keys = [
         Symbol.for("@earendil-works/pi-coding-agent:theme"),
         Symbol.for("@mariozechner/pi-coding-agent:theme"),
     ];
+
     const previous = keys.map((key) => Object.getOwnPropertyDescriptor(globalThis, key));
     initTheme(undefined, false);
     const { installUserMentionRendering } = await import("../src/message-rendering.ts");
@@ -146,10 +153,12 @@ test("colors a Markdown mention across real wrapped lines", async () => {
 
 test("does not confuse hidden destinations with repeated visible mentions", async () => {
     const { UserMessageComponent, initTheme } = await import("@earendil-works/pi-coding-agent");
+
     const keys = [
         Symbol.for("@earendil-works/pi-coding-agent:theme"),
         Symbol.for("@mariozechner/pi-coding-agent:theme"),
     ];
+
     const previous = keys.map((key) => Object.getOwnPropertyDescriptor(globalThis, key));
     initTheme(undefined, false);
     const { installUserMentionRendering } = await import("../src/message-rendering.ts");
@@ -172,10 +181,12 @@ test("does not confuse hidden destinations with repeated visible mentions", asyn
 
 test("leaves output unchanged when the marker probe changes the rendered text", async () => {
     const { UserMessageComponent, initTheme } = await import("@earendil-works/pi-coding-agent");
+
     const keys = [
         Symbol.for("@earendil-works/pi-coding-agent:theme"),
         Symbol.for("@mariozechner/pi-coding-agent:theme"),
     ];
+
     const previous = keys.map((key) => Object.getOwnPropertyDescriptor(globalThis, key));
     initTheme(undefined, false);
     const { installUserMentionRendering } = await import("../src/message-rendering.ts");
@@ -201,10 +212,12 @@ test("leaves output unchanged when the marker probe changes the rendered text", 
 
 test("colors all visible mentions when a hidden destination requires separate probes", async () => {
     const { UserMessageComponent, initTheme } = await import("@earendil-works/pi-coding-agent");
+
     const keys = [
         Symbol.for("@earendil-works/pi-coding-agent:theme"),
         Symbol.for("@mariozechner/pi-coding-agent:theme"),
     ];
+
     const previous = keys.map((key) => Object.getOwnPropertyDescriptor(globalThis, key));
     initTheme(undefined, false);
     const { installUserMentionRendering } = await import("../src/message-rendering.ts");
@@ -231,10 +244,12 @@ test("colors all visible mentions when a hidden destination requires separate pr
 
 test("fails visibly if Pi changes the private Markdown render configuration", async () => {
     const { UserMessageComponent, initTheme } = await import("@earendil-works/pi-coding-agent");
+
     const keys = [
         Symbol.for("@earendil-works/pi-coding-agent:theme"),
         Symbol.for("@mariozechner/pi-coding-agent:theme"),
     ];
+
     const previous = keys.map((key) => Object.getOwnPropertyDescriptor(globalThis, key));
     initTheme(undefined, false);
     const { installUserMentionRendering } = await import("../src/message-rendering.ts");
@@ -255,10 +270,12 @@ test("fails visibly if Pi changes the private Markdown render configuration", as
 
 test("batches hidden destinations and caches the probe across repaints", async () => {
     const { UserMessageComponent, initTheme } = await import("@earendil-works/pi-coding-agent");
+
     const keys = [
         Symbol.for("@earendil-works/pi-coding-agent:theme"),
         Symbol.for("@mariozechner/pi-coding-agent:theme"),
     ];
+
     const previous = keys.map((key) => Object.getOwnPropertyDescriptor(globalThis, key));
     initTheme(undefined, false);
     const { installUserMentionRendering } = await import("../src/message-rendering.ts");
@@ -267,6 +284,7 @@ test("batches hidden destinations and caches the probe across repaints", async (
         calls++;
         return text;
     };
+
     const user = new UserMessageComponent(
         "**hi** [link](%hidden) %a %b %c %d %e %f %g %h %i %j %k %l %m %n %o %p",
         undefined,
@@ -294,21 +312,25 @@ test("batches hidden destinations and caches the probe across repaints", async (
 test("invalidates cached probes when theme or transformer configuration changes in place", async () => {
     const { UserMessageComponent, initTheme, getMarkdownTheme } =
         await import("@earendil-works/pi-coding-agent");
+
     const keys = [
         Symbol.for("@earendil-works/pi-coding-agent:theme"),
         Symbol.for("@mariozechner/pi-coding-agent:theme"),
     ];
+
     const previous = keys.map((key) => Object.getOwnPropertyDescriptor(globalThis, key));
     initTheme(undefined, false);
     const { installUserMentionRendering } = await import("../src/message-rendering.ts");
     let calls = 0;
     const theme = getMarkdownTheme();
+
     const transformers = [
         (text: string): string => {
             calls++;
             return text;
         },
     ];
+
     const user = new UserMessageComponent("**hi** %team", theme, 1, transformers);
     let prefix = color;
     const definitions = [{ id: "team", trigger: "%" }];

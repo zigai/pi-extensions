@@ -10,22 +10,36 @@ class FakeTerminal implements Terminal {
     rows = 20;
     kittyProtocolActive = false;
     input: (data: string) => void = () => {};
+
     start(onInput: (data: string) => void): void {
         this.input = onInput;
     }
+
     stop(): void {}
+
     async drainInput(): Promise<void> {}
+
     write(): void {}
+
     moveBy(): void {}
+
     hideCursor(): void {}
+
     showCursor(): void {}
+
     clearLine(): void {}
+
     clearFromCursor(): void {}
+
     clearScreen(): void {}
+
     setTitle(): void {}
+
     setProgress(): void {}
+
     setProgramStatus(): void {}
 }
+
 const identity = (text: string) => text;
 const theme: MarkdownTheme = {
     heading: identity,

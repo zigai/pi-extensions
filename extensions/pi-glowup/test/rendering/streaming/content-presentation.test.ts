@@ -17,10 +17,11 @@ function install(
     code: "token" | "statement" | "block" = "statement",
 ) {
     const streams = createCodeStreamStore();
-    dispose.push(() => streams.dispose());
+    dispose.push(async () => streams.dispose());
     const policy = createStreamingPresentation(() => ({ prose, code, streams }));
     const handle = registerGlowupStreamingPolicy(policy);
     dispose.push(() => handle.dispose());
+
     return { streams, policy };
 }
 
@@ -83,6 +84,7 @@ describe("shared generated-content presentation", () => {
                 expect(partial).toContain("const ready=1;");
                 expect(partial).not.toContain("pending");
             } else expect(partial).toBe("");
+
             expect(await presentGlowupSnapshot({ ...input, complete: true })).toBe(source);
             expect(input.source).toBe(source);
         },

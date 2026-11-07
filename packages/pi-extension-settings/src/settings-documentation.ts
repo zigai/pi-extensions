@@ -270,6 +270,7 @@ function markdownTable(header: readonly string[], rows: readonly (readonly strin
     );
     const line = (cells: readonly string[]) =>
         `| ${cells.map((cell, column) => cell + " ".repeat((widths[column] ?? 0) - cellWidth(cell))).join(" | ")} |`;
+
     return [line(header), line(widths.map((width) => "-".repeat(width))), ...rows.map(line)];
 }
 

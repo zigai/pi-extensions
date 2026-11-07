@@ -26,6 +26,7 @@ export function makeComponent(
             if (cachedWidth === safeWidth && cachedLines !== undefined) {
                 return cachedLines;
             }
+
             const shared = sharedCache?.get(safeWidth);
             if (shared !== undefined) return [...shared];
 

@@ -693,7 +693,9 @@ export function getStylePrefix(styleFn: (text: string) => string): string {
 /** Color OSC 8 web-link labels, carrying hyperlink state across rendered lines. */
 export function highlightWebLinkLabelLines(lines: readonly string[], style: string): string[] {
     if (!style) return [...lines];
+
     let active = false;
+
     return lines.map((line) => {
         const { tokens } = tokenizeAnsi(line);
         const ranges: HighlightRange[] = [];
@@ -707,13 +709,17 @@ export function highlightWebLinkLabelLines(lines: readonly string[], style: stri
                     });
                 continue;
             }
+
             if (!token.text.startsWith(`${ESC}]8;`)) continue;
+
             const sequence = token.text.slice(4).replace(/(?:\x07|\x1b\\)$/, "");
             const separator = sequence.indexOf(";");
             if (separator < 0) continue;
+
             const destination = sequence.slice(separator + 1);
             active = /^https?:\/\//i.test(destination);
         }
+
         return highlightMessageLineRanges(line, ranges);
     });
 }
@@ -730,11 +736,14 @@ export function highlightFallbackMarkdownLinkLabels(
 ): string[] {
     if (!style || /[`\\<>\n]/.test(source) || source.startsWith("    ") || source.includes("!["))
         return [...lines];
-    const links = [...source.matchAll(/\[([^\[\]\n]+)\]\((https?:\/\/[^\s()]+)\)/g)];
+
+    const links = [...source.matchAll(/\[([^[\]\n]+)\]\((https?:\/\/[^\s()]+)\)/g)];
     if (links.length !== 1) return [...lines];
+
     const label = links[0]?.[1];
     const url = links[0]?.[2];
     if (!label || !url || /[*_~]/.test(label)) return [...lines];
+
     const target = `${label} (${url})`;
     const matches: { index: number; start: number }[] = [];
     for (const [index, line] of lines.entries()) {
@@ -745,7 +754,9 @@ export function highlightFallbackMarkdownLinkLabels(
             position = plain.indexOf(target, position + 1);
         }
     }
+
     if (matches.length !== 1) return [...lines];
+
     const match = matches[0];
     if (match === undefined) return [...lines];
     return lines.map((line, index) => {

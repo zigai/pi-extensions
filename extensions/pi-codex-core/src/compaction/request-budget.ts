@@ -677,6 +677,7 @@ async function estimateResponsesInputItemTokens(
             // overhead, not ciphertext tokens. Summaries/plaintext are not replay
             // costs; checkpoint ciphertext below uses a different heuristic.
             if (encryptedContent === undefined) return 0;
+
             const decodedBytes = Math.floor((Buffer.byteLength(encryptedContent, "utf8") * 3) / 4);
             return Math.ceil(
                 Math.max(0, decodedBytes - REASONING_ENCRYPTION_OVERHEAD_BYTES) /

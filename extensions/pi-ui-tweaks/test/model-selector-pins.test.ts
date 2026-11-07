@@ -5,6 +5,7 @@ import { installModelSelectorPinsPatch } from "../src/model-selector-pins.ts";
 
 class Text {
     constructor(public text: string) {}
+
     setText(text: string): void {
         this.text = text;
     }
@@ -87,6 +88,7 @@ test("pins retain native physical and virtual identities when display names are 
         target.listContainer.children.map((child) => child.text),
         ["Automatic *", "Quick *"],
     );
+
     handle.dispose();
 });
 
@@ -138,6 +140,7 @@ test("pin markers occupy a shared column without moving cursor and current indic
             child.render(12).every((line) => visibleWidth(line) <= 12),
         ),
     );
+
     handle.dispose();
 });
 
@@ -185,5 +188,6 @@ test("pin column stays reserved when scrolling away from matching pins", async (
         ),
         6,
     );
+
     handle.dispose();
 });

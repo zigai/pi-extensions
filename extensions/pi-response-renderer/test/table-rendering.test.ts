@@ -327,6 +327,7 @@ it("keeps the screenshot's long prose columns readable through Markdown and resi
         );
         const markdown = new Markdown(source, 0, 0, theme);
         markFencesHidden(markdown);
+
         for (const width of [173, 100, 180, 173]) {
             const rendered = markdown.render(width);
             const lines = rendered.map(stripVTControlCharacters);
@@ -335,6 +336,7 @@ it("keeps the screenshot's long prose columns readable through Markdown and resi
             expect(Math.min(...widths)).toBeGreaterThanOrEqual(23);
             expect(lines.length).toBeLessThan(35);
             expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+
             if (width === 173) expect(widths).toEqual([41, 49, 49, 28]);
             expect(rendered.join("\n")).toContain("\u001b[31mhsbg_data\u001b[39m");
         }
@@ -948,6 +950,7 @@ it("uses distinct depths and recomputes their ranks as assistant content streams
         expect(stripVTControlCharacters(first).trim()).toBe("First");
         expect(stripVTControlCharacters(second).trim()).toBe("Second");
         expect(stripVTControlCharacters(third).trim()).toBe("###### Third");
+
         for (const line of [first, second, third]) expect(line).toContain("\u001b[38;2;255;255;0m");
         expect(first).toContain("\u001b[1m");
         expect(second).not.toContain("\u001b[1m");
@@ -1065,8 +1068,10 @@ it("clears folds on heading insertion and removal but preserves append-only stre
                 })?.handled,
             ).toBe(true);
         };
+
         const update = (text: string) =>
             component.updateContent({ ...message, content: [{ type: "text", text }] }, true);
+
         const text = () => stripVTControlCharacters(component.render(80).join("\n"));
         click("Target");
         expect(text()).not.toContain("target body");
@@ -1129,6 +1134,7 @@ it("clears folds when an earlier assistant text block is inserted or removed", a
                 })?.handled,
             ).toBe(true);
         };
+
         const text = () => stripVTControlCharacters(component.render(80).join("\n"));
         click("Target");
         expect(text()).not.toContain("target body");
@@ -1139,6 +1145,7 @@ it("clears folds when an earlier assistant text block is inserted or removed", a
             },
             true,
         );
+
         expect(text()).toContain("insert body");
         expect(text()).toContain("target body");
         click("Target");
@@ -1189,6 +1196,7 @@ it("retains a fold while its last heading text continues streaming", async () =>
                 ctrl: false,
             })?.handled,
         ).toBe(true);
+
         component.updateContent(
             { ...message, content: [{ type: "text", text: "# Target\n\nnew body" }] },
             true,

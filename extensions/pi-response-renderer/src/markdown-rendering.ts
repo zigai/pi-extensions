@@ -463,6 +463,7 @@ function classifyLine(
     headingLineTexts: ReadonlySet<string>,
 ): LineClassification {
     if (line.classification !== undefined) return line.classification;
+
     const { raw, plain, trimmed } = line;
     const start = plain.trimStart();
     const intro = plain.trimEnd().endsWith(":");
@@ -517,6 +518,7 @@ export function collapseAssistantBlankLines(
     let previous: PresentedLine | undefined;
     let current = presented.next().value;
     let next = presented.next().value;
+
     while (current !== undefined) {
         let collapse = false;
         if (
@@ -530,11 +532,13 @@ export function collapseAssistantBlankLines(
             const right = classifyLine(next, headingPrefix, headingLineTexts);
             collapse = (left.intro && right.introduced) || (left.paragraph && right.paragraph);
         }
+
         if (!collapse) output.push(current.raw);
         previous = current;
         current = next;
         next = presented.next().value;
     }
+
     return output;
 }
 

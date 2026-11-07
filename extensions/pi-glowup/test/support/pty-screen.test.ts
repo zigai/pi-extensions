@@ -12,6 +12,7 @@ it.each([
         try {
             let prefix = "";
             if (alternate) prefix = "\u001b[?1049h";
+
             await new Promise<void>((resolve) => {
                 terminal.write(`${prefix}abcdefghijkl\r\nNEXT`, resolve);
             });
@@ -19,11 +20,13 @@ it.each([
             const rows = screenRows(terminal);
             expect(rows.slice(0, expected.length).map((row) => row.text)).toEqual(expected);
             expect(rows).toHaveLength(8);
+
             if (alternate) {
                 // xterm retains the alternate buffer's hidden cells for a later grow.
                 expect(terminal.buffer.active.getLine(0)?.translateToString(true)).toBe(
                     "abcdefghijkl",
                 );
+
                 expect(rows[0]?.isWrapped).toBe(false);
                 terminal.resize(12, 8);
                 expect(screenRows(terminal)[0]?.text).toBe("abcdefghijkl");

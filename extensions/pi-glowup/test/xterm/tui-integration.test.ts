@@ -760,10 +760,13 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
             await initializeSyntaxHighlighting(process.env, {
                 preloadLanguages: ["bash", "python"],
             });
+
             for (let index = 0; index < 140; index += 1)
                 highlightSyntaxCode(`print("invented_history_${index}")`, "python");
+
             let initialColumns = 80;
             if (driving === "measured") initialColumns = 200;
+
             const pendingTerminal = new VirtualTerminal(initialColumns, 40);
             const activeTui = createTui(pendingTerminal);
             const source = [
@@ -798,10 +801,13 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
 
             for (const expanded of [false, true, false]) {
                 tool.setExpanded(expanded);
+
                 for (const columns of [80, 120, 200, 80]) {
                     let terminalColumns = columns;
+
                     if (driving === "measured") terminalColumns = 200;
                     pendingTerminal.resize(terminalColumns, 40);
+
                     for (let pass = 0; pass < 3; pass += 1) {
                         tool.render(columns);
                         await pendingTerminal.settle();
@@ -813,9 +819,11 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
                         });
                         await vi.waitUntil(() => getScriptFormatterWorkload().active === 0);
                         await settleSyntaxHighlights();
+
                         // A repaint must not need a forced tool/component invalidation to get colors.
                         activeTui.requestRender();
                     }
+
                     await pendingTerminal.settle();
                     const raw = tool.render(columns);
                     const code = "replacements = {";

@@ -757,6 +757,7 @@ export class TypedCommandUxSession {
             this.armedDoubleTabEditorText = undefined;
             this.activeTypedCompletionEditorText = undefined;
             this.scheduleRefresh(ctx);
+
             return undefined;
         }
 

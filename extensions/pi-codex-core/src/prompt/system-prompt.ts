@@ -42,6 +42,7 @@ const CODEX_PROMPT_PATHS_BY_MODEL = new Map<string, string>([
 ]);
 
 const cachedCodexPromptsByPath = new Map<string, string>();
+
 const PI_DEFAULT_PROMPT_STARTS = [
     "You are an expert coding assistant operating inside pi, a coding agent harness.",
     "You are a coding assistant running inside pi, a coding agent harness. Help users inspect files, run commands, and modify code.",
@@ -307,6 +308,7 @@ function analyzeEarlierPromptChange(
 
     let expectedPromptStarts = PI_DEFAULT_PROMPT_STARTS;
     if (options.customPrompt !== undefined) expectedPromptStarts = [options.customPrompt];
+
     if (!expectedPromptStarts.some((start) => basePrompt.startsWith(start))) {
         return { interop: "unrecognized-replacement" };
     }

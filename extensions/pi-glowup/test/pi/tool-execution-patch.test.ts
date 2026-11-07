@@ -424,6 +424,7 @@ describe("tool execution patches", () => {
             let streaming = true;
             const received: Array<{ complete: boolean; partial: boolean; result: unknown }> = [];
             const component = { render: () => ["call"], invalidate: noop };
+
             if (kind === "built-in") {
                 installBuiltInToolRendererPatch(
                     {
@@ -465,8 +466,10 @@ describe("tool execution patches", () => {
                     prototype,
                 );
             }
+
             let toolName = "custom_tool";
             if (kind === "built-in") toolName = "bash";
+
             const instance = { toolName };
             const context = {
                 ...renderContext,

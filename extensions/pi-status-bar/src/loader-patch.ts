@@ -251,6 +251,7 @@ function renderDisplay(
     paddingX = Math.min(paddingX, Math.max(0, Math.floor((width - 1) / 2)));
 
     const contentWidth = Math.max(1, width - paddingX * 2);
+
     // Indicators can contain multiline dashboards (for example pi-subagents).
     // Let Text render and wrap those rows, then compose only the final working
     // row. Embedded newlines in one returned row break TUI layout and diffing.

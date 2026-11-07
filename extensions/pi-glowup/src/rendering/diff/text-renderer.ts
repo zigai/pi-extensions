@@ -634,6 +634,7 @@ function createDiffComponent(
             );
             let selected: ReadonlySet<number> | undefined;
             if (shouldCollapse) selected = new Set(visibleLines.map((line) => line.index));
+
             const changedRanges = changedRangesForDiffLines(parsedLines, selected);
             const renderLines = (
                 lines: ReadonlyArray<{ readonly line: string; readonly index: number }>,
@@ -691,6 +692,7 @@ function createDiffComponent(
                 currentIdentity = identity();
                 if (renderIdentity !== currentIdentity) component.invalidate();
             }
+
             const version = syntaxHighlightingVersion();
             if (syntaxVersion !== version) {
                 syntaxVersion = version;
@@ -699,9 +701,11 @@ function createDiffComponent(
             }
 
             const lines = component.render(width);
+
             if (sharedCache.has(Math.max(1, Math.floor(width))))
                 renderIdentity = currentIdentity ?? identity();
             else renderIdentity = undefined;
+
             return lines;
         },
         invalidate() {

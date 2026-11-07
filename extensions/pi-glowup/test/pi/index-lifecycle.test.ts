@@ -786,6 +786,7 @@ describe("extension lifecycle", () => {
                 createTui(),
                 root,
             );
+
         return { pi, root, row };
     }
 
@@ -810,8 +811,10 @@ describe("extension lifecycle", () => {
             await pi.updateAssistant(bashMessage("live", "printf held_tail"));
             live.updateArgs({ command: "printf held_tail" });
             live.setExpanded(true);
+
             for (const width of [80, 45, 100])
                 expect(screen(live, width)).not.toContain("held_tail");
+
             await pi.endAssistant(bashMessage("live", "printf held_tail"));
             await vi.waitFor(() => expect(screen(live)).toContain("printf held_tail"));
         },
@@ -826,10 +829,12 @@ describe("extension lifecycle", () => {
             const interrupted = row("interrupted", "printf interrupted_tail");
             const screen = () => stripAnsi(interrupted.render(80).join("\n"));
             expect(screen()).not.toContain("interrupted_tail");
+
             if (ending === "turn") await pi.runTurn("aborted");
             else if (ending === "agent") await pi.endAgent();
             else if (ending === "aborted") await pi.endAssistant(source, "aborted");
             else await pi.endAssistant(source, "error");
+
             await vi.waitFor(() => expect(screen()).toContain("printf interrupted_tail"));
         },
     );
@@ -858,6 +863,7 @@ describe("extension lifecycle", () => {
             await pi.startAssistant(bashMessage("retained", "printf retained_tail"));
             const live = row("retained", "printf retained_tail");
             expect(stripAnsi(live.render(80).join("\n"))).not.toContain("retained_tail");
+
             if (reset === "tree") {
                 await pi.navigateTree();
                 await vi.waitFor(() =>

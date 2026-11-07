@@ -281,6 +281,7 @@ it.each(["declared-shell", "stream-code"])(
         const command = "node -e 'original'";
         let streamCode: CodePreview | undefined;
         if (kind === "stream-code") streamCode = ({ source }) => source;
+
         const read = (completed: boolean) =>
             stripVTControlCharacters(
                 owner

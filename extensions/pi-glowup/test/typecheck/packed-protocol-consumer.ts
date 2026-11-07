@@ -13,21 +13,26 @@ import {
     registerGlowupStreamingPolicy,
     type GlowupContentInput,
 } from "@zigai/pi-glowup/protocol";
+
 const generated = output("Ready. Pending", {
     streaming: { kind: "markdown", complete: false, key: "child", mode: "inherit" },
 });
 if (decodeGlowupNode(generated)?.kind !== "output")
     throw new Error("Missing generated-content declaration");
+
 const input: GlowupContentInput = {
     key: "packed",
     kind: "prose",
     source: "original",
     complete: false,
 };
+
 const registration = registerGlowupStreamingPolicy({
     present: (value) => value.source,
     settled: async () => {},
 });
+
 if (presentGlowupContent(input) !== "original") throw new Error("Missing shared policy");
+
 await presentGlowupSnapshot(input);
 registration.dispose();

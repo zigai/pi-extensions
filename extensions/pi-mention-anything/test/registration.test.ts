@@ -338,6 +338,7 @@ test("failed editor or autocomplete installation rolls back its render patch and
             | ((provider: AutocompleteProvider) => AutocompleteProvider)
             | undefined;
         let disposed = 0;
+
         const ui = {
             notify() {},
             getEditorComponent() {
@@ -347,12 +348,14 @@ test("failed editor or autocomplete installation rolls back its render patch and
                 factory: Parameters<MentionEditorContext["ui"]["setEditorComponent"]>[0],
             ) {
                 if (failure === "editor" && shouldFail) throw new Error("editor failure");
+
                 editorFactory = factory;
             },
             addAutocompleteProvider(
                 factory: (provider: AutocompleteProvider) => AutocompleteProvider,
             ) {
                 installedWrapper = factory;
+
                 if (failure === "autocomplete" && shouldFail)
                     throw new Error("autocomplete failure");
             },
@@ -376,6 +379,7 @@ test("failed editor or autocomplete installation rolls back its render patch and
         assert.equal(UserMessageComponent.prototype.render, original);
         assert.equal(editorFactory, undefined);
         assert.equal(disposed, 1);
+
         if (installedWrapper) {
             const base: AutocompleteProvider = {
                 getSuggestions: async () => null,
@@ -387,6 +391,7 @@ test("failed editor or autocomplete installation rolls back its render patch and
             };
             assert.equal(installedWrapper(base), base);
         }
+
         shouldFail = false;
         await app.emit("session_start", {});
         assert.notEqual(UserMessageComponent.prototype.render, original);

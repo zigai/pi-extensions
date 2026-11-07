@@ -461,6 +461,7 @@ test("enlarged native logo keeps click geometry, text alignment and bounded-widt
             { path: "/shared/AGENTS.md", content: "" },
             { path: "/project/AGENTS.md", content: "" },
         ]);
+
         mode.showLoadedResources();
         const lines = header.render(100);
         assert.deepEqual(text(lines).split("\n").slice(0, 4), [
@@ -478,6 +479,7 @@ test("enlarged native logo keeps click geometry, text alignment and bounded-widt
                 getSelectListTheme().description("Context     AGENTS.md  /shared/AGENTS.md"),
             ),
         );
+
         clickable.handleMouse(click);
         assert.equal(events[0].x, 4);
         assert.equal(events[0].y, 1);
@@ -526,6 +528,7 @@ test("cwd root AGENTS.md comes first with a short name, without relabeling other
             text(header.render(100)),
             /Context     AGENTS.md\n                  \/shared\/AGENTS.md\n                  \/project\/subdir\/AGENTS.md/,
         );
+
         setAgents([{ path: "./AGENTS.md", content: "" }]);
         mode.showLoadedResources();
         assert.match(text(header.render(100)), /Context     AGENTS.md/);

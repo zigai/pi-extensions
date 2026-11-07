@@ -196,6 +196,7 @@ describe("bounded extraction demand", () => {
         for (const width of [60, 24, 180, 60]) {
             const recovered = component.render(width);
             expect(recovered).toEqual(cold.render(width));
+
             if (width === 60)
                 expect(recovered.map(stripVTControlCharacters).join("\n")).toContain(
                     "RECOVERED_PREVIEW",

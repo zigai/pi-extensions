@@ -202,10 +202,12 @@ describe("status loader lifecycle", () => {
             id: "pi-background.shells",
             text: "1 shell running",
         });
+
         const agents = [
             "● glowup-render-events · Claude Opus 5.5 medium · 29m 28s",
             "● glowup-awk-jq        · Claude Opus 5.5 medium · 29m 28s",
         ];
+
         const { loader } = createLoader([`${agents.join("\n")}\n⠙`]);
 
         try {
@@ -218,7 +220,6 @@ describe("status loader lifecycle", () => {
             );
             assert.match(lines[3] ?? "", /⠙ Working\.\.\. \(0s\).*1 shell running/);
             assert.ok(lines.every((line) => visibleWidth(line) <= 200));
-
             vi.advanceTimersByTime(10_100);
             const updated = loader.render(200);
             assert.deepEqual(updated.slice(1, 3), lines.slice(1, 3));
@@ -253,6 +254,7 @@ describe("status loader lifecycle", () => {
                         assert.deepEqual(lines.slice(0, -1), nativeLines.slice(0, -1));
                         assert.ok(lines.every((line) => !/[\r\n]/u.test(line)));
                         assert.ok(lines.every((line) => visibleWidth(line) <= width));
+
                         if (width >= 48) {
                             assert.match(lines.at(-1) ?? "", /2 shells running/);
                             assert.match(lines.at(-1) ?? "", /\u001b\[36m/u);
@@ -262,6 +264,7 @@ describe("status loader lifecycle", () => {
                     } finally {
                         segment.dispose();
                     }
+
                     assert.deepEqual(loader.render(width), nativeLines);
                 }
             } finally {

@@ -23,6 +23,7 @@ type LineState = {
 const retained = new Map<CacheState, number>();
 const derivedStates = new Set<CacheState>();
 const finalizer = new FinalizationRegistry<CacheState>(release);
+
 let retainedBytes = 0;
 let maxBytes = DEFAULT_COMPLETED_LINE_CACHE_BYTES;
 let maxEntries = DEFAULT_COMPLETED_LINE_CACHE_ENTRIES;
@@ -37,6 +38,7 @@ function release(state: CacheState): void {
         retainedBytes -= bytes;
         finalizer.unregister(state);
     }
+
     derivedStates.delete(state);
     state.value = undefined;
     state.width = undefined;
@@ -49,6 +51,7 @@ function evictOldest(derivedOnly: boolean): boolean {
     let oldest = derivedStates.values().next();
     if (oldest.done === true && !derivedOnly) oldest = retained.keys().next();
     if (oldest.done === true) return false;
+
     release(oldest.value);
     evictions += 1;
     return true;
@@ -60,6 +63,7 @@ export function clearCompletedLineCache(): void {
 
 export function configureCompletedLineCache(limits: CompletedLineCacheLimits): void {
     if (maxBytes === limits.maxBytes && maxEntries === limits.maxEntries) return;
+
     clearCompletedLineCache();
     maxBytes = limits.maxBytes;
     maxEntries = limits.maxEntries;
@@ -89,23 +93,30 @@ export class RenderedLineCache {
             misses += 1;
             return undefined;
         }
+
         hits += 1;
+
         const bytes = retained.get(this.state);
         if (bytes !== undefined) {
             retained.delete(this.state);
             retained.set(this.state, bytes);
         }
+
         return this.state.lines;
     }
 
     set(width: number, lines: string[]): void {
         this.clear();
+
         let bytes = lines.length * COMPLETED_LINE_CACHE_ENTRY_OVERHEAD_BYTES;
         for (const line of lines) bytes += Buffer.byteLength(line, "utf8");
+
         if (bytes > maxBytes) return;
+
         while (retainedBytes + bytes > maxBytes || retained.size >= maxEntries) {
             if (!evictOldest(false)) return;
         }
+
         this.state.width = width;
         this.state.lines = lines;
         retained.set(this.state, bytes);
@@ -127,19 +138,24 @@ export class RenderedValueCache<T> {
     get(): T | undefined {
         const bytes = retained.get(this.state);
         if (bytes === undefined) return undefined;
+
         retained.delete(this.state);
         retained.set(this.state, bytes);
         derivedStates.delete(this.state);
         derivedStates.add(this.state);
+
         return this.state.value;
     }
 
     set(value: T, bytes: number): void {
         this.clear();
+
         if (!Number.isFinite(bytes) || bytes < 0 || bytes > maxBytes) return;
+
         while (retainedBytes + bytes > maxBytes || retained.size >= maxEntries) {
             if (!evictOldest(true)) return;
         }
+
         this.state.value = value;
         derivedStates.add(this.state);
         retained.set(this.state, bytes);

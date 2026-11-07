@@ -97,17 +97,20 @@ function containsTable(body: string, quoted: boolean): boolean {
     for (const line of body.split("\n")) {
         let text = line;
         if (quoted) text = stripQuote(line);
+
         if (nested) {
             if (closesFence(text, nested)) nested = undefined;
             previous = undefined;
             continue;
         }
+
         const opening = openFence(text);
         if (opening) {
             nested = opening;
             previous = undefined;
             continue;
         }
+
         text = text.trim();
         if (!text) {
             previous = undefined;

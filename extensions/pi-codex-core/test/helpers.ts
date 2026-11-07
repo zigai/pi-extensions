@@ -151,7 +151,9 @@ const activeHarnessSessions = new Map<ExtensionHarness, ExtensionContext>();
 /** Dispose every started fixture, including tests that fail before their own cleanup. */
 export async function shutdownExtensionHarnesses(): Promise<void> {
     const outcomes = await Promise.allSettled(
-        [...activeHarnessSessions].map(([harness, ctx]) => harness.shutdownSession("quit", ctx)),
+        [...activeHarnessSessions].map(async ([harness, ctx]) =>
+            harness.shutdownSession("quit", ctx),
+        ),
     );
     const failures: unknown[] = [];
     for (const outcome of outcomes) {
@@ -306,7 +308,6 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
             ctx: ExtensionContext,
         ): Promise<Readonly<Record<string, JsonValue | undefined>> | undefined> {
             assert.ok(sessionBeforeCompact);
-
             const controller = new AbortController();
             pendingCompactions.add(controller);
             try {

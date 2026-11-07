@@ -377,6 +377,7 @@ test("reuses heading preparation output when ranks and fold indicators do not ch
             assert.ok(child.render(width).join("\n").includes("Top"));
             assert.equal(styled, prepared, "presentation must reuse the prepared SDK lines");
         }
+
         tag = "changed";
         child.invalidate();
         resetHeadingFolds(group);
@@ -449,7 +450,9 @@ test("keeps the same-width preparation guard during foreign render reentrancy", 
             function (this: Markdown, width) {
                 attempts++;
                 if (attempts > 5) throw new Error("preparation reentered");
+
                 prepareHeadingGroup(group, width);
+
                 return render.call(this, width);
             },
     );

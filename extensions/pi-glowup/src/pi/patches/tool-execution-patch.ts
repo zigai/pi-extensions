@@ -304,8 +304,10 @@ function cacheCompletedComponent(component: Component): Component {
         render(width) {
             const cached = cache.get(width);
             if (cached !== undefined) return cached;
+
             const lines = base.render(width);
             cache.set(width, lines);
+
             return lines;
         },
         handleMouse(event) {
@@ -316,9 +318,11 @@ function cacheCompletedComponent(component: Component): Component {
             // changes replace this wrapper, while renderer invalidations clear its cache slot.
         },
     };
+
     completedComponentBases.set(wrapper, base);
     completedComponentCaches.set(wrapper, cache);
     inheritSyntaxComponent(wrapper, base);
+
     return wrapper;
 }
 
@@ -549,6 +553,7 @@ export function thirdPartyRenderContext(
     if (context.keyHint !== undefined) {
         renderContext = { ...renderContext, keyHint: context.keyHint };
     }
+
     if (context.cwd !== undefined) {
         renderContext = { ...renderContext, cwd: context.cwd };
     }

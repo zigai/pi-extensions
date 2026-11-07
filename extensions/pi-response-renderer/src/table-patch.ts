@@ -203,6 +203,7 @@ function createTablePatch(host: TableHost, settings: TableStyle) {
                         if (accent !== undefined) {
                             return styleText(accent(text), { bold: true }, "truecolor");
                         }
+
                         return styleText(text, { bold: true }, "truecolor");
                     },
                     rule: (text) => styleText(text, { fg: parseColor("#555555") }, "truecolor"),
@@ -241,12 +242,14 @@ function createTablePatch(host: TableHost, settings: TableStyle) {
                         sources.set(this, this.text);
                     }
                 }
+
                 const accent = settings.accent;
                 const sample = accent?.("\u0000") ?? "";
                 if (accentSamples.get(this) !== sample) {
                     this.invalidate();
                     accentSamples.set(this, sample);
                 }
+
                 const revision = tableRenderingState().revision;
                 if (revisions.get(this) !== revision) {
                     this.invalidate();

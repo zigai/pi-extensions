@@ -46,6 +46,7 @@ it("retries a rejected request even when capacity returns before its pending ent
     await initializeSyntaxHighlighting({}, { preloadLanguages: ["python"] });
     const controller = new AbortController();
     highlightSyntaxCode('print("cancelled")', "python", { signal: controller.signal });
+
     for (let index = 1; index < 100; index += 1)
         highlightSyntaxCode(`print("occupied_${index}")`, "python");
 
@@ -61,6 +62,7 @@ it("retries a rejected request even when capacity returns before its pending ent
 
 it("resubmits rejected work without depending on a host redraw", async () => {
     await initializeSyntaxHighlighting({}, { preloadLanguages: ["python"] });
+
     for (let index = 0; index < 100; index += 1)
         highlightSyntaxCode(`print("occupied_${index}")`, "python");
 
@@ -68,6 +70,7 @@ it("resubmits rejected work without depending on a host redraw", async () => {
     const invalidate = () => {
         invalidations += 1;
     };
+
     const source = 'print("retried_without_redraw")';
     expect(highlightSyntaxCode(source, "python", { invalidate })).toEqual([source]);
     await settleSyntaxHighlights();
@@ -78,9 +81,11 @@ it("resubmits rejected work without depending on a host redraw", async () => {
 
 it("does not invalidate a superseded restored source when capacity returns", async () => {
     await initializeSyntaxHighlighting({}, { preloadLanguages: ["python"] });
+
     for (let index = 0; index < 100; index += 1) {
         highlightSyntaxCode(`print("occupied_${index}")`, "python", { invalidate: () => {} });
     }
+
     let invalidations = 0;
     const invalidate = () => {
         invalidations += 1;
@@ -115,6 +120,7 @@ it("colors the last real script preview after a restored history burst", async (
             components[index] = component;
             rendered[index] = component.render(120);
         };
+
         return redraw;
     });
     for (const redraw of redraws) redraw();
@@ -135,6 +141,7 @@ it("colors the last real script preview after a restored history burst", async (
 
 it("does not resubmit backpressured work after an explicit cache clear", async () => {
     await initializeSyntaxHighlighting({}, { preloadLanguages: ["python"] });
+
     for (let index = 0; index < 100; index += 1)
         highlightSyntaxCode(`print("occupied_${index}")`, "python");
 
@@ -142,6 +149,7 @@ it("does not resubmit backpressured work after an explicit cache clear", async (
     const invalidate = () => {
         invalidations += 1;
     };
+
     const source = 'print("owned")';
     highlightSyntaxCode(source, "python", { invalidate });
     clearSyntaxHighlightCache();
@@ -158,8 +166,10 @@ it("does not resubmit backpressured work after an explicit cache clear", async (
 it("invalidates cached script rows when a capacity retry adopts another consumer's colors", async () => {
     await initializeSyntaxHighlighting({}, { preloadLanguages: ["python"] });
     const source = "values = [1, 2, 3]\nprint(sum(values))";
+
     // The other consumer wins the shared cache while this renderer waits for capacity.
     const other = highlightSyntaxCodeAsync(source, "python");
+
     for (let index = 0; index < 98; index += 1)
         highlightSyntaxCode(`print("occupied_${index}")`, "python");
 
@@ -172,11 +182,13 @@ it("invalidates cached script rows when a capacity retry adopts another consumer
         },
         (invalidate) => {
             observeSyntaxHighlightSource(source, invalidate);
+
             // One owner may have separate full-source and visible-run requests.
             highlightSyntaxCode('print("retired_run")', "python", {
                 invalidate,
                 signal: superseded.signal,
             });
+
             return makeComponent(() => []);
         },
     );

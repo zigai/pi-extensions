@@ -99,14 +99,17 @@ describe("model picker off-peak indicator", () => {
         expect(text(selector)).toBe(
             "  display [display-provider]  <success>off-peak · ends in 8h</success>",
         );
+
         expect(selector.listContainer.children[0].render(35).join("").trimEnd()).toBe(
             "  display [display-provider]",
         );
+
         vi.setSystemTime(new Date("2026-01-05T15:58:30Z"));
         selector.updateList();
         expect(text(selector)).toBe(
             "  display [display-provider]  <muted>peak · off-peak starts in 2m</muted>",
         );
+
         selector.dispose();
         handle.dispose();
     });

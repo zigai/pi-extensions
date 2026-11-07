@@ -31,12 +31,14 @@ function glyphs(line: string) {
             index += 1;
             continue;
         }
+
         const rest = line.slice(index);
         const osc = /^\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/.exec(rest);
         if (osc) {
             index += osc[0].length;
             continue;
         }
+
         const csi = /^\u001b\[([0-9;]*)([ -/]*[@-~])/.exec(rest);
         if (csi) {
             if (csi[2] === "m") {
@@ -56,11 +58,14 @@ function glyphs(line: string) {
                         foreground = String(code);
                 }
             }
+
             index += csi[0].length;
             continue;
         }
+
         index += 2;
     }
+
     return { text, colors };
 }
 
@@ -102,6 +107,7 @@ test("real user rendering keeps mention and URL glyph colors in both patch order
     try {
         for (const plain of [false, true]) {
             if (plain) await plainUserMessagesExtension(api);
+
             for (const order of ["mention-first", "highlight-first"]) {
                 const mention = () =>
                     installUserMentionRendering(
@@ -111,6 +117,7 @@ test("real user rendering keeps mention and URL glyph colors in both patch order
                         ],
                         () => `\u001b[${mentionForeground}m`,
                     );
+
                 const highlights = () =>
                     installMessageHighlightPatch(
                         targets,
@@ -119,6 +126,7 @@ test("real user rendering keeps mention and URL glyph colors in both patch order
                     );
                 let first;
                 let second;
+
                 if (order === "mention-first") {
                     first = mention();
                     second = highlights();
@@ -126,6 +134,7 @@ test("real user rendering keeps mention and URL glyph colors in both patch order
                     first = highlights();
                     second = mention();
                 }
+
                 try {
                     const user = new UserMessageComponent(
                         "Please review %staging and https://example.com/docs.",

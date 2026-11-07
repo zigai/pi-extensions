@@ -53,11 +53,13 @@ export function unpadTables(text: string): string {
         .split("\n")
         .map((line) => {
             if (!line.startsWith("|")) return line;
+
             const cells = line
                 .slice(1, -1)
                 .split(/(?<!\\)\|/)
                 .map((cell) => cell.trim())
                 .map((cell) => (/^-+$/.test(cell) ? "---" : cell));
+
             return `| ${cells.join(" | ")} |`;
         })
         .join("\n");

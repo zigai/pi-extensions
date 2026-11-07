@@ -272,8 +272,8 @@ export function installModelSelectorProviderPatch(
 
             const originalFilteredModels = this.filteredModels;
             const settings = getSettings(this, patchState.state);
-
             const originals = new Map<ModelSelectorItem, ModelSelectorItem>();
+
             this.filteredModels = originalFilteredModels.map((item) => {
                 const displayed = { ...item, id: getModelDisplayId(item.model, settings) };
                 originals.set(displayed, item);

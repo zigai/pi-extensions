@@ -94,11 +94,13 @@ describe("README generation", () => {
         const tables: string[][] = [];
         for (const [index, line] of lines.entries()) {
             if (!line.startsWith("|")) continue;
+
             if (lines[index - 1]?.startsWith("|")) tables.at(-1)?.push(line);
             else tables.push([line]);
         }
 
         expect(tables).toHaveLength(2);
+
         for (const table of tables) {
             const pipeColumns = table.map((line) =>
                 [...line].flatMap((character, column, characters) =>

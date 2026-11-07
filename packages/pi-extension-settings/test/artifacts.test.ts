@@ -53,6 +53,7 @@ describe("settings artifacts", () => {
         expect(unpadTables(rendered.readmeSection)).toContain(
             "| `appearance.opacity` | number | `0.8`",
         );
+
         expect(rendered.readmeSection).toContain("### Defaults");
         expect(rendered.readmeSection).toContain("### Advanced example");
         expect(rendered.readmeSection).toContain('"mode": "expanded"');

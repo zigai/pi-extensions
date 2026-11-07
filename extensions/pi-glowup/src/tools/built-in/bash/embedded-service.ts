@@ -87,13 +87,16 @@ export function createEmbeddedProgramService(parser = createStatementService()) 
                     active = undefined;
                     entry.complete();
                     jobs.delete(job);
+
                     // Keep a single oversized demanded source valid, as before; byte
                     // budgets bound competing demand, never truncate a script.
                     for (const [olderSource, older] of entries) {
                         if (entries.size <= 1 || retainedBytes <= 2 * MAX_STATEMENT_SOURCE_BYTES)
                             break;
+
                         remove(olderSource, older);
                     }
+
                     pump();
                 });
 

@@ -26,6 +26,7 @@ import {
 import { TEST_THEME_COLORS, TEST_THEME_BACKGROUND_COLORS } from "../../support/theme-colors.ts";
 
 const theme = new Theme(TEST_THEME_COLORS, TEST_THEME_BACKGROUND_COLORS, "truecolor");
+
 function payload(index: number, rows = 1) {
     const oldContent = Array.from({ length: rows }, (_value, n) => `const old${n} = ${n};`).join(
         "\n",
@@ -86,6 +87,7 @@ describe("reclaimable Pierre rendering", () => {
                 { toolCallId: "one", lastComponent: previous, invalidate },
             );
         }
+
         expect(pierreDiffHighlightStats().queuedHighlights).toBe(1);
         await vi.runAllTimersAsync();
         expect(load).toHaveBeenCalledTimes(1);
@@ -221,6 +223,7 @@ describe("hidden exploration syntax ownership", () => {
                 })
                 .render(80),
         ).toEqual([]);
+
         expect(current()).toBe(false);
         expect(otherCurrent()).toBe(true);
     });
@@ -275,6 +278,7 @@ describe("hidden exploration syntax ownership", () => {
         expect(feature.renderExplorationResult(result, false, theme, options).render(100)).toEqual(
             [],
         );
+
         expect(cachedSyntaxCode(source, "typescript", { invalidate, cache: false })).toBeDefined();
         expect(otherCurrent()).toBe(true);
         const reopened = feature.renderExplorationResult(result, true, theme, options);

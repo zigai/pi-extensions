@@ -85,7 +85,9 @@ async function retainedMemory(): Promise<void> {
             await new Promise<void>((resolve) => setImmediate(resolve));
         }
     };
+
     await collect();
+
     const before = process.memoryUsage();
     let previous: Component | undefined;
     let content = "";
@@ -101,8 +103,11 @@ async function retainedMemory(): Promise<void> {
         });
         previous.render(100);
     }
+
     await collect();
+
     const after = process.memoryUsage();
+
     console.log(
         JSON.stringify({
             sourceChars: content.length,
@@ -120,6 +125,7 @@ async function main(): Promise<void> {
         await retainedMemory();
         return;
     }
+
     const render = renderWriteCallPreview;
     const frames = exactFrames(render);
     const capture = process.env.WRITE_PREVIEW_CAPTURE;

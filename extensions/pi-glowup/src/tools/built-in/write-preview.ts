@@ -183,6 +183,7 @@ class PartialWriteContentPreview {
 
     update(content: string, appendStart: number | undefined): void {
         this.incremental = appendStart !== undefined;
+
         // Only the streaming owner can prove append identity from its already-owned
         // previous args. Other callers safely rebuild; never retain another full source.
         if (appendStart === undefined || appendStart !== this.scannedLength) this.reset();
@@ -296,6 +297,7 @@ class PartialWriteContentPreview {
 
     private retainLine(line: string): string {
         if (!this.incremental) return line;
+
         // Samples survive later updates. A small sliced string can otherwise
         // pin an entire old input buffer. UTF-16 preserves even unmatched
         // surrogate code units; UTF-8 round-tripping would change the input.

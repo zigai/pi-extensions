@@ -139,6 +139,7 @@ describe("assistant structured streaming", () => {
             const source = "```javascript\nconst SHARED_READY = 1;\nconst SHARED_PENDING =\n\n";
             const raw = message(source);
             if (kind === "thinking") raw.content = [{ type: "thinking", thinking: source }];
+
             const component = new AssistantMessageComponent();
             component.updateContent(raw, true);
             text(component);
@@ -149,6 +150,7 @@ describe("assistant structured streaming", () => {
             text(component);
             await streams.settled();
             expect(text(component)).toContain("SHARED_PENDING");
+
             if (kind === "thinking")
                 expect(raw.content[0]).toEqual({ type: "thinking", thinking: source });
             else expect(raw.content[0]).toEqual({ type: "text", text: source });
@@ -273,6 +275,7 @@ describe("assistant structured streaming", () => {
                 ...raw,
                 content: [{ ...block, thinking: thinking + " continued" }],
             });
+
             expect(text(component)).not.toContain("continued");
             component.updateContent(raw, false);
             expect(text(component)).toContain("Unfinished tail");
@@ -296,6 +299,7 @@ describe("assistant structured streaming", () => {
                 if (end >= source.indexOf("Pending")) expected = "First thought. Second thought.";
                 else if (prose === "sentence") {
                     if (end >= source.indexOf("Second")) expected = "First thought.";
+
                     if (end >= source.indexOf("\n") + 1)
                         expected = "First thought. Second thought.";
                 }
@@ -313,9 +317,11 @@ describe("assistant structured streaming", () => {
             const raw = message("Response without punctuation");
             component.updateContent(raw, true);
             expect(text(component)).not.toContain("Response without punctuation");
+
             if (kind === "thinking")
                 raw.content.push({ type: "thinking", thinking: "Pending thought" });
             else raw.content.push({ type: "toolCall", id: "call", name: "read", arguments: {} });
+
             component.updateContent(raw);
             expect(text(component)).toContain("Response without punctuation");
             expect(text(component)).not.toContain("Pending thought");
@@ -362,6 +368,7 @@ describe("assistant structured streaming", () => {
                     { type: "toolCall", id: "call", name: "read", arguments: {} },
                 ];
             else raw.content = [thought, next];
+
             component.updateContent(raw);
             expect(text(component)).toContain(thought.thinking);
             expect(text(component)).not.toContain("Response tail");
@@ -387,11 +394,13 @@ describe("assistant structured streaming", () => {
         "flushes %s even if host streaming flag remains true",
         async (stopReason) => {
             await install("sentence", "token");
+
             for (const kind of ["text", "thinking"] as const) {
                 const component = new AssistantMessageComponent();
                 const raw = message("Unfinished tail");
                 if (kind === "thinking")
                     raw.content = [{ type: "thinking", thinking: "Unfinished tail" }];
+
                 component.updateContent(raw, true);
                 expect(text(component)).not.toContain("Unfinished tail");
                 component.updateContent({ ...raw, stopReason }, true);
@@ -421,6 +430,7 @@ describe("assistant structured streaming", () => {
         expect(painted).toContain("const first=1;");
         expect(painted).toContain("const second=2;");
         expect(painted).not.toContain("unfinished");
+
         // Pi 1.5 reuses the Markdown slot when the prepared statement changes.
         // Assert the next paint's content, not replacement component identities.
         expect(text(component)).toBe(painted);

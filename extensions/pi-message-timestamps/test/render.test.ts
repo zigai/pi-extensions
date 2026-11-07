@@ -69,6 +69,7 @@ describe("message timestamp rendering", () => {
         expect(renderTimestamp(["\x1b[44mhi  \x1b[43m       \x1b[0m"], 11, "12:34").lines).toEqual([
             "\x1b[44mhi  \x1b[43m \x1b[2m12:34\x1b[22m \x1b[0m",
         ]);
+
         expect(renderTimestamp(["hi    \x1b[43m     \x1b[0m"], 11, "12:34").lines).toEqual([
             "hi   \x1b[2m12:34\x1b[22m\x1b[43m \x1b[0m",
         ]);

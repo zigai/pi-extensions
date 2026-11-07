@@ -36,7 +36,6 @@ export class ThinkingStatusPatchSession {
         this.activation = undefined;
 
         const restore = this.restore;
-
         this.restore = (): void => {};
         restore();
     }

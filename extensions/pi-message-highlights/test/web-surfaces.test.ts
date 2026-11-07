@@ -68,6 +68,7 @@ test("real Text widget and Markdown web labels are patched and disposed", async 
     } finally {
         patch.dispose();
     }
+
     assert.equal(text.render(100).join("\n"), before);
 });
 
@@ -126,6 +127,7 @@ test("unknown assistant structure is left untouched rather than guessing thinkin
 
 test("OSC 8 link state spans lines and closes or switches destinations", async () => {
     const { highlightWebLinkLabelLines } = await import("../src/highlight-text.ts");
+
     const lines = [
         "before \u001b]8;id=one;https://example.com\u0007first",
         "second \u001b]8;;mailto:a@b\u0007mail",
@@ -133,6 +135,7 @@ test("OSC 8 link state spans lines and closes or switches destinations", async (
         "fourth\u001b]8;;\u0007 after",
         "plain",
     ];
+
     const result = highlightWebLinkLabelLines(lines, blue);
     assert.ok(result[0].includes(`${blue}first`));
     assert.ok(result[1].includes(`${blue}second `));
@@ -162,6 +165,7 @@ test("Text renderer colors an OSC 8 label across wrapping and stops at close", a
             /abcdef|klmnop|uv/.test(stripTerminalSequences(line)),
         );
         assert.ok(labelLines.length >= 2);
+
         for (const line of labelLines) assert.ok(line.includes(blue));
         const closing = lines.find((line) => stripTerminalSequences(line).includes("tail"));
         if (closing === undefined) assert.fail("missing tail line");

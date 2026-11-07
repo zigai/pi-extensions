@@ -66,6 +66,7 @@ function wrapCell(text: string, width: number): string[] {
         ) {
             minimumContentWidth = 2;
         }
+
         const indent = " ".repeat(Math.min(leading, Math.max(0, width - minimumContentWidth)));
         const content = sliceByColumn(line, leading, Infinity);
 

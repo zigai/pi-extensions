@@ -41,6 +41,7 @@ test("fixture cleanup awaits shutdown once for every started session", async () 
     const ctx = testDouble<ExtensionContext>(makeExtensionContext("/workspace", false));
     let shutdowns = 0;
     harness.api.on("session_start", () => {});
+
     harness.api.on("session_shutdown", async () => {
         await Promise.resolve();
         shutdowns += 1;
@@ -58,14 +59,16 @@ test("fixture cleanup cancels pending compaction before disposing its session", 
     const ctx = testDouble<ExtensionContext>(makeExtensionContext("/workspace", false));
     let signal: AbortSignal | undefined;
     harness.api.on("session_start", () => {});
+
     harness.api.on("session_shutdown", () => {
         assert.ok(signal);
         assert.equal(signal.aborted, true);
     });
     const started = new Promise<void>((resolveStarted) => {
-        harness.api.on("session_before_compact", (event) => {
+        harness.api.on("session_before_compact", async (event) => {
             signal = event.signal;
             resolveStarted();
+
             return new Promise<{ cancel: true }>((resolve) => {
                 event.signal.addEventListener("abort", () => resolve({ cancel: true }), {
                     once: true,
@@ -77,7 +80,6 @@ test("fixture cleanup cancels pending compaction before disposing its session", 
     const compaction = harness.beginCompaction(ctx);
     await started;
     assert.ok(signal);
-
     await shutdownExtensionHarnesses();
     assert.equal(signal.aborted, true);
     assert.deepEqual(await compaction, { cancel: true });
@@ -755,6 +757,7 @@ test.each(["default", undefined, "flex"])(
         const provider = openaiCodexProvider();
         const originalStream = Object.getOwnPropertyDescriptor(provider, "stream");
         const originalSimple = Object.getOwnPropertyDescriptor(provider, "streamSimple");
+
         // Exercise tier rewriting with a synthetic pricing identity, not catalog membership.
         const catalogModel = provider
             .getModels()

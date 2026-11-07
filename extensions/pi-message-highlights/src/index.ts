@@ -42,6 +42,7 @@ export function registerMessageHighlights(
         const config = settings.apply(ctx);
         let ui: MessageHighlightSettingsContext["ui"] | undefined;
         if (ctx.hasUI) ui = ctx.ui;
+
         const activeGeneration = generation;
 
         activation = (async () => {

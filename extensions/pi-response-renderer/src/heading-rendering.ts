@@ -40,6 +40,7 @@ const themeSchema = Type.Object({
         Type.Function([Type.String(), Type.Optional(Type.String())], Type.Array(Type.String())),
     ),
 });
+
 const hostSchema = Type.Object({
     render: Type.Function([Type.Number()], Type.Array(Type.String())),
     renderToken: Type.Function(
@@ -52,6 +53,7 @@ const hostSchema = Type.Object({
         Type.Array(Type.String()),
     ),
 });
+
 type HeadingHost = Static<typeof hostSchema>;
 
 const foldable = new WeakMap<object, Set<number>>();
@@ -88,6 +90,7 @@ export function resetHeadingFolds(group: HeadingGroup): void {
 export function prepareHeadingGroup(group: HeadingGroup, width: number): void {
     const previousWidth = group.width;
     if (previousWidth === width) return;
+
     group.width = width;
 
     try {
@@ -118,12 +121,14 @@ export function prepareHeadingGroup(group: HeadingGroup, width: number): void {
                 signatures.push([]);
                 continue;
             }
+
             const headings: HeadingSignature[] = [];
             for (const token of value.tokens) {
                 if (!Value.Check(headingSchema, token)) continue;
                 depths.add(token.depth);
                 headings.push({ depth: token.depth, text: token.text });
             }
+
             signatures.push(headings);
         }
 
@@ -133,8 +138,10 @@ export function prepareHeadingGroup(group: HeadingGroup, width: number): void {
         }
 
         group.history.signatures = signatures;
+
         const nextDepths = [...depths].sort((a, b) => a - b);
         group.depths = nextDepths;
+
         const foldsCleared =
             hadFolds && ![...group.folds.values()].some((collapsed) => collapsed.size > 0);
         for (const [block, markdown] of group.children.entries()) {
@@ -142,6 +149,7 @@ export function prepareHeadingGroup(group: HeadingGroup, width: number): void {
             const previousDepths =
                 renderedDepths ??
                 [...new Set(headings.map((heading) => heading.depth))].sort((a, b) => a - b);
+
             // The discovery render already produced the final lines when heading ranks and
             // fold indicators are unchanged. Invalidate only if those inputs actually changed;
             // keep normal theme/syntax/setText invalidation owned by the SDK and its callers.
@@ -155,6 +163,7 @@ export function prepareHeadingGroup(group: HeadingGroup, width: number): void {
             )
                 markdown.invalidate();
         }
+
         group.width = width;
     } catch (cause: unknown) {
         group.width = previousWidth;
@@ -194,11 +203,13 @@ function indexHeadings(tokens: unknown[]): HeadingIndex {
     let ordinal = 0;
     for (const token of tokens) {
         if (!Value.Check(headingSchema, token)) continue;
+
         // Preserve indexOf's first ordinal even for unsupported duplicate token identities.
         if (!ordinals.has(token)) ordinals.set(token, ordinal);
         ordinal += 1;
         depths.add(token.depth);
     }
+
     return { ordinals, depths: [...depths].sort((a, b) => a - b) };
 }
 
@@ -212,6 +223,7 @@ export function installHeadingRendering(): { dispose(): void } | undefined {
         warnPiInternalPatchUnavailable("pi-response-renderer", "Markdown heading tokens");
         return undefined;
     }
+
     const host = candidate;
 
     // The SDK owns mutable tokens and retains them only weakly. Index them for one
@@ -225,8 +237,10 @@ export function installHeadingRendering(): { dispose(): void } | undefined {
         (predecessor) =>
             function (this: HeadingHost, width) {
                 if (!shouldHideFences(this)) return predecessor.call(this, width);
+
                 const previous = renders.get(this);
                 renders.set(this, {});
+
                 try {
                     return predecessor.call(this, width);
                 } finally {
@@ -235,6 +249,7 @@ export function installHeadingRendering(): { dispose(): void } | undefined {
                 }
             },
     );
+
     try {
         const tokenPatch = installLinkedMethodPatch(
             host,
@@ -251,6 +266,7 @@ export function installHeadingRendering(): { dispose(): void } | undefined {
                     )?.value;
                     if (!(cache instanceof WeakRef))
                         return predecessor.call(this, token, width, next, context);
+
                     const value: unknown = cache.deref();
                     const render = renders.get(this);
                     let index = render?.index;
@@ -258,20 +274,25 @@ export function installHeadingRendering(): { dispose(): void } | undefined {
                         if (!Value.Check(tokenCacheSchema, value)) {
                             return predecessor.call(this, token, width, next, context);
                         }
+
                         index = indexHeadings(value.tokens);
                         if (render !== undefined) {
                             render.cache = value;
                             render.index = index;
                         }
                     }
+
                     const ordinal = index.ordinals.get(token);
+
                     // Only top-level headings have ranks and fold ordinals. Nested headings
                     // still belong to their quote/list renderer and must use the predecessor.
                     if (ordinal === undefined)
                         return predecessor.call(this, token, width, next, context);
+
                     const theme: unknown = Object.getOwnPropertyDescriptor(this, "theme")?.value;
                     if (!Value.Check(themeSchema, theme))
                         return predecessor.call(this, token, width, next, context);
+
                     const depths = groups.get(this)?.depths ?? index.depths;
                     const rank = depths.indexOf(token.depth);
                     const yellow = (text: string): string =>
@@ -280,6 +301,7 @@ export function installHeadingRendering(): { dispose(): void } | undefined {
                     const identity = (text: string): string => text;
                     let bold = theme.bold;
                     if (rank === 1) bold = identity;
+
                     Reflect.set(this, "theme", {
                         ...theme,
                         heading: yellow,
@@ -302,6 +324,7 @@ export function installHeadingRendering(): { dispose(): void } | undefined {
                     if (collapsed !== undefined && lines.length > 0) {
                         let indicator = "";
                         if (collapsed.has(ordinal)) indicator = yellow("▸ ");
+
                         return [
                             `\u001b]9999;pi-fold:${token.depth}:${ordinal}\u0007${indicator}${lines[0]}${endMarker}`,
                             ...lines.slice(1),
@@ -311,6 +334,7 @@ export function installHeadingRendering(): { dispose(): void } | undefined {
                     return lines;
                 },
         );
+
         return {
             dispose(): void {
                 try {
@@ -399,6 +423,7 @@ export function foldableMarkdown(
 
             if (collapsed.has(ordinal)) collapsed.delete(ordinal);
             else collapsed.add(ordinal);
+
             markdown.invalidate();
 
             return { handled: true };

@@ -192,6 +192,7 @@ class ProtocolMutationComponent implements Component {
             const path = mutationPath(file);
             let displayPath = displayMutationPath(file.path);
             if (path !== file.path) displayPath = displayMutationPath(file.path, file.previousPath);
+
             const occurrence = pathOccurrences.get(path) ?? 0;
             pathOccurrences.set(path, occurrence + 1);
 
@@ -215,6 +216,7 @@ class ProtocolMutationComponent implements Component {
             if (update.context.invalidate !== undefined) {
                 pierreContext = { ...pierreContext, invalidate: update.context.invalidate };
             }
+
             if (update.context.keyHint !== undefined) {
                 pierreContext = { ...pierreContext, keyHint: update.context.keyHint };
             }

@@ -97,6 +97,7 @@ test("snapshots primitive args when the producer mutates its object in place", (
     };
     let previous = renderWriteCallPreview(args, theme, context);
     previous.render(80);
+
     for (const content of ["one\ntwo\n", "replacement\n", "replacement\nnext", "", "final\n"]) {
         args.content = content;
         previous = renderWriteCallPreview(args, theme, { ...context, lastComponent: previous });

@@ -91,10 +91,12 @@ type DiffHighlightSchedulerStats = {
 class DiffHighlightScheduler {
     private readonly queued: QueuedHighlight[] = [];
     private readonly pending = new Map<string, QueuedHighlight>();
+
     private readonly cached = new Map<
         string,
         { readonly value: WeakRef<HighlightedDiffSet>; readonly failed: boolean }
     >();
+
     private timer: ReturnType<typeof setTimeout> | undefined;
     private active: QueuedHighlight | undefined;
     private disposed = false;
@@ -115,29 +117,40 @@ class DiffHighlightScheduler {
             const promise = new Promise<HighlightedDiffLoadResult | undefined>((done) => {
                 resolve = done;
             });
+
             task = { key, priority, run, promise, resolve, subscribers: 0 };
+
             const insertionIndex = this.queued.findIndex((queued) => queued.priority < priority);
             if (insertionIndex < 0) this.queued.push(task);
             else this.queued.splice(insertionIndex, 0, task);
+
             this.pending.set(key, task);
         }
+
         task.subscribers += 1;
+
         const subscribed = task;
         let released = false;
+
         this.scheduleNext(this.active === undefined ? initialDiffHighlightDelayMs() : 100);
+
         return {
             promise: task.promise,
             release: () => {
                 if (released) return;
+
                 released = true;
                 subscribed.subscribers -= 1;
                 if (subscribed.subscribers > 0 || subscribed === this.active) return;
+
                 const index = this.queued.indexOf(subscribed);
                 if (index >= 0) this.queued.splice(index, 1);
                 if (this.pending.get(key) === subscribed) this.pending.delete(key);
+
                 // Only cancel queued work. An active operation stays joinable if a
                 // consumer needs this key again; its reactions hold only weak owners.
                 subscribed.resolve(undefined);
+
                 if (this.queued.length === 0 && this.timer !== undefined) {
                     clearTimeout(this.timer);
                     this.timer = undefined;
@@ -152,6 +165,7 @@ class DiffHighlightScheduler {
             clearTimeout(this.timer);
             this.timer = undefined;
         }
+
         for (const task of this.pending.values()) task.resolve(undefined);
         this.pending.clear();
         this.queued.length = 0;
@@ -174,6 +188,7 @@ class DiffHighlightScheduler {
             this.queued.length === 0
         )
             return;
+
         this.timer = setTimeout(() => {
             this.timer = undefined;
             void this.processNext();
@@ -183,9 +198,12 @@ class DiffHighlightScheduler {
 
     private async processNext(): Promise<void> {
         if (this.disposed || this.active !== undefined) return;
+
         const task = this.queued.shift();
         if (task === undefined) return;
+
         this.active = task;
+
         let result: HighlightedDiffLoadResult;
         try {
             result = await task.run();
@@ -193,16 +211,21 @@ class DiffHighlightScheduler {
             recordRenderError("diff.pierre-highlight", cause);
             result = { value: emptyHighlightedDiffSet(), failed: true };
         }
+
         if (this.pending.get(task.key) === task) this.pending.delete(task.key);
+
         if (!this.disposed && task.subscribers > 0) {
             this.cached.delete(task.key);
             this.cached.set(task.key, { value: new WeakRef(result.value), failed: result.failed });
+
             while (this.cached.size > MAX_CACHED_DIFF_HIGHLIGHTS) {
                 const oldest = this.cached.keys().next();
                 if (oldest.done === true) break;
+
                 this.cached.delete(oldest.value);
             }
         }
+
         task.resolve(result);
         this.active = undefined;
         this.scheduleNext(0);
@@ -556,13 +579,16 @@ function derivedRowBytes(rows: ReadonlyArray<UnifiedDiffRow | SplitDiffRow>): nu
             if (span.fg !== undefined) total += span.fg.length * 2;
             if (span.bg !== undefined) total += span.bg.length * 2;
         }
+
         return total;
     };
+
     for (const row of rows) {
         if (row.kind !== "line") bytes += Buffer.byteLength(row.text, "utf8");
         else if ("spans" in row) bytes += spanBytes(row.spans);
         else bytes += 128 + spanBytes(row.deletion.spans) + spanBytes(row.addition.spans);
     }
+
     return bytes;
 }
 
@@ -743,6 +769,7 @@ class PierreDiffComponent implements Component {
             sourceRows = this.buildUnifiedRows(highlighted, narrowLayout);
             this.cachedUnifiedRows.set(sourceRows, derivedRowBytes(sourceRows));
         }
+
         return renderUnifiedRows(
             sourceRows,
             this.payload.metadata,
@@ -758,6 +785,7 @@ class PierreDiffComponent implements Component {
             sourceRows = this.buildSplitRows(highlighted);
             this.cachedSplitRows.set(sourceRows, derivedRowBytes(sourceRows));
         }
+
         return renderSplitRows(
             sourceRows,
             this.payload.metadata,
@@ -848,6 +876,7 @@ class PierreDiffComponent implements Component {
 
         this.releaseHighlight?.();
         this.releaseHighlight = undefined;
+
         const cached = getCachedHighlightedDiff(this.payload.metadata);
         if (cached !== undefined) {
             this.highlighted = cached.value;
@@ -869,8 +898,10 @@ class PierreDiffComponent implements Component {
             this.expanded ? 1 : 0,
         );
         this.releaseHighlight = subscription.release;
+
         // Promise reactions must not keep a discarded transcript component alive.
         const owner = new WeakRef(this);
+
         void subscription.promise.then((result) => {
             const component = owner.deref();
             if (
@@ -881,6 +912,7 @@ class PierreDiffComponent implements Component {
                 component.highlightState.key !== nextKey
             )
                 return;
+
             component.releaseHighlight = undefined;
             component.highlighted = result.value;
             component.highlightState = result.failed

@@ -1598,6 +1598,7 @@ test.each([
         assert.equal(result.rewrittenToolOutputs, 0);
         assert.equal(reasoningItem.encrypted_content, encryptedContent);
         assert.equal(result.kind, "ok");
+
         if (result.kind === "ok") {
             const { id: _id, ...expectedItem } = reasoningItem;
             assert.deepEqual(

@@ -19,6 +19,7 @@ test("responsive provider rows reserve space for an inner pin column", () => {
     Object.defineProperty(child.render, Symbol.for("zigai.model-selector-pin-column"), {
         value: true,
     });
+
     formatProviderRows({ children: [child] }, [
         { modelText: "A very long renamed fixture model", providerText: "Fixture" },
     ]);

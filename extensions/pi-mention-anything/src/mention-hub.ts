@@ -164,6 +164,7 @@ function createHub(ctx: ExtensionContext): MentionHub {
             sources.push(source);
 
             let startedUi = false;
+
             try {
                 if (ctx.hasUI && !autocompleteInstalled) {
                     startedUi = true;
@@ -198,6 +199,7 @@ function createHub(ctx: ExtensionContext): MentionHub {
                                 let color: "accent" | "warning" = "accent";
                                 if (!span.complete || unresolved.has(span.sourceId))
                                     color = "warning";
+
                                 colored += ctx.ui.theme.fg(color, line.slice(span.start, span.end));
                                 offset = span.end;
                             }
@@ -205,10 +207,12 @@ function createHub(ctx: ExtensionContext): MentionHub {
                             return colored + line.slice(offset);
                         },
                     });
+
                     const token = { active: true };
                     autocompleteToken = token;
                     ctx.ui.addAutocompleteProvider((current) => {
                         if (!token.active) return current;
+
                         autocomplete?.dispose();
                         autocomplete = createChainAutocompleteProvider({
                             current,
@@ -254,33 +258,43 @@ function createHub(ctx: ExtensionContext): MentionHub {
             } catch (cause) {
                 handles.delete(handle);
                 runtimes.delete(runtime.id);
+
                 const index = sources.indexOf(source);
                 if (index !== -1) sources.splice(index, 1);
+
                 if (startedUi) {
                     autocompleteInstalled = false;
+
                     if (autocompleteToken !== undefined) autocompleteToken.active = false;
                     autocompleteToken = undefined;
+
                     try {
                         autocomplete?.dispose();
                     } catch {
                         // Continue rolling back the remaining resources.
                     }
+
                     autocomplete = undefined;
+
                     try {
                         editor?.dispose();
                     } catch {
                         // Preserve the setup failure while still removing the render patch.
                     }
+
                     editor = undefined;
                     messageRendering?.dispose();
                     messageRendering = undefined;
                 }
+
                 if (runtimes.size === 0) {
                     if (getOwnDataDescriptor(ui, MENTION_HUB)?.value === hub) {
                         Reflect.deleteProperty(ui, MENTION_HUB);
                     }
                 }
+
                 void runtime.controller.dispose().catch(() => {});
+
                 throw cause;
             }
         },
@@ -298,12 +312,15 @@ function createHub(ctx: ExtensionContext): MentionHub {
             } finally {
                 if (runtimes.size === 0) {
                     autocompleteInstalled = false;
+
                     if (autocompleteToken !== undefined) autocompleteToken.active = false;
                     autocompleteToken = undefined;
+
                     try {
                         autocomplete?.dispose();
                     } finally {
                         autocomplete = undefined;
+
                         try {
                             editor?.dispose();
                         } finally {
@@ -312,6 +329,7 @@ function createHub(ctx: ExtensionContext): MentionHub {
                             messageRendering = undefined;
                             expansion.clear();
                             selections.clear();
+
                             if (
                                 getOwnDataDescriptor(ui, MENTION_HUB)?.value === hub &&
                                 !Reflect.deleteProperty(ui, MENTION_HUB)

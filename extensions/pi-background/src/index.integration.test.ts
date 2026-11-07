@@ -352,6 +352,7 @@ it("returns an inspection checkpoint through Pi without cancelling the running c
             .map((part) => part.text)
             .join("\n"),
     ).toContain("Inspect");
+
     expect(
         outputParser.Parse((await runtime.execute("background_status", { id: job.id })).details).job
             .state,

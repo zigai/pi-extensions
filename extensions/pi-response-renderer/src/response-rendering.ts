@@ -45,6 +45,7 @@ function snapshotContent(message: AssistantMessage): ContentSnapshot[] {
         if (item.type === "text") return { kind: item.type, value: item.text, appendable: true };
         if (item.type === "thinking")
             return { kind: item.type, value: item.thinking, appendable: true };
+
         return { kind: item.type, value: JSON.stringify(item), appendable: false };
     });
 }
@@ -216,6 +217,7 @@ async function patchMarkdownFences(owner: symbol): Promise<MarkdownFencesPatchRe
                 predecessor.call(this);
             },
     );
+
     // Pi 1.5 reuses Markdown instances and calls setText even when only the
     // streaming transform context changes. Keep the plain-thinking clone fresh.
     patch.markdownSetTextPatch = installLinkedMethodPatch(
@@ -270,6 +272,7 @@ async function patchMarkdownFences(owner: symbol): Promise<MarkdownFencesPatchRe
                     prepareHeadingGroup(headingGroup, width);
                     resetHeadingFolds(headingGroup);
                 }
+
                 const source = predecessor.call(this, width);
                 const frame = assistantFrames.get(this);
                 if (frame !== undefined && sameRenderFrame(frame, width, source))
@@ -296,20 +299,25 @@ async function patchMarkdownFences(owner: symbol): Promise<MarkdownFencesPatchRe
                     blocks = new Map();
                     folds.set(this, blocks);
                 }
+
                 const snapshot = snapshotContent(message);
                 const previous = contentSnapshots.get(this);
                 if (previous !== undefined && !contentIsAppendOnly(previous, snapshot)) {
                     clearHeadingFolds(blocks);
                 }
+
                 contentSnapshots.set(this, snapshot);
+
                 let history = headingHistories.get(this);
                 if (history === undefined) {
                     history = {};
                     headingHistories.set(this, history);
                 }
+
                 let blockIndex = 0;
                 const headingGroup = createHeadingGroup(blocks, history);
                 headingGroups.set(this, headingGroup);
+
                 let childPatch: { dispose(): void } | undefined;
                 if (contentContainer !== undefined) {
                     childPatch = installLinkedMethodPatch(
@@ -323,12 +331,14 @@ async function patchMarkdownFences(owner: symbol): Promise<MarkdownFencesPatchRe
                                 component: Component,
                             ): void {
                                 hideAssistantMarkdownFences(patch, component);
+
                                 if (component instanceof Markdown) {
                                     let collapsed = blocks.get(blockIndex);
                                     if (collapsed === undefined) {
                                         collapsed = new Set();
                                         blocks.set(blockIndex, collapsed);
                                     }
+
                                     blockIndex += 1;
                                     addChild.call(
                                         this,
@@ -364,6 +374,7 @@ export async function installResponseRendering({
         tables = installTableRendering({ nativeTableBorderStyle, accent });
     } catch (cause: unknown) {
         headings?.dispose();
+
         if (markdown !== undefined) restoreMarkdownFencesPatch(markdown, owner);
         throw cause;
     }
@@ -380,6 +391,7 @@ export async function installResponseRendering({
                 tables?.dispose();
             } finally {
                 headings?.dispose();
+
                 if (markdown !== undefined) restoreMarkdownFencesPatch(markdown, owner);
             }
         },

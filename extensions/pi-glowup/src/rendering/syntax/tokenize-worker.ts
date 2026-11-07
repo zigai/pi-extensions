@@ -42,6 +42,7 @@ if (port === null) throw new Error("Syntax worker requires a parent port");
 
 const { createBundledHighlighter, bundledLanguages, bundledThemes, createOnigurumaEngine } =
     await import("shiki");
+
 // String-keyed like the main highlighter, so vendored grammars such as jq can register.
 const createHighlighter = createBundledHighlighter<string, string>({
     langs: bundledLanguages,

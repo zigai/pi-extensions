@@ -89,8 +89,10 @@ export function createExplorationFeature() {
         if (!expanded) {
             if (options?.invalidate !== undefined)
                 retireIdleSyntaxHighlightSource(options.invalidate);
+
             return emptyComponent();
         }
+
         const output = textOutput(result);
         if (output === undefined) {
             return emptyComponent();
