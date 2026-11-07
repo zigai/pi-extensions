@@ -42,6 +42,14 @@ export function createSyntaxComponent(
     return component;
 }
 
+/** Exposes only our callback capability, never a host component or mutable owner. */
+export function syntaxComponentInvalidation(component: Component): (() => void) | undefined {
+    const owner = owners.get(component);
+    if (owner?.component === undefined) return undefined;
+
+    return owner.invalidate;
+}
+
 export function retireSyntaxComponent(component: Component): void {
     const owner = owners.get(component);
     if (owner?.component === undefined) return;

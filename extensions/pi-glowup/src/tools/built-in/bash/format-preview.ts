@@ -27,6 +27,7 @@ export type FormatScriptPreviewOptions = {
     readonly isCurrent?: () => boolean;
     readonly invalidate?: () => void;
     readonly recordSegment?: ScriptFormatDiagnostics["recordSegment"];
+    readonly prepare?: (preview: ScriptInvocation) => Promise<void>;
 };
 
 /** Source the embedded formatter can rewrite in place inside a Bash command. */
@@ -106,6 +107,10 @@ export async function formatAndStoreScriptPreview(
     );
     const previousCode = options.sink.get(options.toolCallId)?.code ?? script.code;
     if (formattedScript.code !== previousCode && (options.isCurrent?.() ?? true)) {
+        await options.prepare?.(formattedScript);
+
+        if (!(options.isCurrent?.() ?? true) || options.signal?.aborted === true) return false;
+
         options.sink.set(options.toolCallId, formattedScript);
         options.invalidate?.();
     }

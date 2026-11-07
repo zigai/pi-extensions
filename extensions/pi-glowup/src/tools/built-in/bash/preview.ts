@@ -38,6 +38,11 @@ import type {
 } from "./formatter.ts";
 import { createScriptPreviewStore, MAX_SCRIPT_PREVIEW_ENTRIES } from "./preview-store.ts";
 import { renderBashCommandCall, type BashCommandRenderOptions } from "./renderer.ts";
+import {
+    carryRawScriptSyntax,
+    inheritPreparedScriptSyntax,
+    prepareScriptCallSyntax,
+} from "./prepared-syntax.ts";
 import { StreamingScriptIdentityStore } from "./streaming-identity.ts";
 import { renderExpandableSection, sectionContent } from "../../section-expansion.ts";
 import {
@@ -81,8 +86,14 @@ type BashRunningWorker = {
 
 type BashWorker = { readonly status: "idle" } | BashRunningWorker;
 
+type BashRawSyntax =
+    | { readonly status: "idle" }
+    | { readonly status: "preparing"; readonly previous: ScriptInvocation }
+    | { readonly status: "ready"; readonly script: ScriptInvocation };
+
 type ScheduledPreview = {
     options: ScriptPreviewSchedule;
+    rawSyntax: BashRawSyntax;
     targetWidth: number | undefined;
     execution: BashExecution;
     formatting: BashFormatting;
@@ -102,15 +113,14 @@ type StreamingScriptRenderState = {
     signal: AbortSignal | undefined;
     readonly invalidate: () => void;
     preview: Component | undefined;
+    displayedInvocation?: ScriptInvocation;
+    displayedSource?: string;
+    displayedOriginal?: ScriptInvocation;
     sourcePrefix: string | undefined;
     pending: { source: string; programs: readonly EmbeddedProgram[] } | undefined;
 };
 
 const streamingScriptRenderStates = new WeakMap<Component, StreamingScriptRenderState>();
-
-function aborted(signal: AbortSignal): boolean {
-    return signal.aborted;
-}
 
 function renderStreamingScriptCall(
     invocation: ScriptInvocation,
@@ -122,7 +132,13 @@ function renderStreamingScriptCall(
     identities: StreamingScriptIdentityStore,
     options: Omit<BashCommandRenderOptions, "expanded">,
     onlyScript = false,
-    signalForLanguage?: (language: string) => AbortSignal,
+    signalForLanguage?: (
+        language: string,
+        renderState: StreamingScriptRenderState,
+        preservePrevious: boolean,
+    ) => AbortSignal,
+    onStreamHandoff?: () => void,
+    onStreamReveal?: () => void,
 ) {
     const { toolCallId, argsComplete, isError } = context;
     let current = context.lastComponent;
@@ -159,7 +175,9 @@ function renderStreamingScriptCall(
                         !command.startsWith(renderState.sourcePrefix)
                     ) {
                         identities.forget(toolCallId);
-                        renderState.preview = undefined;
+
+                        // Reject the old display until analysis is ready, but keep
+                        // its syntax owner so unchanged embedded children can be reused.
                         renderState.sourcePrefix = undefined;
                     }
 
@@ -195,8 +213,26 @@ function renderStreamingScriptCall(
                     if (onlyScript && detected === undefined) return [];
 
                     currentInvocation = detected ?? invocation;
+
+                    const original = renderState.displayedOriginal;
+                    const preservePrevious =
+                        currentInvocation.language === "bash" &&
+                        original !== undefined &&
+                        original.language !== "bash" &&
+                        renderState.displayedSource !== undefined &&
+                        command.startsWith(renderState.displayedSource) &&
+                        available.some(
+                            (item) =>
+                                !item.expandable &&
+                                item.language === original.language &&
+                                item.code.replace(/\n$/u, "") === original.code.replace(/\n$/u, ""),
+                        );
                     if (signalForLanguage !== undefined) {
-                        activeSignal = signalForLanguage(currentInvocation.language);
+                        activeSignal = signalForLanguage(
+                            currentInvocation.language,
+                            renderState,
+                            preservePrevious,
+                        );
                         renderState.signal = activeSignal;
                     }
 
@@ -218,7 +254,7 @@ function renderStreamingScriptCall(
                         renderState.sourcePrefix = command.slice(0, lastCharacter.end);
 
                     let code = currentInvocation.code;
-                    if (streamCode !== undefined)
+                    if (streamCode !== undefined) {
                         code = streamCode({
                             key: `tool:${toolCallId}:script:${currentInvocation.language}`,
                             source: currentInvocation.code,
@@ -229,8 +265,25 @@ function renderStreamingScriptCall(
                             ...(activeSignal !== undefined && { signal: activeSignal }),
                             toolCallId,
                         });
+                        onStreamHandoff?.();
+                    }
+
+                    // A new language namespace has no revealed rows yet. Keep the
+                    // still-live standalone view until its compound replacement exists.
+                    if (
+                        preservePrevious &&
+                        code.trim().length === 0 &&
+                        renderState.preview !== undefined
+                    )
+                        return renderState.preview.render(width);
 
                     let displayedInvocation = { ...currentInvocation, code };
+                    if (streamCode !== undefined && code.trim().length > 0) {
+                        renderState.displayedInvocation = displayedInvocation;
+                        renderState.displayedSource = command;
+                        renderState.displayedOriginal = currentInvocation;
+                    }
+
                     if (code.trim().length === 0 && currentInvocation.launcher === undefined) {
                         const firstLine = command.replace(/^[ \t\n]+/u, "").split("\n", 1)[0] ?? "";
                         if (firstLine.length > 0) {
@@ -246,15 +299,43 @@ function renderStreamingScriptCall(
                         }
                     }
 
+                    let previewOptions = options;
+
+                    if (preservePrevious && code.trim().length > 0) {
+                        // The new stream can normalize a boundary newline or format
+                        // the body. Its exact display needs metadata before retiring
+                        // the old standalone owner, not another cold lookup frame.
+                        const programs = extractEmbeddedPrograms(code);
+                        const lookup: EmbeddedProgramLookup = Object.assign(
+                            (source: string, notify?: () => void) =>
+                                source === code
+                                    ? programs
+                                    : options.embeddedPrograms?.(source, notify),
+                            {
+                                isCurrent: (source: string, found: readonly EmbeddedProgram[]) =>
+                                    source === code
+                                        ? found === programs
+                                        : (options.embeddedPrograms?.isCurrent?.(source, found) ??
+                                          true),
+                            },
+                        );
+
+                        previewOptions = { ...options, embeddedPrograms: lookup };
+                    }
+
                     const preview = renderBashCommandCall(theme, code, {
-                        ...options,
+                        ...previewOptions,
                         expanded,
                         invalidate: renderState.invalidate,
                         pureScriptOverride: displayedInvocation,
                         lastComponent: renderState.preview,
                     });
                     renderState.preview = preview;
-                    return preview.render(width);
+
+                    const lines = preview.render(width);
+
+                    if (code.trim().length > 0) onStreamReveal?.();
+                    return lines;
                 });
 
                 // Host invalidations rebuild this wrapper. Retain the child syntax owner
@@ -309,7 +390,12 @@ export function createNativeBashFeature(
     const MAX_BASH_RENDER_INVALIDATIONS = 300;
     const livePreviews = new Map<
         string,
-        { readonly language: string; readonly controller: AbortController }
+        {
+            readonly language: string;
+            readonly controller: AbortController;
+            previous?: AbortController;
+            renderState?: WeakRef<StreamingScriptRenderState>;
+        }
     >();
 
     function sessionInvalidate(host: () => void): () => void {
@@ -330,22 +416,45 @@ export function createNativeBashFeature(
         const live = livePreviews.get(toolCallId);
         livePreviews.delete(toolCallId);
         live?.controller.abort();
+        live?.previous?.abort();
     }
 
-    function livePreviewSignal(toolCallId: string, language: string): AbortSignal {
+    function livePreviewSignal(
+        toolCallId: string,
+        language: string,
+        renderState?: StreamingScriptRenderState,
+        preservePrevious = false,
+    ): AbortSignal {
         let live = livePreviews.get(toolCallId);
-        if (live?.language === language) return live.controller.signal;
+        if (live === undefined || live.language !== language) {
+            let previous: AbortController | undefined;
+            if (preservePrevious && live !== undefined) {
+                live.previous?.abort();
+                previous = live.controller;
+            } else retireLivePreview(toolCallId);
 
-        retireLivePreview(toolCallId);
-        live = { language, controller: new AbortController() };
-        livePreviews.set(toolCallId, live);
+            live = {
+                language,
+                controller: new AbortController(),
+                ...(previous !== undefined && { previous }),
+            };
+            livePreviews.set(toolCallId, live);
 
-        while (livePreviews.size > MAX_BASH_RENDER_INVALIDATIONS) {
-            const oldest = livePreviews.keys().next().value;
-            if (oldest === undefined) break;
+            while (livePreviews.size > MAX_BASH_RENDER_INVALIDATIONS) {
+                const oldest = livePreviews.keys().next().value;
+                if (oldest === undefined) break;
 
-            retireLivePreview(oldest);
+                retireLivePreview(oldest);
+            }
         }
+
+        if (!preservePrevious) {
+            live.previous?.abort();
+            delete live.previous;
+        }
+
+        if (renderState !== undefined && live.renderState?.deref() !== renderState)
+            live.renderState = new WeakRef(renderState);
 
         return live.controller.signal;
     }
@@ -383,9 +492,6 @@ export function createNativeBashFeature(
         const knownPrograms = embeddedPrograms(command, invalidate);
         const programs = knownPrograms ?? [];
 
-        if (context.argsComplete || context.isError || streamCode === undefined)
-            retireLivePreview(context.toolCallId);
-
         if (context.argsComplete && knownPrograms !== undefined && renderDiagnosticsEnabled()) {
             // The completed preview records analysis after embedded decisions are known.
             const formatter =
@@ -417,12 +523,31 @@ export function createNativeBashFeature(
                     scriptInvocationFromPrograms(programs),
                 );
 
+            // Transfer the revealed prefix to the completed store entry first.
+            // Aborting its old signal before get() would delete that prefix and
+            // briefly replace the code with an empty launcher while block work runs.
+            let onStreamHandoff: (() => void) | undefined;
+            if (context.argsComplete || context.isError) {
+                const live = livePreviews.get(toolCallId);
+                if (live !== undefined)
+                    onStreamHandoff = () => {
+                        if (livePreviews.get(toolCallId) === live) retireLivePreview(toolCallId);
+                    };
+            }
+
             const invocation = script ?? { label: "Bash", language: "bash", code: command };
             const profile = formatterAccessor?.()?.profileFor?.(invocation.language);
             let signal: AbortSignal | undefined;
-            let signalForLanguage: ((language: string) => AbortSignal) | undefined;
+            let signalForLanguage:
+                | ((
+                      language: string,
+                      renderState: StreamingScriptRenderState,
+                      preservePrevious: boolean,
+                  ) => AbortSignal)
+                | undefined;
             if (!context.argsComplete && !context.isError) {
-                signalForLanguage = (language) => livePreviewSignal(toolCallId, language);
+                signalForLanguage = (language, renderState, preservePrevious) =>
+                    livePreviewSignal(toolCallId, language, renderState, preservePrevious);
 
                 if (knownPrograms === undefined)
                     signal = livePreviews.get(context.toolCallId)?.controller.signal;
@@ -453,8 +578,18 @@ export function createNativeBashFeature(
                 },
                 false,
                 signalForLanguage,
+                onStreamHandoff,
+                () => {
+                    const live = livePreviews.get(toolCallId);
+                    live?.previous?.abort();
+
+                    if (live !== undefined) delete live.previous;
+                },
             );
         }
+
+        if (!context.argsComplete && !context.isError && streamCode === undefined)
+            retireLivePreview(context.toolCallId);
 
         if (
             shouldDeferSimpleToolCall(context) &&
@@ -520,12 +655,24 @@ export function createNativeBashFeature(
             }
         }
 
+        if (context.argsComplete || context.isError) retireLivePreview(context.toolCallId);
+
         const previousComponent = sectionContent(context.lastComponent);
         let previousStream: StreamingScriptRenderState | undefined;
         if (previousComponent !== undefined)
             previousStream = streamingScriptRenderStates.get(previousComponent);
 
+        const scheduled = scheduledCommands.get(context.toolCallId);
+        let heldScript: ScriptInvocation | undefined;
         if (
+            scheduled?.options.command === command &&
+            scheduled.rawSyntax.status === "preparing" &&
+            previousStream?.displayedSource === command
+        )
+            heldScript = previousStream.displayedInvocation;
+
+        if (
+            heldScript === undefined &&
             knownPrograms === undefined &&
             (context.argsComplete || context.isError) &&
             previousStream?.toolCallId === context.toolCallId &&
@@ -558,7 +705,6 @@ export function createNativeBashFeature(
         }
 
         const displayCommand = command;
-        const scheduled = scheduledCommands.get(context.toolCallId);
 
         if (executionComplete) completePreview(context.toolCallId);
 
@@ -575,8 +721,13 @@ export function createNativeBashFeature(
                 parsedScript?.language === "bash" &&
                 hasEmbeddedSource(programs, scheduled?.options.formatter));
         let script = scriptPreviews.get(context.toolCallId);
-        if (profiled && scheduled?.execution.status !== "complete") script = undefined;
+        if (profiled && scheduled?.execution.status !== "complete") {
+            script = undefined;
+            if (scheduled?.options.command === command && scheduled.rawSyntax.status === "ready")
+                script = scheduled.rawSyntax.script;
+        }
 
+        if (heldScript !== undefined) script = heldScript;
         if (script === undefined && parsedScript !== undefined) script = parsedScript;
 
         let stableScript = script;
@@ -624,20 +775,37 @@ export function createNativeBashFeature(
         // retaining a chain of previous transcript components through its closure.
         let previous = context.lastComponent;
 
+        // The streaming wrapper owns a different syntax component from its actual
+        // script preview. Hand that child off when completed arguments select the
+        // formatter path, or large sources lose their owner-local colors for a frame.
+        if (previousStream?.toolCallId === context.toolCallId)
+            previous = previousStream.preview ?? previous;
+
         return renderExpandableSection(renderContext, "call", (expanded) => {
             let options = { ...bashOptions, expanded, lastComponent: previous };
+            let expandedSource = heldScript ?? parsedScript;
+            if (
+                heldScript === undefined &&
+                scheduled?.options.command === command &&
+                scheduled.execution.status !== "complete" &&
+                scheduled.rawSyntax.status === "ready"
+            )
+                expandedSource = scheduled.rawSyntax.script;
+
             if (
                 expanded &&
-                parsedScript !== undefined &&
+                expandedSource !== undefined &&
                 (profiled || scheduled?.formatting.status !== "ready")
             ) {
-                let expandedScript = parsedScript;
+                let expandedScript = expandedSource;
                 if (
                     scheduled?.execution.status === "complete" &&
                     scheduled.formatting.status === "ready" &&
                     scheduled.formatting.expandedScript !== undefined
                 )
                     expandedScript = scheduled.formatting.expandedScript;
+
+                if (script !== undefined) inheritPreparedScriptSyntax(expandedScript, script);
 
                 options = {
                     ...options,
@@ -683,6 +851,12 @@ export function createNativeBashFeature(
 
             const component = renderBashCommandCall(theme, displayCommand, options);
             previous = component;
+
+            if (heldScript !== undefined && previousStream !== undefined) {
+                previousStream.preview = component;
+                streamingScriptRenderStates.set(component, previousStream);
+            }
+
             return component;
         });
     }
@@ -785,6 +959,8 @@ export function createNativeBashFeature(
         if (scheduled === undefined || scheduled.execution.status === "complete") return;
 
         scheduled.execution = { status: "complete" };
+        if (scheduled.rawSyntax.status === "ready") scheduled.rawSyntax = { status: "idle" };
+
         if (scheduled.formatting.status === "ready") {
             // Completion also changes the host's format observation after an
             // unprofiled preview has already published its early output.
@@ -804,8 +980,51 @@ export function createNativeBashFeature(
         let signal = controller.signal;
         if (options.signal !== undefined) signal = AbortSignal.any([signal, options.signal]);
 
+        // Identical work may receive refreshed validity/invalidation callbacks.
+        const currentPass = (): boolean =>
+            !signal.aborted &&
+            scheduled.options.isCurrent() &&
+            scheduledCommands.get(options.toolCallId) === scheduled &&
+            scheduled.worker === worker &&
+            worker.controller === controller;
+
         const programs = await embeddedService.resolve(options.command, signal);
-        if (programs === undefined || signal.aborted) return;
+        if (programs === undefined || !currentPass()) return;
+
+        // Statement previews may already be formatter-changed. Prepare the raw
+        // execution-phase view before replacing those rows; unchanged streams need
+        // no extra syntax job. This uses the existing cancellable formatter pass.
+        if (scheduled.rawSyntax.status === "preparing") {
+            const raw = scriptForPreview(
+                options.command,
+                options.formatter,
+                formatEmbedded !== undefined,
+                programs,
+            );
+            if (raw !== undefined) {
+                const previous = scheduled.rawSyntax.previous;
+                const changed = raw.language !== previous.language || raw.code !== previous.code;
+                if (changed) {
+                    try {
+                        await prepareScriptCallSyntax(raw, signal, async (source) =>
+                            embeddedService.resolve(source, signal),
+                        );
+                    } catch (cause: unknown) {
+                        if (!signal.aborted)
+                            recordRenderError("bash.raw-syntax", cause, options.toolCallId);
+                    }
+                }
+
+                if (!currentPass()) return;
+
+                scriptPreviews.set(options.toolCallId, raw);
+                scheduled.rawSyntax = { status: "ready", script: raw };
+                if (!changed || scheduled.execution.status === "complete")
+                    scheduled.rawSyntax = { status: "idle" };
+
+                invalidatePreview(scheduled);
+            } else scheduled.rawSyntax = { status: "idle" };
+        }
 
         let previewFormatter = options.formatter;
         let expandedScript: ScriptInvocation | undefined;
@@ -855,15 +1074,24 @@ export function createNativeBashFeature(
             embeddedFormatting: formatEmbedded !== undefined,
             programs,
             signal,
+            prepare: async (preview) => {
+                await prepareScriptCallSyntax(preview, signal, async (source) =>
+                    embeddedService.resolve(source, signal),
+                );
+
+                const prior = scriptPreviews.get(options.toolCallId);
+                const raw = scriptForPreview(
+                    options.command,
+                    options.formatter,
+                    formatEmbedded !== undefined,
+                    programs,
+                );
+                if (prior !== undefined && raw !== undefined)
+                    carryRawScriptSyntax(preview, prior, raw.code);
+            },
             ...(targetWidth !== undefined && { targetWidth }),
             ...(recordSegment !== undefined && { recordSegment }),
-            isCurrent: () =>
-                !signal.aborted &&
-                options.isCurrent() &&
-                scheduledCommands.get(options.toolCallId) === scheduled &&
-                scheduled.worker === worker &&
-                worker.controller === controller &&
-                scheduled.targetWidth === targetWidth,
+            isCurrent: () => currentPass() && scheduled.targetWidth === targetWidth,
         }).catch((cause: unknown) => {
             if (!signal.aborted)
                 recordRenderError("bash.format-preview", cause, options.toolCallId);
@@ -871,15 +1099,7 @@ export function createNativeBashFeature(
             return false;
         });
 
-        if (
-            aborted(signal) ||
-            !options.isCurrent() ||
-            scheduledCommands.get(options.toolCallId) !== scheduled ||
-            scheduled.worker !== worker ||
-            worker.controller !== controller ||
-            scheduled.targetWidth !== targetWidth
-        )
-            return;
+        if (!currentPass() || scheduled.targetWidth !== targetWidth) return;
 
         if (recordSegment !== undefined) {
             let embeddedSkipReason: string | undefined;
@@ -942,6 +1162,18 @@ export function createNativeBashFeature(
         })().finally(() => {
             if (scheduled.worker === worker) {
                 scheduled.worker = { status: "idle" };
+
+                if (scheduled.rawSyntax.status === "preparing") {
+                    scheduled.rawSyntax = { status: "idle" };
+
+                    if (
+                        scheduledCommands.get(scheduled.options.toolCallId) === scheduled &&
+                        scheduled.options.isCurrent() &&
+                        scheduled.options.signal?.aborted !== true
+                    )
+                        invalidatePreview(scheduled);
+                }
+
                 publishReady(scheduled);
             }
         });
@@ -1006,8 +1238,20 @@ export function createNativeBashFeature(
 
         if (options.formatter === undefined) return false;
 
+        let rawSyntax: BashRawSyntax = { status: "idle" };
+        const revealed = livePreviews
+            .get(options.toolCallId)
+            ?.renderState?.deref()?.displayedInvocation;
+        const raw = scriptPreviews.get(options.toolCallId);
+        if (
+            revealed !== undefined &&
+            (raw === undefined || revealed.language !== raw.language || revealed.code !== raw.code)
+        )
+            rawSyntax = { status: "preparing", previous: revealed };
+
         const scheduled: ScheduledPreview = {
             options,
+            rawSyntax,
             targetWidth: renderWidths.get(options.toolCallId)?.contentWidth ?? options.targetWidth,
             execution: { status: "active" },
             formatting: { status: "unformatted" },

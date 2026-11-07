@@ -8,6 +8,8 @@ import {
 } from "../../../rendering/theme.ts";
 import { formatCallDuration } from "./duration.ts";
 import type { ScriptInvocation } from "./invocation.ts";
+import { programKey } from "./embedded-syntax-identity.ts";
+import { getPreparedScriptSyntax } from "./prepared-syntax.ts";
 import {
     extractEmbeddedPrograms,
     sourceCharacterAt,
@@ -18,7 +20,9 @@ import type { EmbeddedProgramLookup } from "./embedded-service.ts";
 import { graphemes, sgrSequenceEnd } from "../../../text-boundaries.ts";
 import {
     highlightSyntaxCode,
+    inheritReadySyntaxHighlights,
     observeSyntaxHighlightSource,
+    retireSyntaxHighlightSource,
     type SyntaxHighlightOptions,
 } from "../../../rendering/syntax/highlighter.ts";
 import { filePathText } from "../../../rendering/path.ts";
@@ -61,6 +65,59 @@ type ScriptPreview = {
 
 const sourceOwners = new WeakMap<() => void, object>();
 
+type EmbeddedPreviewState = {
+    readonly source: string;
+    programs: readonly EmbeddedProgram[];
+};
+
+const embeddedPreviewStates = new WeakMap<Component, EmbeddedPreviewState>();
+
+function retainedEmbeddedPrograms(
+    previous: EmbeddedPreviewState,
+    source: string,
+): readonly EmbeddedProgram[] {
+    if (source === previous.source) return previous.programs;
+    if (!source.startsWith(previous.source)) return [];
+
+    const safe = (program: EmbeddedProgram): boolean => {
+        if (program.parent !== undefined) {
+            if (!safe(program.parent)) return false;
+
+            // A static inline parent's decoded source is already closed; shell
+            // quoting around it is not part of its nested operand boundaries.
+            if (program.parent.origin === "inline") return true;
+        }
+
+        if (program.origin === "inline") {
+            // A closed quoted operand can still gain a concatenated expansion or
+            // escape. Stable offsets alone do not preserve its static-word status.
+            const boundary = source[program.end];
+            return boundary === undefined || /[\t\n ;&|<>()]/u.test(boundary);
+        }
+
+        if (program.incomplete !== true) {
+            if (program.quoted) return true;
+
+            // An EOF terminator is not settled until its newline arrives: a
+            // suffix can reopen an unquoted heredoc and introduce expansions.
+            return (
+                previous.source.includes("\n", program.end) ||
+                source[previous.source.length] === "\n"
+            );
+        }
+
+        if (!program.quoted) return false;
+
+        let tail = program.code.slice(program.code.lastIndexOf("\n") + 1);
+        if (program.stripTabs === true) tail = tail.replace(/^\t+/u, "");
+
+        // A body row can become the heredoc terminator on the next chunk.
+        return tail.length === 0 || program.delimiter?.startsWith(tail) !== true;
+    };
+
+    return previous.programs.filter(safe);
+}
+
 type ChildOwners = {
     readonly parentSignal: AbortSignal | undefined;
     readonly controller: AbortController;
@@ -97,7 +154,11 @@ function childHighlightOptions(
             child = {
                 signal: current.signal,
                 invalidate: () => {
-                    if (childOwners.get(invalidate) === current && !current.signal.aborted)
+                    if (
+                        childOwners.get(invalidate) === current &&
+                        current.children.get(key) === child &&
+                        !current.signal.aborted
+                    )
                         invalidate();
                 },
             };
@@ -109,15 +170,33 @@ function childHighlightOptions(
     };
 }
 
-function programKey(program: EmbeddedProgram): string {
-    const path: Array<[number, string, string]> = [];
-    let current: EmbeddedProgram | undefined = program;
-    while (current !== undefined) {
-        path.push([current.start, current.language, current.origin]);
-        current = current.parent;
-    }
+function retainChildHighlightOptions(
+    invalidate: (() => void) | undefined,
+    keys: ReadonlySet<string>,
+): void {
+    if (invalidate === undefined) return;
 
-    return JSON.stringify(path);
+    const owner = childOwners.get(invalidate);
+    if (owner === undefined) return;
+
+    for (const [key, options] of owner.children) {
+        if (keys.has(key)) continue;
+        owner.children.delete(key);
+
+        if (options.invalidate !== undefined) retireSyntaxHighlightSource(options.invalidate);
+    }
+}
+
+/** Retire the standalone namespace after a compound owner copied its ready values. */
+export function retireScriptChildHighlights(invalidate: () => void): void {
+    const owner = childOwners.get(invalidate);
+    if (owner === undefined) return;
+
+    childOwners.delete(invalidate);
+    owner.controller.abort();
+
+    for (const child of owner.children.values())
+        if (child.invalidate !== undefined) retireSyntaxHighlightSource(child.invalidate);
 }
 
 function shellCommand(theme: GlowupRenderTheme, text: string): string {
@@ -467,7 +546,7 @@ function embeddedInlineHighlightRows(
             decoded = highlightSyntaxCode(
                 script.code,
                 script.language,
-                childOptions(programKey(script), script.code),
+                childOptions(programKey(script, programs), script.code),
             );
 
         let projected: string | undefined;
@@ -690,6 +769,7 @@ export type ScriptCallRenderOptions = {
     readonly profile?: ScriptFormatterProfile;
     readonly embeddedPrograms?: EmbeddedProgramLookup;
     readonly logicalSource?: string;
+    readonly syntaxPredecessor?: () => void;
     readonly formatObservation?: () => ComponentFormat | undefined;
     readonly signal?: AbortSignal;
     readonly durationMs?: number | undefined;
@@ -707,11 +787,26 @@ export function renderScriptCall(
     return createSyntaxComponent(
         lastComponent,
         renderOptions.invalidate,
-        (invalidate) => {
-            const component = createScriptCallComponent(theme, invocation, {
-                ...renderOptions,
-                invalidate,
-            });
+        (invalidate, previous) => {
+            let retained: EmbeddedPreviewState | undefined;
+            if (previous !== undefined) retained = embeddedPreviewStates.get(previous);
+
+            const embedded: EmbeddedPreviewState = { source: invocation.code, programs: [] };
+
+            // Retain only spans whose shell interpretation cannot change at the
+            // append boundary while the worker analyzes the new suffix.
+            if (invocation.language === "bash" && retained !== undefined)
+                embedded.programs = retainedEmbeddedPrograms(retained, invocation.code);
+
+            const component = createScriptCallComponent(
+                theme,
+                invocation,
+                {
+                    ...renderOptions,
+                    invalidate,
+                },
+                embedded,
+            );
             const observed: Component = {
                 render(width) {
                     const lines = component.render(width);
@@ -724,7 +819,7 @@ export function renderScriptCall(
                 },
             };
 
-            return {
+            const script: Component = {
                 render(width) {
                     return renderSyntaxComponent(observed, invalidate, width);
                 },
@@ -732,6 +827,10 @@ export function renderScriptCall(
                     observed.invalidate();
                 },
             };
+
+            embeddedPreviewStates.set(script, embedded);
+
+            return script;
         },
         renderOptions.logicalSource ?? invocation.code,
     );
@@ -745,6 +844,7 @@ function createScriptCallComponent(
     theme: GlowupRenderTheme,
     invocation: ScriptInvocation,
     options: Omit<ScriptCallRenderOptions, "lastComponent">,
+    embedded: EmbeddedPreviewState,
 ): Component {
     const expanded = options.expanded;
     const state = options.state;
@@ -752,12 +852,43 @@ function createScriptCallComponent(
     const showPrologueOmission = options.showPrologueOmission ?? false;
     const retained = invocation;
     const omittedHint = options.omittedHint ?? toolExpandHint();
-    const childOptions = childHighlightOptions(options.invalidate, options.signal);
+    const prepared = getPreparedScriptSyntax(retained);
+    const ownerOptions = childHighlightOptions(options.invalidate, options.signal);
+    const childOptions = (key: string, source: string): SyntaxHighlightOptions => {
+        const child = ownerOptions(key, source);
+        const ready = prepared?.children.get(key);
+        if (ready?.source === source && child.invalidate !== undefined)
+            ready.syntax.adopt(child.invalidate);
+
+        if (options.syntaxPredecessor !== undefined && child.invalidate !== undefined) {
+            const previous = childOwners.get(options.syntaxPredecessor);
+            if (previous !== undefined && !previous.signal.aborted) {
+                const exact = previous.children.get(key);
+                const prior = exact ?? previous.children.get("standalone");
+                if (
+                    prior?.invalidate !== undefined &&
+                    (previous.parentSignal === options.signal || exact === undefined)
+                )
+                    inheritReadySyntaxHighlights(
+                        child.invalidate,
+                        prior.invalidate,
+                        exact === undefined ? source : undefined,
+                    );
+            }
+        }
+
+        return child;
+    };
+
     let syntaxOptions: SyntaxHighlightOptions = {
         invalidate: options.invalidate,
         ...(options.signal !== undefined && { signal: options.signal }),
     };
-    if (retained.language !== "bash") syntaxOptions = childOptions("standalone", retained.code);
+    if (retained.language !== "bash") {
+        syntaxOptions = childOptions("standalone", retained.code);
+        if (syntaxOptions.invalidate !== undefined)
+            prepared?.standalone?.adopt(syntaxOptions.invalidate);
+    }
 
     const sourceOwner = {};
     if (options.invalidate !== undefined) sourceOwners.set(options.invalidate, sourceOwner);
@@ -786,7 +917,7 @@ function createScriptCallComponent(
                 highlightSyntaxCode(
                     program.code,
                     program.language,
-                    childOptions(programKey(program), program.code),
+                    childOptions(programKey(program, current), program.code),
                 );
 
             if (index < current.length) setImmediate(next);
@@ -795,12 +926,26 @@ function createScriptCallComponent(
         setImmediate(next);
     };
 
-    let programs: readonly EmbeddedProgram[] = [];
+    let programs = prepared?.programs ?? embedded.programs;
     if (retained.language === "bash") {
         if (options.embeddedPrograms === undefined)
             programs = extractEmbeddedPrograms(retained.code);
-        else programs = options.embeddedPrograms(retained.code, options.invalidate) ?? [];
+        else programs = options.embeddedPrograms(retained.code, options.invalidate) ?? programs;
     }
+
+    embedded.programs = programs;
+
+    const retainProgramOwners = (): void => {
+        const keys = new Set(
+            programs
+                .filter((program) => !program.expandable)
+                .map((program) => programKey(program, programs)),
+        );
+        if (retained.language !== "bash") keys.add("standalone");
+        retainChildHighlightOptions(options.invalidate, keys);
+    };
+
+    retainProgramOwners();
 
     scheduleScriptPreviewSyntaxLoad(retained, syntaxOptions.invalidate);
     schedulePrograms(programs);
@@ -810,6 +955,8 @@ function createScriptCallComponent(
             const available = options.embeddedPrograms(retained.code, options.invalidate);
             if (available !== undefined && available !== programs) {
                 programs = available;
+                embedded.programs = programs;
+                retainProgramOwners();
                 scheduleScriptPreviewSyntaxLoad(retained, syntaxOptions.invalidate);
                 schedulePrograms(programs);
             }

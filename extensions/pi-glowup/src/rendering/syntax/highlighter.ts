@@ -507,6 +507,87 @@ export function cachedSyntaxCode(
     return lines;
 }
 
+export type PreparedSyntaxCode = {
+    adopt(invalidate: () => void): void;
+};
+
+async function loadPreparedSyntaxLanguage(
+    language: string,
+    signal: AbortSignal | undefined,
+): Promise<boolean> {
+    const loading = loadSyntaxLanguageIfReady(language);
+    if (signal === undefined) return loading;
+    return new Promise((resolve, reject) => {
+        const abort = (): void => {
+            signal.removeEventListener("abort", abort);
+            resolve(false);
+        };
+
+        signal.addEventListener("abort", abort, { once: true });
+
+        if (signal.aborted) abort();
+
+        void loading.then(
+            (ready) => {
+                signal.removeEventListener("abort", abort);
+                resolve(ready);
+            },
+            (cause: unknown) => {
+                signal.removeEventListener("abort", abort);
+
+                if (cause instanceof Error) reject(cause);
+                else reject(new Error(String(cause)));
+            },
+        );
+    });
+}
+
+/** Prepare an atomic formatted replacement without adding a strong global source cache. */
+export async function prepareSyntaxCode(
+    code: string,
+    language: string,
+    signal: AbortSignal | undefined,
+): Promise<PreparedSyntaxCode | undefined> {
+    const isAborted = (): boolean => signal?.aborted === true;
+    if (isAborted()) return undefined;
+
+    try {
+        if (!(await loadPreparedSyntaxLanguage(language, signal))) return undefined;
+    } catch (cause: unknown) {
+        recordRenderError("syntax.prepare", cause);
+        return undefined;
+    }
+
+    const normalized = normalizeSyntaxLanguage(language);
+    if (normalized === undefined || syntaxState?.status !== "ready") return undefined;
+
+    const version = syntaxRenderingVersion;
+    const generation = syntaxGeneration;
+    const themeName = syntaxState.theme.name;
+    const lines = await highlightSyntaxCodeAsync(code, normalized, {
+        ...(signal !== undefined && { signal }),
+        invalidateOnComplete: false,
+    });
+
+    if (isAborted() || cachedSyntaxCode(code, normalized) === undefined) return undefined;
+
+    const key = highlightedCodeCacheKey(
+        themeName,
+        normalized,
+        code,
+        Buffer.byteLength(code, "utf8"),
+    );
+    const source = highlightedSource(code, normalized, themeName, lines);
+
+    return {
+        adopt(invalidate) {
+            if (syntaxRenderingVersion !== version || syntaxGeneration !== generation) return;
+
+            currentHighlightOwner(invalidate)?.results.set(key, source);
+        },
+    };
+}
+
 /** Arranges a redraw once a requested grammar is available, without retaining the component. */
 export function scheduleSyntaxLanguageLoad(
     language: string | undefined,
@@ -606,6 +687,46 @@ function currentHighlightOwner(invalidate: (() => void) | undefined): HighlightO
     return owner;
 }
 
+/**
+ * Fork ready values without sharing cancellation or pending work. A standalone
+ * handoff can retain its revealed statement prefix while the full body is pending.
+ */
+export function inheritReadySyntaxHighlights(
+    target: () => void,
+    source: () => void,
+    boundarySource?: string,
+): void {
+    if (target === source || syntaxState?.status !== "ready") return;
+
+    const previous = currentHighlightOwner(source);
+    const next = currentHighlightOwner(target);
+    if (
+        previous === undefined ||
+        next === undefined ||
+        previous.controller.signal.aborted ||
+        next.controller.signal.aborted
+    )
+        return;
+
+    const boundary =
+        boundarySource === undefined || next.source !== boundarySource
+            ? []
+            : [...previous.results].filter(
+                  ([, result]) =>
+                      (previous.source === result.source ||
+                          previous.source === `${result.source}\n`) &&
+                      (boundarySource === result.source ||
+                          boundarySource.startsWith(`${result.source}\n`)),
+              );
+    if (previous.source !== next.source && boundary.length === 0) return;
+
+    const ready = previous.source === next.source ? previous.results : boundary;
+    for (const [key, result] of ready) if (!next.results.has(key)) next.results.set(key, result);
+
+    if (previous.source !== next.source)
+        next.previousResults = new Map([...boundary, ...next.previousResults]);
+}
+
 export function retireSyntaxHighlightSource(invalidate: () => void): void {
     const owner = highlightOwners.get(invalidate);
     if (owner === undefined && !highlightSources.has(invalidate)) return;
@@ -629,6 +750,7 @@ export function retireIdleSyntaxHighlightSource(invalidate: () => void): void {
             owner.timedOut.size > 0)
     )
         return;
+
     retireSyntaxHighlightSource(invalidate);
 }
 
@@ -1740,6 +1862,37 @@ function pendingHighlightLines(
     );
 }
 
+type PendingRowMatch = {
+    readonly line: string;
+    readonly key: string;
+    readonly source: HighlightedSource;
+};
+
+function rememberPendingRow(
+    rows: Map<string, PendingRowMatch | null>,
+    text: string,
+    match: PendingRowMatch,
+): void {
+    const previous = rows.get(text);
+    if (previous === undefined) rows.set(text, match);
+    else if (previous !== null && previous.line !== match.line) rows.set(text, null);
+}
+
+function pendingRowContext(lines: readonly string[], index: number): string {
+    const context = [lines[index - 1], lines[index], lines[index + 1]];
+    let chars = 0;
+    for (const line of context) chars += line?.length ?? 0;
+
+    if (chars > MAX_PENDING_EXACT_SOURCE_CHARS) return "";
+
+    return JSON.stringify(
+        context.map((line) => {
+            if (line === undefined) return null;
+            return stripVTControlCharacters(line);
+        }),
+    );
+}
+
 /** Keep exact rows across insertions/deletions without quadratic diffing or stale source text. */
 function retainExactPendingRows(
     lines: string[],
@@ -1747,10 +1900,8 @@ function retainExactPendingRows(
     themeName: string,
     owner: HighlightOwner,
 ): string[] {
-    const rows = new Map<
-        string,
-        { readonly line: string; readonly key: string; readonly source: HighlightedSource }
-    >();
+    const rows = new Map<string, PendingRowMatch | null>();
+    const contextualRows = new Map<string, PendingRowMatch | null>();
     let remainingRows = MAX_PENDING_EXACT_ROW_MATCHES;
     let remainingChars = MAX_PENDING_EXACT_SOURCE_CHARS;
     let inspectedSources = 0;
@@ -1769,10 +1920,15 @@ function retainExactPendingRows(
             const text = plain[index];
             if (text === undefined || stripVTControlCharacters(line) !== text) continue;
 
-            if (!rows.has(text)) rows.set(text, { line, key, source });
+            const match = { line, key, source };
+            rememberPendingRow(rows, text, match);
+
+            const context = pendingRowContext(plain, index);
+            if (context.length > 0) rememberPendingRow(contextualRows, context, match);
         }
     }
 
+    const plain = lines.slice(0, MAX_PENDING_EXACT_ROW_MATCHES + 1);
     let matchedChars = 0;
     for (let index = 0; index < Math.min(lines.length, MAX_PENDING_EXACT_ROW_MATCHES); index += 1) {
         const line = lines[index];
@@ -1780,8 +1936,12 @@ function retainExactPendingRows(
         matchedChars += line.length;
         if (matchedChars > MAX_PENDING_EXACT_SOURCE_CHARS) break;
 
-        const match = rows.get(line);
-        if (match === undefined) continue;
+        let match = rows.get(line);
+
+        // Identical text can be code, a comment, or a multiline string. Use
+        // matching neighboring rows to disambiguate, never the first occurrence.
+        if (match === null) match = contextualRows.get(pendingRowContext(plain, index));
+        if (match === undefined || match === null) continue;
         lines[index] = match.line;
         owner.results.set(match.key, match.source);
     }

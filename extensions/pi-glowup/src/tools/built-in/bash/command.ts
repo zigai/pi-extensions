@@ -10,6 +10,7 @@ import {
 import { scriptInvocationFromPrograms, type ScriptInvocation } from "./invocation.ts";
 import { extractEmbeddedPrograms, type EmbeddedProgram } from "./embedded-programs.ts";
 import { recordRenderError } from "../../../diagnostics/render-events.ts";
+import { reflowedEmbeddedPrograms } from "./reflowed-programs.ts";
 
 export type ShellLayout = "preserve" | "auto" | "always";
 export type ShellOperatorPosition = "trailing" | "leading";
@@ -20,6 +21,7 @@ export type BashCommandAnalysis = {
     readonly pureScript: ScriptInvocation | undefined;
     readonly reflowedCommand: string | undefined;
     readonly structurallyComplex: boolean;
+    readonly reflowedPrograms?: readonly EmbeddedProgram[];
 };
 
 type DisplayBreakpoint = {
@@ -427,10 +429,16 @@ export function analyzeBashCommand(
     const pureScript = scriptInvocationFromPrograms(programs);
     const layout =
         pureScript === undefined ? analyzeBashLayout(command, operatorPosition, syntax) : undefined;
+    const reflowedCommand = layout?.reflowedCommand;
+    let reflowedPrograms: readonly EmbeddedProgram[] | undefined;
+    if (reflowedCommand !== undefined && programs.length > 0)
+        reflowedPrograms = reflowedEmbeddedPrograms(command, reflowedCommand, programs);
+
     return {
         command,
         pureScript,
-        reflowedCommand: layout?.reflowedCommand,
+        reflowedCommand,
         structurallyComplex: layout?.structurallyComplex ?? false,
+        ...(reflowedPrograms !== undefined && { reflowedPrograms }),
     };
 }

@@ -12,6 +12,7 @@ const MAX_RAW_OUTPUT_BYTES = 4 * 1024 * 1024;
 export type PtyScreenRow = {
     readonly text: string;
     readonly isWrapped: boolean;
+    readonly foregrounds?: readonly number[];
 };
 
 export type PtyScreenFrame = {
@@ -30,6 +31,7 @@ export type PiProcessOptions = {
     readonly sessionPath?: string;
     readonly initialPrompt?: string;
     readonly tuiMode?: "regular" | "fullscreen";
+    readonly captureColors?: boolean;
 };
 
 type ProcessExit = {
@@ -69,15 +71,25 @@ function processEnvironment(agentDir: string): PiProcessEnvironment {
     return environment;
 }
 
-export function screenRows(terminal: HeadlessTerminal): readonly PtyScreenRow[] {
+export function screenRows(
+    terminal: HeadlessTerminal,
+    captureColors = false,
+): readonly PtyScreenRow[] {
     const buffer = terminal.buffer.active;
     const rows: PtyScreenRow[] = [];
     for (let viewportRow = 0; viewportRow < terminal.rows; viewportRow += 1) {
         const line = buffer.getLine(buffer.viewportY + viewportRow);
+
         rows.push({
             // Alternate-buffer lines can retain cells beyond the resized viewport.
             text: line?.translateToString(true, 0, terminal.cols) ?? "",
             isWrapped: line?.isWrapped ?? false,
+            ...(captureColors && {
+                foregrounds: Array.from(
+                    { length: terminal.cols },
+                    (_value, column) => line?.getCell(column)?.getFgColor() ?? -1,
+                ),
+            }),
         });
     }
 
@@ -103,6 +115,7 @@ export class PiPtyProcess {
     private readonly process: IPty;
     private readonly startedAt = performance.now();
     private readonly command: readonly string[];
+    private readonly captureColors: boolean;
     private readonly capturedFrames: PtyScreenFrame[] = [];
     private rawOutput = "";
     private pendingAnsi = "";
@@ -111,6 +124,7 @@ export class PiPtyProcess {
     private readonly exitPromise: Promise<ProcessExit>;
 
     constructor(options: PiProcessOptions) {
+        this.captureColors = options.captureColors === true;
         this.terminal = new HeadlessTerminal({
             allowProposedApi: true,
             cols: options.columns,
@@ -335,7 +349,7 @@ export class PiPtyProcess {
     }
 
     private captureFrame(): void {
-        const rows = screenRows(this.terminal);
+        const rows = screenRows(this.terminal, this.captureColors);
 
         this.capturedFrames.push({
             sequence: this.capturedFrames.length,

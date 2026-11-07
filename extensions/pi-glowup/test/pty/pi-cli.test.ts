@@ -1136,6 +1136,81 @@ describe("actual Pi CLI in a real PTY", () => {
         }
     }, 45_000);
 
+    it.each(["regular", "fullscreen"] as const)(
+        "retains large embedded syntax in every compound Bash streaming frame (%s)",
+        async (tuiMode) => {
+            const fixture = createFixtureWorkspace();
+            fixtures.push(fixture);
+            writeFileSync(
+                getGlowupGlobalConfigPath(fixture.agentDir),
+                JSON.stringify({
+                    streaming: { code: "statement", prose: "token" },
+                }),
+            );
+            const pi = new PiPtyProcess({
+                ...launchOptions(fixture, {
+                    initialPrompt: "run the deterministic stable compound bash",
+                    tuiMode,
+                    columns: 120,
+                    rows: 40,
+                }),
+                captureColors: true,
+            });
+            const marker = 'console.log("STABLE_COMPOUND_ANCHOR");';
+            const colors = (frame: PtyScreenFrame) => {
+                const row = frame.rows.find((item) => item.text.includes(marker));
+                const start = row?.text.indexOf(marker);
+                if (row === undefined || start === undefined) return undefined;
+                return row.foregrounds?.slice(start, start + marker.length);
+            };
+            try {
+                const initial = await pi.waitForFrame(
+                    (frame) => new Set(colors(frame)).size > 2,
+                    PTY_TIMEOUT_MS,
+                );
+                const initialColors = colors(initial);
+                const omission = /… \+(\d+) lines/u.exec(initial.text)?.[1];
+                if (omission === undefined) throw new Error("Expected bounded compound preview");
+
+                writeFileSync(join(fixture.cwd, "release-compound-0"), "");
+                await pi.waitForFrame(
+                    (frame) =>
+                        frame.text.includes(`+${Number(omission) + 1} lines`) &&
+                        new Set(colors(frame)).size > 2,
+                    PTY_TIMEOUT_MS,
+                    initial.sequence + 1,
+                );
+                writeFileSync(join(fixture.cwd, "release-compound-1"), "");
+                const completed = await pi.waitForText("STREAM_COMPLETE", PTY_TIMEOUT_MS);
+                let checked = 0;
+                for (const frame of pi.frames()) {
+                    if (frame.sequence < initial.sequence || frame.sequence > completed.sequence)
+                        continue;
+
+                    const current = colors(frame);
+                    if (current === undefined)
+                        throw new Error(`Embedded source disappeared in frame ${frame.sequence}`);
+
+                    expect(current, `syntax colors in frame ${frame.sequence}`).toEqual(
+                        initialColors,
+                    );
+                    checked++;
+                }
+
+                expect(checked).toBeGreaterThan(3);
+                expectTerminalInvariants(completed, [
+                    resolve("test/pty/fixtures/offline-provider.ts"),
+                ]);
+            } catch (cause: unknown) {
+                await pi.writeFailureArtifacts(`compound-syntax-${tuiMode}`, cause);
+                throw cause;
+            } finally {
+                await pi.stop();
+            }
+        },
+        60_000,
+    );
+
     it("captures every deterministic streaming apply_patch lifecycle without stale or duplicate rows", async () => {
         const fixture = createFixtureWorkspace();
         fixtures.push(fixture);

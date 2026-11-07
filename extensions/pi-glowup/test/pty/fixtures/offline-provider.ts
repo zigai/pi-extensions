@@ -456,6 +456,72 @@ function streamInlinePythonPipelineResponse(model: Model<string>): AssistantMess
     return streamCompletedToolCall(model, toolCall);
 }
 
+function streamStableCompoundBashResponse(
+    model: Model<string>,
+    options: SimpleStreamOptions | undefined,
+): AssistantMessageEventStream {
+    const stream = createAssistantMessageEventStream();
+    const output = createOutput(model);
+    const source = [
+        "pwd && node --input-type=module <<'NODE'",
+        'console.log("STABLE_COMPOUND_ANCHOR");',
+        ...Array.from(
+            { length: 450 },
+            (_value, index) => `const value${index} = "render_source_${index}";`,
+        ),
+        "NODE",
+        "",
+    ].join("\n");
+    const snapshots = [source, `${source}echo appended\n`, `${source}echo appended\necho last\n`];
+    const toolCall: ToolCall = {
+        type: "toolCall",
+        id: "pty-stable-compound",
+        name: "bash",
+        arguments: {},
+    };
+    output.content.push(toolCall);
+    stream.push({ type: "start", partial: output });
+    stream.push({ type: "toolcall_start", contentIndex: 0, partial: output });
+    void (async () => {
+        try {
+            for (const [index, command] of snapshots.entries()) {
+                options?.signal?.throwIfAborted();
+                toolCall.arguments = { command };
+                stream.push({
+                    type: "toolcall_delta",
+                    contentIndex: 0,
+                    delta: "",
+                    partial: output,
+                });
+
+                if (index >= snapshots.length - 1) continue;
+
+                let released = false;
+                for (let attempt = 0; attempt < 200; attempt++) {
+                    released = await access(join(process.cwd(), `release-compound-${index}`)).then(
+                        () => true,
+                        () => false,
+                    );
+                    if (released) break;
+
+                    await delay(FRAME_DELAY_MS, undefined, { signal: options?.signal });
+                }
+
+                if (!released) throw new Error("Compound Bash checkpoint was not released");
+            }
+
+            output.stopReason = "toolUse";
+            stream.push({ type: "toolcall_end", contentIndex: 0, toolCall, partial: output });
+            stream.push({ type: "done", reason: "toolUse", message: output });
+            stream.end();
+        } catch (cause: unknown) {
+            finishWithError(stream, output, cause);
+        }
+    })();
+
+    return stream;
+}
+
 function latestUserText(context: Context): string {
     for (let index = context.messages.length - 1; index >= 0; index -= 1) {
         const message = context.messages[index];
@@ -500,6 +566,8 @@ function streamOfflineProvider(
             arguments: {},
         });
 
+    if (prompt.includes("deterministic stable compound bash"))
+        return streamStableCompoundBashResponse(model, options);
     if (prompt.includes("deterministic bash chain")) return streamBashChainResponse(model);
     if (prompt.includes("deterministic bash layout")) return streamBashLayoutResponse(model);
 
