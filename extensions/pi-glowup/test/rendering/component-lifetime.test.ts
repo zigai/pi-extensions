@@ -44,6 +44,35 @@ function renderSnapshot(
                 context,
                 "static",
             );
+        case "protocol-tree":
+            return renderProtocolNode(
+                {
+                    kind: "list",
+                    style: "tree",
+                    items: [{ kind: "stack", children: [{ kind: "code", text: source }] }],
+                },
+                theme,
+                { ...context, invalidate: () => {} },
+                "static",
+            );
+        case "protocol-rich-list":
+            return renderProtocolNode(
+                { kind: "list", items: [{ kind: "output", text: source, format: "markdown" }] },
+                theme,
+                { ...context, invalidate: () => {} },
+                "static",
+            );
+        case "protocol-call":
+            return renderProtocolNode(
+                {
+                    kind: "call",
+                    labels: { static: "Example" },
+                    body: { kind: "code", text: source },
+                },
+                theme,
+                { ...context, invalidate: () => {} },
+                "static",
+            );
         case "protocol-stack":
             return renderProtocolNode(
                 { kind: "stack", children: [{ kind: "code", text: source }] },
@@ -109,6 +138,9 @@ describe("streaming component ownership", () => {
         "protocol",
         "protocol-output",
         "protocol-list",
+        "protocol-tree",
+        "protocol-rich-list",
+        "protocol-call",
         "protocol-stack",
         "outline",
     ])("%s releases previous snapshots while the newest component remains live", (renderer) => {

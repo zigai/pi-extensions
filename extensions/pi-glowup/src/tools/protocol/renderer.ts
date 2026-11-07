@@ -141,7 +141,12 @@ function publicCallContext(context: ThirdPartyToolRenderContext): GlowupCallCont
         expanded: context.expanded,
         showImages: context.showImages,
         isError: context.isError,
-        hasResult: context.result !== undefined,
+        // Live call rendering deliberately omits the result payload to avoid redraw coupling.
+        // Pi still marks a settled live call with complete args and isPartial=false.
+        hasResult:
+            context.hasResult ??
+            (context.result !== undefined ||
+                (context.executionStarted === true && context.argsComplete && !context.isPartial)),
     };
 }
 

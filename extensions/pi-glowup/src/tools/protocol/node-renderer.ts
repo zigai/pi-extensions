@@ -1,7 +1,9 @@
-import { renderInline } from "./inline-renderer.ts";
+import { renderInline, renderText } from "./inline-renderer.ts";
 import { displayMutationPath } from "../../rendering/path.ts";
 import type { Component } from "@earendil-works/pi-tui";
 import { protocolContent } from "./content.ts";
+import { createMarkdownRows, previewRenderedRows } from "./rendered-content.ts";
+import { text } from "./nodes.ts";
 import { emptyComponent, makeComponent, wrapPrefixedLine } from "../../rendering/component.ts";
 import { renderGlowupOutput, type GlowupOutputRenderOptions } from "../../rendering/output.ts";
 import {
@@ -17,7 +19,6 @@ import type {
     GlowupCallLabels,
     GlowupCodeNode,
     GlowupListNode,
-    GlowupInline,
     GlowupNode,
     GlowupPreview,
     GlowupSummaryNode,
@@ -42,11 +43,19 @@ type ProtocolSlot = {
 
 const contentSlots = new WeakMap<
     Component,
-    { readonly slot: ProtocolSlot; readonly kind: "code" | "output" }
+    {
+        readonly slot: ProtocolSlot;
+        readonly kind: "code" | "output";
+        readonly markdown?: ReturnType<typeof createMarkdownRows> | undefined;
+    }
 >();
 const callBodies = new WeakMap<
     Component,
     { readonly slot: ProtocolSlot; readonly body: Component }
+>();
+const listChildren = new WeakMap<
+    Component,
+    { readonly slot: ProtocolSlot; readonly children: readonly Component[] }
 >();
 const stackChildren = new WeakMap<
     Component,
@@ -80,6 +89,13 @@ function retireProtocolComponent(component: Component): void {
         retireProtocolComponent(call.body);
     }
 
+    const list = listChildren.get(component);
+    if (list !== undefined) {
+        listChildren.delete(component);
+
+        for (const child of list.children) retireProtocolComponent(child);
+    }
+
     const stack = stackChildren.get(component);
     if (stack !== undefined) {
         stackChildren.delete(component);
@@ -99,8 +115,10 @@ function retireReplacedComponent(node: GlowupNode, context: ThirdPartyToolRender
     if (content !== undefined && sameProtocolSlot(content.slot, context)) {
         if (
             node.kind !== content.kind ||
-            node.syntax === undefined ||
-            context.invalidate === undefined
+            (node.syntax === undefined &&
+                !(node.kind === "output" && node.format === "markdown")) ||
+            (context.invalidate === undefined &&
+                !(node.kind === "output" && node.format === "markdown"))
         )
             retireProtocolComponent(previous);
 
@@ -109,33 +127,45 @@ function retireReplacedComponent(node: GlowupNode, context: ThirdPartyToolRender
 
     const call = callBodies.get(previous);
     if (call !== undefined && sameProtocolSlot(call.slot, context)) {
-        if (node.kind !== "call" || node.body === undefined || node.body.kind === "text")
+        if (
+            node.kind !== "call" ||
+            node.body === undefined ||
+            (node.body.kind === "text" && node.body.parts === undefined)
+        )
             retireProtocolComponent(previous);
 
         return;
     }
+
+    const list = listChildren.get(previous);
+    if (list !== undefined && sameProtocolSlot(list.slot, context) && node.kind !== "list")
+        retireProtocolComponent(previous);
 
     const stack = stackChildren.get(previous);
     if (stack !== undefined && sameProtocolSlot(stack.slot, context) && node.kind !== "stack")
         retireProtocolComponent(previous);
 }
 
-type BodyPosition = "first" | "continued";
+type BodyPosition = "first" | "continued" | "bare";
 
 function bodyFirstPrefix(theme: GlowupRenderTheme, position: BodyPosition): string {
+    if (position === "bare") return "";
     if (position === "first") return dim(theme, "  └ ");
     return BODY_INDENT;
 }
 
 function renderBodyText(
     theme: GlowupRenderTheme,
-    value: GlowupInline,
+    value: Extract<GlowupNode, { kind: "text" }>,
     position: BodyPosition,
 ): ReturnType<typeof makeComponent> {
-    const prefixFirst = bodyFirstPrefix(theme, position);
-
     return makeComponent((width) =>
-        wrapPrefixedLine(renderInline(theme, value), width, prefixFirst, BODY_INDENT),
+        wrapPrefixedLine(
+            renderText(theme, value),
+            width,
+            bodyFirstPrefix(theme, position),
+            position === "bare" ? "" : BODY_INDENT,
+        ),
     );
 }
 
@@ -143,8 +173,9 @@ function statusLabel(
     mode: ToolLabelMode,
     context: ThirdPartyToolRenderContext,
     labels: GlowupCallLabels,
+    isError = context.isError,
 ): string {
-    if (mode === "lifecycle" && context.isError && labels.failed !== undefined) {
+    if (mode === "lifecycle" && isError && labels.failed !== undefined) {
         return labels.failed;
     }
 
@@ -179,10 +210,11 @@ function nodeText(
     codeContent: CodeContent = (value) => value.text ?? "",
     key = "root",
     indent = 0,
+    width = Number.MAX_SAFE_INTEGER,
 ): string {
     switch (node.kind) {
         case "text":
-            return renderInline(theme, node.text);
+            return renderText(theme, node);
         case "summary":
             return node.rows
                 .map(
@@ -200,13 +232,31 @@ function nodeText(
         case "list":
             return node.items
                 .map((item, index) => {
-                    if (!(item instanceof Object)) return `• ${item}`;
+                    const tree = node.style === "tree";
+                    const itemIndent = indent + (tree ? 4 : 2);
+                    let content: string;
+                    if (!(item instanceof Object)) content = item;
+                    else if (item.kind === "text" && ("tone" in item || "bold" in item))
+                        content = renderInline(theme, item);
+                    else
+                        content = nodeText(
+                            item,
+                            theme,
+                            codeContent,
+                            `${key}.${index}`,
+                            itemIndent,
+                            width,
+                        );
 
-                    if (item.kind === "text" && ("tone" in item || "bold" in item)) {
-                        return `• ${renderInline(theme, item)}`;
-                    }
+                    if (!tree) return `• ${content}`;
 
-                    return `• ${nodeText(item, theme, codeContent, `${key}.${index}`, indent + 2)}`;
+                    const last = index === node.items.length - 1;
+                    return wrapPrefixedLine(
+                        content,
+                        Math.max(1, width - indent),
+                        dim(theme, last ? "  └ " : "  ├ "),
+                        last ? BODY_INDENT : dim(theme, "  │ "),
+                    ).join("\n");
                 })
                 .join("\n");
         case "output":
@@ -218,14 +268,14 @@ function nodeText(
         case "stack":
             return node.children
                 .map((child, index) =>
-                    nodeText(child, theme, codeContent, `${key}.${index}`, indent),
+                    nodeText(child, theme, codeContent, `${key}.${index}`, indent, width),
                 )
                 .filter(Boolean)
                 .join("\n");
         case "call":
             return node.body === undefined
                 ? ""
-                : nodeText(node.body, theme, codeContent, `${key}.body`, indent);
+                : nodeText(node.body, theme, codeContent, `${key}.body`, indent, width);
         case "empty":
             return "";
     }
@@ -240,17 +290,139 @@ function renderSummary(node: GlowupSummaryNode, theme: GlowupRenderTheme, positi
         maxPreviewLines: DEFAULT_EXPANDED_PREVIEW_LINES,
         noOutputLabel: null,
         prefixFirst: bodyFirstPrefix(theme, position),
-        prefixRest: BODY_INDENT,
+        prefixRest: position === "bare" ? "" : BODY_INDENT,
+        ...(position === "bare" && { dimContent: false }),
     });
+}
+
+function renderSemanticList(
+    node: GlowupListNode,
+    theme: GlowupRenderTheme,
+    { lastComponent, ...context }: ThirdPartyToolRenderContext,
+    position: BodyPosition,
+    labelMode: ToolLabelMode,
+    mutationSettings: MutationSettings | undefined,
+): Component {
+    let previous: readonly Component[] = [];
+    if (lastComponent !== undefined) {
+        const old = listChildren.get(lastComponent);
+        if (old !== undefined && sameProtocolSlot(old.slot, context)) previous = old.children;
+    }
+
+    for (const child of previous.slice(node.items.length)) retireProtocolComponent(child);
+    const buildChildren = (old: readonly Component[]) =>
+        node.items.map((item, index) => {
+            const child = !(item instanceof Object)
+                ? text(item)
+                : item.kind === "text" && ("tone" in item || "bold" in item)
+                  ? text(item)
+                  : item;
+
+            return renderProtocolNode(
+                child,
+                theme,
+                {
+                    ...context,
+                    lastComponent: old[index],
+                    ...(context.invalidate !== undefined && {
+                        invalidate: () => {
+                            rendered.invalidate();
+                            context.invalidate?.();
+                        },
+                    }),
+                    streamKey: `${context.streamKey ?? "root"}.${index}`,
+                },
+                labelMode,
+                mutationSettings,
+                "bare",
+            );
+        });
+    let children = buildChildren(previous);
+    const slot = protocolSlot(context);
+    const rendered = makeComponent((width) => {
+        const tree = node.style === "tree";
+        const indent = tree ? 4 : 2;
+        const outerIndent = tree || position === "bare" ? 0 : BODY_INDENT.length;
+        const contentWidth = Math.max(1, width - outerIndent);
+        const rows = children.flatMap((child, index) => {
+            const last = index === children.length - 1;
+            const first = tree ? dim(theme, last ? "  └ " : "  ├ ") : "• ";
+            const rest = tree && !last ? dim(theme, "  │ ") : " ".repeat(indent);
+
+            return child
+                .render(Math.max(1, contentWidth - indent))
+                .map((row, rowIndex) => `${rowIndex === 0 ? first : rest}${row}`);
+        });
+        const visible = previewRenderedRows(
+            rows,
+            theme,
+            node.preview,
+            context.expanded,
+            contentWidth,
+        );
+        if (outerIndent === 0) return visible;
+        return visible.map(
+            (row, index) => `${index === 0 ? bodyFirstPrefix(theme, position) : BODY_INDENT}${row}`,
+        );
+    });
+    const component: Component = {
+        render: (width) => rendered.render(width),
+        invalidate() {
+            for (const child of children) child.invalidate();
+            children = buildChildren(children);
+            listChildren.set(component, { slot, children });
+            rendered.invalidate();
+        },
+    };
+
+    listChildren.set(component, { slot, children });
+
+    return component;
+}
+
+function hasRichContent(node: GlowupListNode["items"][number]): boolean {
+    if (!(node instanceof Object)) return false;
+
+    switch (node.kind) {
+        case "text":
+            return "parts" in node;
+        case "output":
+            return node.format === "markdown";
+        case "stack":
+            return node.children.some(hasRichContent);
+        case "call":
+            return node.body !== undefined && hasRichContent(node.body);
+        case "list":
+            return node.style === "tree" || node.items.some(hasRichContent);
+        case "code":
+        case "empty":
+        case "mutation":
+        case "summary":
+            return false;
+    }
+
+    throw new Error("Unsupported protocol node");
 }
 
 function renderProtocolList(
     node: GlowupListNode,
     theme: GlowupRenderTheme,
-    { lastComponent: _lastComponent, ...context }: ThirdPartyToolRenderContext,
+    { lastComponent, ...context }: ThirdPartyToolRenderContext,
     position: BodyPosition,
+    labelMode: ToolLabelMode,
+    mutationSettings: MutationSettings | undefined,
 ) {
-    const { streamKey } = context;
+    if (node.style === "tree" || position === "bare" || node.items.some(hasRichContent))
+        return renderSemanticList(
+            node,
+            theme,
+            { ...context, lastComponent },
+            position,
+            labelMode,
+            mutationSettings,
+        );
+
+    // Preserve the established ordinary bullet frames byte-for-byte.
     const options: GlowupOutputRenderOptions = {
         expanded: context.expanded,
         mode: previewMode(node.preview),
@@ -271,7 +443,9 @@ function renderProtocolList(
                     Math.max(1, width - BODY_INDENT.length - indent),
                     key,
                 ),
-            streamKey ?? "root",
+            context.streamKey ?? "root",
+            0,
+            Math.max(1, width - BODY_INDENT.length),
         );
 
         return renderGlowupOutput(theme, content, options).render(width);
@@ -284,11 +458,24 @@ function renderProtocolContent(
     { lastComponent, ...context }: ThirdPartyToolRenderContext,
     position: BodyPosition,
 ) {
+    const markdown = node.kind === "output" && node.format === "markdown";
+    const syntaxAware = node.syntax !== undefined || markdown;
     let contentPosition = position;
-    if (node.kind === "code" && node.title !== undefined) contentPosition = "continued";
+    if (node.kind === "code" && node.title !== undefined && position !== "bare")
+        contentPosition = "continued";
 
     let noOutputLabel: string | null = null;
     if (node.kind === "output") noOutputLabel = node.noOutputLabel ?? null;
+
+    let previous: Component | undefined;
+    if (
+        lastComponent !== undefined &&
+        sameProtocolSlot(contentSlots.get(lastComponent)?.slot, context)
+    )
+        previous = lastComponent;
+
+    let ownedMarkdown: ReturnType<typeof createMarkdownRows> | undefined;
+    if (markdown && previous !== undefined) ownedMarkdown = contentSlots.get(previous)?.markdown;
 
     const createContent = (invalidate: (() => void) | undefined): Component => {
         let contentContext = context;
@@ -301,48 +488,77 @@ function renderProtocolContent(
             maxExpandedLines: previewLines(node.preview, true),
             noOutputLabel,
             prefixFirst: bodyFirstPrefix(theme, contentPosition),
-            prefixRest: BODY_INDENT,
+            prefixRest: position === "bare" ? "" : BODY_INDENT,
+            ...(position === "bare" && { dimContent: false }),
             invalidate,
             syntaxSource: node.text ?? "",
             ...(node.syntax !== undefined &&
                 context.renderProbe !== true && { syntax: node.syntax }),
         };
-        const body = makeComponent((width) =>
-            renderGlowupOutput(
+
+        if (markdown) {
+            ownedMarkdown ??= createMarkdownRows(theme, invalidate);
+            ownedMarkdown.update(theme, invalidate);
+        }
+
+        const markdownContent = ownedMarkdown;
+        const body = makeComponent((width) => {
+            const indent = position === "bare" ? 0 : BODY_INDENT.length;
+            const contentWidth = Math.max(1, width - indent);
+            const content = protocolContent(node, contentContext, contentWidth);
+            if (markdownContent === undefined)
+                return renderGlowupOutput(theme, content, options).render(width);
+
+            let rows = markdownContent.render(content, contentWidth);
+            if (rows.length === 0 && noOutputLabel !== null) rows = [dim(theme, noOutputLabel)];
+
+            return previewRenderedRows(
+                rows,
                 theme,
-                protocolContent(node, contentContext, Math.max(1, width - BODY_INDENT.length)),
-                options,
-            ).render(width),
-        );
-        if (invalidate === undefined || node.syntax === undefined) return body;
+                node.preview,
+                context.expanded,
+                contentWidth,
+            ).map(
+                (row, index) =>
+                    `${index === 0 ? bodyFirstPrefix(theme, contentPosition) : position === "bare" ? "" : BODY_INDENT}${row}`,
+            );
+        });
 
         return {
-            render: (width) => renderSyntaxComponent(body, invalidate, width),
-            invalidate: () => body.invalidate(),
+            render(width) {
+                if (markdownContent?.syncSyntaxVersion() === true) body.invalidate();
+                if (invalidate === undefined || !syntaxAware) return body.render(width);
+                return renderSyntaxComponent(body, invalidate, width);
+            },
+            invalidate() {
+                markdownContent?.invalidate();
+                body.invalidate();
+            },
         };
     };
-    let previous: Component | undefined;
-    if (
-        lastComponent !== undefined &&
-        sameProtocolSlot(contentSlots.get(lastComponent)?.slot, context)
-    )
-        previous = lastComponent;
-
     let content: Component;
-    if (context.invalidate !== undefined && node.syntax !== undefined) {
+    if (context.invalidate !== undefined && syntaxAware) {
         content = createSyntaxComponent(
             previous,
             context.invalidate,
             createContent,
-            node.text ?? "",
+            // Markdown observes the visible streamed source when it renders.
+            markdown ? undefined : (node.text ?? ""),
         );
-    } else content = createContent(context.invalidate);
+    } else {
+        if (previous !== undefined) retireSyntaxComponent(previous);
+        content = createContent(context.invalidate);
+    }
 
-    contentSlots.set(content, { slot: protocolSlot(context), kind: node.kind });
+    contentSlots.set(content, {
+        slot: protocolSlot(context),
+        kind: node.kind,
+        markdown: ownedMarkdown,
+    });
 
     if (node.kind !== "code" || node.title === undefined) return content;
 
-    const title = renderBodyText(theme, node.title, position);
+    const title = renderBodyText(theme, text(node.title), position);
     const titled = makeComponent((width) => [...title.render(width), ...content.render(width)]);
     inheritSyntaxComponent(titled, content);
     contentSlots.set(titled, { slot: protocolSlot(context), kind: node.kind });
@@ -365,14 +581,14 @@ export function renderProtocolNode(
         case "empty":
             return emptyComponent();
         case "text":
-            return renderBodyText(theme, node.text, position);
+            return renderBodyText(theme, node, position);
         case "summary":
             return renderSummary(node, theme, position);
         case "code":
         case "output":
             return renderProtocolContent(node, theme, context, position);
         case "list":
-            return renderProtocolList(node, theme, context, position);
+            return renderProtocolList(node, theme, context, position, labelMode, mutationSettings);
         case "mutation": {
             let mutationOptions: ProtocolMutationRenderOptions = {
                 label: statusLabel(labelMode, context, node.labels),
@@ -385,9 +601,12 @@ export function renderProtocolNode(
             return renderProtocolMutation(node, theme, context, mutationOptions);
         }
         case "call": {
+            let isError = context.isError;
+            if (node.state !== undefined) isError = node.state === "error";
+
             let headerOptions: ThirdPartyCallOptions = {
-                state: callState(context),
-                statusText: statusLabel(labelMode, context, node.labels),
+                state: node.state ?? callState(context),
+                statusText: statusLabel(labelMode, context, node.labels, isError),
                 body: undefined,
                 maxRenderedLines: previewLines(node.preview, context.expanded),
                 expanded: context.expanded,
@@ -398,7 +617,10 @@ export function renderProtocolNode(
                 headerOptions = { ...headerOptions, expandable: node.preview.expandable };
             }
 
-            if (node.body === undefined || node.body.kind === "text") {
+            if (
+                node.body === undefined ||
+                (node.body.kind === "text" && node.body.parts === undefined)
+            ) {
                 return renderThirdPartyCall(theme, {
                     ...headerOptions,
                     body: node.body === undefined ? undefined : nodeText(node.body, theme),
@@ -411,6 +633,7 @@ export function renderProtocolNode(
                 if (old !== undefined && sameProtocolSlot(old.slot, context)) previous = old.body;
             }
 
+            const invalidateHost = context.invalidate;
             const header = renderThirdPartyCall(theme, headerOptions);
             const body = renderProtocolNode(
                 node.body,
@@ -418,10 +641,17 @@ export function renderProtocolNode(
                 {
                     ...context,
                     lastComponent: previous,
+                    ...(context.invalidate !== undefined && {
+                        invalidate: () => {
+                            rendered.invalidate();
+                            invalidateHost?.();
+                        },
+                    }),
                     streamKey: `${context.streamKey ?? "root"}.body`,
                 },
                 labelMode,
                 mutationSettings,
+                position === "bare" ? "bare" : "first",
             );
             const rendered = makeComponent((width) => [
                 ...header.render(width),
@@ -445,7 +675,7 @@ export function renderProtocolNode(
             const firstVisible = node.children.findIndex((child) => child.kind !== "empty");
             const buildChildren = (previous: readonly Component[] = []) =>
                 node.children.map((child, index) => {
-                    let childPosition: BodyPosition = "continued";
+                    let childPosition: BodyPosition = position === "bare" ? "bare" : "continued";
                     if (index === firstVisible) childPosition = position;
 
                     return renderProtocolNode(
@@ -454,6 +684,12 @@ export function renderProtocolNode(
                         {
                             ...childContext,
                             lastComponent: previous[index],
+                            ...(childContext.invalidate !== undefined && {
+                                invalidate: () => {
+                                    rendered.invalidate();
+                                    childContext.invalidate?.();
+                                },
+                            }),
                             streamKey: `${childContext.streamKey ?? "root"}.${index}`,
                         },
                         labelMode,

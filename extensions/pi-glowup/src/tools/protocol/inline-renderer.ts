@@ -1,4 +1,4 @@
-import type { GlowupInline } from "./nodes.ts";
+import type { GlowupInline, GlowupTextNode } from "./nodes.ts";
 import type { GlowupRenderTheme } from "../../rendering/theme.ts";
 
 /** Keeps semantic inline styling consistent across compact and outline presentations. */
@@ -31,4 +31,11 @@ export function renderInline(theme: GlowupRenderTheme, value: GlowupInline): str
     })();
     const styled = theme.fg(token, value.text);
     return value.bold === true ? theme.bold(styled) : styled;
+}
+
+/** Styled parts replace only the presentation, never the producer's plain fallback. */
+export function renderText(theme: GlowupRenderTheme, node: GlowupTextNode): string {
+    return node.parts === undefined
+        ? renderInline(theme, node.text)
+        : node.parts.map((part) => renderInline(theme, part)).join("");
 }

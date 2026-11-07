@@ -11,6 +11,7 @@ import type {
     GlowupNode,
     GlowupOutputNode,
     GlowupPreview,
+    GlowupTextNode,
 } from "./nodes.ts";
 
 export type GlowupNodeDecodeLimits = {
@@ -121,7 +122,13 @@ const mutationLineSchema = captureSchema(
 // Child fields stay unknown here: only the bounded traversal may inspect them.
 const nodeSchemas = {
     empty: captureSchema(Type.Object({ kind: Type.Literal("empty") })),
-    text: captureSchema(Type.Object({ kind: Type.Literal("text"), text: Type.Unknown() })),
+    text: captureSchema(
+        Type.Object({
+            kind: Type.Literal("text"),
+            text: Type.Unknown(),
+            parts: Type.Optional(Type.Unknown()),
+        }),
+    ),
     summary: captureSchema(Type.Object({ kind: Type.Literal("summary"), rows: Type.Unknown() })),
     code: captureSchema(
         Type.Object({
@@ -137,6 +144,7 @@ const nodeSchemas = {
         Type.Object({
             kind: Type.Literal("list"),
             items: Type.Unknown(),
+            style: Type.Optional(Type.Union([Type.Literal("bullet"), Type.Literal("tree")])),
             preview: Type.Optional(Type.Unknown()),
         }),
     ),
@@ -144,6 +152,14 @@ const nodeSchemas = {
         Type.Object({
             kind: Type.Literal("call"),
             labels: Type.Unknown(),
+            state: Type.Optional(
+                Type.Union([
+                    Type.Literal("running"),
+                    Type.Literal("success"),
+                    Type.Literal("error"),
+                    Type.Literal("muted"),
+                ]),
+            ),
             body: Type.Optional(Type.Unknown()),
             preview: Type.Optional(Type.Unknown()),
         }),
@@ -151,6 +167,7 @@ const nodeSchemas = {
     output: captureSchema(
         Type.Object({
             kind: Type.Literal("output"),
+            format: Type.Optional(Type.Literal("markdown")),
             text: Type.Optional(Type.String()),
             streaming: Type.Optional(Type.Unknown()),
             syntax: Type.Optional(Type.Unknown()),
@@ -301,7 +318,8 @@ function decodeListItem(
     // discriminator and text once even when this falls through to node decoding.
     if (
         readField(value, "kind", state) === "text" &&
-        stringValidator.Check(readField(value, "text", state))
+        stringValidator.Check(readField(value, "text", state)) &&
+        readField(value, "parts", state) === undefined
     ) {
         return decodeInline(value, state);
     }
@@ -329,7 +347,21 @@ function decodeVariant(value: unknown, state: DecodeState, depth: number): Glowu
             return capture(nodeSchemas.empty, value, state);
         case "text": {
             const node = capture(nodeSchemas.text, value, state);
-            return { kind: "text", text: decodeInline(node.text, state) };
+            let decoded: GlowupTextNode = { kind: "text", text: decodeInline(node.text, state) };
+            if (node.parts !== undefined) {
+                const { values, length } = collection(
+                    node.parts,
+                    state.limits.maxCollectionItems,
+                    state,
+                );
+                const parts: GlowupInline[] = [];
+                for (let index = 0; index < length; index++)
+                    parts.push(decodeInline(readField(values, String(index), state), state));
+
+                decoded = { ...decoded, parts };
+            }
+
+            return decoded;
         }
         case "summary": {
             const node = capture(nodeSchemas.summary, value, state);
@@ -390,6 +422,7 @@ function decodeVariant(value: unknown, state: DecodeState, depth: number): Glowu
                 );
 
             let node: GlowupListNode = { kind: "list", items };
+            if (source.style !== undefined) node = { ...node, style: source.style };
             if (source.preview !== undefined)
                 node = { ...node, preview: decodePreview(source.preview, state) };
 
@@ -406,6 +439,7 @@ function decodeVariant(value: unknown, state: DecodeState, depth: number): Glowu
                     "failed",
                 ]),
             };
+            if (source.state !== undefined) node = { ...node, state: source.state };
             if (source.body !== undefined)
                 node = { ...node, body: decodeNode(source.body, state, depth + 1) };
 
@@ -417,6 +451,8 @@ function decodeVariant(value: unknown, state: DecodeState, depth: number): Glowu
         case "output": {
             const source = capture(nodeSchemas.output, value, state, ["text", "noOutputLabel"]);
             let node: GlowupOutputNode = { kind: "output" };
+            if (source.format !== undefined) node = { ...node, format: source.format };
+
             if (source.streaming !== undefined)
                 node = {
                     ...node,

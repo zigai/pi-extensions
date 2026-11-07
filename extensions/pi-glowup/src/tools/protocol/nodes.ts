@@ -44,10 +44,11 @@ export type GlowupCallLabels = {
     readonly failed?: string;
 };
 
-/** Plain text component. */
+/** Text component with a plain fallback and optional styled spans. */
 export type GlowupTextNode = {
     readonly kind: "text";
     readonly text: GlowupInline;
+    readonly parts?: readonly GlowupInline[];
 };
 
 /** Structured label/value row. */
@@ -74,6 +75,9 @@ export type GlowupCodeNode = {
 export type GlowupListNode = {
     readonly kind: "list";
     readonly items: ReadonlyArray<GlowupInline | GlowupNode>;
+
+    /** Native tree connectors instead of bullets. Defaults to "bullet". */
+    readonly style?: "bullet" | "tree";
     readonly preview?: GlowupPreview;
 };
 
@@ -81,6 +85,9 @@ export type GlowupListNode = {
 export type GlowupCallNode = {
     readonly kind: "call";
     readonly labels: GlowupCallLabels;
+
+    /** Overrides this call's native indicator and failure label, not its children. */
+    readonly state?: "running" | "success" | "error" | "muted";
     readonly body?: GlowupNode;
     readonly preview?: GlowupPreview;
 };
@@ -89,6 +96,7 @@ export type GlowupCallNode = {
 export type GlowupOutputNode = {
     readonly kind: "output";
     readonly text?: string;
+    readonly format?: "markdown";
 
     /** Generated content opts in; ordinary stdout/log output stays immediate. */
     readonly streaming?: GlowupStreaming;
@@ -153,8 +161,15 @@ export type GlowupNode =
     | GlowupEmptyNode;
 
 /** Creates a text component with semantic styling. */
-export function text(value: GlowupInline): GlowupTextNode {
-    return { kind: "text", text: value };
+export function text(
+    value: GlowupInline,
+    options: { readonly parts?: readonly GlowupInline[] } = {},
+): GlowupTextNode {
+    return {
+        kind: "text",
+        text: value,
+        ...(options.parts !== undefined && { parts: options.parts }),
+    };
 }
 
 /** Creates a structured summary component. */
@@ -196,8 +211,11 @@ export function code(
 export function list(
     items: ReadonlyArray<GlowupInline | GlowupNode>,
     preview?: GlowupPreview,
+    style?: "bullet" | "tree",
 ): GlowupListNode {
     let node: GlowupListNode = { kind: "list", items };
+    if (style !== undefined) node = { ...node, style };
+
     if (preview !== undefined) {
         node = { ...node, preview };
     }
@@ -208,9 +226,15 @@ export function list(
 /** Creates a tool call component. */
 export function call(
     labels: GlowupCallLabels,
-    options: { readonly body?: GlowupNode; readonly preview?: GlowupPreview } = {},
+    options: {
+        readonly state?: GlowupCallNode["state"];
+        readonly body?: GlowupNode;
+        readonly preview?: GlowupPreview;
+    } = {},
 ): GlowupCallNode {
     let node: GlowupCallNode = { kind: "call", labels };
+    if (options.state !== undefined) node = { ...node, state: options.state };
+
     if (options.body !== undefined) {
         node = { ...node, body: options.body };
     }
@@ -226,6 +250,7 @@ export function call(
 export function output(
     value: string | undefined,
     options: {
+        readonly format?: "markdown";
         readonly streaming?: GlowupStreaming;
         readonly syntax?: GlowupSyntax;
         readonly preview?: GlowupPreview;
@@ -233,6 +258,7 @@ export function output(
     } = {},
 ): GlowupOutputNode {
     let node: GlowupOutputNode = { kind: "output" };
+    if (options.format !== undefined) node = { ...node, format: options.format };
     if (options.streaming !== undefined) node = { ...node, streaming: options.streaming };
 
     if (value !== undefined) {

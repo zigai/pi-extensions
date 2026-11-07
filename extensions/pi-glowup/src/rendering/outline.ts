@@ -1,6 +1,7 @@
-import { renderInline } from "../tools/protocol/inline-renderer.ts";
+import { renderInline, renderText } from "../tools/protocol/inline-renderer.ts";
 import { displayMutationPath } from "./path.ts";
 import { protocolContent } from "../tools/protocol/content.ts";
+import { markdownRows, previewRenderedRows } from "../tools/protocol/rendered-content.ts";
 import type { CodePreview } from "./streaming/presentation.ts";
 import { Value } from "typebox/value";
 import { inlineObjectSchema, decodeGlowupNode } from "../tools/protocol/decode.ts";
@@ -20,7 +21,7 @@ import { formatMutationStats } from "./tool-header.ts";
 import { mutationPayloads } from "../tools/protocol/mutation-renderer.ts";
 import { renderGlowupOutput, type GlowupOutputRenderOptions } from "./output.ts";
 import { toolStatusLabel, type ToolLabelMode } from "./status-labels.ts";
-import type { GlowupRenderTheme } from "./theme.ts";
+import { dim, type GlowupRenderTheme } from "./theme.ts";
 import {
     call,
     code,
@@ -41,7 +42,9 @@ import type { ThirdPartyToolRenderer, ThirdPartyToolRenderContext } from "../too
 function listNode(item: GlowupInline | GlowupNode): GlowupNode {
     const scalar = stringParser.parse(item);
     if (scalar !== undefined) return text(scalar);
-    if (Value.Check(inlineObjectSchema, item)) return text(item);
+
+    if (item instanceof Object && !("parts" in item) && Value.Check(inlineObjectSchema, item))
+        return text(item);
 
     const node = decodeGlowupNode(item);
     if (node === undefined) throw new Error("Outline list item is unavailable");
@@ -137,7 +140,7 @@ function nodeRows(
         case "empty":
             return [];
         case "text":
-            return renderInline(theme, node.text)
+            return renderText(theme, node)
                 .split("\n")
                 .flatMap((line) => wrapStyledText(line, width));
         case "summary":
@@ -177,7 +180,10 @@ function nodeRows(
         }
         case "list": {
             const rows = node.items.flatMap((item, index) => {
-                const prefix = `${index + 1}. `;
+                const tree = node.style === "tree";
+                const last = index === node.items.length - 1;
+                const prefix = tree ? (last ? "  └ " : "  ├ ") : `${index + 1}. `;
+                const restPrefix = tree && !last ? "  │ " : " ".repeat(prefix.length);
                 const bodyWidth = Math.max(1, width - prefix.length);
                 const itemContext = {
                     ...context,
@@ -193,10 +199,13 @@ function nodeRows(
                 );
 
                 return body.map((line, lineIndex) => {
-                    if (lineIndex === 0) return `${prefix}${line}`;
-                    return `${" ".repeat(prefix.length)}${line}`;
+                    const marker = lineIndex === 0 ? prefix : restPrefix;
+                    return `${tree ? dim(theme, marker) : marker}${line}`;
                 });
             });
+
+            if (node.style === "tree")
+                return previewRenderedRows(rows, theme, node.preview, context.expanded, width);
 
             return renderGlowupOutput(theme, rows.join("\n"), {
                 expanded: context.expanded,
@@ -232,8 +241,26 @@ function nodeRows(
                 outputOptions = { ...outputOptions, syntax: node.syntax };
 
             const content = protocolContent(node, context, Math.max(1, width));
+            let rows: string[];
+            if (node.kind === "output" && node.format === "markdown") {
+                let rendered = markdownRows(content, theme, width, context.invalidate);
+                if (
+                    rendered.length === 0 &&
+                    node.noOutputLabel !== undefined &&
+                    node.noOutputLabel !== null
+                )
+                    rendered = wrapStyledText(dim(theme, node.noOutputLabel), width);
 
-            const rows = renderGlowupOutput(theme, content, outputOptions).render(width);
+                rows = previewRenderedRows(
+                    rendered,
+                    theme,
+                    node.preview,
+                    context.expanded,
+                    width,
+                    8,
+                );
+            } else rows = renderGlowupOutput(theme, content, outputOptions).render(width);
+
             if (node.kind === "code" && node.title !== undefined)
                 rows.unshift(
                     ...wrapStyledText(theme.fg("accent", renderInline(theme, node.title)), width),

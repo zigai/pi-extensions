@@ -168,13 +168,72 @@ the process it started.
 
 Protocol components are semantic rather than visual:
 
-- `call` renders a lifecycle-aware tool call.
-- `output` renders bounded text output.
+- `call` renders a lifecycle-aware tool call, with an optional `state`.
+- `output` renders bounded text output, with an optional `format: "markdown"`.
 - `summary` renders label/value rows.
 - `code` renders syntax-aware code.
 - `mutation` renders responsive, syntax-aware per-file changes from semantic rows and an optional completed unified patch.
-- `list`, `text`, and `stack` compose structured content.
+- `list`, `text`, and `stack` compose structured content. Lists take an optional `style`, and text takes optional `parts`.
 - `empty` intentionally renders nothing.
+
+### Call state
+
+- `state: "running" | "success" | "error" | "muted"` uses the native `GlowupCallState` values.
+- It overrides only that call's native indicator, color, and failure selection.
+- For example, `call({ static: "Agent", completed: "Agent done", failed: "Agent failed" }, { state: "success" })` stays successful in a mixed failed tool result.
+- Only an explicit `"error"` selects the failed label.
+- Running and completed labels still follow the tool lifecycle, and static labels stay static.
+- Without `state`, behavior is unchanged.
+- The override does not affect sibling calls or nested body calls.
+- Both the helper option and the structural `{ kind: "call", labels, state }` work.
+
+### Markdown output
+
+- `format: "markdown"` uses Pi's native Markdown renderer: headings, lists, inline formatting, and syntax-aware fences.
+- Streaming policy runs before Markdown parsing.
+- Preview budgets count rendered physical rows instead of source lines.
+- `format` changes presentation only; add `streaming` to opt generated content into policy gating.
+- Expanded output honors `expandedLines` (default 500), with an omission row when bounded.
+- Compact protocol content keeps its Markdown instance across redraws and same-slot snapshots.
+- This keeps Pi's parsing caches even above Glowup's row-cache budget.
+- Changes to visible source, width, theme, and syntax refresh the matching caches.
+- Streamed fence jobs belong to the visible source.
+- Ordinary output is unchanged.
+
+### Tree lists
+
+- `list(items, preview?, style?)` accepts `style: "bullet" | "tree"`, also available on `GlowupListNode`.
+- Without a style, lists keep the bullet presentation.
+- `"tree"` uses the native read and search connectors, with continuation rails for multiline and wrapped items and no extra outer connector.
+- For example, `call({ static: "Read" }, { body: list(["first.ts", "second.ts"], undefined, "tree") })`.
+- Tree items render their child components: stacks, nested lists, styled text, Markdown output, and syntax-aware code.
+- Only the rails are dimmed.
+- Tree lists keep the shared head, head-tail, and hidden previews and the collapsed and expanded row budgets.
+- The outline backend also honors tree style and rich content; its default list stays numbered.
+
+### Text parts
+
+- `text` accepts optional `parts: readonly GlowupInline[]`.
+- Parts are joined without separators and replace the visible text.
+- The `text` field stays as a plain fallback for older consumers.
+- Each part has its own `tone` and `bold`.
+- Both `text(value, { parts })` and the structural `{ ...text(value), parts }` work.
+
+Owners on older helper packages can emit these optional fields structurally, without Pi TUI imports or new helper imports:
+
+```ts
+stack([
+  { ...text("Task · running"), parts: [
+    { kind: "text", text: "Task", bold: true },
+    { kind: "text", text: " · running", tone: "dim" },
+  ] },
+  { ...output("## Progress\n\n- Working on `file.ts`"), format: "markdown",
+    preview: { mode: "head", collapsedLines: 6, expandedLines: 200 } },
+]);
+```
+
+`output(source, { format: "markdown", preview })` is equivalent. Collapsed omission hints
+use Pi's configured tool expansion key; expanded omission rows do not suggest further expansion.
 
 The protocol is intentionally a small composition vocabulary rather than a catalog of Glowup
 features or known tools. Tool-specific previews should compose these nodes. Rich rendering that
