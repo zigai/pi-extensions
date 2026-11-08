@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, test } from "vitest";
 
-import { CONFIG_DIR_NAME, type ContextEvent } from "@earendil-works/pi-coding-agent";
+import {
+    CONFIG_DIR_NAME,
+    type ContextEvent,
+    type InputEvent,
+} from "@earendil-works/pi-coding-agent";
 import mentionSkillExtension, { type MentionSkillExtensionApi } from "../src/index.ts";
 import type { MentionSkillSettingsContext } from "../src/settings.ts";
 import type { SkillCommand } from "../src/skill-commands.ts";
@@ -56,6 +60,13 @@ function skillCommand(name: string, filePath: string, description = "test skill"
     };
 }
 
+const silentEvents: MentionSkillExtensionApi["events"] = {
+    emit() {},
+    on() {
+        return () => {};
+    },
+};
+
 function context(cwd: string): MentionSkillSettingsContext {
     return {
         cwd,
@@ -66,6 +77,10 @@ function context(cwd: string): MentionSkillSettingsContext {
 }
 
 function isContextHandler(value: unknown): value is MentionSkillHandlerMap["context"] {
+    return typeof value === "function";
+}
+
+function isInputHandler(value: unknown): value is MentionSkillHandlerMap["input"] {
     return typeof value === "function";
 }
 
@@ -136,6 +151,7 @@ test("mention skill skips command enumeration when provider context has no trigg
 
                 return () => {};
             },
+            events: silentEvents,
             getCommands() {
                 getCommandsCount += 1;
                 return [];
@@ -180,6 +196,7 @@ test("mention skill expands provider context through the shared input observer",
 
                 return () => {};
             },
+            events: silentEvents,
             getCommands() {
                 return [skillCommand("python", skillPath)];
             },
@@ -242,6 +259,7 @@ test("skill mentions escape quotes in discovered file locations", async () => {
 
                 return () => {};
             },
+            events: silentEvents,
             getCommands() {
                 return [skillCommand("demo", skillPath)];
             },
@@ -286,6 +304,7 @@ test("registered skill mentions expand custom triggers without mutating images o
 
                 return () => {};
             },
+            events: silentEvents,
             getCommands() {
                 return [skillCommand("python", skillPath)];
             },
@@ -330,6 +349,59 @@ test("registered skill mentions expand custom triggers without mutating images o
             await handler({ type: "context", messages: expected }, context(cwd)),
             undefined,
         );
+    } finally {
+        await rm(cwd, { recursive: true, force: true });
+    }
+});
+
+test("mention skill reports the skills named in user input to other extensions", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-mention-skill-reported-"));
+    try {
+        const inputHandlers: unknown[] = [];
+        const emitted: unknown[] = [];
+        mentionSkillExtension({
+            on(event, handler) {
+                if (event === "input") inputHandlers.push(handler);
+
+                return () => {};
+            },
+            events: {
+                emit(channel, data) {
+                    emitted.push({ channel, data });
+                },
+                on() {
+                    return () => {};
+                },
+            },
+            getCommands() {
+                return [
+                    skillCommand("python", path.join(cwd, "python.md")),
+                    skillCommand("commit", path.join(cwd, "commit.md")),
+                ];
+            },
+        });
+        const send = async (event: Partial<InputEvent>) => {
+            for (const handler of inputHandlers) {
+                if (!isInputHandler(handler)) throw new Error("Expected input handler");
+
+                await handler(
+                    { type: "input", text: "", source: "interactive", ...event },
+                    context(cwd),
+                );
+            }
+        };
+
+        await send({ text: "Use $python, then $commit. Keep $HOME and $python" });
+        await send({ text: "also $commit", streamingBehavior: "steer" });
+        await send({ text: "$python", source: "extension" });
+
+        assert.deepEqual(emitted, [
+            {
+                channel: "skills:mentioned",
+                data: { names: ["python", "commit"], append: false },
+            },
+            { channel: "skills:mentioned", data: { names: ["commit"], append: true } },
+        ]);
     } finally {
         await rm(cwd, { recursive: true, force: true });
     }

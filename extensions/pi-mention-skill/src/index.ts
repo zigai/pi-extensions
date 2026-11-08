@@ -1,12 +1,18 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerMention, type MentionExtensionApi } from "@zigai/pi-mention-anything/api";
 import { createCachedSkillExpansionLoader } from "./skill-content.ts";
+import {
+    mentionedSkillNames,
+    SKILLS_MENTIONED_CHANNEL,
+    type SkillsMentioned,
+} from "./mentioned-skills.ts";
 import { loadMentionSkillSettingsResult } from "./settings.ts";
 import { createSkillProvider, resolveSkillCandidate } from "./skill-provider.ts";
 import { getSkillCommands } from "./skill-commands.ts";
 import { createSlashSkillFilter } from "./slash-skill-filter.ts";
 
-export type MentionSkillExtensionApi = Pick<ExtensionAPI, "getCommands"> & MentionExtensionApi;
+export type MentionSkillExtensionApi = Pick<ExtensionAPI, "getCommands" | "events"> &
+    MentionExtensionApi;
 
 export default function (pi: MentionSkillExtensionApi): void {
     const loadSkillExpansion = createCachedSkillExpansionLoader();
@@ -35,6 +41,19 @@ export default function (pi: MentionSkillExtensionApi): void {
         if (ctx.hasUI && loaded.settings.hideSlashSkills) {
             ctx.ui.addAutocompleteProvider(createSlashSkillFilter);
         }
+    });
+
+    pi.on("input", (event, ctx) => {
+        if (event.source === "extension") return { action: "continue" };
+
+        const { settings } = settingsFor(ctx);
+        const mentioned: SkillsMentioned = {
+            names: mentionedSkillNames(event.text, settings.trigger, getSkillCommands(pi)),
+            append: event.streamingBehavior !== undefined,
+        };
+        pi.events.emit(SKILLS_MENTIONED_CHANNEL, mentioned);
+
+        return { action: "continue" };
     });
 
     registerMention(pi, {
