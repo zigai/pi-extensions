@@ -259,16 +259,15 @@ function capture<Properties extends TProperties>(
 ): Static<TObject<Properties>> {
     if (!isObjectNotArray(value)) return reject();
 
-    const entries: Array<[string, unknown]> = [];
+    const captured: Record<string, ReturnType<typeof readField>> = {};
     for (const key of schema.keys) {
         const field = readField(value, key, state);
         if (textFields.includes(key) && stringValidator.Check(field)) countText(state, field);
 
         // Omit undefined optional fields, preserving exact optional public types.
-        if (field !== undefined) entries.push([key, field]);
+        if (field !== undefined) captured[key] = field;
     }
 
-    const captured = Object.fromEntries(entries);
     if (!schema.validator.Check(captured)) return reject();
     return captured;
 }

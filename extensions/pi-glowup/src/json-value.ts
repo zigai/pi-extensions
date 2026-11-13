@@ -1,5 +1,5 @@
 import Type from "typebox";
-import { Value } from "typebox/value";
+import { Compile } from "typebox/compile";
 
 export const jsonValueSchema = Type.Cyclic(
     {
@@ -17,6 +17,10 @@ export const jsonValueSchema = Type.Cyclic(
 
 export const jsonObjectSchema = Type.Record(Type.String(), jsonValueSchema);
 
+// Renderers validate tool arguments and results on every frame.
+const jsonValueValidator = Compile(jsonValueSchema);
+const jsonObjectValidator = Compile(jsonObjectSchema);
+
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonArray = ReadonlyArray<JsonValue>;
 export type JsonValue = JsonPrimitive | JsonArray | JsonObject;
@@ -32,7 +36,7 @@ export function isJsonArray(value: JsonValue | undefined): value is JsonArray {
 export const jsonValueParser = {
     parse(value: unknown): JsonValue | undefined {
         try {
-            if (value === undefined || value === null || !Value.Check(jsonValueSchema, value))
+            if (value === undefined || value === null || !jsonValueValidator.Check(value))
                 return undefined;
 
             return value;
@@ -44,7 +48,7 @@ export const jsonValueParser = {
 
 export const jsonObjectParser = {
     parse(value: unknown): JsonObject | undefined {
-        if (value === undefined || value === null || !Value.Check(jsonObjectSchema, value))
+        if (value === undefined || value === null || !jsonObjectValidator.Check(value))
             return undefined;
 
         return value;

@@ -15,6 +15,7 @@ import { selectedGlowupPresentation } from "../../rendering/presentation-registr
 import type { ThirdPartyToolRenderContext, ThirdPartyToolRenderer } from "../types.ts";
 import { renderExpandableSection, sectionContent } from "../section-expansion.ts";
 import { recordRenderError } from "../../diagnostics/render-events.ts";
+import { objectValidator } from "../../unknown-values.ts";
 
 const MAX_MUTATION_CALL_SLOTS = 500;
 const mutationCallSlots = new Map<string, ProtocolMutationCallSlot>();
@@ -314,30 +315,53 @@ export function createProtocolRenderer(
     };
 }
 
+// Tool definitions are immutable once registered, and renderers ask for the same
+// definition's adapter on every frame.
+const parsedAdapters = new WeakMap<object, Map<string, UnknownGlowupRenderer | undefined>>();
+
 const renderingAdapterParser = {
     parse(toolDefinition: unknown, propertyName: string): UnknownGlowupRenderer | undefined {
-        const definitionSchema = Type.Object({ [propertyName]: renderingAdapterSchema });
+        if (!objectValidator.Check(toolDefinition)) return undefined;
 
-        try {
-            if (!Value.Check(definitionSchema, toolDefinition)) return undefined;
-
-            const adapter = Value.Parse(definitionSchema, toolDefinition)[propertyName];
-            if (adapter === undefined) return undefined;
-            if (adapter.callStyle !== undefined && adapter.renderCall === undefined)
-                return undefined;
-            if (adapter.renderPartialCall !== undefined && adapter.renderCall === undefined)
-                return undefined;
-            if (adapter.renderResult !== undefined && adapter.parseResult === undefined)
-                return undefined;
-
-            return adapter.renderCall === undefined && adapter.renderResult === undefined
-                ? undefined
-                : adapter;
-        } catch {
-            return undefined;
+        let byProperty = parsedAdapters.get(toolDefinition);
+        if (byProperty === undefined) {
+            byProperty = new Map();
+            parsedAdapters.set(toolDefinition, byProperty);
         }
+
+        if (byProperty.has(propertyName)) return byProperty.get(propertyName);
+
+        const adapter = parseRenderingAdapter(toolDefinition, propertyName);
+        byProperty.set(propertyName, adapter);
+
+        return adapter;
     },
 };
+
+function parseRenderingAdapter(
+    toolDefinition: Static<typeof objectValidator.Type>,
+    propertyName: string,
+): UnknownGlowupRenderer | undefined {
+    const definitionSchema = Type.Object({ [propertyName]: renderingAdapterSchema });
+
+    try {
+        if (!Value.Check(definitionSchema, toolDefinition)) return undefined;
+
+        const adapter = Value.Parse(definitionSchema, toolDefinition)[propertyName];
+        if (adapter === undefined) return undefined;
+        if (adapter.callStyle !== undefined && adapter.renderCall === undefined) return undefined;
+        if (adapter.renderPartialCall !== undefined && adapter.renderCall === undefined)
+            return undefined;
+        if (adapter.renderResult !== undefined && adapter.parseResult === undefined)
+            return undefined;
+
+        return adapter.renderCall === undefined && adapter.renderResult === undefined
+            ? undefined
+            : adapter;
+    } catch {
+        return undefined;
+    }
+}
 
 /** Extracts a public adapter from an unknown tool definition. */
 export function glowupRenderingAdapter(

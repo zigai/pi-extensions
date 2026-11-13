@@ -1,6 +1,11 @@
 import Type, { type Static } from "typebox";
+import { Compile } from "typebox/compile";
 import { Value } from "typebox/value";
 import { jsonObjectParser, type JsonObject, type JsonValue } from "./json-value.ts";
+import { stringParser } from "./json-scalar.ts";
+
+/** Accepts any non-array object, so parse results can be memoized by identity. */
+export const objectValidator = Compile(Type.Unsafe<object>(Type.Object({})));
 
 /** Narrows an already validated JSON value without widening its fields. */
 export function isRecord(value: JsonValue | undefined): value is JsonObject {
@@ -11,7 +16,7 @@ export function stringField(value: JsonValue | undefined, key: string): string |
     if (!isRecord(value)) return undefined;
 
     const field = value[key];
-    return Value.Check(Type.String(), field) ? field : undefined;
+    return stringParser.parse(field);
 }
 
 const diffDetailsSchema = Type.Object({

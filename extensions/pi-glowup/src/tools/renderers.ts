@@ -19,6 +19,7 @@ import {
 } from "../rendering/presentation-registry.ts";
 import { createSchemaRenderer, outputSchemaParser } from "./schema-rendering.ts";
 import { GLOWUP_RENDERING_PROPERTY } from "./protocol/contract.ts";
+import { objectValidator } from "../unknown-values.ts";
 import type {
     ThirdPartyToolRenderer,
     ThirdPartyToolRendererPlugin,
@@ -44,20 +45,37 @@ type ToolDefinitionView = {
     readonly adapter: ReturnType<typeof glowupRenderingAdapter>;
 };
 
+const missingToolDefinitionView: ToolDefinitionView = {
+    metadata: undefined,
+    preserve: false,
+    adapter: undefined,
+};
+const parsedToolDefinitionViews = new WeakMap<object, ToolDefinitionView>();
+
 const toolDefinitionViewParser = {
     parse(value: unknown): ToolDefinitionView {
+        if (!objectValidator.Check(value)) return missingToolDefinitionView;
+
+        const cached = parsedToolDefinitionViews.get(value);
+        if (cached !== undefined) return cached;
+
         const adapter = glowupRenderingAdapter(value);
+        let view: ToolDefinitionView = { metadata: undefined, preserve: false, adapter };
 
         try {
             const definition = toolDefinitionViewValidator.Parse(value);
-            return {
+            view = {
                 metadata: definition,
                 preserve: definition[GLOWUP_RENDERING_PROPERTY] === "preserve",
                 adapter,
             };
         } catch {
-            return { metadata: undefined, preserve: false, adapter };
+            // Keep the adapter-only view for definitions with invalid metadata.
         }
+
+        parsedToolDefinitionViews.set(value, view);
+
+        return view;
     },
 };
 

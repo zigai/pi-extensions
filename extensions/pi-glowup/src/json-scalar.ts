@@ -1,48 +1,37 @@
 import Type, { type Static } from "typebox";
-import { Value } from "typebox/value";
+import { Compile } from "typebox/compile";
 import { jsonValueSchema } from "./json-value.ts";
 
-const stringSchema = Type.String();
-const numberSchema = Type.Number();
-const booleanSchema = Type.Boolean();
+const stringValidator = Compile(Type.String());
+const numberValidator = Compile(Type.Number());
+const booleanValidator = Compile(Type.Boolean());
 const jsonArraySchema = Type.Array(jsonValueSchema);
+const jsonArrayValidator = Compile(jsonArraySchema);
 
 export type JsonArray = Static<typeof jsonArraySchema>;
 
 export const stringParser = {
     parse(value: unknown): string | undefined {
-        try {
-            return Value.Parse(stringSchema, value);
-        } catch {
-            return undefined;
-        }
+        return stringValidator.Check(value) ? value : undefined;
     },
 };
 
 export const numberParser = {
     parse(value: unknown): number | undefined {
-        try {
-            return Value.Parse(numberSchema, value);
-        } catch {
-            return undefined;
-        }
+        return numberValidator.Check(value) ? value : undefined;
     },
 };
 
 export const booleanParser = {
     parse(value: unknown): boolean | undefined {
-        try {
-            return Value.Parse(booleanSchema, value);
-        } catch {
-            return undefined;
-        }
+        return booleanValidator.Check(value) ? value : undefined;
     },
 };
 
 export const jsonArrayParser = {
     parse(value: unknown): JsonArray | undefined {
         try {
-            return Value.Parse(jsonArraySchema, value);
+            return jsonArrayValidator.Check(value) ? value : undefined;
         } catch {
             return undefined;
         }

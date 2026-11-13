@@ -9,6 +9,7 @@ import {
     type JsonValue,
 } from "../json-value.ts";
 import { stringParser } from "../json-scalar.ts";
+import { objectValidator } from "../unknown-values.ts";
 import { output, stack, DEFAULT_GLOWUP_NODE_DECODE_LIMITS } from "./protocol/contract.ts";
 import { createProtocolRenderer, glowupRenderingAdapter } from "./protocol/renderer.ts";
 import { textOutput } from "./built-in/arguments.ts";
@@ -23,13 +24,23 @@ const resultSchema = Type.Object(
     { additionalProperties: true },
 );
 
+const parsedOutputSchemas = new WeakMap<object, JsonObject | undefined>();
+
 export const outputSchemaParser = {
     parse(value: unknown): JsonObject | undefined {
+        if (!objectValidator.Check(value)) return undefined;
+        if (parsedOutputSchemas.has(value)) return parsedOutputSchemas.get(value);
+
+        let outputSchema: JsonObject | undefined;
         try {
-            return Value.Parse(definitionSchema, value).outputSchema;
+            outputSchema = Value.Parse(definitionSchema, value).outputSchema;
         } catch {
-            return undefined;
+            outputSchema = undefined;
         }
+
+        parsedOutputSchemas.set(value, outputSchema);
+
+        return outputSchema;
     },
 };
 
