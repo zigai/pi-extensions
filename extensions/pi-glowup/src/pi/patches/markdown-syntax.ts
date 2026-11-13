@@ -4,6 +4,8 @@ import {
     observeSyntaxHighlightSource,
     syntaxHighlightingVersion,
 } from "../../rendering/syntax/highlighter.ts";
+import Type from "typebox";
+import { Compile } from "typebox/compile";
 import { normalizedCodeLines } from "../../text-boundaries.ts";
 import { scheduleCodeOutputSyntaxLoad } from "../../rendering/syntax/code-component.ts";
 
@@ -21,20 +23,53 @@ let markdownThinkingThemeSuppressionFailures = 0;
 type MarkdownInstance = {
     readonly theme?: MarkdownTheme;
     readonly text?: string;
+    readonly paddingX?: unknown;
+    readonly options?: unknown;
     invalidate?: () => void;
     readonly defaultTextStyle?: { readonly italic?: boolean };
 };
 
+type MarkdownRender = (this: MarkdownInstance, width: number) => string[];
+type MarkdownSetText = (this: MarkdownInstance, text: string) => void;
+type MarkdownInvalidate = (this: MarkdownInstance) => void;
+
+type RenderedWidth = {
+    readonly width: number;
+    readonly source: string;
+    readonly lines: string[];
+};
+
+// Rendered lines for the two most recent widths. `stale` marks a setText call since
+// the last render: Pi reads streaming state through its transform at that point.
+type MarkdownLineCache = {
+    text: string | undefined;
+    stale: boolean;
+    entries: RenderedWidth[];
+};
+
 type MarkdownPatchState = {
     enabled: boolean;
+    readonly lineCaches: WeakMap<MarkdownInstance, MarkdownLineCache> | undefined;
     readonly originalRender: MarkdownPrototype["render"];
-    readonly wrapperRender: NonNullable<MarkdownPrototype["render"]>;
+    readonly wrapperRender: MarkdownRender;
+    readonly originalSetText: MarkdownSetText | undefined;
+    readonly wrapperSetText: MarkdownSetText | undefined;
+    readonly originalInvalidate: MarkdownInvalidate | undefined;
+    readonly wrapperInvalidate: MarkdownInvalidate | undefined;
 };
 
 type MarkdownPrototype = {
-    render?: (this: MarkdownInstance, width: number) => string[];
+    render?: MarkdownRender;
+    setText?: MarkdownSetText;
+    invalidate?: MarkdownInvalidate;
     [MARKDOWN_PATCH_KEY]?: true;
     [MARKDOWN_PATCH_STATE_KEY]?: MarkdownPatchState;
+};
+
+type MarkdownOwner = {
+    readonly invalidate: () => void;
+    version: number;
+    highlighted: boolean;
 };
 
 export type MarkdownSyntaxPatchStats = {
@@ -49,14 +84,26 @@ export type MarkdownSyntaxPatchStats = {
     readonly thinkingThemeSuppressionFailures: number;
 };
 
-const markdownOwners = new WeakMap<
-    MarkdownInstance,
-    { readonly invalidate: () => void; version: number }
->();
+const MAX_CACHED_WIDTHS = 2;
+
+const markdownSourceValidator = Compile(
+    Type.Object({
+        text: Type.String(),
+        paddingX: Type.Number(),
+        options: Type.Object({
+            transform: Type.Optional(Type.Function([Type.String(), Type.Number()], Type.Unknown())),
+        }),
+    }),
+);
+const transformedSourceValidator = Compile(Type.String());
+const markdownOwners = new WeakMap<MarkdownInstance, MarkdownOwner>();
+let activeMarkdownOwner: MarkdownOwner | undefined;
 let activeMarkdownInvalidation: (() => void) | undefined;
 let activeMarkdownSource: (() => boolean) | undefined;
 
 function highlightMarkdownCode(code: string, lang?: string): string[] {
+    if (activeMarkdownOwner !== undefined) activeMarkdownOwner.highlighted = true;
+
     if (!markdownSyntaxEnabled) return normalizedCodeLines(code);
 
     scheduleCodeOutputSyntaxLoad(
@@ -100,8 +147,15 @@ export function configureMarkdownSyntaxPatch(
         if (state !== undefined) {
             state.enabled = false;
 
-            if (prototype.render === state.wrapperRender) {
-                restoreMarkdownRender(prototype, state.originalRender);
+            if (ownsMarkdownMethods(prototype, state)) {
+                restoreMarkdownMethod(prototype, "render", state.originalRender);
+
+                if (state.wrapperSetText !== undefined)
+                    restoreMarkdownMethod(prototype, "setText", state.originalSetText);
+
+                if (state.wrapperInvalidate !== undefined)
+                    restoreMarkdownMethod(prototype, "invalidate", state.originalInvalidate);
+
                 delete prototype[MARKDOWN_PATCH_STATE_KEY];
                 delete prototype[MARKDOWN_PATCH_KEY];
             }
@@ -118,7 +172,18 @@ export function configureMarkdownSyntaxPatch(
     }
 
     const originalRender = prototype.render;
+    const originalSetText = prototype.setText;
+    const originalInvalidate = prototype.invalidate;
+
+    // Cached lines are only safe when every source and theme change is observable.
+    let lineCaches: WeakMap<MarkdownInstance, MarkdownLineCache> | undefined;
+    if (originalSetText !== undefined && originalInvalidate !== undefined)
+        lineCaches = new WeakMap();
+
     const wrapperRender = function renderWithGlowupSyntax(this: MarkdownInstance, width: number) {
+        if (prototype[MARKDOWN_PATCH_STATE_KEY]?.enabled === false)
+            return originalRender?.call(this, width) ?? [];
+
         let owner = markdownOwners.get(this);
         if (owner === undefined) {
             owner = {
@@ -126,6 +191,7 @@ export function configureMarkdownSyntaxPatch(
                     this.invalidate?.();
                 },
                 version: syntaxHighlightingVersion(),
+                highlighted: false,
             };
             markdownOwners.set(this, owner);
         }
@@ -133,47 +199,160 @@ export function configureMarkdownSyntaxPatch(
         const version = syntaxHighlightingVersion();
         if (owner.version !== version) {
             owner.version = version;
-            owner.invalidate();
+
+            // Only fenced code depends on highlighter state; prose and thinking keep their lines.
+            if (owner.highlighted) owner.invalidate();
+        }
+
+        const lineCache = lineCaches?.get(this);
+        const latest = lineCache?.entries[0];
+        if (
+            lineCache !== undefined &&
+            latest !== undefined &&
+            !lineCache.stale &&
+            lineCache.text === this.text &&
+            latest.width === width
+        )
+            return latest.lines;
+
+        let source: string | undefined;
+        if (lineCaches !== undefined) source = transformedMarkdownSource(this, width);
+
+        if (lineCache !== undefined && source !== undefined) {
+            const cached = lineCache.entries.find(
+                (entry) => entry.width === width && entry.source === source,
+            );
+            if (cached !== undefined) {
+                lineCache.text = this.text;
+                lineCache.stale = false;
+                lineCache.entries = [
+                    cached,
+                    ...lineCache.entries.filter((entry) => entry !== cached),
+                ];
+
+                return cached.lines;
+            }
         }
 
         let current: (() => boolean) | undefined;
         if (this.text !== undefined)
             current = observeSyntaxHighlightSource(this.text, owner.invalidate);
 
+        const previousOwner = activeMarkdownOwner;
         const previousInvalidation = activeMarkdownInvalidation;
         const previousSource = activeMarkdownSource;
+        activeMarkdownOwner = owner;
         activeMarkdownInvalidation = owner.invalidate;
         activeMarkdownSource = current;
 
-        const restoreSyntaxTheme =
-            prototype[MARKDOWN_PATCH_STATE_KEY]?.enabled !== false
-                ? prepareSyntaxTheme(this)
-                : undefined;
-
+        const restoreSyntaxTheme = prepareSyntaxTheme(this);
+        let lines: string[];
         try {
-            return originalRender?.call(this, width) ?? [];
+            lines = originalRender?.call(this, width) ?? [];
         } finally {
+            activeMarkdownOwner = previousOwner;
             activeMarkdownInvalidation = previousInvalidation;
             activeMarkdownSource = previousSource;
             restoreSyntaxTheme?.();
         }
+
+        if (lineCaches !== undefined && source !== undefined)
+            rememberRenderedWidth(lineCaches, this, { width, source, lines });
+
+        return lines;
     };
 
+    let wrapperSetText: MarkdownSetText | undefined;
+    if (originalSetText !== undefined) {
+        wrapperSetText = function setTextWithGlowupCache(this: MarkdownInstance, text: string) {
+            const lineCache = lineCaches?.get(this);
+            if (lineCache !== undefined) lineCache.stale = true;
+
+            originalSetText.call(this, text);
+        };
+        prototype.setText = wrapperSetText;
+    }
+
+    let wrapperInvalidate: MarkdownInvalidate | undefined;
+    if (originalInvalidate !== undefined) {
+        wrapperInvalidate = function invalidateWithGlowupCache(this: MarkdownInstance) {
+            lineCaches?.delete(this);
+            originalInvalidate.call(this);
+        };
+        prototype.invalidate = wrapperInvalidate;
+    }
+
     prototype.render = wrapperRender;
-    prototype[MARKDOWN_PATCH_STATE_KEY] = { enabled: true, originalRender, wrapperRender };
+    prototype[MARKDOWN_PATCH_STATE_KEY] = {
+        enabled: true,
+        lineCaches,
+        originalRender,
+        wrapperRender,
+        originalSetText,
+        wrapperSetText,
+        originalInvalidate,
+        wrapperInvalidate,
+    };
     prototype[MARKDOWN_PATCH_KEY] = true;
 }
 
-function restoreMarkdownRender(
-    prototype: MarkdownPrototype,
-    originalRender: MarkdownPrototype["render"],
+function ownsMarkdownMethods(prototype: MarkdownPrototype, state: MarkdownPatchState): boolean {
+    return (
+        prototype.render === state.wrapperRender &&
+        (state.wrapperSetText === undefined || prototype.setText === state.wrapperSetText) &&
+        (state.wrapperInvalidate === undefined || prototype.invalidate === state.wrapperInvalidate)
+    );
+}
+
+// Pi keys its own line cache by raw text and width and resets it on setText, because
+// extension transforms may read streaming state. Keying by the transformed source
+// keeps that contract while surviving the setText calls of an unchanged message.
+function transformedMarkdownSource(instance: MarkdownInstance, width: number): string | undefined {
+    if (!markdownSourceValidator.Check(instance)) return undefined;
+
+    const transformed = instance.options.transform?.(
+        instance.text,
+        Math.max(1, width - instance.paddingX * 2),
+    );
+    if (transformed === undefined || transformed === null) return instance.text;
+
+    if (!transformedSourceValidator.Check(transformed)) return undefined;
+
+    return transformed;
+}
+
+function rememberRenderedWidth(
+    lineCaches: WeakMap<MarkdownInstance, MarkdownLineCache>,
+    instance: MarkdownInstance,
+    rendered: RenderedWidth,
 ): void {
-    if (originalRender === undefined) {
-        delete prototype.render;
+    // Pi returns an uncached [""] for blank output and [] afterwards; let it keep doing so.
+    if (rendered.lines.length === 0 || (rendered.lines.length === 1 && rendered.lines[0] === "")) {
+        lineCaches.delete(instance);
         return;
     }
 
-    prototype.render = originalRender;
+    // Width-dependent sources (formatted code) differ per width, so keep the other
+    // width even when the source changed; the cap bounds what a stream can retain.
+    const previous = lineCaches.get(instance)?.entries ?? [];
+    const entries = [rendered, ...previous.filter((entry) => entry.width !== rendered.width)].slice(
+        0,
+        MAX_CACHED_WIDTHS,
+    );
+    lineCaches.set(instance, { text: instance.text, stale: false, entries });
+}
+
+function restoreMarkdownMethod<TName extends "render" | "setText" | "invalidate">(
+    prototype: MarkdownPrototype,
+    name: TName,
+    method: MarkdownPrototype[TName],
+): void {
+    if (method === undefined) {
+        delete prototype[name];
+        return;
+    }
+
+    prototype[name] = method;
 }
 
 function prepareSyntaxTheme(instance: MarkdownInstance): (() => void) | undefined {

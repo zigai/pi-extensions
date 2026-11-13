@@ -2,6 +2,7 @@ import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { Markdown, type MarkdownTheme } from "@earendil-works/pi-tui";
 import { resolve } from "node:path";
 import {
+    configureSyntaxBracketPairColoring,
     initializeSyntaxHighlighting,
     disposeSyntaxHighlighting,
     settleSyntaxHighlights,
@@ -102,6 +103,104 @@ describe("markdown syntax patch", () => {
         expect(colored).toContain("\u001b[38;2;86;156;214mconst");
         expect(colored).toContain("fresh");
         expect(colored).not.toContain("stale");
+    });
+
+    it("colors a fence rendered before the highlighter became ready", async () => {
+        onTestFinished(async () => {
+            configureMarkdownSyntaxPatch(false);
+            await disposeSyntaxHighlighting();
+        });
+
+        configureMarkdownSyntaxPatch(true);
+        const markdown = new Markdown(
+            "```javascript\nconst value = 1;\n```",
+            0,
+            0,
+            makeMarkdownTheme(),
+        );
+        expect(markdown.render(80).join("\n")).not.toContain("38;2");
+
+        await initializeSyntaxHighlighting(
+            { PI_GLOWUP_SYNTAX_THEME: resolve("themes/darker-modern-theme.json") },
+            { preloadLanguages: ["javascript"] },
+        );
+        await settleSyntaxHighlights();
+
+        await vi.waitFor(() => expect(markdown.render(80).join("\n")).toContain("38;2"));
+    });
+
+    it("repaints highlighted fences when highlighter rendering changes", async () => {
+        onTestFinished(async () => {
+            configureSyntaxBracketPairColoring(true);
+            configureMarkdownSyntaxPatch(false);
+            await disposeSyntaxHighlighting();
+        });
+
+        await initializeSyntaxHighlighting(
+            { PI_GLOWUP_SYNTAX_THEME: resolve("themes/darker-modern-theme.json") },
+            { preloadLanguages: ["javascript"] },
+        );
+        configureMarkdownSyntaxPatch(true);
+        configureSyntaxBracketPairColoring(true);
+        const source = "```javascript\nconst value = [[(1)]];\n```";
+        const markdown = new Markdown(source, 0, 0, makeMarkdownTheme());
+        markdown.render(80);
+        await settleSyntaxHighlights();
+        const paired = markdown.render(80);
+
+        configureSyntaxBracketPairColoring(false);
+        await settleSyntaxHighlights();
+        markdown.render(80);
+        await settleSyntaxHighlights();
+
+        const unpaired = new Markdown(source, 0, 0, makeMarkdownTheme());
+        unpaired.render(80);
+        await settleSyntaxHighlights();
+        expect(unpaired.render(80)).not.toEqual(paired);
+        expect(markdown.render(80)).toEqual(unpaired.render(80));
+    });
+
+    it("renders each width and theme freshly when returning to an earlier width", () => {
+        onTestFinished(() => configureMarkdownSyntaxPatch(false));
+        configureMarkdownSyntaxPatch(true);
+        let marker = "a";
+        const theme = { ...makeMarkdownTheme(), bold: (text: string) => `${marker}${text}` };
+        const source = `**${"word ".repeat(30).trim()}**`;
+        const markdown = new Markdown(source, 1, 0, theme);
+        const fresh = (width: number) => new Markdown(source, 1, 0, theme).render(width);
+
+        expect(markdown.render(80)).toEqual(fresh(80));
+        expect(markdown.render(40)).toEqual(fresh(40));
+        expect(markdown.render(80)).toEqual(fresh(80));
+
+        marker = "b";
+        markdown.invalidate();
+
+        expect(markdown.render(40)).toEqual(fresh(40));
+        expect(markdown.render(80)).toEqual(fresh(80));
+        expect(markdown.render(80).join("\n")).toContain("bword");
+    });
+
+    it("re-reads a transform when unchanged text is set again", () => {
+        onTestFinished(() => configureMarkdownSyntaxPatch(false));
+        configureMarkdownSyntaxPatch(true);
+        let streaming = true;
+        const markdown = new Markdown("answer", 0, 0, makeMarkdownTheme(), undefined, {
+            transform: (text) => {
+                if (streaming) return `${text} (streaming)`;
+
+                return text;
+            },
+        });
+        expect(markdown.render(40).join("\n")).toContain("(streaming)");
+
+        markdown.render(20);
+
+        streaming = false;
+        markdown.setText("answer");
+
+        expect(markdown.render(20).join("\n")).not.toContain("(streaming)");
+        expect(markdown.render(40).join("\n")).not.toContain("(streaming)");
     });
 
     it("stops injecting a highlighter when disabled", () => {

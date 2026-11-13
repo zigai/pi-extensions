@@ -29,15 +29,43 @@ type ComponentState = {
     streaming: boolean;
     dirty: boolean;
     targetWidth: number | undefined;
+    renderWidth: number | undefined;
+    refreshing: boolean;
+    presented: Presentation | undefined;
+};
+
+// What Pi last received: the raw message, its streaming flag, and each displayed text.
+type Presentation = {
+    readonly raw: AssistantMessage;
+    readonly streaming: boolean;
+    readonly texts: readonly (string | undefined)[];
 };
 
 const componentConstructorSchema = Type.Object({ component: Type.Constructor([], Type.Unknown()) });
+const outputPaddingSchema = Type.Number({ minimum: 0 });
 const componentPrototypeSchema = Type.Object({
     updateContent: Type.Function([], Type.Void()),
     render: Type.Function([Type.Number()], Type.Array(Type.String())),
 });
-const outputPaddingSchema = Type.Number({ minimum: 0 });
+
 let nextComponent = 0;
+
+function displayedText(block: AssistantMessage["content"][number]): string | undefined {
+    if (block.type === "thinking") return block.thinking;
+    if (block.type === "text") return block.text;
+
+    return undefined;
+}
+
+function samePresentation(previous: Presentation | undefined, next: Presentation): boolean {
+    return (
+        previous !== undefined &&
+        previous.raw === next.raw &&
+        previous.streaming === next.streaming &&
+        previous.texts.length === next.texts.length &&
+        previous.texts.every((text, index) => text === next.texts[index])
+    );
+}
 
 /**
  * Patches the exported host component before its Markdown constructor trims text.
@@ -109,6 +137,9 @@ export async function installAssistantStreaming(
                     streaming: false,
                     dirty: false,
                     targetWidth: undefined,
+                    renderWidth: undefined,
+                    refreshing: false,
+                    presented: undefined,
                 };
                 states.set(this, state);
                 components.add(new WeakRef(this));
@@ -119,6 +150,9 @@ export async function installAssistantStreaming(
 
             if (!state.clones.has(message)) state.raw = message;
             if (isStreaming !== undefined) state.streaming = isStreaming;
+
+            // Host-initiated updates may change the output padding behind the render width.
+            if (!state.refreshing) state.renderWidth = undefined;
 
             const raw = state.raw;
             if (["aborted", "error", "length"].includes(raw.stopReason)) state.streaming = false;
@@ -170,9 +204,21 @@ export async function installAssistantStreaming(
                     }),
                 };
             });
+            const presented: Presentation = {
+                raw,
+                streaming: state.streaming,
+                texts: content.map(displayedText),
+            };
+
+            state.dirty = false;
+
+            // A width change or async readiness that leaves every displayed text unchanged
+            // would only rebuild identical children and discard their rendered lines.
+            if (state.refreshing && samePresentation(state.presented, presented)) return;
+
             const clone: AssistantMessage = { ...raw, content };
             state.clones.add(clone);
-            state.dirty = false;
+            state.presented = presented;
             previous.call(this, clone, state.streaming);
         };
     });
@@ -184,17 +230,31 @@ export async function installAssistantStreaming(
                 return function renderStreamingContent(width): string[] {
                     const state = states.get(this);
                     if (active && state !== undefined && Number.isFinite(width)) {
-                        const padding: unknown = Object.getOwnPropertyDescriptor(
-                            this,
-                            "outputPad",
-                        )?.value;
-                        let available = Math.floor(width);
-                        if (Value.Check(outputPaddingSchema, padding))
-                            available -= 2 * Math.max(0, padding);
-                        available = Math.max(1, Math.floor(available - codeIndentWidth));
-                        if (state.targetWidth !== available || state.dirty) {
-                            state.targetWidth = available;
-                            this.updateContent(state.raw, state.streaming);
+                        if (state.renderWidth !== width) {
+                            state.renderWidth = width;
+
+                            const padding: unknown = Object.getOwnPropertyDescriptor(
+                                this,
+                                "outputPad",
+                            )?.value;
+                            let available = Math.floor(width);
+                            if (Value.Check(outputPaddingSchema, padding))
+                                available -= 2 * Math.max(0, padding);
+                            available = Math.max(1, Math.floor(available - codeIndentWidth));
+                            if (state.targetWidth !== available) {
+                                state.targetWidth = available;
+                                state.dirty = true;
+                            }
+                        }
+
+                        if (state.dirty) {
+                            state.refreshing = true;
+
+                            try {
+                                this.updateContent(state.raw, state.streaming);
+                            } finally {
+                                state.refreshing = false;
+                            }
                         }
                     }
 

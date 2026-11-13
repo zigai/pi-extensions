@@ -168,7 +168,20 @@ function shouldRenderAssistantSeparator(previousKind: ChatComponentKind | undefi
     return previousKind === "tool";
 }
 
+// A component never changes class, and chat containers classify every child on every paint.
+const componentKinds = new WeakMap<Component, ChatComponentKind | null>();
+
 function componentKind(component: Component): ChatComponentKind | undefined {
+    let kind = componentKinds.get(component);
+    if (kind === undefined) {
+        kind = classifyComponent(component) ?? null;
+        componentKinds.set(component, kind);
+    }
+
+    return kind ?? undefined;
+}
+
+function classifyComponent(component: Component): ChatComponentKind | undefined {
     if (component instanceof AssistantMessageComponent) {
         return "assistant";
     }
