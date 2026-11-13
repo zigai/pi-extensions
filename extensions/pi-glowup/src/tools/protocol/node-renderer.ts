@@ -127,11 +127,7 @@ function retireReplacedComponent(node: GlowupNode, context: ThirdPartyToolRender
 
     const call = callBodies.get(previous);
     if (call !== undefined && sameProtocolSlot(call.slot, context)) {
-        if (
-            node.kind !== "call" ||
-            node.body === undefined ||
-            (node.body.kind === "text" && node.body.parts === undefined)
-        )
+        if (node.kind !== "call" || node.body === undefined || node.body.kind === "text")
             retireProtocolComponent(previous);
 
         return;
@@ -617,10 +613,7 @@ export function renderProtocolNode(
                 headerOptions = { ...headerOptions, expandable: node.preview.expandable };
             }
 
-            if (
-                node.body === undefined ||
-                (node.body.kind === "text" && node.body.parts === undefined)
-            ) {
+            if (node.body === undefined || node.body.kind === "text") {
                 return renderThirdPartyCall(theme, {
                     ...headerOptions,
                     body: node.body === undefined ? undefined : nodeText(node.body, theme),

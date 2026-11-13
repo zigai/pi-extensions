@@ -136,6 +136,33 @@ for (const backend of ["compact", "outline"] as const) {
             expect(stripVTControlCharacters(rows)).toContain("└ Task · running");
         });
 
+        it("lays out a styled call body like a plain one", () => {
+            const style: GlowupRenderTheme = {
+                fg: (token, value) => (token === "muted" ? `\u001b[2m${value}\u001b[22m` : value),
+                bold: (value) => value,
+            };
+            const node = call(
+                { static: "Fetched" },
+                {
+                    body: text("plain fallback", {
+                        parts: [
+                            "https://example.org/a",
+                            { kind: "text", text: " (404)", tone: "muted" },
+                        ],
+                    }),
+                },
+            );
+
+            const unstyled = call(
+                { static: "Fetched" },
+                { body: text("https://example.org/a (404)") },
+            );
+
+            const rows = component(node, {}, style).render(80);
+            expect(plain(rows)).toEqual(plain(component(unstyled).render(80)));
+            expect(rows.join("\n")).toContain("\u001b[2m (404)\u001b[22m");
+        });
+
         it.each([40, 80, 165])("bounds rendered rows, not source rows, at %s", (width) => {
             const node = output("# Heading\n\n- " + "long words ".repeat(150), {
                 format: "markdown",

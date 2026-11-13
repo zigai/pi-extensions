@@ -217,6 +217,7 @@ Protocol components are semantic rather than visual:
 - Parts are joined without separators and replace the visible text.
 - The `text` field stays as a plain fallback for older consumers.
 - Each part has its own `tone` and `bold`.
+- A call whose body is one text node, with or without parts, shows that text on the call line.
 - Both `text(value, { parts })` and the structural `{ ...text(value), parts }` work.
 
 Owners on older helper packages can emit these optional fields structurally, without Pi TUI imports or new helper imports:
