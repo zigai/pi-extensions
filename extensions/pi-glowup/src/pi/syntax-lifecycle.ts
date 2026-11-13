@@ -3,8 +3,10 @@ import { type GlowupConfig } from "../config/normalize.ts";
 import { DebugFileLogger, type DebugLogFields } from "../diagnostics/logger.ts";
 import {
     clearSyntaxHighlightCache,
+    configureSyntaxInitialization,
     onSyntaxHighlightComplete,
     refreshSyntaxHighlighting,
+    type SyntaxInitializationOptions,
 } from "../rendering/syntax/highlighter.ts";
 import {
     createSyntaxHighlightStore,
@@ -21,27 +23,34 @@ type SyntaxHighlightingLifecycleOptions = {
     readonly reportWarning: (message: string) => void;
 };
 
-async function loadSyntaxHighlighting(
+function syntaxInitializationOptions(
     options: SyntaxHighlightingLifecycleOptions,
     highlightStore: SyntaxHighlightStore,
+): SyntaxInitializationOptions {
+    const projectLanguageDetection =
+        options.cwd === undefined
+            ? { enabled: options.config.syntax.projectLanguageDetection.enabled }
+            : {
+                  enabled: options.config.syntax.projectLanguageDetection.enabled,
+                  cwd: options.cwd,
+              };
+
+    return {
+        preloadLanguages: options.config.syntax.preloadLanguages,
+        projectLanguageDetection,
+        reportWarning: options.reportWarning,
+        highlightStore,
+    };
+}
+
+async function loadSyntaxHighlighting(
+    initialization: SyntaxInitializationOptions,
+    reportWarning: (message: string) => void,
 ): Promise<void> {
     try {
-        const projectLanguageDetection =
-            options.cwd === undefined
-                ? { enabled: options.config.syntax.projectLanguageDetection.enabled }
-                : {
-                      enabled: options.config.syntax.projectLanguageDetection.enabled,
-                      cwd: options.cwd,
-                  };
-
-        await refreshSyntaxHighlighting(process.env, {
-            preloadLanguages: options.config.syntax.preloadLanguages,
-            projectLanguageDetection,
-            reportWarning: options.reportWarning,
-            highlightStore,
-        });
+        await refreshSyntaxHighlighting(process.env, initialization);
     } catch (cause: unknown) {
-        options.reportWarning(`[pi-glowup] Syntax preload failed: ${errorMessage(cause)}`);
+        reportWarning(`[pi-glowup] Syntax preload failed: ${errorMessage(cause)}`);
     }
 }
 
@@ -64,7 +73,8 @@ export function createSyntaxLifecycle(options: {
     let pendingSyntaxStart:
         | {
               readonly generation: number;
-              readonly options: SyntaxHighlightingLifecycleOptions;
+              readonly initialization: SyntaxInitializationOptions;
+              readonly reportWarning: (message: string) => void;
               readonly context: ExtensionContext;
           }
         | undefined;
@@ -82,7 +92,7 @@ export function createSyntaxLifecycle(options: {
             syntaxTimer = undefined;
         }
 
-        const syntaxTask = loadSyntaxHighlighting(pending.options, highlightStore);
+        const syntaxTask = loadSyntaxHighlighting(pending.initialization, pending.reportWarning);
         pendingSyntaxTasks.add(syntaxTask);
         void syntaxTask
             .then(() => {
@@ -115,9 +125,15 @@ export function createSyntaxLifecycle(options: {
             if (generation() === currentGeneration) requestToolRender(context);
         });
 
+        // Renders may start highlighting before the warm-up refresh. Matching inputs let
+        // that refresh keep the highlighter and its stored results.
+        const initialization = syntaxInitializationOptions(options, highlightStore);
+        configureSyntaxInitialization(process.env, initialization);
+
         pendingSyntaxStart = {
             generation: generation(),
-            options,
+            initialization,
+            reportWarning: options.reportWarning,
             context,
         };
         syntaxTimer = setTimeout(startPendingSyntaxHighlighting, SYNTAX_WARMUP_DELAY_MS);

@@ -117,6 +117,50 @@ it("highlights through the worker when a stored entry is corrupt", async () => {
     expect(second.started).toHaveLength(1);
 });
 
+it.each([
+    ["lines with a non-string row", "lines", '["const", 1]'],
+    [
+        "lines stored as a diff",
+        "lines",
+        '{"dark":{"colors":[],"deletionLines":[],"additionLines":[]},"light":null}',
+    ],
+    [
+        "a diff with fractional runs",
+        "diff",
+        '{"dark":{"colors":["#fff"],"deletionLines":[["a",[0.5,0,0]]],"additionLines":[]},"light":null}',
+    ],
+    [
+        "a diff line without runs",
+        "diff",
+        '{"dark":{"colors":[],"deletionLines":[["a"]],"additionLines":[]},"light":null}',
+    ],
+    [
+        "a diff with a malformed light side",
+        "diff",
+        '{"dark":{"colors":[],"deletionLines":[],"additionLines":[]},"light":{"colors":[]}}',
+    ],
+    ["a diff stored as lines", "diff", '["const"]'],
+])("highlights through the worker when a stored entry holds %s", async (_name, kind, stored) => {
+    const directory = await temporaryDirectory();
+    const first = tokenizerWithStore(directory);
+    const highlight = async (tokenizer: ReturnType<typeof createSyntaxTokenizer>) => {
+        if (kind === "lines") return tokenizer.tokenize(SOURCE, "typescript", true);
+        return tokenizer.highlightDiff(diffMetadata());
+    };
+
+    const expected = await highlight(first.tokenizer);
+    await vi.waitFor(async () => expect(await storedEntries(directory)).toHaveLength(1));
+
+    const [entry] = await storedEntries(directory);
+    if (entry === undefined) throw new Error("missing stored entry");
+
+    await writeFile(join(directory, entry), stored);
+
+    const second = tokenizerWithStore(directory);
+    expect(await highlight(second.tokenizer)).toEqual(expected);
+    expect(second.started).toHaveLength(1);
+});
+
 it("keeps highlighting and reports once when the cache directory is unusable", async () => {
     const parent = await temporaryDirectory();
     const blocked = join(parent, "not-a-directory");

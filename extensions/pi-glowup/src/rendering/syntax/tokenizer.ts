@@ -5,7 +5,7 @@ import { Worker } from "node:worker_threads";
 import type { FileDiffMetadata } from "@pierre/diffs";
 import type { ThemeRegistration } from "shiki";
 import Type from "typebox";
-import { Value } from "typebox/value";
+import { Compile } from "typebox/compile";
 import {
     isLoadableSyntaxLanguage,
     normalizeSyntaxLanguage,
@@ -30,7 +30,10 @@ const WORKER_START_LIMIT_MS = 30_000;
 const WORKER_JOB_LIMIT_MS = 60_000;
 const WORKER_CONTENTION_LIMIT_MS = 10_000;
 const WORKER_CLEANUP_LIMIT_MS = 10_000;
-const storedLinesSchema = Type.Array(Type.String());
+
+// Stored entries hold hundreds of thousands of values; only compiled checks stay cheap.
+const storedLinesValidator = Compile(Type.Array(Type.String()));
+
 const packedLineSchema = Type.Union([
     Type.Null(),
     Type.Tuple([Type.String(), Type.Array(Type.Integer())]),
@@ -42,10 +45,12 @@ const packedCodeSchema = Type.Object({
     additionLines: Type.Array(packedLineSchema),
 });
 
-const storedDiffSchema = Type.Object({
-    dark: packedCodeSchema,
-    light: Type.Union([Type.Null(), packedCodeSchema]),
-});
+const storedDiffValidator = Compile(
+    Type.Object({
+        dark: packedCodeSchema,
+        light: Type.Union([Type.Null(), packedCodeSchema]),
+    }),
+);
 
 type WorkResult = { readonly lines: string[] } | { readonly diff: DiffHighlightOutput };
 
@@ -944,12 +949,12 @@ function decodeStoredResult(
     }
 
     if (request.operation === "diff") {
-        if (!Value.Check(storedDiffSchema, value)) return undefined;
+        if (!storedDiffValidator.Check(value)) return undefined;
 
         return { diff: { highlight: value, failures: [] } };
     }
 
-    if (!Value.Check(storedLinesSchema, value)) return undefined;
+    if (!storedLinesValidator.Check(value)) return undefined;
 
     return { lines: value };
 }

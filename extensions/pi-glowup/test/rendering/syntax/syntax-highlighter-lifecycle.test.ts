@@ -18,6 +18,7 @@ import { scheduleCodeOutputSyntaxLoad } from "../../../src/rendering/syntax/code
 import {
     createSyntaxHighlighter,
     compactPythonStructuralBlankRows,
+    configureSyntaxInitialization,
     disposeSyntaxHighlighting,
     clearSyntaxHighlightCache,
     getLoadedSyntaxHighlighterForLanguage,
@@ -736,6 +737,28 @@ describe("syntax highlighter lifecycle", () => {
             { createHighlighter: factory, preloadLanguages: ["typescript", "python"] },
         );
         expect(factoryCalls).toBe(2);
+    });
+
+    it("keeps a render-started highlighter when the session refresh has the same inputs", async () => {
+        let factoryCalls = 0;
+        const options = {
+            createHighlighter: async () => {
+                factoryCalls += 1;
+                return fakeHighlighter({ loadedLanguages: ["typescript"] });
+            },
+            preloadLanguages: ["typescript"],
+        };
+
+        configureSyntaxInitialization({}, options);
+        const started = await getSyntaxHighlighterForLanguage("typescript");
+        expect(factoryCalls).toBe(1);
+
+        await refreshSyntaxHighlighting({}, options);
+
+        expect(factoryCalls).toBe(1);
+        expect((await getSyntaxHighlighterForLanguage("typescript"))?.highlighter).toBe(
+            started?.highlighter,
+        );
     });
 
     it.each([

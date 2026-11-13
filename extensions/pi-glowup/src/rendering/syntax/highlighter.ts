@@ -211,6 +211,9 @@ const syntaxStateListeners = new Set<SyntaxStateListener>();
 
 let syntaxRenderingVersion = 0;
 let activeConfigurationKey: string | undefined;
+let demandInitialization:
+    | { readonly env: NodeJS.ProcessEnv; readonly options: SyntaxInitializationOptions }
+    | undefined;
 
 export type SyntaxHighlighterFactory = CreateHighlighterFactory<string, string>;
 
@@ -237,6 +240,21 @@ export type SyntaxInitializationOptions = {
     readonly createWorker?: ((url: URL) => Worker) | undefined;
     readonly highlightStore?: SyntaxHighlightStore | undefined;
 };
+
+/**
+ * Sets the inputs for initialization that a render starts before the session's own refresh.
+ * Matching the refresh inputs lets that refresh keep the state instead of rebuilding it.
+ */
+export function configureSyntaxInitialization(
+    env: NodeJS.ProcessEnv,
+    options: SyntaxInitializationOptions,
+): void {
+    demandInitialization = { env, options };
+}
+
+async function initializeSyntaxHighlightingOnDemand(): Promise<SyntaxState> {
+    return initializeSyntaxHighlighting(demandInitialization?.env, demandInitialization?.options);
+}
 
 /** Initializes the central Shiki highlighter once during extension startup. */
 export async function initializeSyntaxHighlighting(
@@ -928,6 +946,7 @@ export async function compactPythonStructuralBlankRows(
         maxBytes: MAX_CACHE_BYTES,
         reportWarning: options.reportWarning,
         waitForDisposals: waitForTokenizerDisposals,
+        store: demandInitialization?.options.highlightStore,
     });
 
     const lines = await pythonTokenizer.compactPython(code, options);
@@ -1194,7 +1213,7 @@ export async function highlightSyntaxDiff(
     metadata: FileDiffMetadata,
 ): Promise<DiffHighlightOutput | undefined> {
     const generation = syntaxGeneration;
-    const state = syntaxState ?? (await initializeSyntaxHighlighting());
+    const state = syntaxState ?? (await initializeSyntaxHighlightingOnDemand());
     if (generation !== syntaxGeneration || state.status !== "ready") return undefined;
 
     return state.tokenizer.highlightDiff(metadata);
@@ -1237,7 +1256,7 @@ export async function getSyntaxHighlighterForLanguage(
         return loaded;
     }
 
-    const state = syntaxState ?? (await initializeSyntaxHighlighting());
+    const state = syntaxState ?? (await initializeSyntaxHighlightingOnDemand());
     if (generation !== syntaxGeneration || state.status !== "ready") {
         return undefined;
     }
@@ -1410,6 +1429,7 @@ export async function disposeSyntaxHighlighting(): Promise<void> {
     initializationPromise = undefined;
     syntaxPreloadDiagnostics = undefined;
     activeConfigurationKey = undefined;
+    demandInitialization = undefined;
 
     disposeReadySyntaxState(state);
 
