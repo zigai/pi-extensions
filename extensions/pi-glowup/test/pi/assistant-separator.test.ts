@@ -207,6 +207,64 @@ describe("assistant separator patch", () => {
         }
     });
 
+    it.each([
+        {
+            name: "a final answer after reasoning",
+            precededByTool: true,
+            toolCall: false,
+            expected: ["", "RULE", "", " weighing options", "", "RULE", "", " final answer"],
+        },
+        {
+            name: "a narrated tool call",
+            precededByTool: true,
+            toolCall: true,
+            expected: ["", "RULE", "", " weighing options", "", " final answer"],
+        },
+        {
+            name: "an ordinary reply",
+            precededByTool: false,
+            toolCall: false,
+            expected: ["", " weighing options", "", " final answer"],
+        },
+    ])("places separators around reasoning for $name", ({ precededByTool, toolCall, expected }) => {
+        initTheme("dark");
+        configureAssistantSeparatorPatch(true);
+        const chat = new Container();
+        const terminal = new VirtualTerminal(20, 10);
+        const content: AssistantMessage["content"] = [
+            { type: "thinking", thinking: "weighing options" },
+            { type: "text", text: "final answer" },
+        ];
+        if (toolCall) content.push({ type: "toolCall", id: "call", name: "sample", arguments: {} });
+
+        if (precededByTool)
+            chat.addChild(
+                new ToolExecutionComponent(
+                    "sample",
+                    "completed-sample",
+                    {},
+                    undefined,
+                    { renderCall: () => new Text("completed tool", 0, 0) },
+                    new TuiMainScreen(terminal),
+                    "/generic",
+                ),
+            );
+
+        const reply = new AssistantMessageComponent(assistantMessage(content));
+        chat.addChild(reply);
+        try {
+            const lines = chat
+                .render(20)
+                .map((line) => stripVTControlCharacters(line).trimEnd())
+                .map((line) => (line === "─".repeat(20) ? "RULE" : line));
+            expect(lines.slice(-expected.length)).toEqual(expected);
+            if (!precededByTool) expect(lines).toEqual(expected);
+        } finally {
+            configureAssistantSeparatorPatch(false);
+            terminal.dispose();
+        }
+    });
+
     it.each([true, false])(
         "prepares separate transcript cards without rendering hidden native history (restored: %s)",
         (restored) => {

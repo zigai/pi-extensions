@@ -26,11 +26,13 @@ type AssistantContent = {
 
 type AssistantMessageLike = Pick<AssistantMessage, "content">;
 type AssistantContentKind = "text" | "thinking";
-type AssistantAddChildCall = AssistantContentKind | "other";
+
+// "answer" marks Pi's spacer between the reasoning and the final answer text.
+type AssistantAddChildCall = AssistantContentKind | "answer" | "other";
 
 type AssistantRenderInstance = {
+    readonly [ASSISTANT_SEPARATOR_RENDER_KEY]?: boolean;
     readonly contentContainer?: unknown;
-    [ASSISTANT_SEPARATOR_RENDER_KEY]?: boolean;
 };
 
 type AssistantSeparatorPatchState = {
@@ -117,27 +119,26 @@ function visibleContentKinds(
     return contentItems.map(visibleContentKind);
 }
 
-function hasVisibleContentAfterByIndex(
+function nextVisibleKindByIndex(
     kinds: ReadonlyArray<AssistantContentKind | undefined>,
-): ReadonlyArray<boolean> {
-    const hasVisibleAfter = Array.from({ length: kinds.length }, () => false);
-    let hasLaterVisibleContent = false;
+): ReadonlyArray<AssistantContentKind | undefined> {
+    const nextVisible = Array.from<AssistantContentKind | undefined>({ length: kinds.length });
+    let laterKind: AssistantContentKind | undefined;
     for (let index = kinds.length - 1; index >= 0; index -= 1) {
-        hasVisibleAfter[index] = hasLaterVisibleContent;
-
-        if (kinds[index] !== undefined) {
-            hasLaterVisibleContent = true;
-        }
+        nextVisible[index] = laterKind;
+        laterKind = kinds[index] ?? laterKind;
     }
 
-    return hasVisibleAfter;
+    return nextVisible;
 }
 
 function assistantAddChildCalls(message: AssistantMessageLike): AssistantAddChildCall[] {
     const calls: AssistantAddChildCall[] = [];
     const kinds = visibleContentKinds(message.content);
     const hasVisibleContent = kinds.some((kind) => kind !== undefined);
-    const hasVisibleAfter = hasVisibleContentAfterByIndex(kinds);
+    const nextVisible = nextVisibleKindByIndex(kinds);
+    const isFinalAnswer = !message.content.some((content) => content.type === "toolCall");
+    let hasVisibleText = false;
 
     if (hasVisibleContent) {
         calls.push("other");
@@ -154,10 +155,13 @@ function assistantAddChildCalls(message: AssistantMessageLike): AssistantAddChil
             if (visibleRun) {
                 calls.push("thinking");
 
-                if (hasVisibleAfter[index] === true) calls.push("other");
+                const next = nextVisible[index];
+                if (next === "text" && isFinalAnswer && !hasVisibleText) calls.push("answer");
+                else if (next !== undefined) calls.push("other");
             }
         } else if (kinds[index] === "text") {
             calls.push("text");
+            hasVisibleText = true;
         }
     }
 
@@ -201,6 +205,21 @@ function classifyComponent(component: Component): ChatComponentKind | undefined 
     }
 
     return undefined;
+}
+
+class AnswerSeparator implements Component {
+    constructor(
+        private readonly owner: AssistantRenderInstance,
+        private readonly isEnabled: () => boolean,
+    ) {}
+
+    render(width: number): string[] {
+        if (!this.isEnabled() || this.owner[ASSISTANT_SEPARATOR_RENDER_KEY] !== true) return [];
+
+        return ["", renderSeparator(width)];
+    }
+
+    invalidate(): void {}
 }
 
 function markAssistantSeparator(component: Component, shouldRender: boolean): void {
@@ -249,6 +268,7 @@ function createThinkingBlockSpacingWrapper(
         const calls = assistantAddChildCalls(message);
         let callIndex = 0;
         let previousVisibleKind: AssistantContentKind | undefined;
+        const answerSeparator = (): Component => new AnswerSeparator(this, isEnabled);
 
         contentContainer.addChild = function addChildWithThinkingSpacing(
             this: Container,
@@ -260,6 +280,8 @@ function createThinkingBlockSpacingWrapper(
             if (call === "thinking" && previousVisibleKind === "text") {
                 addChildBeforePatch(new Spacer(1));
             }
+
+            if (call === "answer") addChildBeforePatch(answerSeparator());
 
             addChildBeforePatch(component);
 
