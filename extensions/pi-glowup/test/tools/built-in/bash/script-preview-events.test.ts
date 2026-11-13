@@ -447,14 +447,14 @@ describe("script preview events", () => {
 
             expect(render()).toContain(raw);
             release();
-            await vi.waitUntil(() => render().includes("  import math\n  class Sample:"));
+            await vi.waitUntil(() => render().includes("  import math\n  \n  class Sample:"));
             expect(render()).toContain(
-                '      text = """first\n  \n  last"""\n  assert Sample.text',
+                '      text = """first\n  \n  last"""\n  \n  assert Sample.text',
             );
 
             expect(render(true)).toContain(raw);
             expect(render(false, 24)).toContain("  assert Sample.text");
-            expect(render()).toContain("  import math\n  class Sample:");
+            expect(render()).toContain("  import math\n  \n  class Sample:");
             expect(context.args).toEqual({ command });
         } finally {
             release();

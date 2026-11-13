@@ -12,6 +12,15 @@ export type PreparedFormatterCommand = {
     readonly dispose?: () => Promise<void>;
 };
 
+const PYTHON_BLANK_LINE_RULES = [
+    "blank-line-after-control-block",
+    "blank-line-after-terminal-control-block",
+    "blank-line-before-assignment",
+    "blank-line-before-branch",
+    "blank-line-before-unrelated-block",
+    "no-suite-leading-trailing-blank-lines",
+];
+
 export async function prepareFormatterCommand(
     profile: ScriptFormatterProfile,
     options: ScriptBlockFormatterOptions,
@@ -45,14 +54,24 @@ export async function prepareFormatterCommand(
         switch (profile.kind) {
             case "python": {
                 const layout = profile.collections ?? "ruff-default";
+                const config = join(directory, "tuff.toml");
                 await writeFile(
-                    join(directory, "tuff.toml"),
-                    `[format.collections]\nlists = { layout = "${layout}" }\ndicts = { layout = "${layout}" }\ntuples = { layout = "${layout}" }\nsets = { layout = "${layout}" }\n`,
+                    config,
+                    [
+                        "[format.collections]",
+                        ...["lists", "dicts", "tuples", "sets"].map(
+                            (kind) => `${kind} = { layout = "${layout}" }`,
+                        ),
+                        "[format.blank-lines]",
+                        `rules = ${JSON.stringify(PYTHON_BLANK_LINE_RULES)}`,
+                        "",
+                    ].join("\n"),
                     { mode: 0o600, signal },
                 );
                 args.push(
                     "format",
-                    "--isolated",
+                    "--config",
+                    config,
                     "--line-length",
                     width,
                     "--config",

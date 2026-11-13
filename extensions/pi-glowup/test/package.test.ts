@@ -342,7 +342,7 @@ try {
     worker.postMessage({ operation: "highlight", id: 1, code: ${JSON.stringify(source)}, language: "javascript", brackets: true, theme });
     const highlighted = await response;
     const compacted = new Promise((resolve, reject) => { worker.once("message", resolve); worker.once("error", reject); });
-    worker.postMessage({ operation: "compact-python", id: 2, code: 'text = """first\\n\\nlast"""\\n\\nassert text' });
+    worker.postMessage({ operation: "compact-python", id: 2, code: 'text = """first\\n\\nlast"""\\n\\n\\nassert text' });
     const compactedLines = (await compacted).lines;
     const statementWorker = new Worker(new URL("./node_modules/@zigai/pi-glowup/dist/src/statement-worker.mjs", import.meta.url), { execArgv: [] });
     const statements = [];
@@ -389,7 +389,7 @@ try {
             { language: "bash", statements: ["printf complete"] },
         ]);
 
-        expect(result.compacted).toEqual(['text = """first', "", 'last"""', "assert text"]);
+        expect(result.compacted).toEqual(['text = """first', "", 'last"""', "", "assert text"]);
         expect(result.lines[1]).toContain("\u001b[");
         expect(result.lines[2]).toContain("\u001b[38;2;106;153;85mconst hidden");
         expect(result.lines[3]).toContain("\u001b[38;2;86;156;214mconst");

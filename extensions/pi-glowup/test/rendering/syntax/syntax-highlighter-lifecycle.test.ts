@@ -521,8 +521,8 @@ describe("syntax highlighter lifecycle", () => {
         await initializeSyntaxHighlighting({ PI_GLOWUP_SYNTAX: "off" });
 
         await expect(
-            compactPythonStructuralBlankRows('text = """first\n\nlast"""\n\nassert text'),
-        ).resolves.toBe('text = """first\n\nlast"""\nassert text');
+            compactPythonStructuralBlankRows('text = """first\n\n\nlast"""\n\n\nassert text'),
+        ).resolves.toBe('text = """first\n\n\nlast"""\n\nassert text');
         expect(isSyntaxHighlightingReady()).toBe(false);
     });
 
@@ -531,7 +531,7 @@ describe("syntax highlighter lifecycle", () => {
         const cancelled = compactPythonStructuralBlankRows("first = 1\n\nsecond = 2", {
             signal: controller.signal,
         });
-        const queued = compactPythonStructuralBlankRows("third = 3\n\nfourth = 4");
+        const queued = compactPythonStructuralBlankRows("third = 3\n\n\nfourth = 4");
         await new Promise<void>((resolve) => {
             setImmediate(resolve);
         });
@@ -539,7 +539,7 @@ describe("syntax highlighter lifecycle", () => {
         controller.abort();
 
         await expect(cancelled).resolves.toBeUndefined();
-        await expect(queued).resolves.toBe("third = 3\nfourth = 4");
+        await expect(queued).resolves.toBe("third = 3\n\nfourth = 4");
     });
 
     it("disposes pending Python analysis and permits fresh session analysis", async () => {
@@ -548,8 +548,8 @@ describe("syntax highlighter lifecycle", () => {
         await disposeSyntaxHighlighting();
 
         await expect(pending).resolves.toBeUndefined();
-        await expect(compactPythonStructuralBlankRows("third = 3\n\nfourth = 4")).resolves.toBe(
-            "third = 3\nfourth = 4",
+        await expect(compactPythonStructuralBlankRows("third = 3\n\n\nfourth = 4")).resolves.toBe(
+            "third = 3\n\nfourth = 4",
         );
     });
 

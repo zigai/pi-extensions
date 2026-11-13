@@ -51,7 +51,7 @@ describe("script formatter settings", () => {
         expect(await formatter({ label: "Python", language: "python", code })).toBe(code);
     });
 
-    it("fits Python imports, class and function bodies after compacting structural gaps", async () => {
+    it("keeps one blank row between top-level Python blocks", async () => {
         const code =
             "import math\n\n\nclass Sample:\n    pass\n\n\ndef read():\n    return 1\n\n\nassert read() == 1";
         const invocation = { label: "Python", language: "python", code };
@@ -75,11 +75,12 @@ describe("script formatter settings", () => {
         );
 
         const expected = [
-            "$ import math",
-            "  class Sample:",
+            "$ class Sample:",
             "      pass",
+            "  ",
             "  def read():",
             "      return 1",
+            "  ",
             "  assert read() == 1",
         ];
 
@@ -105,7 +106,7 @@ describe("script formatter settings", () => {
         ["inline comment grouping", "first = 1  # group\n\nsecond = 2"],
         ["incomplete string", 'text = """first\n\nlast'],
     ])("retains %s blank rows while compacting structural spacing", async (_name, content) => {
-        const prefix = "import math\n\nclass Sample:\n    pass\n\nassert True\n";
+        const prefix = "import math\n\n\nclass Sample:\n    pass\n\n\nassert True\n";
 
         const formatter = createCommandScriptFormatter(
             parseScriptFormatterCommandsValue({
@@ -121,7 +122,7 @@ describe("script formatter settings", () => {
         );
 
         expect(formatted.code).toBe(
-            "import math\nclass Sample:\n    pass\nassert True\n" + content,
+            "import math\n\nclass Sample:\n    pass\n\nassert True\n" + content,
         );
     });
 

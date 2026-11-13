@@ -47,8 +47,10 @@ export function compactPythonStructuralBlankRows(
             next !== undefined &&
             !next.comment &&
             /^\S/u.test(next.text)
-        )
+        ) {
+            retained.push(row.text);
             continue;
+        }
 
         retained.push(...rows.slice(start, cursor).map((blank) => blank.text));
     }

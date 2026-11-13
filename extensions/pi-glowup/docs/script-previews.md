@@ -97,16 +97,18 @@ formats whole shell commands. Executables must already be installed and reachabl
 explicit executable path. `kind: "command"` accepts arbitrary formatter argv through `command`.
 
 Profiles format asynchronously at the available content width and after resize. Oxfmt receives
-`printWidth` through an owned temporary configuration; Tuff receives line length and an isolated
-collection profile. Successful Python formatting also compacts root-level structural blank rows
-before unindented code. The syntax worker's Python tokenizer protects strings, expressions, and
-continuations; comment-adjacent and suite-internal gaps remain. This applies to Python command
-profiles too.
+`printWidth` through an owned temporary configuration; Tuff receives line length, the collection
+profile, and its blank-line rules that separate control blocks.
+
+Successful Python formatting shrinks each run of root-level blank rows before unindented code to
+one row. The syntax worker's Python tokenizer protects strings, expressions, and continuations;
+comment-adjacent and suite-internal gaps remain. This applies to Python command profiles too.
+
 Python/JS/TS profiles omit complete leading imports by default; `imports: "show"` retains them.
 This import policy applies in statement and block streaming modes too.
 Bash keeps setup statements and heredocs. Expanded Bash-tool and Codemode previews normally show
 original source unless `streaming.code` is `"statement"`. Recognized embedded heredoc source stays
-formatted in expanded Bash previews too; token mode retains the original surrounding shell layout.
+formatted in expanded Bash previews too; the surrounding shell follows `scriptPreview.shellLayout`.
 
 Token-mode previews keep raw source until execution completes, then publish prepared decoration.
 Statement mode formats each completed statement separately before revealing it; block mode waits for
