@@ -626,6 +626,68 @@ describe("script preview events", () => {
         }
     });
 
+    it("keeps the configured shell layout when a formatted call is expanded", async () => {
+        const bash = createNativeBashFeature();
+        const theme = new Theme(TEST_THEME_COLORS, TEST_THEME_BACKGROUND_COLORS, "truecolor");
+        const command = "echo first; echo second; echo third";
+
+        const profiles = parseScriptFormatterCommandsValue({
+            bash: { kind: "bash", command: ["shfmt"] },
+        });
+        const formatter: ScriptBlockFormatter = Object.assign(
+            async () => "echo first\necho second\necho third",
+            { profileFor: (language: string) => profiles.get(language) },
+        );
+        const context: BuiltInRenderContext = {
+            args: { command },
+            toolCallId: "bash-expanded-layout",
+            cwd: "/work",
+            lastComponent: undefined,
+            state: {},
+            executionStarted: true,
+            argsComplete: true,
+            isPartial: false,
+            expanded: true,
+            showImages: false,
+            isError: false,
+            durationMs: undefined,
+            outputPad: 1,
+            keyText,
+            keyHint,
+            invalidate: () => {},
+        };
+        const render = () =>
+            stripVTControlCharacters(
+                bash
+                    .renderBashCall(
+                        { command },
+                        theme,
+                        context,
+                        () => 8,
+                        () => false,
+                        () => "always",
+                        () => "trailing",
+                    )
+                    .render(80)
+                    .join("\n"),
+            );
+
+        try {
+            bash.schedule({
+                toolCallId: context.toolCallId,
+                command,
+                formatter,
+                completed: true,
+                signal: undefined,
+                isCurrent: () => true,
+                invalidate: context.invalidate,
+            });
+            expect(render()).toBe("$ echo first;\n  echo second;\n  echo third");
+        } finally {
+            bash.clear();
+        }
+    });
+
     it("formats for the rendered content width and restores a single line after widening", async () => {
         const bash = createNativeBashFeature();
         const theme = new Theme(TEST_THEME_COLORS, TEST_THEME_BACKGROUND_COLORS, "truecolor");

@@ -282,6 +282,10 @@ describe("bash command analysis", () => {
             "first;\ncat <<-ONE <<'TWO'\n\tdata; first\n\tONE\n  data; second\nTWO\nlast;\nfinal",
         );
 
+        expect(reflowBashCommand("run - <<'DATA'\nbody\nDATA\n  next; last")).toBe(
+            "run - <<'DATA'\nbody\nDATA\nnext;\nlast",
+        );
+
         expect(reflowBashCommand('printf "first\n  second; still text"; final')).toBe(
             'printf "first\n  second; still text";\nfinal',
         );

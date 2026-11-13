@@ -805,11 +805,7 @@ export function createNativeBashFeature(
 
                 if (script !== undefined) inheritPreparedScriptSyntax(expandedScript, script);
 
-                options = {
-                    ...options,
-                    pureScriptOverride: expandedScript,
-                    shellLayout: "preserve",
-                };
+                options = { ...options, pureScriptOverride: expandedScript };
             }
 
             const selected = options.pureScriptOverride;
