@@ -472,7 +472,8 @@ describe("extension lifecycle", () => {
         expect(format?.fields).toMatchObject({
             toolCallId: "call-1",
             stage: "block",
-            outcome: "unchanged",
+            // The quiet session already stored this output for the next session.
+            outcome: "cached",
         });
     });
 
@@ -722,6 +723,11 @@ describe("extension lifecycle", () => {
         await Promise.all(nextPi.runBashToolCall("true"));
         await vi.waitUntil(() => isSyntaxHighlightingReady());
 
+        // The first session stored its result on disk; new source needs a worker again.
+        const nextCode = "const other = 4;";
+        const afterReload = await highlightSyntaxCodeAsync(nextCode, "typescript");
+        expect(afterReload.map(stripAnsi)).toEqual([nextCode]);
+        expect(afterReload).not.toEqual([nextCode]);
         expect(await highlightSyntaxCodeAsync(code, "typescript")).toEqual(beforeReload);
         expect(workers).toHaveLength(4);
         expect(workers.slice(0, 2).every((worker) => worker.threadId === -1)).toBe(true);

@@ -38,6 +38,22 @@ const external = [
 await rm(outputRoot, { recursive: true, force: true });
 await mkdir(path.dirname(outfile), { recursive: true });
 
+/** @type {import("esbuild").Plugin} */
+const pierreRuntimePlugin = {
+  name: "pi-glowup-pierre-runtime",
+  setup(build) {
+    build.onResolve({ filter: /^@pierre\/diffs$/ }, () => ({
+      path: "pierre-diffs-runtime",
+      namespace: "pi-glowup-pierre-runtime",
+    }));
+    build.onLoad({ filter: /.*/, namespace: "pi-glowup-pierre-runtime" }, () => ({
+      contents: pierreDiffsRuntimeSource,
+      resolveDir: pierreDiffsDirectory,
+      loader: "js",
+    }));
+  },
+};
+
 const result = await esbuild.build({
   absWorkingDir: packageRoot,
   entryPoints: ["src/index.ts", "src/presentation.ts"],
@@ -59,22 +75,7 @@ const result = await esbuild.build({
   sourcesContent: true,
   legalComments: "none",
   external,
-  plugins: [
-    {
-      name: "pi-glowup-pierre-runtime",
-      setup(build) {
-        build.onResolve({ filter: /^@pierre\/diffs$/ }, () => ({
-          path: "pierre-diffs-runtime",
-          namespace: "pi-glowup-pierre-runtime",
-        }));
-        build.onLoad({ filter: /.*/, namespace: "pi-glowup-pierre-runtime" }, () => ({
-          contents: pierreDiffsRuntimeSource,
-          resolveDir: pierreDiffsDirectory,
-          loader: "js",
-        }));
-      },
-    },
-  ],
+  plugins: [pierreRuntimePlugin],
   metafile: true,
 });
 
@@ -91,6 +92,7 @@ const workerResult = await esbuild.build({
   sourcesContent: true,
   legalComments: "none",
   external,
+  plugins: [pierreRuntimePlugin],
   metafile: true,
 });
 

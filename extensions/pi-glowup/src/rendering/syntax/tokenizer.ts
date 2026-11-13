@@ -1,11 +1,23 @@
+import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
+import type { FileDiffMetadata } from "@pierre/diffs";
 import type { ThemeRegistration } from "shiki";
-import type { SyntaxLanguage } from "./language.ts";
+import Type from "typebox";
+import { Value } from "typebox/value";
+import {
+    isLoadableSyntaxLanguage,
+    normalizeSyntaxLanguage,
+    type SyntaxLanguage,
+} from "./language.ts";
+import type { SyntaxHighlightKey, SyntaxHighlightStore } from "./highlight-store.ts";
 import type {
+    SyntaxWorkerRequest,
     TokenizeInitialization,
-    TokenizeRequest,
     TokenizeResponse,
 } from "./tokenize-worker.ts";
+import type { DiffHighlightOutput } from "../diff/highlight-runs.ts";
 import { recordRenderError } from "../../diagnostics/render-events.ts";
 
 declare global {
@@ -18,11 +30,30 @@ const WORKER_START_LIMIT_MS = 30_000;
 const WORKER_JOB_LIMIT_MS = 60_000;
 const WORKER_CONTENTION_LIMIT_MS = 10_000;
 const WORKER_CLEANUP_LIMIT_MS = 10_000;
+const storedLinesSchema = Type.Array(Type.String());
+const packedLineSchema = Type.Union([
+    Type.Null(),
+    Type.Tuple([Type.String(), Type.Array(Type.Integer())]),
+]);
+
+const packedCodeSchema = Type.Object({
+    colors: Type.Array(Type.String()),
+    deletionLines: Type.Array(packedLineSchema),
+    additionLines: Type.Array(packedLineSchema),
+});
+
+const storedDiffSchema = Type.Object({
+    dark: packedCodeSchema,
+    light: Type.Union([Type.Null(), packedCodeSchema]),
+});
+
+type WorkResult = { readonly lines: string[] } | { readonly diff: DiffHighlightOutput };
 
 type Work = {
-    readonly request: TokenizeRequest;
+    settled: boolean;
+    readonly request: SyntaxWorkerRequest;
     readonly bytes: number;
-    readonly resolve: (lines: string[] | undefined) => void;
+    readonly resolve: (result: WorkResult | undefined) => void;
     readonly signal: AbortSignal | undefined;
     readonly cancel: () => void;
     readonly onUnavailable: TokenizeUnavailableListener | undefined;
@@ -106,6 +137,7 @@ export function createSyntaxTokenizer(
         readonly reportWarning: ((message: string) => void) | undefined;
         readonly waitForDisposals: () => Promise<void>;
         readonly createWorker?: ((url: URL) => Worker) | undefined;
+        readonly store?: SyntaxHighlightStore | undefined;
     },
 ) {
     const queue: Work[] = [];
@@ -220,10 +252,11 @@ export function createSyntaxTokenizer(
     function timeout(work: Work): void {
         if (activeWork() !== work) return;
 
+        const abandoned = work.settled;
         stopWorker({ kind: "idle" });
         finish(work, undefined, "timeout");
 
-        if (!warnedTimeout) {
+        if (!warnedTimeout && !abandoned) {
             warnedTimeout = true;
             options.reportWarning?.(
                 "[pi-glowup] Syntax work exceeded its time limit; the request was not completed",
@@ -267,14 +300,17 @@ export function createSyntaxTokenizer(
 
     function finish(
         work: Work,
-        lines: string[] | undefined,
+        result: WorkResult | undefined,
         reason: TokenizeUnavailableReason = "failed",
         error?: string,
     ): void {
-        if (lines === undefined) work.onUnavailable?.(reason, error);
+        if (work.settled) return;
+
+        work.settled = true;
+        if (result === undefined) work.onUnavailable?.(reason, error);
         bytes -= work.bytes;
         work.signal?.removeEventListener("abort", work.cancel);
-        work.resolve(lines);
+        work.resolve(result);
         wakeCapacityWaiters();
         scheduleCapacityNotification();
     }
@@ -467,7 +503,7 @@ export function createSyntaxTokenizer(
             finish(completed, undefined, "failed", response.error);
             fail();
         } else {
-            finish(completed, response.lines);
+            finish(completed, response);
             dispatch();
         }
     }
@@ -480,10 +516,7 @@ export function createSyntaxTokenizer(
         }
 
         try {
-            const url = new URL(
-                import.meta.glowupSyntaxWorker ?? "./tokenize-worker.ts",
-                import.meta.url,
-            );
+            const url = workerUrl();
             const current = options.createWorker?.(url) ?? new Worker(url, { execArgv: [] });
 
             lifecycle = {
@@ -500,12 +533,9 @@ export function createSyntaxTokenizer(
             });
             current.on("message", (response: TokenizeResponse) => receive(current, response));
 
-            let language: SyntaxLanguage = "python";
-            if (initial.request.operation === "highlight") language = initial.request.language;
-
             const initialization: TokenizeInitialization = {
                 type: "initialize",
-                language,
+                language: initialLanguage(initial.request),
                 theme,
             };
             current.postMessage(initialization);
@@ -581,10 +611,10 @@ export function createSyntaxTokenizer(
     }
 
     async function enqueue(
-        request: TokenizeRequest,
+        request: SyntaxWorkerRequest,
         cancellation: TokenizeCancellation,
-    ): Promise<string[] | undefined> {
-        const size = Buffer.byteLength(request.code, "utf8");
+    ): Promise<WorkResult | undefined> {
+        const size = requestBytes(request);
         const resting = restingState();
         if (resting?.kind === "disposed" || resting?.kind === "failed") {
             cancellation.onUnavailable?.(resting.reason, "syntax worker unavailable");
@@ -688,6 +718,7 @@ export function createSyntaxTokenizer(
 
         return new Promise((resolve) => {
             const work: Work = {
+                settled: false,
                 request,
                 bytes: size,
                 resolve,
@@ -695,10 +726,10 @@ export function createSyntaxTokenizer(
                 onUnavailable: cancellation.onUnavailable,
                 onState: cancellation.onState,
                 cancel: () => {
+                    // Restarting the worker costs more than finishing the job; the
+                    // response is dropped, and contention or the job limit still stop it.
                     if (activeWork() === work) {
-                        stopWorker({ kind: "idle" });
                         finish(work, undefined, "cancelled");
-                        dispatch();
                         return;
                     }
 
@@ -721,6 +752,81 @@ export function createSyntaxTokenizer(
         });
     }
 
+    let storeFiles: readonly string[] | undefined;
+    let themeDigest: string | undefined;
+
+    function storeKey(request: SyntaxWorkerRequest): SyntaxHighlightKey {
+        // The worker bundle and Shiki's grammars produce the colors.
+        storeFiles ??= [
+            fileURLToPath(workerUrl()),
+            createRequire(import.meta.url).resolve("shiki"),
+        ];
+
+        themeDigest ??= createHash("sha256")
+            .update(JSON.stringify(theme ?? null))
+            .digest("hex");
+
+        let input: string;
+        switch (request.operation) {
+            case "highlight":
+                input = JSON.stringify([
+                    request.operation,
+                    themeDigest,
+                    request.language,
+                    request.brackets,
+                    request.code,
+                ]);
+                break;
+            case "diff":
+                input = JSON.stringify([request.operation, themeDigest, request.metadata]);
+                break;
+            case "compact-python":
+                input = JSON.stringify([request.operation, request.code]);
+                break;
+            default:
+                return request satisfies never;
+        }
+
+        return { input, files: storeFiles };
+    }
+
+    function isUnavailable(): boolean {
+        const resting = restingState();
+        return resting?.kind === "disposed" || resting?.kind === "failed";
+    }
+
+    async function run(
+        request: SyntaxWorkerRequest,
+        cancellation: TokenizeCancellation,
+    ): Promise<WorkResult | undefined> {
+        const store = options.store;
+        if (store === undefined || isUnavailable()) return enqueue(request, cancellation);
+
+        let key: SyntaxHighlightKey;
+        try {
+            key = storeKey(request);
+        } catch (cause: unknown) {
+            recordRenderError("syntax.highlight-store", cause);
+            return enqueue(request, cancellation);
+        }
+
+        const stored = decodeStoredResult(request, await store.read(key));
+        if (stored !== undefined && !isUnavailable()) {
+            if (isAborted(cancellation.signal)) {
+                cancellation.onUnavailable?.("cancelled");
+                return undefined;
+            }
+
+            return stored;
+        }
+
+        const result = await enqueue(request, cancellation);
+        const encoded = encodeStoredResult(result);
+        if (encoded !== undefined) store.write(key, encoded);
+
+        return result;
+    }
+
     async function tokenize(
         code: string,
         language: SyntaxLanguage,
@@ -732,17 +838,41 @@ export function createSyntaxTokenizer(
             return undefined;
         }
 
-        return enqueue(
+        const result = await run(
             { operation: "highlight", id: nextId++, code, language, theme, brackets },
             cancellation,
         );
+        if (result === undefined || !("lines" in result)) return undefined;
+
+        return result.lines;
+    }
+
+    async function highlightDiff(
+        metadata: FileDiffMetadata,
+        cancellation: TokenizeCancellation = {},
+    ): Promise<DiffHighlightOutput | undefined> {
+        if (theme === undefined) {
+            cancellation.onUnavailable?.("failed", "syntax theme unavailable");
+            return undefined;
+        }
+
+        const result = await run(
+            { operation: "diff", id: nextId++, metadata, theme },
+            cancellation,
+        );
+        if (result === undefined || !("diff" in result)) return undefined;
+
+        return result.diff;
     }
 
     async function compactPython(
         code: string,
         cancellation: TokenizeCancellation = {},
     ): Promise<string[] | undefined> {
-        return enqueue({ operation: "compact-python", id: nextId++, code }, cancellation);
+        const result = await run({ operation: "compact-python", id: nextId++, code }, cancellation);
+        if (result === undefined || !("lines" in result)) return undefined;
+
+        return result.lines;
     }
 
     async function dispose(): Promise<void> {
@@ -771,5 +901,64 @@ export function createSyntaxTokenizer(
             throw new Error(`Syntax worker cleanup ${settled.cleanup}`);
     }
 
-    return { tokenize, compactPython, dispose };
+    return { tokenize, highlightDiff, compactPython, dispose };
+}
+
+function workerUrl(): URL {
+    return new URL(import.meta.glowupSyntaxWorker ?? "./tokenize-worker.ts", import.meta.url);
+}
+
+function initialLanguage(request: SyntaxWorkerRequest): SyntaxLanguage {
+    if (request.operation === "highlight") return request.language;
+
+    if (request.operation === "diff") {
+        const language = normalizeSyntaxLanguage(request.metadata.lang);
+        if (language !== undefined && language !== "text" && isLoadableSyntaxLanguage(language))
+            return language;
+    }
+
+    return "python";
+}
+
+function requestBytes(request: SyntaxWorkerRequest): number {
+    if (request.operation !== "diff") return Buffer.byteLength(request.code, "utf8");
+
+    let size = 0;
+    for (const line of request.metadata.deletionLines) size += Buffer.byteLength(line, "utf8");
+    for (const line of request.metadata.additionLines) size += Buffer.byteLength(line, "utf8");
+
+    return size;
+}
+
+function decodeStoredResult(
+    request: SyntaxWorkerRequest,
+    stored: string | undefined,
+): WorkResult | undefined {
+    if (stored === undefined) return undefined;
+
+    let value: unknown;
+    try {
+        value = JSON.parse(stored);
+    } catch {
+        return undefined;
+    }
+
+    if (request.operation === "diff") {
+        if (!Value.Check(storedDiffSchema, value)) return undefined;
+
+        return { diff: { highlight: value, failures: [] } };
+    }
+
+    if (!Value.Check(storedLinesSchema, value)) return undefined;
+
+    return { lines: value };
+}
+
+function encodeStoredResult(result: WorkResult | undefined): string | undefined {
+    if (result === undefined) return undefined;
+    if ("lines" in result) return JSON.stringify(result.lines);
+
+    // A plain-text fallback after a failure may be transient; only clean results persist.
+    if (result.diff.highlight === undefined || result.diff.failures.length > 0) return undefined;
+    return JSON.stringify(result.diff.highlight);
 }

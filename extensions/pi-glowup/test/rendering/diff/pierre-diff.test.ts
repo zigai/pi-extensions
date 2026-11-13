@@ -946,23 +946,25 @@ describe("Pierre diff rendering", () => {
         expect(oneSidedDeletionAccess.accessCount()).toBeLessThan(20);
     });
 
-    it("expands tabs at terminal stops across token and wide-character boundaries", () => {
+    it("expands tabs at terminal stops across token and wide-character boundaries", async () => {
         expect(cleanDiffLine("a\tb")).toBe("a   b");
         expect(cleanDiffLine("abc\tb")).toBe("abc b");
-        const spans = flattenHighlightedLine(
-            {
-                type: "element",
-                properties: {},
-                children: [
-                    { type: "text", value: "界" },
-                    { type: "text", value: "\tb" },
-                ],
-            },
-            "dark",
-            "",
-            "",
-        );
-        expect(spans.map((span) => span.text).join("")).toBe("界  b");
+        const oldContent = 'const a = "界";\n';
+        const newContent = 'const a = "界"\tb;\n';
+        const payload = buildPierreDiffPayload({
+            path: "src/tabs.ts",
+            oldContent,
+            newContent,
+            oldSizeBytes: Buffer.byteLength(oldContent, "utf8"),
+            newSizeBytes: Buffer.byteLength(newContent, "utf8"),
+            canBuildPierreDiff: true,
+        });
+        if (payload?.kind !== "renderable") throw new Error("expected renderable payload");
+
+        const highlighted = await loadHighlightedDiff(payload.metadata);
+        const spans = flattenHighlightedLine(highlighted.dark.additionLines[0], "", "");
+        expect(spans.length).toBeGreaterThan(1);
+        expect(spans.map((span) => span.text).join("")).toBe('const a = "界"  b;');
     });
 
     it("settles empty highlighted metadata without scheduling retries", async () => {

@@ -163,7 +163,7 @@ it("accepts readiness only during initialization and results only for the runnin
     expect(states).toEqual(["first:queued", "second:queued", "first:running", "second:running"]);
 });
 
-it("holds restart behind termination and rejects all stale worker events", async () => {
+it("finishes a cancelled running job on the same worker and drops its result", async () => {
     const current = harness();
     const abort = new AbortController();
     const reasons: string[] = [];
@@ -175,27 +175,41 @@ it("holds restart behind termination and rejects all stale worker events", async
     });
     const second = current.tokenizer.compactPython("second");
     await flushTransitions();
+    const worker = current.worker();
+    worker.emit("message", { type: "ready" });
+    abort.abort();
+    expect(await first).toBeUndefined();
+    expect(worker.terminationCalls).toBe(0);
+    expect(worker.messages).toHaveLength(2);
+    worker.emit("message", { id: 1, lines: ["wrong request"] });
+    worker.emit("message", { id: 0, lines: ["stale"] });
+    expect(worker.messages).toHaveLength(3);
+    worker.emit("message", { id: 1, lines: ["second"] });
+    expect(await second).toEqual(["second"]);
+    expect(current.workers).toHaveLength(1);
+    expect(reasons).toEqual(["cancelled"]);
+    expect(current.warning).not.toHaveBeenCalled();
+});
+
+it("stops a cancelled job that blocks queued work without warning", async () => {
+    const current = harness();
+    const abort = new AbortController();
+    const first = current.tokenizer.compactPython("first", { signal: abort.signal });
+    await flushTransitions();
     const old = current.worker();
     old.emit("message", { type: "ready" });
     abort.abort();
     expect(await first).toBeUndefined();
+    const second = current.tokenizer.compactPython("second");
+    await vi.advanceTimersByTimeAsync(10_000);
     expect(old.terminationCalls).toBe(1);
     old.emit("message", { id: 0, lines: ["stale"] });
-    old.emit("message", { type: "ready" });
-    old.emit("error", new Error("stale error"));
-    old.emit("exit", 1);
-    await flushTransitions();
-    expect(current.workers).toHaveLength(1);
     old.termination.complete(0);
     await flushTransitions();
     const replacement = current.worker(1);
-    old.emit("message", { id: 1, lines: ["wrong owner"] });
-    old.emit("error", new Error("old worker"));
-    old.emit("exit", 1);
     replacement.emit("message", { type: "ready" });
     replacement.emit("message", { id: 1, lines: ["second"] });
     expect(await second).toEqual(["second"]);
-    expect(reasons).toEqual(["cancelled"]);
     expect(current.warning).not.toHaveBeenCalled();
 });
 

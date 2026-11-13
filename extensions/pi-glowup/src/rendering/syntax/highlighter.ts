@@ -2,11 +2,14 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { stripVTControlCharacters } from "node:util";
 import type { Worker } from "node:worker_threads";
+import type { FileDiffMetadata } from "@pierre/diffs";
 import { reportExtensionDiagnostic } from "@zigai/pi-extension-internals";
 import type { CreateHighlighterFactory, HighlighterGeneric } from "shiki";
 import { normalizedCodeLines } from "../../text-boundaries.ts";
 import type { DiffSection } from "../diff/text-diff.ts";
+import type { DiffHighlightOutput } from "../diff/highlight-runs.ts";
 import { createSyntaxTokenizer, type TokenizeUnavailableReason } from "./tokenizer.ts";
+import type { SyntaxHighlightStore } from "./highlight-store.ts";
 import {
     diagnosticCodeHash,
     recordRenderError,
@@ -232,6 +235,7 @@ export type SyntaxInitializationOptions = {
     readonly projectLanguageDetection?: SyntaxProjectLanguageDetectionOptions;
     readonly reportWarning?: SyntaxWarningReporter;
     readonly createWorker?: ((url: URL) => Worker) | undefined;
+    readonly highlightStore?: SyntaxHighlightStore | undefined;
 };
 
 /** Initializes the central Shiki highlighter once during extension startup. */
@@ -1185,6 +1189,17 @@ export async function highlightSyntaxCodeAsync(
     return pending;
 }
 
+/** Highlights diff metadata in the syntax worker; undefined when highlighting is unavailable. */
+export async function highlightSyntaxDiff(
+    metadata: FileDiffMetadata,
+): Promise<DiffHighlightOutput | undefined> {
+    const generation = syntaxGeneration;
+    const state = syntaxState ?? (await initializeSyntaxHighlighting());
+    if (generation !== syntaxGeneration || state.status !== "ready") return undefined;
+
+    return state.tokenizer.highlightDiff(metadata);
+}
+
 export type LoadedSyntaxHighlighter = {
     readonly highlighter: HighlighterGeneric<string, string>;
     readonly themeName: string;
@@ -1544,6 +1559,7 @@ async function initializeSyntaxHighlightingOnce(
                 reportWarning: options.reportWarning,
                 waitForDisposals: waitForTokenizerDisposals,
                 createWorker: options.createWorker,
+                store: options.highlightStore,
             }),
             reportWarning: options.reportWarning ?? reportExtensionDiagnostic,
             loadedLanguages: new Set(highlighter.getLoadedLanguages()),

@@ -1,5 +1,4 @@
 import type { FileDiffMetadata } from "@pierre/diffs";
-import type { ElementContent, Properties } from "hast";
 
 /** Terminal appearance used for Pierre-highlighted diffs. */
 export type PierreAppearance = "dark" | "light";
@@ -43,23 +42,26 @@ export type PierreDiffSummary = {
     readonly maxBytes: number | null;
 };
 
-/** HAST subset consumed by terminal diff flattening (tag names are irrelevant here). */
-export type HighlightedDiffNode =
-    | Exclude<ElementContent, { readonly type: "element" }>
-    | {
-          readonly type: "element";
-          readonly tagName?: string;
-          readonly properties: Properties;
-          readonly children: ReadonlyArray<HighlightedDiffNode>;
-      };
+/** Syntax colors for one diff line, compacted from Pierre's highlighted line tree. */
+export type HighlightedDiffLine = {
+    /** Source text of the line, before terminal tab expansion. */
+    readonly text: string;
 
-/** Highlighted line trees returned by Pierre/Shiki, kept only in renderer state. */
-export type HighlightedDiffCode = {
-    readonly deletionLines: ReadonlyArray<HighlightedDiffNode | undefined>;
-    readonly additionLines: ReadonlyArray<HighlightedDiffNode | undefined>;
+    /**
+     * Style runs, two UTF-16 code units each: the run length and its style, where style is
+     * `(color + 1) * 2 + emphasized` and `color` indexes `colors` (`-1` is none).
+     */
+    readonly runs: string;
+    readonly colors: readonly string[];
 };
 
-/** Highlighted line trees for both Pi light and dark themes. */
+/** Highlighted diff lines, kept only in renderer state. */
+export type HighlightedDiffCode = {
+    readonly deletionLines: ReadonlyArray<HighlightedDiffLine | undefined>;
+    readonly additionLines: ReadonlyArray<HighlightedDiffLine | undefined>;
+};
+
+/** Highlighted diff lines for both Pi light and dark themes. */
 export type HighlightedDiffSet = Record<PierreAppearance, HighlightedDiffCode>;
 
 /** Styled terminal text segment. */
@@ -92,7 +94,7 @@ export type UnifiedDiffRow =
           readonly rowBg: string;
           readonly lineNumberFg: string;
 
-          /** Display column to keep visible before asynchronous HAST is ready. */
+          /** Display column to keep visible before asynchronous highlighting is ready. */
           readonly focusColumn?: number;
       };
 

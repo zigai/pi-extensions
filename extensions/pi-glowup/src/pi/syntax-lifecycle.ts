@@ -6,6 +6,11 @@ import {
     onSyntaxHighlightComplete,
     refreshSyntaxHighlighting,
 } from "../rendering/syntax/highlighter.ts";
+import {
+    createSyntaxHighlightStore,
+    type SyntaxHighlightStore,
+} from "../rendering/syntax/highlight-store.ts";
+import { getGlowupSyntaxCacheDirectory } from "../config/load.ts";
 import { refreshToolRows, requestToolRender } from "./session.ts";
 
 const SYNTAX_WARMUP_DELAY_MS = 5_000;
@@ -16,7 +21,10 @@ type SyntaxHighlightingLifecycleOptions = {
     readonly reportWarning: (message: string) => void;
 };
 
-async function loadSyntaxHighlighting(options: SyntaxHighlightingLifecycleOptions): Promise<void> {
+async function loadSyntaxHighlighting(
+    options: SyntaxHighlightingLifecycleOptions,
+    highlightStore: SyntaxHighlightStore,
+): Promise<void> {
     try {
         const projectLanguageDetection =
             options.cwd === undefined
@@ -30,6 +38,7 @@ async function loadSyntaxHighlighting(options: SyntaxHighlightingLifecycleOption
             preloadLanguages: options.config.syntax.preloadLanguages,
             projectLanguageDetection,
             reportWarning: options.reportWarning,
+            highlightStore,
         });
     } catch (cause: unknown) {
         options.reportWarning(`[pi-glowup] Syntax preload failed: ${errorMessage(cause)}`);
@@ -48,6 +57,10 @@ export function createSyntaxLifecycle(options: {
 }) {
     const { debugLogger, diagnosticSnapshot, reportWarning, generation } = options;
     const pendingSyntaxTasks = new Set<Promise<void>>();
+    const highlightStore = createSyntaxHighlightStore(
+        getGlowupSyntaxCacheDirectory(),
+        reportWarning,
+    );
     let pendingSyntaxStart:
         | {
               readonly generation: number;
@@ -69,7 +82,7 @@ export function createSyntaxLifecycle(options: {
             syntaxTimer = undefined;
         }
 
-        const syntaxTask = loadSyntaxHighlighting(pending.options);
+        const syntaxTask = loadSyntaxHighlighting(pending.options, highlightStore);
         pendingSyntaxTasks.add(syntaxTask);
         void syntaxTask
             .then(() => {

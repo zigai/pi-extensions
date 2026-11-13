@@ -25,8 +25,9 @@ import {
     toolExpandHint,
     wrapPrefixedLine,
     omittedLinesLabel,
+    fitToWidth,
 } from "../component.ts";
-import { truncateToWidth, visibleWidth, type Component } from "@earendil-works/pi-tui";
+import { visibleWidth, type Component } from "@earendil-works/pi-tui";
 import { expandTerminalTabs } from "../../text-boundaries.ts";
 import { strongerDiffBackgroundAnsi } from "./ansi-colors.ts";
 import { highlightCodeOutput, scheduleCodeOutputSyntaxLoad } from "../syntax/code-component.ts";
@@ -169,7 +170,7 @@ function wrapDiffText(text: string, width: number, maxWrappedRows: number | unde
         return wrapStyledText(text, width);
     }
 
-    const boundedText = truncateToWidth(text, Math.max(1, width * maxWrappedRows), "…");
+    const boundedText = fitToWidth(text, Math.max(1, width * maxWrappedRows), "…");
     return wrapStyledText(boundedText, width).slice(0, maxWrappedRows);
 }
 
@@ -195,12 +196,12 @@ function renderDiffRow(
     const contentWidth = Math.max(1, rowWidth - prefixWidth);
     if (!parsed) {
         return wrapDiffText(muted(theme, line), contentWidth, options?.maxWrappedRows).map((row) =>
-            truncateToWidth(`${leftPrefix}${row}`, rowWidth, ""),
+            fitToWidth(`${leftPrefix}${row}`, rowWidth, ""),
         );
     }
 
     if (parsed.kind === "ellipsis") {
-        return [truncateToWidth(`${leftPrefix}${muted(theme, "⋮")}`, rowWidth, "")];
+        return [fitToWidth(`${leftPrefix}${muted(theme, "⋮")}`, rowWidth, "")];
     }
 
     if (parsed.kind === "omission") {
@@ -208,7 +209,7 @@ function renderDiffRow(
             muted(theme, parsed.content),
             contentWidth,
             options?.maxWrappedRows,
-        ).map((row) => truncateToWidth(`${leftPrefix}${row}`, rowWidth, ""));
+        ).map((row) => fitToWidth(`${leftPrefix}${row}`, rowWidth, ""));
     }
 
     let sign = " ";
@@ -243,7 +244,7 @@ function renderDiffRow(
 
     if (parsed.content.length === 0) {
         const styledGutter = styleDiffGutter(parsed.kind, lineNumber, sign, theme);
-        const row = truncateToWidth(`${leftPrefix}${styledGutter}`, rowWidth, "");
+        const row = fitToWidth(`${leftPrefix}${styledGutter}`, rowWidth, "");
         return [paintDiffRowBackground(parsed.kind, row, rowWidth, theme)];
     }
 
@@ -259,7 +260,7 @@ function renderDiffRow(
                 ? styleDiffGutter(parsed.kind, lineNumber, sign, theme)
                 : dim(theme, wrapPrefix);
         const row = `${leftPrefix}${styledGutter}${chunk}`;
-        const bounded = truncateToWidth(row, rowWidth, "");
+        const bounded = fitToWidth(row, rowWidth, "");
         return paintDiffRowBackground(parsed.kind, bounded, rowWidth, theme);
     });
 }
@@ -577,7 +578,7 @@ function createDiffComponent(
             const hint = toolExpandHint();
 
             rendered.push(
-                truncateToWidth(
+                fitToWidth(
                     `${dim(theme, "    ")} ${muted(theme, `${omittedLinesLabel(omitted)} (`)}${hint}${muted(theme, ")")}`,
                     width,
                     "…",

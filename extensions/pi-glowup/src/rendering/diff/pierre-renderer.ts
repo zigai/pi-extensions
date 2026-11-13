@@ -1,12 +1,11 @@
 import { RenderedLineCache, RenderedValueCache } from "../rendered-line-cache.ts";
 import { displayDiffPath } from "../path.ts";
-import { omittedLinesLabel, type ToolKeyHint } from "../component.ts";
+import { omittedLinesLabel, type ToolKeyHint, fitToWidth } from "../component.ts";
 import { keyHint } from "@earendil-works/pi-coding-agent";
 import Type from "typebox";
 import { Value } from "typebox/value";
 import {
     sliceByColumn,
-    truncateToWidth,
     type Component,
     visibleWidth,
     wrapTextWithAnsi,
@@ -711,9 +710,7 @@ class PierreDiffComponent implements Component {
         ) {
             return this.cacheRenderedLines(
                 safeWidth,
-                lines.map((line) =>
-                    truncateToWidth(neutralizeTerminalControls(line), safeWidth, ""),
-                ),
+                lines.map((line) => fitToWidth(neutralizeTerminalControls(line), safeWidth, "")),
             );
         }
 
@@ -734,7 +731,7 @@ class PierreDiffComponent implements Component {
                     safeWidth,
                     baseStyle({ fg: this.palette.metadataFg, bg: this.palette.metadataBg }),
                 ),
-            ].map((line) => truncateToWidth(neutralizeTerminalControls(line), safeWidth, "")),
+            ].map((line) => fitToWidth(neutralizeTerminalControls(line), safeWidth, "")),
         );
     }
 
@@ -936,13 +933,13 @@ function renderPierreDiffSummary(
             const hint = "Use git diff or read the file directly to inspect the full change.";
 
             return [
-                truncateToWidth(neutralizeTerminalControls(headline), safeWidth, ""),
-                truncateToWidth(
+                fitToWidth(neutralizeTerminalControls(headline), safeWidth, ""),
+                fitToWidth(
                     neutralizeTerminalControls(`  └ ${theme.fg("muted", summaryDetail(payload))}`),
                     safeWidth,
                     "",
                 ),
-                truncateToWidth(
+                fitToWidth(
                     neutralizeTerminalControls(`    ${theme.fg("muted", hint)}`),
                     safeWidth,
                     "",
@@ -1114,7 +1111,7 @@ function limitDiffRowLines(
         return visible;
     }
 
-    visible[lastIndex] = `${truncateToWidth(lastLine, Math.max(1, width - 1), "")}…`;
+    visible[lastIndex] = `${fitToWidth(lastLine, Math.max(1, width - 1), "")}…`;
     return visible;
 }
 
@@ -1463,12 +1460,12 @@ function renderFullWidthLine(
     base: AnsiStyle,
 ): string {
     const rendered = renderSegments(segments, base);
-    return padRenderedLine(truncateToWidth(rendered, width, ""), width, base);
+    return padRenderedLine(fitToWidth(rendered, width, ""), width, base);
 }
 
 function padRenderedLine(line: string, width: number, base: AnsiStyle): string {
     const targetWidth = Math.max(1, width);
-    const truncated = truncateToWidth(line, targetWidth, "");
+    const truncated = fitToWidth(line, targetWidth, "");
     const padding = Math.max(0, targetWidth - visibleWidth(truncated));
     return `${truncated}${openAnsi(base)}${" ".repeat(padding)}${DIFF_STYLE_RESET}`;
 }

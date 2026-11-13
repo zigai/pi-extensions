@@ -1,40 +1,20 @@
-import {
-    cleanLastNewline,
-    renderDiffWithHighlighter,
-    setLanguageOverride,
-    type FileDiffMetadata,
-} from "@pierre/diffs";
+import { cleanLastNewline, type FileDiffMetadata } from "@pierre/diffs";
 import type {
     DiffSpan,
     HighlightedDiffCode,
-    HighlightedDiffNode,
+    HighlightedDiffLine,
     HighlightedDiffSet,
-    PierreAppearance,
 } from "./types.ts";
+import type { PackedDiffCode, PackedDiffLine } from "./highlight-runs.ts";
 import { enhanceSyntaxSegments } from "../syntax/brackets.ts";
-import {
-    getSyntaxHighlighterForLanguage,
-    syntaxHighlightingVersion,
-    type LoadedSyntaxHighlighter,
-} from "../syntax/highlighter.ts";
+import { highlightSyntaxDiff, syntaxHighlightingVersion } from "../syntax/highlighter.ts";
 import { expandTerminalTabs } from "../../text-boundaries.ts";
-import type { Properties } from "hast";
 import Type from "typebox";
 import { Value } from "typebox/value";
 import { recordRenderError } from "../../diagnostics/render-events.ts";
 
-const PIERRE_RENDER_OPTIONS = {
-    useTokenTransformer: false,
-    tokenizeMaxLineLength: Number.MAX_SAFE_INTEGER,
-    lineDiffType: "word-alt" as const,
-    maxLineDiffLength: Number.MAX_SAFE_INTEGER,
-} as const;
-
-const MAX_STYLE_CACHE_ENTRIES = 256;
-const styleValueSchema = Type.String();
 const fallbackTextFactorySchema = Type.Function([], Type.String());
 const flattenedLineCache = new WeakMap<object, Map<string, ReadonlyArray<DiffSpan>>>();
-const parsedStyleCache = new Map<string, ReadonlyMap<string, string>>();
 const highlightedMetadataCache = new WeakMap<
     FileDiffMetadata,
     { readonly syntaxVersion: number; readonly result: HighlightedDiffLoadResult }
@@ -113,88 +93,84 @@ export function getCachedHighlightedDiff(
 async function loadHighlightedDiffUncached(
     metadata: FileDiffMetadata,
 ): Promise<HighlightedDiffLoadResult> {
-    const requestedLanguage = metadata.lang ?? "text";
-    const syntax =
-        (await getSyntaxHighlighterForLanguage(requestedLanguage)) ??
-        (await getSyntaxHighlighterForLanguage("text"));
-    if (!syntax) {
-        return { value: emptyHighlightedDiffSet(), failed: true };
-    }
+    const output = await highlightSyntaxDiff(metadata);
+    for (const failure of output?.failures ?? [])
+        recordRenderError("diff.highlight", new Error(failure));
 
-    const highlighted = renderHighlightedDiffCodeWithTextFallback(metadata, syntax);
-    if (!highlighted) {
-        return { value: emptyHighlightedDiffSet(), failed: true };
-    }
+    const packed = output?.highlight;
+    if (packed === undefined) return { value: emptyHighlightedDiffSet(), failed: true };
 
-    return { value: { dark: highlighted, light: highlighted }, failed: false };
+    const dark = unpackDiffCode(packed.dark);
+    let light = dark;
+    if (packed.light !== null) light = unpackDiffCode(packed.light);
+
+    return { value: { dark, light }, failed: false };
 }
 
-/** Flattens Pierre's HAST-ish highlighted line tree into terminal spans. */
+/** Turns a highlighted diff line into terminal spans with the row's emphasis styling. */
 export function flattenHighlightedLine(
-    node: HighlightedDiffNode | undefined,
-    appearance: PierreAppearance,
+    line: HighlightedDiffLine | undefined,
     emphasisBg: string,
     fallbackText: string | (() => string),
     language?: string,
     options: { readonly boldEmphasized?: boolean; readonly dimUnchanged?: boolean } = {},
 ): ReadonlyArray<DiffSpan> {
-    const cacheKey = `${appearance}\u0000${emphasisBg}\u0000${language ?? ""}\u0000${options.boldEmphasized === true ? 1 : 0}\u0000${options.dimUnchanged === true ? 1 : 0}\u0000${syntaxHighlightingVersion()}`;
-    const cacheTarget = node;
-    const cached = cacheTarget === undefined ? undefined : flattenedLineCache.get(cacheTarget);
+    const boldEmphasized = options.boldEmphasized === true;
+    const dimUnchanged = options.dimUnchanged === true;
+    const cacheKey = `${emphasisBg}\u0000${language ?? ""}\u0000${Number(boldEmphasized)}\u0000${Number(dimUnchanged)}\u0000${syntaxHighlightingVersion()}`;
+    let cached: Map<string, ReadonlyArray<DiffSpan>> | undefined;
+    if (line !== undefined) cached = flattenedLineCache.get(line);
+
     const cachedSpans = cached?.get(cacheKey);
     if (cachedSpans !== undefined) {
         return cachedSpans;
     }
 
-    const spans: DiffSpan[] = [];
-    const colorVariable = appearance === "light" ? "--diffs-token-light" : "--diffs-token-dark";
-    let displayColumn = 0;
+    if (line !== undefined && line.text.length > 0) {
+        const spans: DiffSpan[] = [];
+        let displayColumn = 0;
+        let start = 0;
+        let end = 0;
+        let style = -1;
+        const emit = (): void => {
+            if (end <= start) return;
 
-    function visit(current: HighlightedDiffNode, inherited: SpanStyle): void {
-        if (current.type === "text") {
-            const expanded = expandTerminalTabs(current.value, 4, displayColumn);
+            const emphasized = (style & 1) === 1;
+            const expanded = expandTerminalTabs(line.text.slice(start, end), 4, displayColumn);
             displayColumn = expanded.finalDisplayColumn;
-            mergeSpan(spans, makeDiffSpan(expanded.text, inherited));
-            return;
-        }
 
-        if (current.type !== "element") {
-            return;
-        }
+            let bg: string | undefined;
+            if (emphasized) bg = emphasisBg;
 
-        const properties = current.properties;
-        const styles = parseStyleValue(properties.style);
-        const emphasized =
-            Object.prototype.hasOwnProperty.call(properties, "data-diff-span") ||
-            inherited.emphasized;
-        const nextStyle: SpanStyle = {
-            fg: styles.get(colorVariable) ?? styles.get("color") ?? inherited.fg,
-            bg: emphasized ? emphasisBg : inherited.bg,
-            emphasized,
-            boldEmphasized: inherited.boldEmphasized,
-            dimUnchanged: inherited.dimUnchanged,
+            spans.push(
+                makeDiffSpan(expanded.text, {
+                    fg: line.colors[(style >> 1) - 1],
+                    bg,
+                    emphasized,
+                    boldEmphasized,
+                    dimUnchanged,
+                }),
+            );
         };
-        for (const child of current.children) {
-            visit(child, nextStyle);
+
+        for (let index = 0; index + 1 < line.runs.length; index += 2) {
+            const length = line.runs.charCodeAt(index);
+            const next = line.runs.charCodeAt(index + 1);
+            if (next !== style) {
+                emit();
+                start = end;
+                style = next;
+            }
+
+            end += length;
         }
-    }
 
-    if (node !== undefined)
-        visit(node, {
-            fg: undefined,
-            bg: undefined,
-            emphasized: false,
-            boldEmphasized: options.boldEmphasized === true,
-            dimUnchanged: options.dimUnchanged === true,
-        });
+        emit();
 
-    if (spans.length > 0) {
         const enhanced = enhanceSyntaxSegments(spans, language);
-        if (cacheTarget !== undefined) {
-            const nextCache = cached ?? new Map<string, ReadonlyArray<DiffSpan>>();
-            nextCache.set(cacheKey, enhanced);
-            flattenedLineCache.set(cacheTarget, nextCache);
-        }
+        const nextCache = cached ?? new Map<string, ReadonlyArray<DiffSpan>>();
+        nextCache.set(cacheKey, enhanced);
+        flattenedLineCache.set(line, nextCache);
 
         return enhanced;
     }
@@ -210,8 +186,8 @@ export function flattenHighlightedLine(
                       fg: undefined,
                       bg: undefined,
                       emphasized: false,
-                      boldEmphasized: options.boldEmphasized === true,
-                      dimUnchanged: options.dimUnchanged === true,
+                      boldEmphasized,
+                      dimUnchanged,
                   }),
               ],
               language,
@@ -224,74 +200,21 @@ export function cleanDiffLine(line: string | undefined): string {
     return expandTerminalTabs(cleanLastNewline(line ?? "").replace(/\r$/, ""), 4, 0).text;
 }
 
-function renderHighlightedDiffCodeWithTextFallback(
-    metadata: FileDiffMetadata,
-    syntax: LoadedSyntaxHighlighter,
-): HighlightedDiffCode | undefined {
-    const highlighted = renderHighlightedDiffCode(metadata, syntax);
-    if (highlighted !== undefined || (metadata.lang ?? "text") === "text") {
-        return highlighted;
-    }
+const MAX_RUN_LENGTH = 0xffff;
+const RUN_ENCODING_CHUNK = 4096;
 
-    return renderHighlightedDiffCode(setLanguageOverride(metadata, "text"), syntax);
-}
+function unpackDiffCode(code: PackedDiffCode): HighlightedDiffCode {
+    const colors = code.colors;
+    const unpack = (line: PackedDiffLine): HighlightedDiffLine | undefined => {
+        if (line === null) return undefined;
 
-function renderHighlightedDiffCode(
-    metadata: FileDiffMetadata,
-    syntax: LoadedSyntaxHighlighter,
-): HighlightedDiffCode | undefined {
-    try {
-        const highlighted = renderDiffWithHighlighter(metadata, syntax.highlighter, {
-            ...PIERRE_RENDER_OPTIONS,
-            theme: syntax.themeName,
-        });
-        return {
-            deletionLines: highlighted.code.deletionLines,
-            additionLines: highlighted.code.additionLines,
-        };
-    } catch (cause: unknown) {
-        recordRenderError("diff.highlight", cause);
-        return undefined;
-    }
-}
+        return { text: line[0], runs: encodeRuns(line[1]), colors };
+    };
 
-function parseStyleValue(styleValue: Properties["style"]): ReadonlyMap<string, string> {
-    let parsedStyle: string;
-    try {
-        parsedStyle = Value.Parse(styleValueSchema, styleValue);
-    } catch {
-        return new Map();
-    }
-
-    const cached = parsedStyleCache.get(parsedStyle);
-    if (cached !== undefined) {
-        return cached;
-    }
-
-    const styles = new Map<string, string>();
-    for (const segment of parsedStyle.split(";")) {
-        const separator = segment.indexOf(":");
-        if (separator <= 0) {
-            continue;
-        }
-
-        const key = segment.slice(0, separator).trim();
-        const value = segment.slice(separator + 1).trim();
-        if (key.length > 0 && value.length > 0) {
-            styles.set(key, value);
-        }
-    }
-
-    parsedStyleCache.set(parsedStyle, styles);
-
-    while (parsedStyleCache.size > MAX_STYLE_CACHE_ENTRIES) {
-        const oldest = parsedStyleCache.keys().next().value;
-        if (oldest === undefined) break;
-
-        parsedStyleCache.delete(oldest);
-    }
-
-    return styles;
+    return {
+        deletionLines: code.deletionLines.map(unpack),
+        additionLines: code.additionLines.map(unpack),
+    };
 }
 
 function makeDiffSpan(text: string, style: SpanStyle): DiffSpan {
@@ -319,23 +242,22 @@ function makeDiffSpan(text: string, style: SpanStyle): DiffSpan {
     return span;
 }
 
-function mergeSpan(target: DiffSpan[], next: DiffSpan): void {
-    if (next.text.length === 0) {
-        return;
+// Two-byte strings retain far less than arrays of boxed numbers.
+function encodeRuns(runs: readonly number[]): string {
+    const codes: number[] = [];
+    let start = 0;
+    for (let index = 0; index + 2 < runs.length; index += 3) {
+        const end = runs[index] ?? start;
+        const style = ((runs[index + 1] ?? -1) + 1) * 2 + (runs[index + 2] ?? 0);
+        for (let remaining = end - start; remaining > 0; remaining -= MAX_RUN_LENGTH)
+            codes.push(Math.min(remaining, MAX_RUN_LENGTH), style);
+
+        start = end;
     }
 
-    const previous = target[target.length - 1];
-    if (
-        previous &&
-        previous.fg === next.fg &&
-        previous.bg === next.bg &&
-        previous.bold === next.bold &&
-        previous.dim === next.dim &&
-        previous.emphasized === next.emphasized
-    ) {
-        target[target.length - 1] = { ...previous, text: `${previous.text}${next.text}` };
-        return;
-    }
+    let encoded = "";
+    for (let index = 0; index < codes.length; index += RUN_ENCODING_CHUNK)
+        encoded += String.fromCharCode(...codes.slice(index, index + RUN_ENCODING_CHUNK));
 
-    target.push(next);
+    return encoded;
 }

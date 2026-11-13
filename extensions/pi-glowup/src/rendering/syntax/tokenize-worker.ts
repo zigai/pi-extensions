@@ -1,4 +1,5 @@
 import { parentPort } from "node:worker_threads";
+import type { FileDiffMetadata } from "@pierre/diffs";
 import type {
     CodeToTokensBaseOptions,
     HighlighterGeneric,
@@ -9,6 +10,7 @@ import { tokensToAnsiLines } from "./ansi.ts";
 import { configureBracketPairColoring } from "./brackets.ts";
 import { syntaxLanguageInput, type SyntaxLanguage } from "./language.ts";
 import { compactPythonStructuralBlankRows } from "../../tools/built-in/bash/python-blank-rows.ts";
+import { renderPackedDiffHighlight, type DiffHighlightOutput } from "../diff/highlight-runs.ts";
 
 export type TokenizeRequest =
     | {
@@ -25,6 +27,15 @@ export type TokenizeRequest =
           readonly code: string;
       };
 
+export type DiffHighlightRequest = {
+    readonly operation: "diff";
+    readonly id: number;
+    readonly metadata: FileDiffMetadata;
+    readonly theme: ThemeRegistration;
+};
+
+export type SyntaxWorkerRequest = TokenizeRequest | DiffHighlightRequest;
+
 export type TokenizeInitialization = {
     readonly type: "initialize";
     readonly language: SyntaxLanguage;
@@ -34,6 +45,7 @@ export type TokenizeInitialization = {
 export type TokenizeResponse =
     | { readonly type: "ready" }
     | { readonly id: number; readonly lines: string[] }
+    | { readonly id: number; readonly diff: DiffHighlightOutput }
     | { readonly id: number; readonly error: string };
 
 const INPUT_END_ERROR_SCOPE = "invalid.illegal.newline";
@@ -61,10 +73,16 @@ async function initialize(request: TokenizeInitialization): Promise<void> {
     });
 }
 
-async function tokenize(request: TokenizeRequest): Promise<TokenizeResponse> {
+async function tokenize(request: SyntaxWorkerRequest): Promise<TokenizeResponse> {
     try {
         const syntax = highlighter;
         if (syntax === undefined) throw new Error("Syntax worker is not initialized");
+
+        if (request.operation === "diff")
+            return {
+                id: request.id,
+                diff: await renderPackedDiffHighlight(syntax, request.metadata, request.theme),
+            };
 
         if (request.operation === "compact-python") {
             await syntax.loadLanguage("python");
@@ -142,7 +160,7 @@ function withoutInputEndErrors(row: ThemedToken[]): ThemedToken[] {
     });
 }
 
-port.on("message", (request: TokenizeRequest | TokenizeInitialization) => {
+port.on("message", (request: SyntaxWorkerRequest | TokenizeInitialization) => {
     if ("type" in request) {
         void initialize(request)
             .then(() => port.postMessage({ type: "ready" } satisfies TokenizeResponse))

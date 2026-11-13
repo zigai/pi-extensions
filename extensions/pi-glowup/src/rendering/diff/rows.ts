@@ -14,7 +14,7 @@ type DiffRowBuildOptions = {
 
 type UnifiedLineRow = Extract<UnifiedDiffRow, { readonly kind: "line" }>;
 
-/** Builds unified Pierre rows from metadata and optional highlighted line trees. */
+/** Builds unified Pierre rows from metadata and optional highlighted lines. */
 export function buildUnifiedDiffRows(
     metadata: FileDiffMetadata,
     highlighted: HighlightedDiffCode,
@@ -85,7 +85,6 @@ export function buildUnifiedDiffRows(
                                 newLineNumber: additionLineNumber + offset,
                                 spans: flattenHighlightedLine(
                                     highlighted.additionLines[additionLineIndex + offset],
-                                    palette.appearance,
                                     palette.contextRowBg,
                                     () =>
                                         cleanDiffLine(
@@ -114,7 +113,6 @@ export function buildUnifiedDiffRows(
                     oldLineNumber: deletionLineNumber + offset,
                     spans: flattenHighlightedLine(
                         highlighted.deletionLines[deletionLineIndex + offset],
-                        palette.appearance,
                         palette.deletionSpanBg,
                         () => cleanDiffLine(metadata.deletionLines[deletionLineIndex + offset]),
                         metadata.lang,
@@ -132,7 +130,6 @@ export function buildUnifiedDiffRows(
                     newLineNumber: additionLineNumber + offset,
                     spans: flattenHighlightedLine(
                         highlighted.additionLines[additionLineIndex + offset],
-                        palette.appearance,
                         palette.additionSpanBg,
                         () => cleanDiffLine(metadata.additionLines[additionLineIndex + offset]),
                         metadata.lang,
@@ -219,7 +216,7 @@ export function buildUnifiedDiffRows(
     return trimEdgeCollapsedRows(rows);
 }
 
-/** Builds side-by-side Pierre rows from metadata and optional highlighted line trees. */
+/** Builds side-by-side Pierre rows from metadata and optional highlighted lines. */
 export function buildSplitDiffRows(
     metadata: FileDiffMetadata,
     highlighted: HighlightedDiffCode,
@@ -286,7 +283,6 @@ export function buildSplitDiffRows(
                         pushLazyRow(() => {
                             const spans = flattenHighlightedLine(
                                 highlighted.additionLines[additionLineIndex + offset],
-                                palette.appearance,
                                 palette.contextRowBg,
                                 () =>
                                     cleanDiffLine(
@@ -335,7 +331,6 @@ export function buildSplitDiffRows(
                                       lineNumber: deletionLineNumber + offset,
                                       spans: flattenHighlightedLine(
                                           highlighted.deletionLines[deletionLineIndex + offset],
-                                          palette.appearance,
                                           palette.deletionSpanBg,
                                           () =>
                                               cleanDiffLine(
@@ -359,7 +354,6 @@ export function buildSplitDiffRows(
                                       lineNumber: additionLineNumber + offset,
                                       spans: flattenHighlightedLine(
                                           highlighted.additionLines[additionLineIndex + offset],
-                                          palette.appearance,
                                           palette.additionSpanBg,
                                           () =>
                                               cleanDiffLine(
