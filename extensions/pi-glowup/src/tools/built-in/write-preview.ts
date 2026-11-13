@@ -148,6 +148,7 @@ function writeDiffSection(path: string, preview: string, totalLines: number): Di
         }),
         added: totalLines,
         removed: 0,
+        wholeFile: true,
     };
 }
 

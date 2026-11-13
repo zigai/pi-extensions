@@ -51,6 +51,8 @@ type ParsedDiffLine = ReturnType<typeof parseDiffLine> | undefined;
 
 const ANSI_SEQUENCE_PREFIX = ansiStyles.modifier.reset.open.slice(0, 2);
 const ROW_BACKGROUND_SAFE_RESET = `${ansiStyles.modifier.bold.close}${ansiStyles.modifier.italic.close}${ansiStyles.modifier.underline.close}${ansiStyles.modifier.strikethrough.close}${ansiStyles.color.close}`;
+const DIFF_MARGIN = "    ";
+const WHOLE_FILE_MARGIN = " ";
 
 function formatDiffLineNumber(lineNumber: string | number, width: number): string {
     const normalized = normalizedDiffLineNumber(String(lineNumber));
@@ -90,8 +92,9 @@ function diffLineNumberText(
     lineNumber: string,
     width: number,
     coordinates: DiffLineCoordinates | undefined,
+    wholeFile: boolean,
 ): string {
-    if (configuredDiffLineNumberStyle() === "single") {
+    if (wholeFile || configuredDiffLineNumberStyle() === "single") {
         return `${formatDiffLineNumber(lineNumber, width)} `;
     }
 
@@ -188,6 +191,7 @@ type DiffRowRenderOptions = {
     readonly highlightedContent?: string;
     readonly changedRanges?: readonly TextRange[];
     readonly lineCoordinates?: DiffLineCoordinates;
+    readonly wholeFile?: boolean;
 };
 
 function renderDiffRow(
@@ -221,8 +225,11 @@ function renderDiffRow(
         ).map((row) => fitPrefixedSegment(leftPrefix, leftPrefixColumns, row, rowWidth).text);
     }
 
+    const wholeFile = options?.wholeFile === true;
     let sign = " ";
-    if (parsed.kind === "insert") {
+    if (wholeFile) {
+        sign = "";
+    } else if (parsed.kind === "insert") {
         sign = "+";
     }
 
@@ -235,10 +242,10 @@ function renderDiffRow(
         parsed.lineNumber,
         options?.lineNumberWidth ?? normalizedDiffLineNumber(parsed.lineNumber).length,
         options?.lineCoordinates,
+        wholeFile,
     );
-    const lineNumberWidth = visibleWidth(lineNumber);
     const rowPrefix = `${lineNumber}${sign}`;
-    const wrapPrefix = `${" ".repeat(lineNumberWidth)} `;
+    const wrapPrefix = " ".repeat(visibleWidth(rowPrefix));
     const availableWidth = Math.max(1, contentWidth - visibleWidth(rowPrefix));
     const baseContent = styleDiffContent(
         parsed.kind,
@@ -546,6 +553,7 @@ function createDiffComponent(
                     section.added,
                     section.removed,
                     section.lines,
+                    section.wholeFile,
                     section.lineCoordinates?.map((coordinate) => [
                         coordinate?.oldLine,
                         coordinate?.newLine,
@@ -594,6 +602,9 @@ function createDiffComponent(
         const rendered: string[] = [];
         let sectionOffset = 0;
         let renderedSection = false;
+        let omissionMargin = DIFF_MARGIN;
+        if (sections.every((section) => section.wholeFile === true))
+            omissionMargin = WHOLE_FILE_MARGIN;
 
         const renderOmission = (): void => {
             const omitted = allDiffLineCount - collapsedIndices.length;
@@ -601,7 +612,7 @@ function createDiffComponent(
 
             rendered.push(
                 fitToWidth(
-                    `${dim(theme, "    ")} ${muted(theme, `${omittedLinesLabel(omitted)} (`)}${hint}${muted(theme, ")")}`,
+                    `${dim(theme, omissionMargin)} ${muted(theme, `${omittedLinesLabel(omitted)} (`)}${hint}${muted(theme, ")")}`,
                     width,
                     "…",
                 ),
@@ -659,6 +670,9 @@ function createDiffComponent(
             if (shouldCollapse) selected = new Set(visibleLines.map((line) => line.index));
 
             const changedRanges = changedRangesForDiffLines(parsedLines, selected);
+            let rowMargin = DIFF_MARGIN;
+            if (section.wholeFile === true) rowMargin = WHOLE_FILE_MARGIN;
+
             const renderLines = (
                 lines: ReadonlyArray<{ readonly line: string; readonly index: number }>,
             ): void => {
@@ -674,6 +688,7 @@ function createDiffComponent(
                         rowOptions = { ...rowOptions, path: section.path };
                     }
                     rowOptions = { ...rowOptions, lineNumberWidth: sectionLineNumberWidth };
+                    if (section.wholeFile === true) rowOptions = { ...rowOptions, wholeFile: true };
 
                     const lineCoordinates = section.lineCoordinates?.[index];
                     if (lineCoordinates !== undefined) {
@@ -694,7 +709,9 @@ function createDiffComponent(
                         rowOptions = { ...rowOptions, maxWrappedRows };
                     }
 
-                    rendered.push(...renderDiffRow(line, parsed, width, "    ", theme, rowOptions));
+                    rendered.push(
+                        ...renderDiffRow(line, parsed, width, rowMargin, theme, rowOptions),
+                    );
                 }
             };
 

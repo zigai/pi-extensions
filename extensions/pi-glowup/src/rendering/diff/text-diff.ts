@@ -4,6 +4,9 @@ export type DiffSection = {
     readonly lineCoordinates?: ReadonlyArray<DiffLineCoordinates | undefined>;
     readonly added: number;
     readonly removed: number;
+
+    /** Every line is new file content, shown without diff markers or old line numbers. */
+    readonly wholeFile?: boolean;
 };
 
 export type DiffLineCoordinates = {

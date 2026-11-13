@@ -289,7 +289,7 @@ describe("write rendering", () => {
         expect(rendered).not.toContain("<toolErrorBg>");
     });
 
-    it("renders write previews as numbered addition rows", () => {
+    it("renders write previews as numbered rows without addition markers", () => {
         const completed = renderWriteCallPreview(
             { path: "src/example.ts", content: "export const value = 1;\n" },
             dimMarkerTheme,
@@ -301,8 +301,11 @@ describe("write rendering", () => {
             { isError: false, isPartial: true, expanded: false },
         );
 
-        expect(completed.render(140).join("\n")).toContain("<dim>  1 </dim>+");
-        expect(streaming.render(140).join("\n")).toContain("<dim>  1 </dim>+");
+        for (const component of [completed, streaming]) {
+            const rows = component.render(140).slice(1).join("\n");
+            expect(rows).toMatch(/^ <dim>1 <\/dim>[^+]/u);
+            expect(rows).not.toContain("+");
+        }
     });
 
     it("renders streaming write content with a moving tail viewport", () => {
@@ -404,7 +407,7 @@ describe("write rendering", () => {
             const reconstructed = diffLines
                 .map((line, index) => {
                     if (index === 0) {
-                        return line.slice(line.indexOf("+") + 1).trimEnd();
+                        return line.trim().replace(/^1 /u, "");
                     }
 
                     return line.trim();

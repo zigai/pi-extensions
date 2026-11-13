@@ -11,7 +11,7 @@ test("matches frozen baseline ANSI through CRLF, grapheme edges, rewrites and re
     const frames = exactFrames(renderWriteCallPreview);
     expect(frames).toHaveLength(1240);
     expect(createHash("sha256").update(JSON.stringify(frames)).digest("hex")).toBe(
-        "d904c749d84eb2dba73d07858391d78df191e59126ccf6476ad0323958d0c386",
+        "409acbfdf365e8432f8a9a5b79a0914af5226dd5ab92a3787d773ac0d647462d",
     );
 });
 

@@ -1393,11 +1393,9 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
         const initialRow = pendingTerminal.requireRowContaining("retainedWrite");
         const initialCodeColumn = initialRow.text.indexOf("export const retainedWrite");
         expect(initialCodeColumn).toBeGreaterThan(0);
-        expect(initialRow.text.slice(0, initialCodeColumn)).toBe("      1 +");
-        expect(initialRow.cells[6]?.chars).toBe("1");
-        expect(initialRow.cells[6]?.foreground).toBe(DARK_THEME_DIM_FOREGROUND);
-        expect(initialRow.cells[8]?.chars).toBe("+");
-        expect(initialRow.cells[8]?.foreground).toBe(DARK_THEME_ADDED_FOREGROUND);
+        expect(initialRow.text.slice(0, initialCodeColumn)).toBe(" 1 ");
+        expect(initialRow.cells[1]?.chars).toBe("1");
+        expect(initialRow.cells[1]?.foreground).toBe(DARK_THEME_DIM_FOREGROUND);
 
         const grownContent = `${initialContent}export const grownWriteFour = 4;
 export const grownWriteFive = 5;
@@ -1424,13 +1422,11 @@ export const grownWriteTwelve = 12;
         const grownWriteTwelveCodeColumn = grownWriteTwelveRow.text.indexOf(
             "export const grownWriteTwelve",
         );
-        expect(grownWriteTwelveRow.text.slice(0, grownWriteTwelveCodeColumn)).toBe("       12 +");
-        expect(grownWriteTwelveRow.cells[7]?.chars).toBe("1");
-        expect(grownWriteTwelveRow.cells[8]?.chars).toBe("2");
-        expect(grownWriteTwelveRow.cells[7]?.foreground).toBe(DARK_THEME_DIM_FOREGROUND);
-        expect(grownWriteTwelveRow.cells[8]?.foreground).toBe(DARK_THEME_DIM_FOREGROUND);
-        expect(grownWriteTwelveRow.cells[10]?.chars).toBe("+");
-        expect(grownWriteTwelveRow.cells[10]?.foreground).toBe(DARK_THEME_ADDED_FOREGROUND);
+        expect(grownWriteTwelveRow.text.slice(0, grownWriteTwelveCodeColumn)).toBe(" 12 ");
+        expect(grownWriteTwelveRow.cells[1]?.chars).toBe("1");
+        expect(grownWriteTwelveRow.cells[2]?.chars).toBe("2");
+        expect(grownWriteTwelveRow.cells[1]?.foreground).toBe(DARK_THEME_DIM_FOREGROUND);
+        expect(grownWriteTwelveRow.cells[2]?.foreground).toBe(DARK_THEME_DIM_FOREGROUND);
         pendingTerminal.assertNoWrappedRows();
         pendingTerminal.assertRowsFitWidth();
         const grownAfterSentinelRow = pendingTerminal.requireRowContaining(afterSentinel);
