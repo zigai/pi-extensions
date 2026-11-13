@@ -170,6 +170,7 @@ describe("session activation ownership", () => {
             const store: CodeStreamStore = {
                 get: (input) => input.source,
                 ready: () => true,
+                showsCompleteSource: () => true,
                 clear: vi.fn<() => void>(),
                 dispose,
                 settled: async () => {},

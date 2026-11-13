@@ -40,6 +40,9 @@ export type CodeStreamInput = {
 export type CodeStreamStore = {
     get(input: CodeStreamInput): string;
     ready(key: string): boolean;
+
+    /** True while the display covers the whole complete source, even during a relayout. */
+    showsCompleteSource(key: string): boolean;
     clear(): void;
     dispose(): Promise<void>;
     settled(): Promise<void>;
@@ -62,7 +65,7 @@ type EntryExecution =
 // a completed source can still be streaming or awaiting an atomic replacement.
 type EntryPublication =
     | { readonly kind: "streaming"; readonly display: string }
-    | { readonly kind: "replacing"; readonly display: string }
+    | { readonly kind: "replacing"; readonly display: string; readonly revealed: boolean }
     | { readonly kind: "ready"; readonly display: string };
 
 type EntryProgress = {
@@ -131,9 +134,27 @@ function updateFor(entry: Entry, input: CodeStreamInput, language: string): Entr
     return { kind: "rewrite" };
 }
 
+// A finished display stays revealed while the same complete source is laid out again,
+// for example at a new width, so surrounding content does not disappear meanwhile.
+function replacementOf(entry: Entry, input: CodeStreamInput): EntryPublication {
+    const publication = entry.publication;
+    let revealed = publication.kind === "ready";
+    if (publication.kind === "replacing") revealed = publication.revealed;
+
+    return {
+        kind: "replacing",
+        display: publication.display,
+        revealed:
+            revealed &&
+            entry.input.complete &&
+            input.complete &&
+            entry.input.source === input.source,
+    };
+}
+
 function requestReplacement(entry: Entry, input: CodeStreamInput): void {
+    entry.publication = replacementOf(entry, input);
     entry.input = input;
-    entry.publication = { kind: "replacing", display: entry.publication.display };
 }
 
 function requestAppend(entry: Entry, input: CodeStreamInput): void {
@@ -527,6 +548,17 @@ export function createCodeStreamStore(): CodeStreamStore {
         while (jobs.size > 0) await Promise.all(jobs);
     }
 
+    function ready(key: string): boolean {
+        const entry = entries.get(key);
+
+        return (
+            entry !== undefined &&
+            entry.input.complete &&
+            entry.publication.kind === "ready" &&
+            entry.progress.consumed >= entry.input.source.length
+        );
+    }
+
     return {
         get(input): string {
             if (input.toolCallId !== undefined && input.complete && input.mode === "statement")
@@ -565,10 +597,10 @@ export function createCodeStreamStore(): CodeStreamStore {
                             return previous.publication.display;
                         }
 
-                        publication = { kind: "replacing", display: previous.publication.display };
+                        publication = replacementOf(previous, input);
                         break;
                     case "rebuild":
-                        publication = { kind: "replacing", display: previous.publication.display };
+                        publication = replacementOf(previous, input);
                         break;
                     case "rewrite":
                     case "truncate":
@@ -622,15 +654,12 @@ export function createCodeStreamStore(): CodeStreamStore {
             return entry.publication.display;
         },
         formatEmbedded,
-        ready(key): boolean {
+        ready,
+        showsCompleteSource(key): boolean {
             const entry = entries.get(key);
+            if (entry?.publication.kind === "replacing") return entry.publication.revealed;
 
-            return (
-                entry !== undefined &&
-                entry.input.complete &&
-                entry.publication.kind === "ready" &&
-                entry.progress.consumed >= entry.input.source.length
-            );
+            return ready(key);
         },
         clear,
         settled,

@@ -123,7 +123,8 @@ function presentMarkdown(
             if (fence.complete) {
                 // A ready prefix is not the whole closed block. Keep its real
                 // closing fence and following prose behind the remaining units.
-                if (options.code !== "token" && !options.streams.ready(fenceKey)) return output;
+                if (options.code !== "token" && !options.streams.showsCompleteSource(fenceKey))
+                    return output;
 
                 if (fence.closed) {
                     if (display.length > 0 && !/[\r\n]$/u.test(display)) output += "\n";

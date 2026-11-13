@@ -90,6 +90,31 @@ describe("shared generated-content presentation", () => {
         },
     );
 
+    it.each(["statement", "block"] as const)(
+        "keeps a finished message whole while its %s code reflows to a new width",
+        async (code) => {
+            const { streams } = install("sentence", code);
+            const source = "Intro.\n\n```javascript\nconst ready = 1;\n```\n\nAfter the code.";
+            const input = {
+                key: "resized",
+                kind: "markdown" as const,
+                source,
+                complete: true,
+                targetWidth: 80,
+            };
+            presentGlowupContent(input);
+            await streams.settled();
+            const settled = presentGlowupContent(input);
+            expect(settled).toContain("After the code.");
+
+            const resized = presentGlowupContent({ ...input, targetWidth: 40 });
+            expect(resized).toBe(settled);
+
+            await streams.settled();
+            expect(presentGlowupContent({ ...input, targetWidth: 40 })).toBe(settled);
+        },
+    );
+
     it("applies identical code policy to thinking, text and external Markdown snapshots", async () => {
         const { streams } = install();
         const source = "```javascript\nconst ready=1;\nconst pending =\n\n";
