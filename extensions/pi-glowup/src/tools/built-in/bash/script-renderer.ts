@@ -40,7 +40,11 @@ import {
     observeComponentFormat,
     type ComponentFormat,
 } from "../../../diagnostics/highlight-requests.ts";
-import { omitLeadingImportPrologue } from "./prologue.ts";
+import {
+    embeddedImportPrologueRows,
+    importOmissionThreshold,
+    omitLeadingImportPrologue,
+} from "./prologue.ts";
 import {
     wrapSinglePhysicalLineWithContinuation,
     toolExpandHint,
@@ -716,15 +720,24 @@ function scheduleScriptPreviewSyntaxLoad(
     scheduleCodeOutputSyntaxLoad({ language: invocation.language }, invalidate, invocation.code);
 }
 
-function visibleBashPrefix(source: string, width: number, rows: number): string {
+function visibleBashPrefix(
+    source: string,
+    width: number,
+    rows: number,
+    hiddenLines: ReadonlySet<number>,
+): string {
     let end = 0;
     let row = 0;
+    let line = 0;
     let column = 0;
     const contentWidth = Math.max(1, width - 6);
 
     for (const character of graphemes(source)) {
         if (character === "\n" || character === "\r\n" || character === "\r") {
-            row++;
+            if (!hiddenLines.has(line)) row++;
+            line++;
+            column = 0;
+        } else if (hiddenLines.has(line)) {
             column = 0;
         } else {
             const cells = visibleWidth(character);
@@ -758,21 +771,14 @@ function collapsedScriptPreview(
     )
         return { code: invocation.code };
 
-    if (profile !== undefined && profile.kind !== "command") {
-        if (profile.imports === "show") return { code: invocation.code };
+    const threshold = importOmissionThreshold(profile, maxCodePreviewLines);
+    if (threshold === undefined) return { code: invocation.code };
 
-        maxCodePreviewLines = 0;
-    }
-
-    if (trimEdgeBlankLines(invocation.code.split("\n")).length <= maxCodePreviewLines) {
+    if (trimEdgeBlankLines(invocation.code.split("\n")).length <= threshold) {
         return { code: invocation.code };
     }
 
-    const omission = omitLeadingImportPrologue(
-        invocation.code,
-        invocation.language,
-        maxCodePreviewLines,
-    );
+    const omission = omitLeadingImportPrologue(invocation.code, invocation.language, threshold);
     if (omission === undefined) return { code: invocation.code };
 
     return {
@@ -832,6 +838,7 @@ export type ScriptCallRenderOptions = {
     readonly lastComponent?: Component | undefined;
     readonly onContentWidth?: (contentWidth: number, renderWidth: number) => void;
     readonly profile?: ScriptFormatterProfile;
+    readonly profileFor?: (language: string) => ScriptFormatterProfile | undefined;
     readonly embeddedPrograms?: EmbeddedProgramLookup;
     readonly logicalSource?: string;
     readonly syntaxPredecessor?: () => void;
@@ -1081,8 +1088,16 @@ function createScriptCallComponent(
         }
 
         let visibleCode = preview.code;
-        if (!expanded && retained.language === "bash")
-            visibleCode = visibleBashPrefix(preview.code, width, maxCodePreviewLines);
+        let hiddenLines: ReadonlySet<number> = new Set();
+        if (!expanded && retained.language === "bash") {
+            hiddenLines = embeddedImportPrologueRows(
+                preview.code,
+                programs,
+                maxCodePreviewLines,
+                options.profileFor,
+            );
+            visibleCode = visibleBashPrefix(preview.code, width, maxCodePreviewLines, hiddenLines);
+        }
 
         let viewClipped = visibleCode.length < preview.code.length;
         let fullLines = visibleCode.split("\n");
@@ -1095,6 +1110,28 @@ function createScriptCallComponent(
                 undefined,
                 childOptions,
             );
+            if (hiddenLines.size > 0) {
+                const shownLines: string[] = [];
+                const shownHighlighted: string[] = [];
+                for (const [index, line] of fullLines.entries()) {
+                    if (hiddenLines.has(index)) {
+                        if (!showPrologueOmission || hiddenLines.has(index - 1)) continue;
+
+                        let count = 1;
+                        while (hiddenLines.has(index + count)) count++;
+                        const marker = `… ${count} import/setup lines omitted`;
+                        shownLines.push(marker);
+                        shownHighlighted.push(marker);
+                        continue;
+                    }
+
+                    shownLines.push(line);
+                    shownHighlighted.push(fullHighlighted[index] ?? line);
+                }
+
+                fullLines = shownLines;
+                fullHighlighted = shownHighlighted;
+            }
         } else {
             fullHighlighted = highlightSyntaxCode(
                 retained.code,
@@ -1209,7 +1246,7 @@ function createScriptCallComponent(
                 for (let at = content.indexOf("\n"); at >= 0; at = content.indexOf("\n", at + 1))
                     lines++;
 
-                const omitted = Math.max(0, lines - shownLines);
+                const omitted = Math.max(0, lines - hiddenLines.size - shownLines);
                 if (omitted > 0) marker = `… +${omitted} lines (${omittedHint})`;
             }
 

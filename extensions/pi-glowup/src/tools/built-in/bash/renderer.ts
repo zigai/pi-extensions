@@ -71,6 +71,9 @@ function scriptCallRenderOptions(options: BashCommandRenderOptions): ScriptCallR
     if (options.profile !== undefined)
         renderOptions = { ...renderOptions, profile: options.profile };
 
+    if (options.profileFor !== undefined)
+        renderOptions = { ...renderOptions, profileFor: options.profileFor };
+
     if (options.embeddedPrograms !== undefined)
         renderOptions = { ...renderOptions, embeddedPrograms: options.embeddedPrograms };
 
@@ -249,6 +252,7 @@ export type BashCommandRenderOptions = {
     readonly invalidate?: () => void;
     readonly onContentWidth?: (contentWidth: number, renderWidth: number) => void;
     readonly profile?: ScriptCallRenderOptions["profile"];
+    readonly profileFor?: ScriptCallRenderOptions["profileFor"];
     readonly embeddedPrograms?: EmbeddedProgramLookup;
     readonly durationMs?: number | undefined;
     readonly background?: boolean | undefined;

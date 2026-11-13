@@ -1,3 +1,6 @@
+import type { ScriptFormatterProfile } from "../../../settings-input.ts";
+import type { EmbeddedProgram } from "./embedded-programs.ts";
+
 export type ImportPrologueOmission = {
     readonly code: string;
     readonly omittedLines: number;
@@ -159,4 +162,54 @@ export function omitLeadingImportPrologue(
         code: lines.slice(prologueEnd).join("\n"),
         omittedLines: prologueEnd,
     };
+}
+
+/** Line count a script must exceed before its import prologue is omitted, or undefined to keep imports. */
+export function importOmissionThreshold(
+    profile: ScriptFormatterProfile | undefined,
+    maxPreviewLines: number,
+): number | undefined {
+    if (profile === undefined || profile.kind === "command") return maxPreviewLines;
+    if (profile.kind !== "python" && profile.kind !== "javascript" && profile.kind !== "typescript")
+        return undefined;
+    if (profile.imports === "show") return undefined;
+
+    return 0;
+}
+
+/** Zero-based rows of a Bash command that hold the leading imports of its source heredocs. */
+export function embeddedImportPrologueRows(
+    command: string,
+    programs: readonly EmbeddedProgram[],
+    maxPreviewLines: number,
+    profileFor: ((language: string) => ScriptFormatterProfile | undefined) | undefined,
+): ReadonlySet<number> {
+    const rows = new Set<number>();
+    let commandLines: number | undefined;
+
+    for (const program of programs) {
+        if (program.parent !== undefined || program.incomplete === true) continue;
+        if (program.origin !== "heredoc" && program.origin !== "file-heredoc") continue;
+        if (command.slice(program.start, program.end) !== program.code) continue;
+        if (program.start > 0 && command[program.start - 1] !== "\n") continue;
+
+        const threshold = importOmissionThreshold(profileFor?.(program.language), maxPreviewLines);
+        if (threshold === undefined) continue;
+
+        commandLines ??= command.trim().split("\n").length;
+        if (commandLines <= threshold) continue;
+
+        const omission = omitLeadingImportPrologue(program.code, program.language, 0);
+        if (omission === undefined) continue;
+
+        let row = 0;
+        for (let at = command.indexOf("\n"); at >= 0 && at < program.start;) {
+            row++;
+            at = command.indexOf("\n", at + 1);
+        }
+
+        for (let offset = 0; offset < omission.omittedLines; offset++) rows.add(row + offset);
+    }
+
+    return rows;
 }

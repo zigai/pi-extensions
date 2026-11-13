@@ -369,6 +369,7 @@ export function createNativeBashFeature(
     ) => Promise<string>,
 ) {
     const scriptPreviews = createScriptPreviewStore();
+    const profileFor = (language: string) => formatterAccessor?.()?.profileFor?.(language);
     let sessionController = new AbortController();
     let sessionInvalidations = new WeakMap<() => void, () => void>();
     let embeddedService = createEmbeddedProgramService();
@@ -571,6 +572,7 @@ export function createNativeBashFeature(
                     signal: sessionSignal,
                     durationMs: context.durationMs,
                     background: context.shellCall?.background ?? false,
+                    profileFor,
                     ...(profile !== undefined && { profile }),
                 },
                 false,
@@ -619,6 +621,7 @@ export function createNativeBashFeature(
                     signal: sessionSignal,
                     durationMs: context.durationMs,
                     background: context.shellCall?.background ?? false,
+                    profileFor,
                 },
                 true,
             );
@@ -698,6 +701,7 @@ export function createNativeBashFeature(
                     signal: sessionSignal,
                     durationMs: context.durationMs,
                     background: context.shellCall?.background ?? false,
+                    profileFor,
                 },
             );
         }
@@ -746,6 +750,7 @@ export function createNativeBashFeature(
             signal: sessionSignal,
             durationMs: context.durationMs,
             background: context.shellCall?.background ?? false,
+            profileFor,
         };
         if (stableScript !== undefined && context.argsComplete) {
             const { toolCallId } = context;

@@ -70,7 +70,8 @@ hint with Pi's configured tool-expansion key. The default is `8`, and values bel
 while wrapping also counts against the terminal-row budget.
 
 Unformatted short scripts keep their imports. Long Python, JavaScript, and TypeScript previews omit
-only a complete leading import/setup prologue. Set `scriptPreview.showPrologueOmission` to `true`
+only a complete leading import/setup prologue; the same applies to source heredocs inside a long
+Bash command. Set `scriptPreview.showPrologueOmission` to `true`
 to show the omitted-line count. Expanding the tool call always restores the complete code.
 
 ## Formatters

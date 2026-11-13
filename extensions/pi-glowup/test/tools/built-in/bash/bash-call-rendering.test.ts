@@ -720,8 +720,9 @@ describe("bash command rendering", () => {
             .join("\n");
 
         expect(stripVTControlCharacters(collapsed)).toContain("$ node --input-type=module <<'JS'");
-        expect(collapsed).toContain("import assert from 'node:assert/strict';");
-        expect(collapsed).toMatch(/… \+6 lines/u);
+        expect(collapsed).not.toContain("import assert from 'node:assert/strict';");
+        expect(collapsed).toContain("const e = 5;");
+        expect(collapsed).toMatch(/… \+4 lines/u);
         expect(collapsed).not.toContain("git diff --check");
 
         const expanded = renderBashCommandCall(theme, command, {
@@ -735,8 +736,38 @@ describe("bash command rendering", () => {
             .render(80)
             .join("\n");
 
+        expect(expanded).toContain("import assert from 'node:assert/strict';");
         expect(expanded).toContain("git diff --check");
-        expect(expanded).not.toMatch(/… \+6 lines/u);
+        expect(expanded).not.toMatch(/… \+\d+ lines/u);
+
+        const marked = plain(
+            renderBashCommandCall(theme, command, {
+                state: "success",
+                expanded: false,
+                maxCodePreviewLines: 6,
+                showPrologueOmission: true,
+                shellLayout: "auto",
+                shellOperatorPosition: "trailing",
+            }).render(80),
+        );
+        expect(marked.slice(0, 3)).toEqual([
+            "$ node --input-type=module <<'JS'",
+            "  … 2 import/setup lines omitted",
+            "  const a = 1;",
+        ]);
+
+        const shown = renderBashCommandCall(theme, command, {
+            state: "success",
+            expanded: false,
+            maxCodePreviewLines: 6,
+            showPrologueOmission: false,
+            shellLayout: "auto",
+            shellOperatorPosition: "trailing",
+            profileFor: () => ({ kind: "javascript", command: ["oxfmt"], imports: "show" }),
+        })
+            .render(80)
+            .join("\n");
+        expect(shown).toContain("import assert from 'node:assert/strict';");
     });
 });
 
