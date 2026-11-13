@@ -25,6 +25,7 @@ import {
     retireSyntaxHighlightSource,
     type SyntaxHighlightOptions,
 } from "../../../rendering/syntax/highlighter.ts";
+import { collapseHome } from "../../../rendering/path.ts";
 import { createSyntaxComponent } from "../../../rendering/syntax/component-owner.ts";
 import {
     isPreviewMetaLine,
@@ -1418,6 +1419,16 @@ function shellPart(theme: GlowupRenderTheme, part: WordPart, quoted: boolean): s
     return shellText(theme, part.text);
 }
 
+// Bash expands a leading `~` only in an unquoted word, so only those words may show it.
+function shellPathText(theme: GlowupRenderTheme, token: string): string {
+    return shellText(theme, collapseHome(token));
+}
+
+function tildeExpandingShellValue(theme: GlowupRenderTheme, token: string): string {
+    if (!/["'`$\\]/u.test(token) && isPathLikeShellWord(token)) return shellPathText(theme, token);
+    return shellValue(theme, token);
+}
+
 function shellValue(theme: GlowupRenderTheme, token: string): string {
     try {
         const command = parse(`: ${token}`).commands[0]?.command;
@@ -1492,7 +1503,7 @@ function styleShellToken(
 
     if (state.expectsRedirectTarget) {
         return {
-            styled: shellValue(theme, token),
+            styled: tildeExpandingShellValue(theme, token),
             state: { ...state, expectsRedirectTarget: false },
         };
     }
@@ -1522,7 +1533,7 @@ function styleShellToken(
 
     if (state.expectingFlagValue) {
         return {
-            styled: shellValue(theme, token),
+            styled: tildeExpandingShellValue(theme, token),
             state: shellStateAfterOperand(state),
         };
     }
@@ -1530,7 +1541,7 @@ function styleShellToken(
     const assignment = /^(?<name>[A-Za-z_][A-Za-z0-9_]*)(?<operator>\+?=)/u.exec(token);
     if (assignment?.groups !== undefined) {
         return {
-            styled: `${theme.fg("syntaxVariable", assignment.groups.name ?? "")}${shellOperator(theme, assignment.groups.operator ?? "")}${shellValue(theme, token.slice(assignment[0].length))}`,
+            styled: `${theme.fg("syntaxVariable", assignment.groups.name ?? "")}${shellOperator(theme, assignment.groups.operator ?? "")}${tildeExpandingShellValue(theme, token.slice(assignment[0].length))}`,
             state,
         };
     }
@@ -1545,7 +1556,7 @@ function styleShellToken(
         }
 
         let styled = shellCommand(theme, token);
-        if (isPathLikeShellWord(token)) styled = shellText(theme, token);
+        if (isPathLikeShellWord(token)) styled = shellPathText(theme, token);
 
         return {
             styled,
@@ -1566,6 +1577,9 @@ function styleShellToken(
             state: { ...state, expectingFlagValue: false, subcommandSeen: true },
         };
     }
+
+    if (isPathLikeShellWord(token))
+        return { styled: shellPathText(theme, token), state: shellStateAfterOperand(state) };
 
     return { styled: shellText(theme, token), state: shellStateAfterOperand(state) };
 }

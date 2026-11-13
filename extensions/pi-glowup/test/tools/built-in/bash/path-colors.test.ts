@@ -1,7 +1,7 @@
 import { Theme } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { stripVTControlCharacters } from "node:util";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { formatPathTarget } from "../../../../src/rendering/path.ts";
 import { renderScriptCall } from "../../../../src/tools/built-in/bash/script-renderer.ts";
 import { TEST_THEME_BACKGROUND_COLORS, TEST_THEME_COLORS } from "../../../support/theme-colors.ts";
@@ -74,6 +74,35 @@ describe("Bash path rendering", () => {
         expect(formatPathTarget(theme, "skills/review/SKILL.m", { isPartial: true })).toBe(
             theme.fg("customMessageLabel", "skills/review/SKILL.m"),
         );
+    });
+
+    describe("home directory paths", () => {
+        const home = "/home/tester";
+        let previousHome: string | undefined;
+        beforeEach(() => {
+            previousHome = process.env.HOME;
+            process.env.HOME = home;
+        });
+        afterEach(() => {
+            process.env.HOME = previousHome;
+        });
+
+        it("shows unquoted home paths with ~", () => {
+            const rendered = stripVTControlCharacters(
+                render(
+                    `${home}/bin/tool ${home}/notes.txt --out ${home}/out.log > ${home}/run.log; OUT=${home}/x cd ${home}`,
+                ).join("\n"),
+            );
+            expect(rendered).toContain(
+                "~/bin/tool ~/notes.txt --out ~/out.log > ~/run.log; OUT=~/x cd ~",
+            );
+            expect(rendered).not.toContain(home);
+        });
+
+        it("keeps home paths where bash would not expand ~", () => {
+            const code = `cat "${home}/a.txt" '${home}/b.txt' --config=${home}/c.json $DIR${home}/d.txt ${home}x/e.txt; python -c 'open("${home}/f.txt")'`;
+            expect(stripVTControlCharacters(render(code).join("\n"))).toContain(code);
+        });
     });
 
     it("preserves variables, ordinary strings, URL strings, and embedded script syntax", () => {
