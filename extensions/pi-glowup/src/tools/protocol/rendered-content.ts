@@ -1,6 +1,6 @@
-import { Markdown, truncateToWidth, type MarkdownTheme } from "@earendil-works/pi-tui";
+import { Markdown, type MarkdownTheme } from "@earendil-works/pi-tui";
 import ansiStyles from "ansi-styles";
-import { omittedLinesLabel, toolExpandHint } from "../../rendering/component.ts";
+import { omittedLinesLabel, toolExpandHint, fitToWidth } from "../../rendering/component.ts";
 import { dim, type GlowupRenderTheme } from "../../rendering/theme.ts";
 import { trimEdgeBlankLines } from "../../rendering/output.ts";
 import {
@@ -35,7 +35,7 @@ export function previewRenderedRows(
     );
     if (rows.length <= limit) return [...rows];
 
-    const marker = truncateToWidth(
+    const marker = fitToWidth(
         dim(
             theme,
             `${omittedLinesLabel(rows.length - limit)}${expanded || preview?.expandable === false ? "" : ` (${toolExpandHint()})`}`,

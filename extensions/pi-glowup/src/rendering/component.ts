@@ -51,6 +51,14 @@ export function makeComponent(
     };
 }
 
+// Pi's truncation walks every grapheme of styled text even when the text fits; its width
+// measurement has an ASCII and SGR fast path.
+export function fitToWidth(text: string, width: number, ellipsis: string): string {
+    if (width > 0 && visibleWidth(text) <= width) return text;
+
+    return truncateToWidth(text, width, ellipsis);
+}
+
 function clipLine(line: string, width: number): string {
     const text = neutralizeTerminalControls(line);
     let escape = text.indexOf("\u001b");
@@ -118,7 +126,7 @@ export function wrapStyledText(text: string, width: number): string[] {
         return [""];
     }
 
-    return wrapped.map((line) => truncateToWidth(`${indent}${line}`, safeWidth, ""));
+    return wrapped.map((line) => fitToWidth(`${indent}${line}`, safeWidth, ""));
 }
 
 function wrapAsciiLine(
@@ -205,7 +213,7 @@ export function wrapSinglePhysicalLineWithContinuation(
     const rendered: string[] = [];
     for (const [index, segment] of segments.entries()) {
         const prefix = index === 0 ? firstPrefix : continuationPrefix;
-        rendered.push(truncateToWidth(`${prefix}${segment}`, width, ""));
+        rendered.push(fitToWidth(`${prefix}${segment}`, width, ""));
     }
 
     return rendered;

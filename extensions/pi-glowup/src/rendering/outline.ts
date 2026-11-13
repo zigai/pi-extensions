@@ -6,8 +6,14 @@ import type { CodePreview } from "./streaming/presentation.ts";
 import { Value } from "typebox/value";
 import { inlineObjectSchema, decodeGlowupNode } from "../tools/protocol/decode.ts";
 import { stringParser } from "../json-scalar.ts";
-import { truncateToWidth } from "@earendil-works/pi-tui";
-import { makeComponent, omittedLinesLabel, toolExpandHint, wrapStyledText } from "./component.ts";
+
+import {
+    makeComponent,
+    omittedLinesLabel,
+    toolExpandHint,
+    wrapStyledText,
+    fitToWidth,
+} from "./component.ts";
 import {
     PREVIEW_MUTATION_SETTINGS,
     showsFullMutation,
@@ -288,7 +294,7 @@ function nodeRows(
                     if (stats.length > 0) heading += ` ${stats}`;
                 }
 
-                const header = truncateToWidth(heading, width, "…");
+                const header = fitToWidth(heading, width, "…");
                 const kinds = file.lines.map((line): SemanticDiffRowKind => {
                     if (line.kind === "addition") return "insert";
                     if (line.kind === "deletion") return "delete";
@@ -309,14 +315,14 @@ function nodeRows(
 
                     let text = `${sign} ${line.text}`;
                     if (line.kind === "omission") text = theme.fg("dim", text);
-                    if (!context.expanded) text = truncateToWidth(text, width * 4, "…");
+                    if (!context.expanded) text = fitToWidth(text, width * 4, "…");
 
                     return wrapStyledText(text, width);
                 });
                 const omitted = file.lines.length - indices.length;
                 if (omitted > 0)
                     body.push(
-                        truncateToWidth(
+                        fitToWidth(
                             theme.fg("dim", `${omittedLinesLabel(omitted)} (${toolExpandHint()})`),
                             width,
                             "…",
@@ -342,7 +348,7 @@ export function renderOutlineNode(
 
     return makeComponent((width) =>
         nodeRows(replay, theme, context, mode, Math.max(1, width - 2), mutations).map((line) =>
-            truncateToWidth(`  ${line}`, width, ""),
+            fitToWidth(`  ${line}`, width, ""),
         ),
     );
 }

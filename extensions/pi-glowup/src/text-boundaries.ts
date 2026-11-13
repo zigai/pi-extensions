@@ -21,6 +21,11 @@ function completeUnicodePrefix(text: string): string {
     return finalCodeUnit >= 0xd800 && finalCodeUnit <= 0xdbff ? text.slice(0, -1) : text;
 }
 
+// Digits, colon, and semicolon are contiguous code units.
+function isSgrParameter(codeUnit: number): boolean {
+    return codeUnit >= 0x30 && codeUnit <= 0x3b;
+}
+
 export function sgrSequenceEnd(text: string, start: number): number | undefined {
     if (text.charCodeAt(start) !== ESCAPE_CODE || text.charAt(start + 1) !== "[") {
         return undefined;
@@ -30,7 +35,7 @@ export function sgrSequenceEnd(text: string, start: number): number | undefined 
     while (
         index < text.length &&
         index - start < MAX_SGR_SEQUENCE_CHARACTERS &&
-        /[\d:;]/u.test(text.charAt(index))
+        isSgrParameter(text.charCodeAt(index))
     ) {
         index += 1;
     }

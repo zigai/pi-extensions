@@ -45,13 +45,9 @@ import {
     wrapSinglePhysicalLineWithContinuation,
     toolExpandHint,
     makeComponent,
+    fitToWidth,
 } from "../../../rendering/component.ts";
-import {
-    type Component,
-    truncateToWidth,
-    visibleWidth,
-    wrapTextWithAnsi,
-} from "@earendil-works/pi-tui";
+import { type Component, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { parse, type WordPart } from "unbash";
 import { heredocBodyRows, shellWords } from "./shell-words.ts";
 import type { ScriptFormatterProfile } from "../../../settings-input.ts";
@@ -1057,7 +1053,7 @@ function createScriptCallComponent(
             if (fullHighlighted.length > maxCodePreviewLines + 1) viewClipped = true;
 
             fullHighlighted = fullHighlighted.slice(0, maxCodePreviewLines + 1).map((line) => {
-                const clipped = truncateToWidth(line, columns, "");
+                const clipped = fitToWidth(line, columns, "");
                 if (clipped.length < line.length) viewClipped = true;
                 return clipped;
             });

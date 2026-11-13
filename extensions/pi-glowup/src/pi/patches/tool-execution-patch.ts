@@ -51,6 +51,10 @@ const THIRD_PARTY_RENDERER_PATCH_STATE_KEY = Symbol.for(
 );
 const MAX_THIRD_PARTY_RENDERERS = 100;
 const rowInvalidationSchema = Type.Object({ invalidate: Type.Function([], Type.Void()) });
+const deferredRowRefreshSchema = Type.Object({
+    args: Type.Unknown(),
+    updateArgs: Type.Function([Type.Unknown()], Type.Void()),
+});
 
 type RenderShellMode = NonNullable<PiRendererDefinition["renderShell"]>;
 type ThemeForeground = Parameters<Theme["fg"]>[0];
@@ -355,6 +359,17 @@ function clearCompletedRender(
     delete slots[slot];
 }
 
+// Asynchronous renderer updates often arrive in bursts for one row. Pi rebuilds a row with
+// pending arguments once at its next render, so a burst costs one rebuild per frame.
+function refreshRowAtNextRender(row: ToolExecutionInstance, refresh: () => void): void {
+    if (Value.Check(deferredRowRefreshSchema, row)) {
+        row.updateArgs(row.args);
+        return;
+    }
+
+    refresh();
+}
+
 function renderSlotInvalidation(
     cache: CompletedRenderCache,
     instance: ToolExecutionInstance,
@@ -386,7 +401,7 @@ function renderSlotInvalidation(
 
             clearCompletedRendersForInstance(cache, current);
             owner.rendered?.invalidate();
-            owner.refresh();
+            refreshRowAtNextRender(current, owner.refresh);
         },
     };
 

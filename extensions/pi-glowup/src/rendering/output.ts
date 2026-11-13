@@ -1,7 +1,7 @@
 import { stripVTControlCharacters } from "node:util";
 import { hasNonWhitespaceText, truncateUtf8ByGrapheme } from "../text-boundaries.ts";
 import { type GlowupRenderTheme, muted, dim } from "./theme.ts";
-import { truncateToWidth, type Component } from "@earendil-works/pi-tui";
+import { type Component } from "@earendil-works/pi-tui";
 import {
     type CodeOutputSyntax,
     highlightCodeOutput,
@@ -16,6 +16,7 @@ import {
     makeComponent,
     wrapPrefixedLine,
     omittedLinesLabel,
+    fitToWidth,
 } from "./component.ts";
 
 const MAX_COLLAPSED_OUTPUT_PREVIEW_BYTES = 64 * 1024;
@@ -397,7 +398,7 @@ function renderCollapsedWrappedPreview(
             : flattenWrappedRows(lines.filter((line, index) => !line.isMeta && index > metaIndex));
     const allContent = metaIndex === -1 ? before : [...before, ...after];
     const marker = (prefix: string): string =>
-        truncateToWidth(`${prefix}${muted(options.theme, markerText)}`, options.width, "…");
+        fitToWidth(`${prefix}${muted(options.theme, markerText)}`, options.width, "…");
 
     if (allContent.length <= options.rowBudget) {
         return [
@@ -506,7 +507,7 @@ export function renderGlowupOutput(
             }
 
             const label = noOutputLabel ?? "(no output)";
-            return [truncateToWidth(`${prefixFirst}${muted(theme, label)}`, width, "")];
+            return [fitToWidth(`${prefixFirst}${muted(theme, label)}`, width, "")];
         }
 
         const visible = [...rawLines];
@@ -576,7 +577,7 @@ export function renderGlowupOutput(
 
             return [
                 ...rows.slice(0, limit),
-                truncateToWidth(
+                fitToWidth(
                     `${prefixRest}${muted(theme, omittedLinesLabel(rows.length - limit))}`,
                     width,
                     "",
