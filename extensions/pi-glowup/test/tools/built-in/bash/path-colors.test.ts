@@ -61,6 +61,22 @@ describe("Bash semantic path colors", () => {
         }
     });
 
+    it("keeps non-markdown skill files in the ordinary path accent", () => {
+        const script = "/work/.pi/agent/skills/review/scripts/run.ts";
+        const rendered = render(`bun run ${script} --check`).join("\n");
+        expect(rendered).toContain(theme.fg("accent", script));
+        expect(rendered).not.toContain(theme.getFgAnsi("customMessageLabel"));
+        expect(formatPathTarget(theme, script)).toBe(theme.fg("accent", script));
+        expect(
+            formatPathTarget(theme, "/work/.pi/agent/skills/review/scripts/run.t", {
+                isPartial: true,
+            }),
+        ).toBe(theme.fg("muted", "/work/.pi/agent/skills/review/scripts/run.t"));
+
+        const reference = "/work/.pi/agent/skills/review/references/rules.md";
+        expect(formatPathTarget(theme, reference)).toBe(theme.fg("customMessageLabel", reference));
+    });
+
     it("keeps partial skill read targets in the instruction color", () => {
         expect(formatPathTarget(theme, "skills/review/SKILL.m", { isPartial: true })).toBe(
             theme.fg("customMessageLabel", "skills/review/SKILL.m"),

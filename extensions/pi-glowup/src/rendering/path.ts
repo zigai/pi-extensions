@@ -31,8 +31,11 @@ export function isInstructionFilePath(path: string | undefined): boolean {
         return true;
     }
 
-    return /(?:^|\/|~\/)\.pi\/agent\/(?:skills\/[^/]+\/|(?:git|npm\/node_modules)\/.+\/skills\/[^/]+\/)/u.test(
-        normalized,
+    return (
+        normalized.endsWith(".md") &&
+        /(?:^|\/|~\/)\.pi\/agent\/(?:skills\/[^/]+\/|(?:git|npm\/node_modules)\/.+\/skills\/[^/]+\/)/u.test(
+            normalized,
+        )
     );
 }
 
@@ -44,8 +47,11 @@ export function isPartialInstructionFilePath(path: string | undefined): boolean 
         return true;
     }
 
-    return /(?:^|\/|~\/)\.pi\/agent\/(?:skills(?:\/|$)|(?:git|npm\/node_modules)\/.+\/skills(?:\/|$))/u.test(
-        normalized,
+    return (
+        /^(?:[^.]*|.*\.(?:md?)?)$/u.test(basename) &&
+        /(?:^|\/|~\/)\.pi\/agent\/(?:skills(?:\/|$)|(?:git|npm\/node_modules)\/.+\/skills(?:\/|$))/u.test(
+            normalized,
+        )
     );
 }
 
