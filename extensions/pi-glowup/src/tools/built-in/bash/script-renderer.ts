@@ -47,6 +47,7 @@ import {
     makeComponent,
     fitToWidth,
 } from "../../../rendering/component.ts";
+import type { ThemeColor } from "@earendil-works/pi-coding-agent";
 import { type Component, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { parse, type WordPart } from "unbash";
 import { heredocBodyRows, shellWords } from "./shell-words.ts";
@@ -339,6 +340,73 @@ const initialShellHighlightState: ShellHighlightState = {
     subcommandSeen: false,
 };
 
+// Every color a highlighted shell line can contain, including both path styles.
+const SHELL_LINE_COLORS: readonly ThemeColor[] = [
+    "dim",
+    "syntaxFunction",
+    "syntaxKeyword",
+    "syntaxOperator",
+    "syntaxString",
+    "syntaxVariable",
+    "toolTitle",
+];
+
+const MAX_CACHED_SHELL_LINES = 4096;
+const MAX_CACHED_SHELL_LINE_LENGTH = 2048;
+const MAX_CACHED_HEREDOC_SOURCES = 256;
+let shellLineCache: { readonly style: string; readonly lines: Map<string, string> } | undefined;
+const heredocRowsCache = new Map<string, ReadonlySet<number>>();
+
+function shellLineStyle(theme: GlowupRenderTheme): string {
+    const samples = SHELL_LINE_COLORS.map((color) => theme.fg(color, "x"));
+    samples.push(filePathText(theme, "AGENTS.md"), filePathText(theme, "src/x"));
+    return samples.join("\0");
+}
+
+// Shell lines repeat across widths, render passes, and calls; their colors depend only on
+// the line and the theme colors, so cached lines are reused while those colors hold.
+function shellLineHighlighter(theme: GlowupRenderTheme): (line: string) => string {
+    const style = shellLineStyle(theme);
+    if (shellLineCache?.style !== style) shellLineCache = { style, lines: new Map() };
+
+    const lines = shellLineCache.lines;
+    return (line) => {
+        if (line.length > MAX_CACHED_SHELL_LINE_LENGTH) return highlightShellLine(theme, line);
+
+        const cached = lines.get(line);
+        if (cached !== undefined) {
+            lines.delete(line);
+            lines.set(line, cached);
+            return cached;
+        }
+
+        if (lines.size >= MAX_CACHED_SHELL_LINES) {
+            const oldest = lines.keys().next().value;
+            if (oldest !== undefined) lines.delete(oldest);
+        }
+
+        const highlighted = highlightShellLine(theme, line);
+        lines.set(line, highlighted);
+
+        return highlighted;
+    };
+}
+
+function cachedHeredocBodyRows(source: string): ReadonlySet<number> {
+    const cached = heredocRowsCache.get(source);
+    if (cached !== undefined) return cached;
+
+    if (heredocRowsCache.size >= MAX_CACHED_HEREDOC_SOURCES) {
+        const oldest = heredocRowsCache.keys().next().value;
+        if (oldest !== undefined) heredocRowsCache.delete(oldest);
+    }
+
+    const rows = heredocBodyRows(source);
+    heredocRowsCache.set(source, rows);
+
+    return rows;
+}
+
 function highlightShellLine(theme: GlowupRenderTheme, line: string): string {
     const commentStart = shellCommentStart(line);
     const shellPart = commentStart === undefined ? line : line.slice(0, commentStart);
@@ -593,14 +661,14 @@ function embeddedInlineHighlightRows(
 }
 
 function highlightShellLineWithEmbeddedCode(
-    theme: GlowupRenderTheme,
+    highlightLine: (line: string) => string,
     line: string,
     rows: ReadonlyArray<EmbeddedInlineHighlightRow> | undefined,
     literal: boolean,
 ): string {
     const highlight = (text: string): string => {
         if (literal) return text;
-        return highlightShellLine(theme, text);
+        return highlightLine(text);
     };
     if (rows === undefined || rows.length === 0) return highlight(line);
 
@@ -625,12 +693,13 @@ function highlightBashScriptPreviewLines(
     childOptions: (key: string, source: string) => SyntaxHighlightOptions,
 ): string[] {
     const embeddedRows = embeddedInlineHighlightRows(lines, theme, programs, parent, childOptions);
-    const literalRows = heredocBodyRows(lines.join("\n"));
+    const literalRows = cachedHeredocBodyRows(lines.join("\n"));
+    const highlightLine = shellLineHighlighter(theme);
 
     return lines.map((line, lineIndex) => {
         if (isPreviewMetaLine(line)) return line;
         return highlightShellLineWithEmbeddedCode(
-            theme,
+            highlightLine,
             line,
             embeddedRows.get(lineIndex),
             literalRows.has(lineIndex),
@@ -988,7 +1057,7 @@ function createScriptCallComponent(
         if (retained.launcher !== undefined) {
             rendered.push(
                 ...wrapSinglePhysicalLineWithContinuation(
-                    highlightShellLine(theme, retained.launcher),
+                    shellLineHighlighter(theme)(retained.launcher),
                     width - annotationReserve,
                     promptPrefix,
                     PROMPT_CONTINUATION_PREFIX,

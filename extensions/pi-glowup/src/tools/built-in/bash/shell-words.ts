@@ -253,6 +253,10 @@ export function shellWords(source: string): readonly ShellWord[] {
 
 export function heredocBodyRows(source: string): ReadonlySet<number> {
     const rows = new Set<number>();
+
+    // A heredoc operator is "<<", possibly split by a line continuation.
+    if (!source.includes("<<") && !source.includes("\\\n")) return rows;
+
     const ends = new Map<ParsedScript, Map<number, { offset: number; row: number }>>();
     const headers = new Map<
         ParsedScript,
