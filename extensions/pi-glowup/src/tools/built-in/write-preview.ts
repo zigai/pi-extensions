@@ -151,6 +151,41 @@ function writeDiffSection(path: string, preview: string, totalLines: number): Di
     };
 }
 
+type WriteSection = {
+    readonly path: string;
+    readonly content: string;
+    readonly totalLines: number;
+    readonly maxBytes: number | null;
+    readonly bounded: string;
+    readonly section: DiffSection;
+};
+
+type WriteSectionCache = { entry: WriteSection | undefined };
+
+function cachedWriteSection(
+    cache: WriteSectionCache | undefined,
+    path: string,
+    content: string,
+    totalLines: number,
+    maxBytes: number | null,
+): WriteSection {
+    const entry = cache?.entry;
+    if (
+        entry?.content === content &&
+        entry.path === path &&
+        entry.totalLines === totalLines &&
+        entry.maxBytes === maxBytes
+    )
+        return entry;
+
+    const bounded = boundedWriteContentPreview(content, maxBytes);
+    const section = writeDiffSection(path, bounded, totalLines);
+    const created: WriteSection = { path, content, totalLines, maxBytes, bounded, section };
+    if (cache !== undefined) cache.entry = created;
+
+    return created;
+}
+
 // Only the first few blank samples are retained by the established preview policy.
 // Visit bounded head/tail samples and account for the invisible middle in O(1).
 function appendPendingBlankLines(
@@ -537,6 +572,7 @@ class StreamingWritePreviewComponent implements Component {
     private readonly toolCallId: string | undefined;
     private sourceNewlineCount = 0;
     private renderedSourceLength = 0;
+    private readonly sections: WriteSectionCache = { entry: undefined };
 
     constructor(private input: StreamingWriteUpdate) {
         // The host may mutate an args object in place between updates. Snapshot
@@ -562,7 +598,7 @@ class StreamingWritePreviewComponent implements Component {
 
         // Exact rewrite detection still requires a full startsWith comparison.
         // Borrow the owner's existing args reference; do not retain source history.
-        const appending = content.startsWith(previous);
+        const appending = content === previous || content.startsWith(previous);
         let start = previous.length;
         if (!appending) {
             start = 0;
@@ -615,15 +651,20 @@ class StreamingWritePreviewComponent implements Component {
                 lastComponent: this.preview,
             },
             appendStart,
+            this.sections,
         );
         this.renderedSourceLength = 0;
         if (display === content) this.renderedSourceLength = content.length;
 
         const lines = this.preview.render(width);
-        const current = observeSyntaxHighlightSource(content, invalidate);
-        scheduleCodeOutputSyntaxLoad({ path }, invalidate, content, current, {
-            invalidateOnComplete: false,
-        });
+
+        // A completed preview of the raw source has already requested this exact text.
+        if (context.isPartial || display !== content) {
+            const current = observeSyntaxHighlightSource(content, invalidate);
+            scheduleCodeOutputSyntaxLoad({ path }, invalidate, content, current, {
+                invalidateOnComplete: false,
+            });
+        }
 
         return lines;
     }
@@ -643,6 +684,7 @@ function renderWriteCallPreviewInternal(
     theme: GlowupRenderTheme,
     context: WriteCallContext,
     appendStart?: number,
+    sections?: WriteSectionCache,
 ): Component {
     const path = args.path ?? "";
     const content = args.content;
@@ -735,8 +777,11 @@ function renderWriteCallPreviewInternal(
     scheduleCodeOutputSyntaxLoad({ path }, context.invalidate, content, current);
 
     const added = context.sourceLineCount ?? countContentLines(content);
-    const boundedContent = boundedWriteContentPreview(
+    const { bounded: boundedContent, section } = cachedWriteSection(
+        sections,
+        path,
         content,
+        added,
         mutationSettings.limits.maxWritePreviewBytes,
     );
     const showAllRows = showsFullMutation(mutationSettings, context.expanded);
@@ -749,16 +794,11 @@ function renderWriteCallPreviewInternal(
                   noOutputLabel: "(empty file)",
                   ...(context.waitingForCode === true && { noOutputLabel: null }),
               })
-            : renderGlowupDiff(
-                  theme,
-                  [writeDiffSection(path, boundedContent, added)],
-                  showAllRows,
-                  {
-                      ...writeDiffRenderOptions(mutationSettings.previewLines, showAllRows),
-                      lastComponent: context.lastComponent,
-                      invalidate: context.invalidate,
-                  },
-              );
+            : renderGlowupDiff(theme, [section], showAllRows, {
+                  ...writeDiffRenderOptions(mutationSettings.previewLines, showAllRows),
+                  lastComponent: context.lastComponent,
+                  invalidate: context.invalidate,
+              });
 
     let state: "success" | "error" = "success";
     if (context.isError) state = "error";

@@ -46,31 +46,65 @@ export function createExplorationFeature() {
 
     type ExplorationMessage = Extract<ExplorationSessionEntry, { type: "message" }>["message"];
 
+    type SourceIndex = {
+        readonly positions: Map<string, ExplorationSourcePosition>;
+        length: number;
+        last: ExplorationSessionEntry | undefined;
+    };
+
     let explorationSourceEntries: (() => readonly ExplorationSessionEntry[]) | undefined;
     let streamingExplorationMessage: ExplorationMessage | undefined;
+    let sourceIndex: SourceIndex = { positions: new Map(), length: 0, last: undefined };
 
-    function explorationSourcePosition(toolCallId: string): ExplorationSourcePosition | undefined {
+    function toolCallIndex(message: ExplorationMessage | undefined, toolCallId: string): number {
+        if (message?.role !== "assistant") return -1;
+
+        return message.content.findIndex(
+            (content) => content.type === "toolCall" && content.id === toolCallId,
+        );
+    }
+
+    // Branch entries are append-only until the source is replaced on session start
+    // or tree navigation, so indexed positions stay valid and only a miss rereads it.
+    function refreshSourceIndex(): void {
         const entries = explorationSourceEntries?.() ?? [];
-        const contentIndex = (message: ExplorationMessage | undefined): number => {
-            if (message?.role !== "assistant") return -1;
-
-            return message.content.findIndex(
-                (content) => content.type === "toolCall" && content.id === toolCallId,
-            );
-        };
-
-        // Borrow the host-owned branch rather than building an unbounded ID index.
-        // Persisted source takes precedence over the latest streaming snapshot.
-        for (let index = entries.length - 1; index >= 0; index -= 1) {
-            const entry = entries[index];
-            if (entry?.type !== "message") continue;
-
-            const found = contentIndex(entry.message);
-            if (found !== -1) return [index, found];
+        let start = sourceIndex.length;
+        if (start === 0 || entries.length < start || entries[start - 1] !== sourceIndex.last) {
+            sourceIndex = { positions: new Map(), length: 0, last: undefined };
+            start = 0;
         }
 
-        const streamingIndex = contentIndex(streamingExplorationMessage);
-        return streamingIndex === -1 ? undefined : [entries.length, streamingIndex];
+        for (let index = start; index < entries.length; index += 1) {
+            const entry = entries[index];
+            if (entry?.type !== "message" || entry.message.role !== "assistant") continue;
+
+            // Persisted chronology prefers the latest entry and its first matching content.
+            const content = entry.message.content;
+            for (let contentIndex = content.length - 1; contentIndex >= 0; contentIndex -= 1) {
+                const part = content[contentIndex];
+                if (part?.type === "toolCall")
+                    sourceIndex.positions.set(part.id, [index, contentIndex]);
+            }
+        }
+
+        sourceIndex.length = entries.length;
+        sourceIndex.last = entries.at(-1);
+    }
+
+    function explorationSourcePosition(toolCallId: string): ExplorationSourcePosition | undefined {
+        // Persisted source takes precedence over the latest streaming snapshot.
+        const indexed = sourceIndex.positions.get(toolCallId);
+        if (indexed !== undefined) return indexed;
+
+        refreshSourceIndex();
+
+        const persisted = sourceIndex.positions.get(toolCallId);
+        if (persisted !== undefined) return persisted;
+
+        const streamingIndex = toolCallIndex(streamingExplorationMessage, toolCallId);
+        if (streamingIndex === -1) return undefined;
+
+        return [sourceIndex.length, streamingIndex];
     }
 
     const explorationGroups = new ExplorationGroupStore(undefined, explorationSourcePosition);
@@ -156,6 +190,7 @@ export function createExplorationFeature() {
 
     function setSource(source: () => readonly ExplorationSessionEntry[]): void {
         explorationSourceEntries = source;
+        sourceIndex = { positions: new Map(), length: 0, last: undefined };
     }
 
     function setMessage(message: ExplorationMessage): void {
@@ -166,6 +201,7 @@ export function createExplorationFeature() {
         explorationGroups.clear();
         explorationSourceEntries = undefined;
         streamingExplorationMessage = undefined;
+        sourceIndex = { positions: new Map(), length: 0, last: undefined };
     }
 
     return {

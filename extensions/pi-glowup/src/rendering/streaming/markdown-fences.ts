@@ -1,37 +1,43 @@
 import { Lexer } from "marked";
 import Type from "typebox";
-import { Value } from "typebox/value";
+import { Compile } from "typebox/compile";
 
-const blockSchema = Type.Object({ type: Type.String(), raw: Type.String() });
-const codeSchema = Type.Object({
-    type: Type.Literal("code"),
-    raw: Type.String(),
-    text: Type.String(),
-    lang: Type.Optional(Type.String()),
-    codeBlockStyle: Type.Optional(Type.Literal("indented")),
-});
+const blockValidator = Compile(Type.Object({ type: Type.String(), raw: Type.String() }));
+const codeValidator = Compile(
+    Type.Object({
+        type: Type.Literal("code"),
+        raw: Type.String(),
+        text: Type.String(),
+        lang: Type.Optional(Type.String()),
+        codeBlockStyle: Type.Optional(Type.Literal("indented")),
+    }),
+);
 
-const quoteSchema = Type.Object({
-    type: Type.Literal("blockquote"),
-    raw: Type.String(),
-    text: Type.String(),
-    tokens: Type.Array(Type.Unknown()),
-});
+const quoteValidator = Compile(
+    Type.Object({
+        type: Type.Literal("blockquote"),
+        raw: Type.String(),
+        text: Type.String(),
+        tokens: Type.Array(Type.Unknown()),
+    }),
+);
 
-const listSchema = Type.Object({
-    type: Type.Literal("list"),
-    raw: Type.String(),
-    ordered: Type.Boolean(),
-    start: Type.Union([Type.Number(), Type.Literal("")]),
-    items: Type.Array(
-        Type.Object({
-            raw: Type.String(),
-            text: Type.String(),
-            task: Type.Boolean(),
-            tokens: Type.Array(Type.Unknown()),
-        }),
-    ),
-});
+const listValidator = Compile(
+    Type.Object({
+        type: Type.Literal("list"),
+        raw: Type.String(),
+        ordered: Type.Boolean(),
+        start: Type.Union([Type.Number(), Type.Literal("")]),
+        items: Type.Array(
+            Type.Object({
+                raw: Type.String(),
+                text: Type.String(),
+                task: Type.Boolean(),
+                tokens: Type.Array(Type.Unknown()),
+            }),
+        ),
+    }),
+);
 
 type MappedText = {
     readonly text: string;
@@ -60,16 +66,14 @@ function characterEnd(source: string, position: number): number {
 }
 
 function normalize(source: string): MappedText {
-    let text = "";
+    const text = source.replace(/\r\n?/gu, "\n");
     const positions: number[] = [];
-    for (let index = 0; index < source.length; index++) {
+    let index = 0;
+    for (let position = 0; position < text.length; position++) {
         positions.push(index);
 
-        if (source[index] === "\r") {
-            text += "\n";
-
-            if (source[index + 1] === "\n") index++;
-        } else text += source[index];
+        if (source.charCodeAt(index) === 13 && source.charCodeAt(index + 1) === 10) index++;
+        index++;
     }
 
     return { text, contentEnd: text.trimEnd().length, positions, end: source.length };
@@ -207,7 +211,7 @@ export function markdownFences(source: string): MarkdownFence[] {
         for (const token of tokens) {
             // Marked's public Token includes an open extension shape. Project
             // only the concrete built-in block shapes that this adapter owns.
-            if (!Value.Check(blockSchema, token)) continue;
+            if (!blockValidator.Check(token)) continue;
 
             const start = mapped.text.indexOf(token.raw, offset);
             if (start === -1) continue;
@@ -216,9 +220,9 @@ export function markdownFences(source: string): MarkdownFence[] {
 
             offset = start + token.raw.length;
 
-            if (Value.Check(quoteSchema, token)) {
+            if (quoteValidator.Check(token)) {
                 walk(token.tokens, project(block, token.text), widthInset + 2);
-            } else if (Value.Check(listSchema, token)) {
+            } else if (listValidator.Check(token)) {
                 const listInset = nestedList?.widthInset ?? widthInset;
                 const listDepth = nestedList?.depth ?? 0;
                 let itemOffset = 0;
@@ -244,7 +248,7 @@ export function markdownFences(source: string): MarkdownFence[] {
                         depth: listDepth + 1,
                     });
                 }
-            } else if (Value.Check(codeSchema, token) && token.codeBlockStyle === "indented") {
+            } else if (codeValidator.Check(token) && token.codeBlockStyle === "indented") {
                 // Indented Markdown code has no language declaration. Treat it as an
                 // unknown-language block (hold until complete), never as prose.
                 const logical = project(block, token.text);
@@ -267,7 +271,7 @@ export function markdownFences(source: string): MarkdownFence[] {
                     prefix,
                     originalCode: source.slice(originalStart, block.end),
                 });
-            } else if (Value.Check(codeSchema, token)) {
+            } else if (codeValidator.Check(token)) {
                 const opening = /^ {0,3}(`{3,}|~{3,})([^\n]*)(?:\n|$)/u.exec(token.raw);
                 const marker = opening?.[1];
                 const markerOffset = opening?.[0].indexOf(marker ?? "") ?? 0;
@@ -351,7 +355,10 @@ export function markdownFences(source: string): MarkdownFence[] {
         }
     }
 
-    walk(Lexer.lex(source), normalize(source), 0);
+    // Fence discovery needs block tokens only; Lexer.lex would also run the
+    // inline pass over every paragraph.
+    const mapped = normalize(source);
+    walk(new Lexer().blockTokens(mapped.text), mapped, 0);
 
     return result;
 }

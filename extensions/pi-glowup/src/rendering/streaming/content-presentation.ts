@@ -2,7 +2,7 @@ import type { GlowupContentInput, GlowupStreamingPolicy } from "../../tools/prot
 import type { ScriptBlockFormatter } from "../../tools/built-in/bash/formatter.ts";
 import type { CodeStreamingMode, CodeStreamStore } from "./code-stream.ts";
 import { revealProse, type ProseStreamingMode } from "./prose.ts";
-import { displayFenceCode, markdownFences } from "./markdown-fences.ts";
+import { displayFenceCode, markdownFences, type MarkdownFence } from "./markdown-fences.ts";
 
 export type StreamingPresentationOptions = {
     readonly prose: ProseStreamingMode;
@@ -11,18 +11,72 @@ export type StreamingPresentationOptions = {
     readonly formatter?: ScriptBlockFormatter | undefined;
 };
 
+const MAX_FENCE_ANALYSES = 4096;
+
+type FenceDisplay = { readonly display: string; readonly text: string };
+
+type FenceAnalysis = {
+    readonly source: string;
+    readonly fences: readonly MarkdownFence[];
+    readonly displays: (FenceDisplay | undefined)[];
+};
+
+// One entry per content key: a growing streaming source replaces its own entry,
+// while completed messages keep theirs across resizes and repaints.
+function createFenceAnalyses(): (key: string, source: string) => FenceAnalysis {
+    const analyses = new Map<string, FenceAnalysis>();
+
+    function analyze(source: string): FenceAnalysis {
+        const fences = markdownFences(source);
+
+        return { source, fences, displays: Array.from(fences, () => undefined) };
+    }
+
+    return (key, source) => {
+        let analysis = analyses.get(key);
+        analyses.delete(key);
+
+        if (analysis?.source !== source) analysis = analyze(source);
+
+        analyses.set(key, analysis);
+
+        if (analyses.size > MAX_FENCE_ANALYSES) {
+            const oldest = analyses.keys().next();
+            if (oldest.done !== true) analyses.delete(oldest.value);
+        }
+
+        return analysis;
+    };
+}
+
+function fenceDisplay(
+    analysis: FenceAnalysis,
+    index: number,
+    fence: MarkdownFence,
+    display: string,
+): string {
+    const cached = analysis.displays[index];
+    if (cached?.display === display) return cached.text;
+
+    const text = displayFenceCode(fence, display);
+    analysis.displays[index] = { display, text };
+    return text;
+}
+
 function presentMarkdown(
-    source: string,
+    analysis: FenceAnalysis,
     key: string,
     complete: boolean,
     options: StreamingPresentationOptions,
     targetWidth: number | undefined,
     invalidate: () => void,
 ): string {
+    const source = analysis.source;
+
     // Prepare every independent fence once, even while an earlier one is held.
     // Readiness can then be coalesced into one paint without requiring another
     // provider chunk or a component rebuild to start the following block.
-    const previews = markdownFences(source).map((fence, index) => {
+    const previews = analysis.fences.map((fence, index) => {
         const fenceKey = `${key}:fence:${index}`;
         let codeWidth = targetWidth;
         if (codeWidth !== undefined) codeWidth = Math.max(1, codeWidth - fence.widthInset);
@@ -38,24 +92,22 @@ function presentMarkdown(
             invalidate,
         });
 
-        return { fence, fenceKey, display };
+        return { fence, index, fenceKey, display };
     });
     let output = "";
     let offset = 0;
-    for (const { fence, fenceKey, display } of previews) {
+    for (const { fence, index, fenceKey, display } of previews) {
         const preceding = source.slice(offset, fence.start);
         const code = fence.code;
 
         // A fence completes ordinary preceding prose, but a trailing heading
         // belongs to its following content, not to an empty pending code block.
-        const trailingHeading =
-            /(?:^|\n) {0,3}#{1,6}(?:[ \t]+[^\r\n]*)?\r?\n(?:[ \t]*\r?\n)*$/u.test(preceding);
         const emptyCompleteFence = code.trim().length === 0 && (complete || fence.complete);
         if (
             options.prose === "paragraph" &&
-            trailingHeading &&
             display.trim().length === 0 &&
-            !emptyCompleteFence
+            !emptyCompleteFence &&
+            /(?:^|\n) {0,3}#{1,6}(?:[ \t]+[^\r\n]*)?\r?\n(?:[ \t]*\r?\n)*$/u.test(preceding)
         ) {
             return output + revealProse(preceding, options.prose, false);
         }
@@ -67,7 +119,7 @@ function presentMarkdown(
         if (display.length === 0 && code.length > 0) return output;
 
         if (display.length > 0 || fence.complete || complete) {
-            output += fence.opener + displayFenceCode(fence, display);
+            output += fence.opener + fenceDisplay(analysis, index, fence, display);
             if (fence.complete) {
                 // A ready prefix is not the whole closed block. Keep its real
                 // closing fence and following prose behind the remaining units.
@@ -92,6 +144,8 @@ function presentMarkdown(
 export function createStreamingPresentation(
     options: () => StreamingPresentationOptions,
 ): GlowupStreamingPolicy {
+    const fenceAnalysis = createFenceAnalyses();
+
     return {
         present(input: GlowupContentInput): string {
             if (input.mode === "immediate") return input.source;
@@ -102,7 +156,7 @@ export function createStreamingPresentation(
 
             if (input.kind === "markdown")
                 return presentMarkdown(
-                    input.source,
+                    fenceAnalysis(input.key, input.source),
                     input.key,
                     input.complete,
                     current,
