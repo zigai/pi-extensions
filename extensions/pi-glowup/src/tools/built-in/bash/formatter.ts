@@ -24,6 +24,7 @@ import {
     type FormatterRun,
     type ScriptFormatOutcome,
 } from "./formatter-process.ts";
+import type { FormatterOutputKey, FormatterOutputStore } from "./formatter-store.ts";
 
 export type ScriptBlockFormatterInput = {
     readonly label: string;
@@ -103,6 +104,11 @@ function formatterProfile(value: JsonValue): ScriptFormatterProfile | undefined 
     } catch {
         return undefined;
     }
+}
+
+// Command profiles also receive the width through COLUMNS and line-length variables.
+function usesTargetWidth(profile: ScriptFormatterProfile): boolean {
+    return profile.kind !== "bash";
 }
 
 function normalizeCode(code: string): string {
@@ -318,9 +324,33 @@ function recordScriptFormat(
     else recordRenderEvent("script_format", fields);
 }
 
+function formatterOutputKey(
+    profile: ScriptFormatterProfile,
+    input: ScriptBlockFormatterInput,
+    width: number | undefined,
+): FormatterOutputKey | undefined {
+    let executable = profile.command?.[0];
+    if (profile.kind === "awk" || profile.kind === "jq")
+        executable = filterFormatterCommand(profile)[0];
+
+    if (executable === undefined) return undefined;
+
+    return {
+        executable,
+        input: JSON.stringify([
+            profile,
+            input.language,
+            width ?? null,
+            input.firstLineOffset ?? 0,
+            input.code,
+        ]),
+    };
+}
+
 export function createCommandScriptFormatter(
     commands: ScriptFormatterCommands,
     reportWarning: ScriptFormatterWarningReporter = reportExtensionDiagnostic,
+    store?: FormatterOutputStore,
 ): ScriptBlockFormatter | undefined {
     if (commands.size === 0) {
         return undefined;
@@ -328,6 +358,17 @@ export function createCommandScriptFormatter(
 
     const cache = new Map<string, { readonly output: string; readonly bytes: number }>();
     let cacheBytes = 0;
+    const rejected = new Map<string, FormatAttempt>();
+    const rememberRejection = (key: string, attempt: FormatAttempt): void => {
+        rejected.delete(key);
+        rejected.set(key, attempt);
+
+        if (rejected.size <= MAX_FORMATTER_CACHE_ENTRIES) return;
+
+        const oldest = rejected.keys().next().value;
+        if (oldest !== undefined) rejected.delete(oldest);
+    };
+
     const reportedFailures = new Set<string>();
     const reportFailure = (language: string, reason: string): void => {
         if (reportedFailures.has(language)) return;
@@ -373,6 +414,7 @@ export function createCommandScriptFormatter(
         }
 
         const targetWidth = input.targetWidth ?? options.targetWidth;
+        const keyWidth = usesTargetWidth(command) ? targetWidth : undefined;
         const described = {
             profileKind: command.kind,
             ...(targetWidth !== undefined && { targetWidth }),
@@ -384,7 +426,7 @@ export function createCommandScriptFormatter(
         const cacheKey = createHash("sha256")
             .update(input.language)
             .update("\0")
-            .update(targetWidth === undefined ? "" : String(targetWidth))
+            .update(keyWidth === undefined ? "" : String(keyWidth))
             .update("\0")
             .update(String(input.firstLineOffset ?? 0))
             .update("\0")
@@ -392,6 +434,24 @@ export function createCommandScriptFormatter(
             .digest("hex");
         const cached = cache.get(cacheKey);
         if (cached !== undefined) return { output: cached.output, outcome: "cached", ...described };
+
+        const knownRejection = rejected.get(cacheKey);
+        if (knownRejection !== undefined) return knownRejection;
+
+        const storedKey = formatterOutputKey(command, input, keyWidth);
+        let stored: string | undefined;
+        if (store !== undefined && storedKey !== undefined) stored = await store.read(storedKey);
+
+        if (stored !== undefined) {
+            remember(cacheKey, stored);
+            return { output: stored, outcome: "cached", ...described };
+        }
+
+        const keep = (output: string): void => {
+            remember(cacheKey, output);
+
+            if (storedKey !== undefined) store?.write(storedKey, output);
+        };
 
         if (command.kind === "awk" || command.kind === "jq") {
             const [executable, ...baseArgs] = filterFormatterCommand(command);
@@ -430,7 +490,7 @@ export function createCommandScriptFormatter(
                 return { ...result.run, ...described, output: undefined, outcome: "cancelled" };
 
             if (result.kind === "formatted") {
-                remember(cacheKey, result.output);
+                keep(result.output);
                 return { ...result.run, ...described, output: result.output, outcome: "formatted" };
             }
 
@@ -479,6 +539,12 @@ export function createCommandScriptFormatter(
             return { output: completed.output, outcome: "cached", ...described };
         }
 
+        const completedRejection = rejected.get(cacheKey);
+        if (completedRejection !== undefined) {
+            release();
+            return completedRejection;
+        }
+
         let prepared: PreparedFormatterCommand;
         try {
             prepared = await prepareFormatterCommand(command, effectiveOptions, input.language);
@@ -522,12 +588,24 @@ export function createCommandScriptFormatter(
 
         const output = run.output;
         if (output === undefined) {
+            // A formatter that exits with an error status rejects this exact input.
+            if (run.outcome === "failed" && run.exitCode !== undefined && run.signal === undefined)
+                rememberRejection(cacheKey, { ...run, ...described });
+
             return { ...run, ...described };
         }
 
         let formatted = normalizeCode(output);
-        if (formatted.trim().length === 0)
-            return { ...run, ...described, output: undefined, outcome: "declined" };
+        if (formatted.trim().length === 0) {
+            const declined: FormatAttempt = {
+                ...run,
+                ...described,
+                output: undefined,
+                outcome: "declined",
+            };
+            rememberRejection(cacheKey, declined);
+            return declined;
+        }
 
         if (input.language === "python") {
             const compacted = await compactPythonStructuralBlankRows(formatted, {
@@ -553,7 +631,7 @@ export function createCommandScriptFormatter(
         if (effectiveOptions.signal?.aborted === true)
             return { ...run, ...described, output: undefined, outcome: "cancelled" };
 
-        remember(cacheKey, formatted);
+        keep(formatted);
 
         let outcome: ScriptFormatOutcome = "formatted";
         if (formatted === normalizeCode(input.code)) outcome = "unchanged";
@@ -578,9 +656,13 @@ export function createCommandScriptFormatter(
         if (options.signal?.aborted === true)
             return Promise.resolve({ output: undefined, outcome: "cancelled" });
 
+        const profile = profileFor(input.language);
+        let keyWidth = input.targetWidth ?? options.targetWidth;
+        if (profile !== undefined && !usesTargetWidth(profile)) keyWidth = undefined;
+
         const key = JSON.stringify([
             input.language,
-            input.targetWidth ?? options.targetWidth,
+            keyWidth,
             input.firstLineOffset ?? 0,
             input.code,
         ]);

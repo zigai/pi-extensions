@@ -723,16 +723,53 @@ describe("script preview events", () => {
         bash.clear();
     });
 
-    it("identifies the changed tool call when restoring formatted previews", async () => {
+    it("formats restored previews at their rendered width and identifies each changed call", async () => {
         const bash = createNativeBashFeature();
+        const theme = new Theme(TEST_THEME_COLORS, TEST_THEME_BACKGROUND_COLORS, "truecolor");
         const changed: string[] = [];
-        const formatter: ScriptBlockFormatter = async () => "print('reviewed')";
+        const widths: Array<number | undefined> = [];
+        const formatter: ScriptBlockFormatter = async (_input, options) => {
+            widths.push(options?.targetWidth);
+            return "print('reviewed')";
+        };
+
+        const calls = [
+            { toolCallId: "first", command: "python -c 'print(1)'" },
+            { toolCallId: "second", command: "python -c 'print(2)'" },
+        ];
+
+        const render = (call: (typeof calls)[number]) =>
+            bash
+                .renderBashCall(
+                    { command: call.command },
+                    theme,
+                    {
+                        args: { command: call.command },
+                        toolCallId: call.toolCallId,
+                        cwd: "/work",
+                        lastComponent: undefined,
+                        state: {},
+                        executionStarted: true,
+                        argsComplete: true,
+                        isPartial: false,
+                        expanded: true,
+                        showImages: false,
+                        isError: false,
+                        durationMs: undefined,
+                        outputPad: 1,
+                        keyText,
+                        keyHint,
+                        invalidate: () => {},
+                    },
+                    () => 8,
+                    () => false,
+                    () => "auto",
+                    () => "trailing",
+                )
+                .render(60);
         try {
             await bash.restore({
-                calls: [
-                    { toolCallId: "first", command: "python -c 'print(1)'" },
-                    { toolCallId: "second", command: "python -c 'print(2)'" },
-                ],
+                calls,
                 formatter,
                 signal: new AbortController().signal,
                 isCurrent: () => true,
@@ -740,7 +777,16 @@ describe("script preview events", () => {
                     changed.push(toolCallId);
                 },
             });
-            expect(changed).toEqual(["first", "second"]);
+
+            // Rendering resolves embedded programs first; a later render reports the width.
+            await vi.waitUntil(() => {
+                for (const call of calls) render(call);
+
+                return changed.length === 2;
+            });
+            expect(new Set(changed)).toEqual(new Set(["first", "second"]));
+            expect(widths).toHaveLength(2);
+            expect(widths.every((width) => width !== undefined)).toBe(true);
         } finally {
             bash.clear();
         }

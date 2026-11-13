@@ -204,6 +204,14 @@ export function getGlowupDiagnosticsDirectory(agentDir: string = getAgentDir()):
     return join(agentDir, GLOWUP_DIAGNOSTICS_DIRECTORY);
 }
 
+export function getGlowupSyntaxCacheDirectory(agentDir: string = getAgentDir()): string {
+    return join(agentDir, GLOWUP_DIAGNOSTICS_DIRECTORY, "syntax-cache");
+}
+
+export function getGlowupFormatterCacheDirectory(agentDir: string = getAgentDir()): string {
+    return join(agentDir, GLOWUP_DIAGNOSTICS_DIRECTORY, "formatter-cache");
+}
+
 export function readGlowupConfig(
     options: {
         readonly cwd?: string;

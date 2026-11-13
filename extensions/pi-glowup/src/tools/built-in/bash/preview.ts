@@ -1,4 +1,4 @@
-import { truncateToWidth, type Component } from "@earendil-works/pi-tui";
+import { type Component } from "@earendil-works/pi-tui";
 import { createSyntaxComponent } from "../../../rendering/syntax/component-owner.ts";
 import { createEmbeddedProgramService, type EmbeddedProgramLookup } from "./embedded-service.ts";
 import {
@@ -8,7 +8,7 @@ import {
 } from "./embedded-programs.ts";
 import type { ShellLayout, ShellOperatorPosition, ShellOutputStyle } from "./command.ts";
 import { type JsonValue } from "../../../json-value.ts";
-import { makeComponent } from "../../../rendering/component.ts";
+import { makeComponent, fitToWidth } from "../../../rendering/component.ts";
 import type { CodePreview } from "../../../rendering/streaming/presentation.ts";
 import { scriptInvocationFromPrograms, type ScriptInvocation } from "./invocation.ts";
 import { renderGlowupOutput, type GlowupOutputRenderOptions } from "../../../rendering/output.ts";
@@ -59,6 +59,7 @@ type ScriptPreviewSchedule = {
     readonly signal: AbortSignal | undefined;
     readonly targetWidth?: number;
     readonly completed?: boolean;
+    readonly awaitRenderWidth?: boolean;
     readonly isCurrent: () => boolean;
     readonly invalidate: () => void;
 };
@@ -290,11 +291,7 @@ function renderStreamingScriptCall(
                             displayedInvocation = {
                                 label: "Bash",
                                 language: "bash",
-                                code: truncateToWidth(
-                                    `${firstLine} …`,
-                                    Math.max(1, width - 2),
-                                    "…",
-                                ),
+                                code: fitToWidth(`${firstLine} …`, Math.max(1, width - 2), "…"),
                             };
                         }
                     }
@@ -649,6 +646,7 @@ export function createNativeBashFeature(
                         formatter,
                         signal: undefined,
                         completed: true,
+                        awaitRenderWidth: true,
                         isCurrent: () => true,
                         invalidate,
                     });
@@ -932,8 +930,10 @@ export function createNativeBashFeature(
     }
 
     function invalidatePreview(scheduled: ScheduledPreview): void {
-        bashRenderInvalidations.get(scheduled.options.toolCallId)?.();
-        scheduled.options.invalidate();
+        const rendered = bashRenderInvalidations.get(scheduled.options.toolCallId);
+        rendered?.();
+
+        if (scheduled.options.invalidate !== rendered) scheduled.options.invalidate();
     }
 
     function publishReady(scheduled: ScheduledPreview): void {
@@ -1271,7 +1271,8 @@ export function createNativeBashFeature(
             scheduledCommands.delete(oldest);
         }
 
-        requestFormatting(scheduled);
+        if (options.awaitRenderWidth !== true || scheduled.targetWidth !== undefined)
+            requestFormatting(scheduled);
 
         return true;
     }
@@ -1296,6 +1297,7 @@ export function createNativeBashFeature(
                 toolCallId: call.toolCallId,
                 command: call.command,
                 completed: true,
+                awaitRenderWidth: true,
                 formatter: options.formatter,
                 signal: options.signal,
                 isCurrent: options.isCurrent,

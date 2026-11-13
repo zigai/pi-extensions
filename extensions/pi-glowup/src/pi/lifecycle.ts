@@ -18,6 +18,7 @@ import {
     createDefaultGlowupConfig,
     getGlowupDiagnosticsDirectory,
     readGlowupConfig,
+    getGlowupFormatterCacheDirectory,
 } from "../config/load.ts";
 import { type GlowupConfig } from "../config/normalize.ts";
 import {
@@ -53,6 +54,7 @@ import {
     type ScriptBlockFormatter,
     type ScriptFormatterCommands,
 } from "../tools/built-in/bash/formatter.ts";
+import { createFormatterOutputStore } from "../tools/built-in/bash/formatter-store.ts";
 import { createNativeBashFeature } from "../tools/built-in/bash/preview.ts";
 import { createCodemodePreview } from "../tools/external/codemode.ts";
 import { createNativeDeleteFeature } from "../tools/built-in/delete.ts";
@@ -149,6 +151,7 @@ function scriptBlockFormatter(
     return createCommandScriptFormatter(
         scriptFormatterCommands(config, reportWarning),
         reportWarning,
+        createFormatterOutputStore(getGlowupFormatterCacheDirectory(), reportWarning),
     );
 }
 
