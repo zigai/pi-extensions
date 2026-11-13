@@ -492,6 +492,31 @@ describe("central syntax highlighting", () => {
         expect(rendered).toContain(`${TYPE_RGB_CODE}mCallable`);
     });
 
+    it("colors imported Python names where they are used", async () => {
+        const rendered = (
+            await highlightSyntaxCodeAsync(
+                [
+                    "import ast, json",
+                    "import os.path as osp",
+                    "from pathlib import Path",
+                    'tree = ast.parse(Path("a").read_text())',
+                    "data = json.loads(text)",
+                    "joined = osp.join(root)",
+                    "result = value.json(text)",
+                ].join("\n"),
+                "python",
+            )
+        ).join("\n");
+
+        expect(rendered).toContain(`${TYPE_RGB_CODE}mast`);
+        expect(rendered).toContain(`${FUNCTION_RGB_CODE}mparse`);
+        expect(rendered).toContain(`${TYPE_RGB_CODE}mjson`);
+        expect(rendered).toContain(`${FUNCTION_RGB_CODE}mloads`);
+        expect(rendered).toContain(`${TYPE_RGB_CODE}mosp`);
+        expect(rendered).toContain(`${TYPE_RGB_CODE}mPath`);
+        expect(rendered).toContain(`${FUNCTION_RGB_CODE}mvalue.json`);
+    });
+
     it("colors Python neutral identifiers as variables, constants, and calls", async () => {
         const rendered = (
             await highlightSyntaxCodeAsync(

@@ -37,9 +37,14 @@ export function colorBracketPairsInTokenRows(
     language?: string,
 ): ThemedToken[][] {
     const state: BracketState = { depth: 0 };
+    let imported: ReadonlySet<string> = new Set();
+    if (language === "python")
+        imported = pythonImportedNames(
+            rows.map((row) => row.map((token) => token.content).join("")),
+        );
 
     return rows.map((row) =>
-        colorPythonIdentifiersInTokens(row, language).flatMap((token) =>
+        colorPythonIdentifiersInTokens(row, language, imported).flatMap((token) =>
             splitBracketText(token.content, token.color, state).map((part) => {
                 const coloredToken = { ...token, content: part.text };
                 return part.color === undefined
@@ -70,6 +75,7 @@ export function enhanceSyntaxSegments<TSegment extends TextSegment>(
 function colorPythonIdentifiersInTokens(
     row: ReadonlyArray<ThemedToken>,
     language: string | undefined,
+    imported: ReadonlySet<string>,
 ): ThemedToken[] {
     if (language !== "python") {
         return [...row];
@@ -78,7 +84,7 @@ function colorPythonIdentifiersInTokens(
     const line = row.map((token) => token.content).join("");
 
     return row.flatMap((token) =>
-        splitPythonIdentifiers(token.content, token.color, line).map((part) => {
+        splitPythonIdentifiers(token.content, token.color, line, imported).map((part) => {
             const coloredToken = { ...token, content: part.text };
             return part.color === undefined ? coloredToken : { ...coloredToken, color: part.color };
         }),
@@ -96,7 +102,7 @@ function colorPythonIdentifiersInSegments<TSegment extends TextSegment>(
     const line = segments.map((segment) => segment.text).join("");
 
     return segments.flatMap((segment) =>
-        splitPythonIdentifiers(segment.text, segment.fg, line).map((part) => {
+        splitPythonIdentifiers(segment.text, segment.fg, line, new Set()).map((part) => {
             const coloredSegment = { ...segment, text: part.text };
             return part.color === undefined
                 ? coloredSegment
@@ -109,6 +115,7 @@ function splitPythonIdentifiers(
     text: string,
     foreground: string | undefined,
     line: string,
+    imported: ReadonlySet<string>,
 ): Array<{ readonly text: string; readonly color?: string }> {
     if (!isBracketColorableForeground(foreground)) {
         return [{ text }];
@@ -119,17 +126,30 @@ function splitPythonIdentifiers(
     let index = 0;
     for (const match of text.matchAll(/[A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)*/gu)) {
         const start = match.index;
-        const value = match[0];
+        let value = match[0];
 
         if (start > index) {
             parts.push({ text: text.slice(index, start) });
         }
 
+        const head = value.split(".", 1)[0] ?? value;
+        const attribute = start > 0 && text[start - 1] === ".";
+        if (!importLine && !attribute && imported.has(head)) {
+            parts.push({ text: head, color: PYTHON_IMPORT_IDENTIFIER_COLOR });
+            index = start + head.length;
+            if (value === head) continue;
+
+            parts.push({ text: "." });
+            index += 1;
+            value = value.slice(head.length + 1);
+        }
+
+        const end = start + match[0].length;
         parts.push({
             text: value,
-            color: pythonIdentifierColor(value, text.slice(start + value.length), importLine),
+            color: pythonIdentifierColor(value, text.slice(end), importLine),
         });
-        index = start + value.length;
+        index = end;
     }
 
     if (index < text.length) {
@@ -153,6 +173,34 @@ function pythonIdentifierColor(value: string, suffix: string, importLine: boolea
     }
 
     return PYTHON_VARIABLE_IDENTIFIER_COLOR;
+}
+
+function pythonImportedNames(lines: readonly string[]): ReadonlySet<string> {
+    const names = new Set<string>();
+    let continued = false;
+    for (const line of lines) {
+        let list: string | undefined;
+        if (continued) list = line;
+        else {
+            const plain = /^\s*import\s+(.+)$/u.exec(line);
+            const from = /^\s*from\s+\S+\s+import\s+(.+)$/u.exec(line);
+            list = plain?.[1] ?? from?.[1];
+        }
+
+        if (list === undefined) continue;
+
+        const code = list.replace(/#.*$/u, "");
+        continued = (continued || code.includes("(")) && !code.includes(")");
+        for (const item of code.replace(/[()\\]/gu, "").split(",")) {
+            const binding = /^\s*([A-Za-z_][\w.]*)(?:\s+as\s+([A-Za-z_]\w*))?\s*$/u.exec(item);
+            if (binding === null) continue;
+
+            names.add(binding[2] ?? binding[1]?.split(".", 1)[0] ?? "");
+        }
+    }
+
+    names.delete("");
+    return names;
 }
 
 function isPythonImportLine(text: string): boolean {
