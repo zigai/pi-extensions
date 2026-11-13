@@ -20,12 +20,15 @@ import {
 } from "../theme.ts";
 import { type TextRange, changedTextRanges, applyBackgroundToTextRanges } from "./intraline.ts";
 import {
-    wrapStyledText,
+    asciiStyledWidth,
+    fitPrefixedSegment,
+    wrapStyledSegments,
     makeComponent,
     toolExpandHint,
     wrapPrefixedLine,
     omittedLinesLabel,
     fitToWidth,
+    type StyledSegment,
 } from "../component.ts";
 import { visibleWidth, type Component } from "@earendil-works/pi-tui";
 import { expandTerminalTabs } from "../../text-boundaries.ts";
@@ -165,13 +168,17 @@ function isUnchangedReplacementSide(
     );
 }
 
-function wrapDiffText(text: string, width: number, maxWrappedRows: number | undefined): string[] {
+function wrapDiffText(
+    text: string,
+    width: number,
+    maxWrappedRows: number | undefined,
+): StyledSegment[] {
     if (maxWrappedRows === undefined) {
-        return wrapStyledText(text, width);
+        return wrapStyledSegments(text, width);
     }
 
     const boundedText = fitToWidth(text, Math.max(1, width * maxWrappedRows), "…");
-    return wrapStyledText(boundedText, width).slice(0, maxWrappedRows);
+    return wrapStyledSegments(boundedText, width).slice(0, maxWrappedRows);
 }
 
 type DiffRowRenderOptions = {
@@ -194,9 +201,11 @@ function renderDiffRow(
     const rowWidth = Math.max(1, width);
     const prefixWidth = visibleWidth(leftPrefix);
     const contentWidth = Math.max(1, rowWidth - prefixWidth);
+    const leftPrefixColumns = asciiStyledWidth(leftPrefix);
+
     if (!parsed) {
-        return wrapDiffText(muted(theme, line), contentWidth, options?.maxWrappedRows).map((row) =>
-            fitToWidth(`${leftPrefix}${row}`, rowWidth, ""),
+        return wrapDiffText(muted(theme, line), contentWidth, options?.maxWrappedRows).map(
+            (row) => fitPrefixedSegment(leftPrefix, leftPrefixColumns, row, rowWidth).text,
         );
     }
 
@@ -209,7 +218,7 @@ function renderDiffRow(
             muted(theme, parsed.content),
             contentWidth,
             options?.maxWrappedRows,
-        ).map((row) => fitToWidth(`${leftPrefix}${row}`, rowWidth, ""));
+        ).map((row) => fitPrefixedSegment(leftPrefix, leftPrefixColumns, row, rowWidth).text);
     }
 
     let sign = " ";
@@ -245,23 +254,35 @@ function renderDiffRow(
     if (parsed.content.length === 0) {
         const styledGutter = styleDiffGutter(parsed.kind, lineNumber, sign, theme);
         const row = fitToWidth(`${leftPrefix}${styledGutter}`, rowWidth, "");
-        return [paintDiffRowBackground(parsed.kind, row, rowWidth, theme)];
+        return [paintDiffRowBackground(parsed.kind, row, undefined, rowWidth, theme)];
     }
 
-    const wrappedContent = wrapDiffText(
-        expandTerminalTabs(styledContent, 4, 0).text,
-        availableWidth,
-        options?.maxWrappedRows,
-    );
+    // Tab expansion also measures the whole line, which only matters when it has tabs.
+    let expandedContent = styledContent;
+    if (styledContent.includes("\t"))
+        expandedContent = expandTerminalTabs(styledContent, 4, 0).text;
+
+    const wrappedContent = wrapDiffText(expandedContent, availableWidth, options?.maxWrappedRows);
 
     return wrappedContent.map((chunk, index) => {
         const styledGutter =
             index === 0
                 ? styleDiffGutter(parsed.kind, lineNumber, sign, theme)
                 : dim(theme, wrapPrefix);
-        const row = `${leftPrefix}${styledGutter}${chunk}`;
-        const bounded = fitToWidth(row, rowWidth, "");
-        return paintDiffRowBackground(parsed.kind, bounded, rowWidth, theme);
+        const gutterPrefix = `${leftPrefix}${styledGutter}`;
+        const bounded = fitPrefixedSegment(
+            gutterPrefix,
+            asciiStyledWidth(gutterPrefix),
+            chunk,
+            rowWidth,
+        );
+        return paintDiffRowBackground(
+            parsed.kind,
+            bounded.text,
+            bounded.asciiColumns,
+            rowWidth,
+            theme,
+        );
     });
 }
 
@@ -306,6 +327,7 @@ function diffSpanBackground(
 function paintDiffRowBackground(
     kind: "insert" | "delete" | "context",
     row: string,
+    rowColumns: number | undefined,
     rowWidth: number,
     theme: GlowupRenderTheme,
 ): string {
@@ -314,7 +336,7 @@ function paintDiffRowBackground(
         return row;
     }
 
-    const padding = " ".repeat(Math.max(0, rowWidth - visibleWidth(row)));
+    const padding = " ".repeat(Math.max(0, rowWidth - (rowColumns ?? visibleWidth(row))));
     const background = diffRowBackgroundAnsi(kind, theme);
     if (background === undefined) {
         return row;

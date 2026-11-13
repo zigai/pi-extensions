@@ -1,4 +1,5 @@
 import Type, { type Static } from "typebox";
+import { Compile } from "typebox/compile";
 import { Value } from "typebox/value";
 import {
     jsonObjectParser,
@@ -15,9 +16,8 @@ import { createProtocolRenderer, glowupRenderingAdapter } from "./protocol/rende
 import { textOutput } from "./built-in/arguments.ts";
 import type { ThirdPartyToolRenderer, ThirdPartyToolRenderingOptions } from "./types.ts";
 
-const definitionSchema = Type.Object(
-    { outputSchema: Type.Optional(jsonObjectSchema) },
-    { additionalProperties: true },
+const definitionValidator = Compile(
+    Type.Object({ outputSchema: Type.Optional(jsonObjectSchema) }, { additionalProperties: true }),
 );
 const resultSchema = Type.Object(
     { content: Type.Optional(Type.Unknown()), structuredContent: Type.Optional(Type.Unknown()) },
@@ -33,7 +33,7 @@ export const outputSchemaParser = {
 
         let outputSchema: JsonObject | undefined;
         try {
-            outputSchema = Value.Parse(definitionSchema, value).outputSchema;
+            outputSchema = definitionValidator.Parse(value).outputSchema;
         } catch {
             outputSchema = undefined;
         }

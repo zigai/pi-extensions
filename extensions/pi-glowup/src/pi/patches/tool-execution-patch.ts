@@ -12,6 +12,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
 import Type from "typebox";
+import { Compile } from "typebox/compile";
 import { Value } from "typebox/value";
 import { jsonValueParser } from "../../json-value.ts";
 import { outputSchemaParser } from "../../tools/schema-rendering.ts";
@@ -50,11 +51,15 @@ const THIRD_PARTY_RENDERER_PATCH_STATE_KEY = Symbol.for(
     "zigai.pi-glowup.third-party-renderer-state",
 );
 const MAX_THIRD_PARTY_RENDERERS = 100;
-const rowInvalidationSchema = Type.Object({ invalidate: Type.Function([], Type.Void()) });
-const deferredRowRefreshSchema = Type.Object({
-    args: Type.Unknown(),
-    updateArgs: Type.Function([Type.Unknown()], Type.Void()),
-});
+const rowInvalidationValidator = Compile(
+    Type.Object({ invalidate: Type.Function([], Type.Void()) }),
+);
+const deferredRowRefreshValidator = Compile(
+    Type.Object({
+        args: Type.Unknown(),
+        updateArgs: Type.Function([Type.Unknown()], Type.Void()),
+    }),
+);
 
 type RenderShellMode = NonNullable<PiRendererDefinition["renderShell"]>;
 type ThemeForeground = Parameters<Theme["fg"]>[0];
@@ -362,7 +367,7 @@ function clearCompletedRender(
 // Asynchronous renderer updates often arrive in bursts for one row. Pi rebuilds a row with
 // pending arguments once at its next render, so a burst costs one rebuild per frame.
 function refreshRowAtNextRender(row: ToolExecutionInstance, refresh: () => void): void {
-    if (Value.Check(deferredRowRefreshSchema, row)) {
+    if (deferredRowRefreshValidator.Check(row)) {
         row.updateArgs(row.args);
         return;
     }
@@ -876,7 +881,7 @@ export function configureBuiltInToolRendererPatch(
             if (!initializedRows.has(this)) {
                 initializedRows.add(this);
 
-                if (Value.Check(rowInvalidationSchema, this)) this.invalidate();
+                if (rowInvalidationValidator.Check(this)) this.invalidate();
             }
 
             return "self";

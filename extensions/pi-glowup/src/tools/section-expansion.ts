@@ -1,6 +1,6 @@
 import { MouseRegion, type Component } from "@earendil-works/pi-tui";
 import Type, { type Static } from "typebox";
-import { Value } from "typebox/value";
+import { Compile } from "typebox/compile";
 import { inheritSyntaxComponent } from "../rendering/syntax/component-owner.ts";
 
 const expansionSchema = Type.Object({
@@ -8,9 +8,12 @@ const expansionSchema = Type.Object({
     call: Type.Optional(Type.Boolean()),
     result: Type.Optional(Type.Boolean()),
 });
-const rendererStateSchema = Type.Object(
-    { glowupSectionExpansion: Type.Optional(expansionSchema) },
-    { additionalProperties: true },
+
+const rendererStateValidator = Compile(
+    Type.Object(
+        { glowupSectionExpansion: Type.Optional(expansionSchema) },
+        { additionalProperties: true },
+    ),
 );
 
 type SectionExpansion = Static<typeof expansionSchema>;
@@ -32,7 +35,7 @@ type SectionContext = {
 function expansionState(context: SectionContext): SectionExpansion | undefined {
     if (context.state === undefined) return undefined;
 
-    const state = Value.Parse(rendererStateSchema, context.state);
+    const state = rendererStateValidator.Parse(context.state);
     const current = state.glowupSectionExpansion;
     if (current !== undefined && current.global === context.expanded) return current;
 

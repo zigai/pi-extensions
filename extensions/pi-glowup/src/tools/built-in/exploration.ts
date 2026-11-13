@@ -1,7 +1,7 @@
 import { type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { stringParser } from "../../json-scalar.ts";
 import Type from "typebox";
-import { Value } from "typebox/value";
+import { Compile } from "typebox/compile";
 import { isJsonArray, jsonValueParser, type JsonValue } from "../../json-value.ts";
 import { canonicalBuiltInToolName } from "./names.ts";
 import { emptyComponent } from "../../rendering/component.ts";
@@ -28,16 +28,23 @@ import {
     type ExplorationSourcePosition,
 } from "./exploration-groups.ts";
 
-const assistantEntrySchema = Type.Object({
-    type: Type.Literal("message"),
-    message: Type.Object({ role: Type.Literal("assistant"), content: Type.Array(Type.Unknown()) }),
-});
+const assistantEntryValidator = Compile(
+    Type.Object({
+        type: Type.Literal("message"),
+        message: Type.Object({
+            role: Type.Literal("assistant"),
+            content: Type.Array(Type.Unknown()),
+        }),
+    }),
+);
 
-const toolCallSchema = Type.Object({
-    type: Type.Literal("toolCall"),
-    name: Type.Optional(Type.Unknown()),
-    id: Type.Optional(Type.Unknown()),
-});
+const toolCallValidator = Compile(
+    Type.Object({
+        type: Type.Literal("toolCall"),
+        name: Type.Optional(Type.Unknown()),
+        id: Type.Optional(Type.Unknown()),
+    }),
+);
 
 export function createExplorationFeature() {
     type ExplorationSessionEntry = ReturnType<
@@ -170,11 +177,11 @@ export function createExplorationFeature() {
 
     function restoreExplorationGroupStarts(entries: readonly unknown[]): void {
         for (const entry of entries) {
-            if (!Value.Check(assistantEntrySchema, entry)) continue;
+            if (!assistantEntryValidator.Check(entry)) continue;
 
             let previousWasExploration = false;
             for (const content of entry.message.content) {
-                if (!Value.Check(toolCallSchema, content)) continue;
+                if (!toolCallValidator.Check(content)) continue;
 
                 const toolName = stringParser.parse(content.name);
                 const toolCallId = stringParser.parse(content.id);

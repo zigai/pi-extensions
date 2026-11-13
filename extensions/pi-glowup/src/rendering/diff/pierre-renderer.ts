@@ -1,12 +1,13 @@
 import { RenderedLineCache, RenderedValueCache } from "../rendered-line-cache.ts";
 import { displayDiffPath } from "../path.ts";
-import { omittedLinesLabel, type ToolKeyHint, fitToWidth } from "../component.ts";
+import { asciiStyledWidth, omittedLinesLabel, type ToolKeyHint, fitToWidth } from "../component.ts";
 import { keyHint } from "@earendil-works/pi-coding-agent";
 import Type from "typebox";
-import { Value } from "typebox/value";
+import { Compile } from "typebox/compile";
 import {
     sliceByColumn,
     type Component,
+    truncateToWidth,
     visibleWidth,
     wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
@@ -59,7 +60,7 @@ const MAX_VIEWPORT_DIFF_RENDER_LINES = 5_000;
 const MAX_CACHED_DIFF_HIGHLIGHTS = 100;
 const DISABLE_INITIAL_DEFER_ENV = "PI_GLOWUP_DISABLE_INITIAL_SYNTAX_DEFER";
 const moduleLoadedAtMs = Date.now();
-const pierreDiffDetailsSchema = Type.Object({ pierreDiff: Type.Unknown() });
+const pierreDiffDetailsValidator = Compile(Type.Object({ pierreDiff: Type.Unknown() }));
 
 type HighlightState =
     | { readonly status: "idle" }
@@ -542,7 +543,7 @@ export function getPierreDiffPayloadFromDetails(
     limits?: DiffRenderLimits,
 ): PierreDiffPayload | undefined {
     try {
-        const parsedDetails = Value.Parse(pierreDiffDetailsSchema, details);
+        const parsedDetails = pierreDiffDetailsValidator.Parse(details);
         return normalizePierreDiffPayload(parsedDetails.pierreDiff, limits);
     } catch {
         return undefined;
@@ -710,7 +711,7 @@ class PierreDiffComponent implements Component {
         ) {
             return this.cacheRenderedLines(
                 safeWidth,
-                lines.map((line) => fitToWidth(neutralizeTerminalControls(line), safeWidth, "")),
+                lines.map((line) => fitNeutralizedLine(line, safeWidth)),
             );
         }
 
@@ -731,7 +732,7 @@ class PierreDiffComponent implements Component {
                     safeWidth,
                     baseStyle({ fg: this.palette.metadataFg, bg: this.palette.metadataBg }),
                 ),
-            ].map((line) => fitToWidth(neutralizeTerminalControls(line), safeWidth, "")),
+            ].map((line) => fitNeutralizedLine(line, safeWidth)),
         );
     }
 
@@ -1167,7 +1168,8 @@ function renderUnifiedRow(
         ? changedPreviewSpans(row.spans, contentWidth, row.focusColumn)
         : row.spans;
     const content = renderContent(spans, baseStyle({ fg: row.rowFg, bg: row.rowBg }));
-    if (visibleWidth(content) === 0) {
+    const contentColumns = asciiStyledWidth(content);
+    if (contentColumns === 0 || (contentColumns === undefined && visibleWidth(content) === 0)) {
         const prefix = renderUnifiedDiffPrefix(
             firstPrefix,
             lineNumberWidth,
@@ -1183,7 +1185,19 @@ function renderUnifiedRow(
         return [padRenderedLine(prefix, width, rowStyle)];
     }
 
-    const wrapped = wrapTextWithAnsi(content, contentWidth);
+    const rowStyle = baseStyle({ fg: row.rowFg, bg: row.rowBg });
+    if (contentColumns !== undefined && contentColumns <= contentWidth) {
+        const prefix = renderUnifiedDiffPrefix(
+            firstPrefix,
+            lineNumberWidth,
+            row.rowFg,
+            row.lineNumberFg,
+            row.rowBg,
+        );
+        return [padStyledRow(prefix, content, contentColumns, width, rowStyle)];
+    }
+
+    const wrapped = wrapStyledRow(content, contentWidth);
     const segments = wrapped.length > 0 ? wrapped : [""];
 
     return segments.map((segment, index) => {
@@ -1202,11 +1216,7 @@ function renderUnifiedRow(
                       baseStyle({ fg: row.lineNumberFg, bg: row.rowBg }),
                   );
 
-        return padRenderedLine(
-            `${currentPrefixAnsi}${segment}`,
-            width,
-            baseStyle({ fg: row.rowFg, bg: row.rowBg }),
-        );
+        return padRenderedLine(`${currentPrefixAnsi}${segment}`, width, rowStyle);
     });
 }
 
@@ -1294,7 +1304,8 @@ function renderSplitCell(
         ? changedPreviewSpans(cell.spans, contentWidth, fallbackFocus)
         : cell.spans;
     const content = renderContent(spans, baseStyle({ fg: cell.rowFg, bg: cell.rowBg }));
-    if (visibleWidth(content) === 0) {
+    const contentColumns = asciiStyledWidth(content);
+    if (contentColumns === 0 || (contentColumns === undefined && visibleWidth(content) === 0)) {
         const prefix = renderSplitDiffPrefix(
             firstPrefix,
             lineNumberWidth,
@@ -1306,7 +1317,19 @@ function renderSplitCell(
         return [padRenderedLine(prefix, width, rowStyle)];
     }
 
-    const wrapped = wrapTextWithAnsi(content, contentWidth);
+    const rowStyle = baseStyle({ fg: cell.rowFg, bg: cell.rowBg });
+    if (contentColumns !== undefined && contentColumns <= contentWidth) {
+        const prefix = renderSplitDiffPrefix(
+            firstPrefix,
+            lineNumberWidth,
+            cell.rowFg,
+            cell.lineNumberFg,
+            cell.rowBg,
+        );
+        return [padStyledRow(prefix, content, contentColumns, width, rowStyle)];
+    }
+
+    const wrapped = wrapStyledRow(content, contentWidth);
     const segments = wrapped.length > 0 ? wrapped : [""];
 
     return segments.map((segment, index) => {
@@ -1318,11 +1341,7 @@ function renderSplitCell(
             cell.lineNumberFg,
             cell.rowBg,
         );
-        return padRenderedLine(
-            `${currentPrefixAnsi}${segment}`,
-            width,
-            baseStyle({ fg: cell.rowFg, bg: cell.rowBg }),
-        );
+        return padRenderedLine(`${currentPrefixAnsi}${segment}`, width, rowStyle);
     });
 }
 
@@ -1460,14 +1479,57 @@ function renderFullWidthLine(
     base: AnsiStyle,
 ): string {
     const rendered = renderSegments(segments, base);
-    return padRenderedLine(fitToWidth(rendered, width, ""), width, base);
+
+    // Padding fits the line to the same width again, so only widths below one need this pass.
+    if (width < 1) return padRenderedLine(fitToWidth(rendered, width, ""), width, base);
+
+    return padRenderedLine(rendered, width, base);
 }
 
 function padRenderedLine(line: string, width: number, base: AnsiStyle): string {
     const targetWidth = Math.max(1, width);
-    const truncated = fitToWidth(line, targetWidth, "");
-    const padding = Math.max(0, targetWidth - visibleWidth(truncated));
+    let truncated = line;
+    let lineWidth = visibleWidth(line);
+    if (lineWidth > targetWidth) {
+        truncated = truncateToWidth(line, targetWidth, "");
+        lineWidth = visibleWidth(truncated);
+    }
+
+    const padding = Math.max(0, targetWidth - lineWidth);
     return `${truncated}${openAnsi(base)}${" ".repeat(padding)}${DIFF_STYLE_RESET}`;
+}
+
+// Pads a prefix and fitting content without measuring them again; printable ASCII and SGR
+// widths add exactly.
+function padStyledRow(
+    prefix: string,
+    content: string,
+    contentColumns: number,
+    width: number,
+    base: AnsiStyle,
+): string {
+    const prefixColumns = asciiStyledWidth(prefix);
+    const targetWidth = Math.max(1, width);
+    if (prefixColumns === undefined || prefixColumns + contentColumns > targetWidth)
+        return padRenderedLine(`${prefix}${content}`, width, base);
+
+    const padding = targetWidth - prefixColumns - contentColumns;
+    return `${prefix}${content}${openAnsi(base)}${" ".repeat(padding)}${DIFF_STYLE_RESET}`;
+}
+
+// wrapTextWithAnsi returns one fitting line unchanged after scanning all of its styles.
+function wrapStyledRow(content: string, width: number): string[] {
+    if (!content.includes("\n") && !content.includes("\r") && visibleWidth(content) <= width)
+        return [content];
+
+    return wrapTextWithAnsi(content, width);
+}
+
+function fitNeutralizedLine(line: string, width: number): string {
+    const columns = asciiStyledWidth(line);
+    if (columns !== undefined && columns <= width) return line;
+
+    return fitToWidth(neutralizeTerminalControls(line), width, "");
 }
 
 function renderSegments(segments: ReadonlyArray<RenderSegment>, base: AnsiStyle): string {
@@ -1496,8 +1558,6 @@ function openAnsi(style: AnsiStyle): string {
 }
 
 function ansiTransition(previous: AnsiStyle | undefined, next: AnsiStyle): string {
-    const fg = toRgb(next.fg);
-    const bg = toRgb(next.bg);
     const transitions: string[] = [];
     if (previous === undefined || previous.bold !== next.bold || previous.dim !== next.dim) {
         // Bold and dim share the SGR 22 reset; enabling one does not clear the other.
@@ -1508,26 +1568,38 @@ function ansiTransition(previous: AnsiStyle | undefined, next: AnsiStyle): strin
     }
 
     if (previous === undefined || previous.fg !== next.fg) {
-        transitions.push(
-            isAnsiStyle(next.fg)
-                ? (next.fg ?? "")
-                : fg === undefined
-                  ? ansiStyles.color.close
-                  : ansiStyles.color.ansi16m(fg.red, fg.green, fg.blue),
-        );
+        transitions.push(colorSequence(next.fg, foregroundSequences, ansiStyles.color));
     }
 
     if (previous === undefined || previous.bg !== next.bg) {
-        transitions.push(
-            isAnsiStyle(next.bg)
-                ? (next.bg ?? "")
-                : bg === undefined
-                  ? ansiStyles.bgColor.close
-                  : ansiStyles.bgColor.ansi16m(bg.red, bg.green, bg.blue),
-        );
+        transitions.push(colorSequence(next.bg, backgroundSequences, ansiStyles.bgColor));
     }
 
     return transitions.join("");
+}
+
+const foregroundSequences = new Map<string, string>();
+const backgroundSequences = new Map<string, string>();
+
+function colorSequence(
+    color: string | undefined,
+    sequences: Map<string, string>,
+    styles: typeof ansiStyles.color | typeof ansiStyles.bgColor,
+): string {
+    if (color === undefined) return styles.close;
+
+    let sequence = sequences.get(color);
+    if (sequence !== undefined) return sequence;
+
+    const rgb = toRgb(color);
+
+    sequence = styles.close;
+    if (isAnsiStyle(color)) sequence = color;
+    else if (rgb !== undefined) sequence = styles.ansi16m(rgb.red, rgb.green, rgb.blue);
+
+    sequences.set(color, sequence);
+
+    return sequence;
 }
 
 function isAnsiStyle(value: string | undefined): boolean {

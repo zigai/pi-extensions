@@ -1,5 +1,5 @@
 import Type, { type Static } from "typebox";
-import { Value } from "typebox/value";
+import { Compile } from "typebox/compile";
 import {
     getFiletypeFromFileName,
     parsePatchFiles,
@@ -116,6 +116,9 @@ const restoredPayloadSchema = Type.Object({
     ),
     metadata: Type.Optional(fileDiffMetadataSchema),
 });
+
+// Pierre diff details are checked on every render of a mutation row.
+const restoredPayloadValidator = Compile(restoredPayloadSchema);
 
 type RestoredPayload = Static<typeof restoredPayloadSchema>;
 type RestoredSummary = NonNullable<RestoredPayload["summary"]>;
@@ -263,7 +266,7 @@ export function normalizePierreDiffPayload(
 
 function parseRestoredPayload(payload: unknown): RestoredPayload | undefined {
     try {
-        return Value.Parse(restoredPayloadSchema, payload);
+        return restoredPayloadValidator.Parse(payload);
     } catch {
         return undefined;
     }

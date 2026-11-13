@@ -5,7 +5,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { warnPiInternalPatchUnavailable } from "@zigai/pi-extension-internals";
 import Type, { type Static } from "typebox";
-import { Value } from "typebox/value";
+import { Compile } from "typebox/compile";
 import type { ToolExecutionInstance } from "../tools/built-in/context.ts";
 import {
     createExplorationFeature,
@@ -25,6 +25,8 @@ const rowSchema = Type.Object(
     { additionalProperties: true },
 );
 
+const rowValidator = Compile(rowSchema);
+
 type RenderedRow = Static<typeof rowSchema>;
 
 const rows = new Set<WeakRef<RenderedRow>>();
@@ -33,7 +35,7 @@ let observedRows = new WeakSet();
 export function observeToolRow(row: ToolExecutionInstance | ToolExecutionComponent): void {
     if (observedRows.has(row)) return;
 
-    if (!Value.Check(rowSchema, row)) {
+    if (!rowValidator.Check(row)) {
         warnPiInternalPatchUnavailable("pi-glowup", "tool row invalidation");
         return;
     }
