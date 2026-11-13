@@ -1,3 +1,7 @@
+import { Type } from "typebox";
+
+import { compileSchema } from "../../schema-parsing.ts";
+
 export type WebRunSource = {
     readonly title?: string | undefined;
     readonly url?: string | undefined;
@@ -196,4 +200,78 @@ function readableExcerpt(
     flush();
 
     return { paragraphs, omitted };
+}
+
+/** A result section produced by a click, or by an open that addressed an earlier page. */
+export type WebRunReferenceSection = {
+    readonly command: "click" | "open";
+    readonly refId: string;
+    readonly linkId?: number | undefined;
+    readonly url?: string | undefined;
+    readonly error?: string | undefined;
+};
+
+const ReferenceSourceSchema = compileSchema(
+    Type.Object({ ref_id: Type.String(), id: Type.Optional(Type.Number()) }),
+);
+
+const REFERENCE_SOURCE = /Source: (click|open)\((\{[^}]*\})\)/u;
+const FAILED_FETCH = /Failed to fetch (https?:\/\/\S+?):? (.+)/u;
+const INACCESSIBLE_URL = /URL (https?:\/\/\S+) is (not accessible via this tool)/u;
+
+/** Codex names each section's command in a Source line; the header or failure line names the page. */
+export function parseWebRunReferenceSections(rawOutput: string): WebRunReferenceSection[] {
+    return rawOutput.split(/-{20,}/u).flatMap((section): WebRunReferenceSection[] => {
+        const source = REFERENCE_SOURCE.exec(section);
+        if (source === null) return [];
+
+        const command = source[1] === "click" ? "click" : "open";
+        const call = parseSourceArguments(source[2] ?? "");
+        if (call === undefined) return [];
+
+        // Only failed sections start with this header; a fetched page may quote failure text.
+        if (/^\s*Internal Error \(\)/u.test(section)) {
+            const failure = FAILED_FETCH.exec(section) ?? INACCESSIBLE_URL.exec(section);
+
+            return [
+                failure === null
+                    ? { command, ...call, error: "request failed" }
+                    : { command, ...call, url: failure[1], error: failureReason(failure[2] ?? "") },
+            ];
+        }
+
+        // Titles can wrap, so the page URL closes a header line before the Source line.
+        const header = section.slice(0, source.index);
+        const url =
+            /\((https?:\/\/\S+)\)\s*$/mu.exec(header)?.[1] ??
+            /\((https?:\/\/[^\s)]+)/u.exec(header)?.[1];
+        return [{ command, ...call, url }];
+    });
+}
+
+function parseSourceArguments(
+    value: string,
+): { readonly refId: string; readonly linkId?: number } | undefined {
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(value);
+    } catch {
+        return undefined;
+    }
+
+    const source = ReferenceSourceSchema.decode(parsed);
+    if (source === undefined) return undefined;
+
+    return source.id === undefined
+        ? { refId: source.ref_id }
+        : { refId: source.ref_id, linkId: source.id };
+}
+
+function failureReason(value: string): string {
+    const reason = value
+        .replace(/^Failed to fetch /u, "")
+        .replace(/\s*\(non-retryable error\)\s*$/u, "")
+        .replace(/^\((\d{3})\)\s*/u, "$1 ")
+        .trim();
+    return reason === "" ? "request failed" : reason;
 }

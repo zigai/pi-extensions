@@ -35,8 +35,9 @@ import { parseWebRunSources } from "./output.ts";
 import { parseGlowupWireArgs } from "../../glowup/wire.ts";
 import {
     WEB_RUN_LABELS,
-    webRunActions,
+    webRunCallActions,
     webRunLabels,
+    webRunReferenceRows,
     webRunResultLines,
     type WebRunPhase,
 } from "./rendering.ts";
@@ -217,7 +218,10 @@ export function createWebRunTool(options: WebRunOptions): ToolDefinition<
                 : context.executionStarted
                   ? "running"
                   : "pending";
-            const actions = webRunActions(parseGlowupWireArgs(args) ?? {});
+            const resultSucceeded = !context.isPartial && !context.isError;
+            const actions = webRunCallActions(parseGlowupWireArgs(args) ?? {}, resultSucceeded);
+            if (actions.length === 0 && resultSucceeded) return new Text("", 0, 0);
+
             const lines =
                 actions.length === 0
                     ? [
@@ -252,7 +256,20 @@ export function createWebRunTool(options: WebRunOptions): ToolDefinition<
             if (context.isError)
                 return new Text(theme.fg("error", rawOutput || "Web request failed."), 0, 0);
 
-            if (!expanded) return new Text("", 0, 0);
+            const references = webRunReferenceRows(
+                parseGlowupWireArgs(context.args) ?? {},
+                rawOutput,
+            ).map(
+                (row) =>
+                    theme.fg(
+                        row.error === undefined ? "toolTitle" : "error",
+                        theme.bold(row.label),
+                    ) +
+                    " " +
+                    theme.fg(row.isUrl ? "mdLinkUrl" : "accent", row.target) +
+                    (row.error === undefined ? "" : theme.fg("muted", ` (${row.error})`)),
+            );
+            if (!expanded) return new Text(references.join("\n"), 0, 0);
 
             const lines = webRunResultLines(rawOutput).map((line) => {
                 if (line.kind === "title") return theme.bold(theme.fg("toolOutput", line.text));
@@ -261,7 +278,7 @@ export function createWebRunTool(options: WebRunOptions): ToolDefinition<
                 return theme.fg("toolOutput", line.text);
             });
 
-            return new Text(lines.join("\n"), 0, 0);
+            return new Text([...references, ...lines].join("\n"), 0, 0);
         },
         async execute(toolCallId, params, signal, _onUpdate, ctx) {
             const tokenizer = options.tokenizer ?? new CodexTokenizer();

@@ -7,12 +7,26 @@ import {
     parseGlowupWireRecord,
     type GlowupWireRecord,
 } from "../../glowup/wire.ts";
-import { parseWebRunSources, WEB_RUN_OMISSION } from "./output.ts";
+import {
+    parseWebRunReferenceSections,
+    parseWebRunSources,
+    WEB_RUN_OMISSION,
+    type WebRunReferenceSection,
+} from "./output.ts";
+
+type WebRunReference = {
+    readonly command: "click" | "open";
+    readonly refId: string;
+    readonly linkId?: number | undefined;
+};
 
 type WebRunAction = {
     readonly labels: Required<GlowupCallLabels>;
     readonly target: string;
     readonly isUrl: boolean;
+
+    /** Set when the action addresses a page by reference, so only its result names the page. */
+    readonly reference?: WebRunReference | undefined;
 };
 
 export type WebRunPhase = "pending" | "running" | "complete";
@@ -21,6 +35,7 @@ type ActionSpec = {
     readonly key: string;
     readonly labels: Required<GlowupCallLabels>;
     readonly target: (record: GlowupWireRecord) => string | undefined;
+    readonly reference?: (record: GlowupWireRecord) => WebRunReference | undefined;
 };
 
 function compact(value: string | undefined): string | undefined {
@@ -30,6 +45,10 @@ function compact(value: string | undefined): string | undefined {
 
 function field(record: GlowupWireRecord, key: string): string | undefined {
     return compact(glowupWireString(record, key));
+}
+
+function isTurnReference(value: string): boolean {
+    return /^turn\d+[a-z]+\d+$/u.test(value);
 }
 
 function quoted(value: string | undefined): string | undefined {
@@ -65,20 +84,38 @@ const ACTIONS: readonly ActionSpec[] = [
             completed: "Opened",
             failed: "Failed to open",
         },
-        target: (record) => field(record, "ref_id"),
+        target(record) {
+            const ref = field(record, "ref_id");
+            return ref !== undefined && isTurnReference(ref) ? "an earlier page" : ref;
+        },
+        reference(record) {
+            const ref = field(record, "ref_id");
+            return ref !== undefined && isTurnReference(ref)
+                ? { command: "open", refId: ref }
+                : undefined;
+        },
     },
     {
         key: "click",
         labels: {
-            static: "Click",
-            running: "Clicking",
-            completed: "Clicked",
-            failed: "Failed to click",
+            static: "Follow",
+            running: "Following",
+            completed: "Followed",
+            failed: "Failed to follow",
         },
         target(record) {
             const ref = field(record, "ref_id");
             const id = glowupWireNumber(record, "id");
-            return ref === undefined || id === undefined ? undefined : `${ref}#${id}`;
+            if (ref === undefined || id === undefined) return undefined;
+
+            return `link ${id} on ${isTurnReference(ref) ? "an earlier page" : ref}`;
+        },
+        reference(record) {
+            const ref = field(record, "ref_id");
+            const id = glowupWireNumber(record, "id");
+            return ref === undefined || id === undefined
+                ? undefined
+                : { command: "click", refId: ref, linkId: id };
         },
     },
     {
@@ -162,26 +199,96 @@ export const WEB_RUN_LABELS: Required<GlowupCallLabels> = {
 };
 
 /** Only actionable inputs: filters, output lengths, and result statistics stay out of the call. */
-export function webRunActions(args: GlowupWireRecord): WebRunAction[] {
+function webRunActions(args: GlowupWireRecord): WebRunAction[] {
     return ACTIONS.flatMap((action) =>
         (glowupWireArray(args, action.key) ?? []).flatMap((value) => {
             const record = parseGlowupWireRecord(value);
             const target = record === undefined ? undefined : action.target(record);
+            if (record === undefined || target === undefined) return [];
 
-            return target === undefined
-                ? []
-                : [
-                      {
-                          labels: action.labels,
-                          target,
-                          isUrl:
-                              action.key !== "search_query" &&
-                              action.key !== "image_query" &&
-                              /https?:\/\//u.test(target),
-                      },
-                  ];
+            return [
+                {
+                    labels: action.labels,
+                    target,
+                    isUrl:
+                        action.key !== "search_query" &&
+                        action.key !== "image_query" &&
+                        /https?:\/\//u.test(target),
+                    reference: action.reference?.(record),
+                },
+            ];
         }),
     );
+}
+
+/** Rows for the call itself; a successful result renders the referenced pages instead. */
+export function webRunCallActions(
+    args: GlowupWireRecord,
+    resultSucceeded: boolean,
+): WebRunAction[] {
+    const actions = webRunActions(args);
+
+    return resultSucceeded ? actions.filter((action) => action.reference === undefined) : actions;
+}
+
+export type WebRunReferenceRow = {
+    readonly label: string;
+    readonly target: string;
+    readonly isUrl: boolean;
+    readonly error?: string | undefined;
+};
+
+const REFERENCE_RESULT_LABELS = {
+    click: { completed: "Followed link to", failed: "Failed to follow link to" },
+    open: { completed: "Opened", failed: "Failed to open" },
+} as const;
+
+/** One row per referenced page, in call order; actions without a matching section keep their call row. */
+export function webRunReferenceRows(
+    args: GlowupWireRecord,
+    rawOutput: string,
+): WebRunReferenceRow[] {
+    const sections = parseWebRunReferenceSections(rawOutput);
+    const used = new Set<WebRunReferenceSection>();
+
+    return webRunActions(args).flatMap((action) => {
+        const reference = action.reference;
+        if (reference === undefined) return [];
+
+        const section = sections.find(
+            (candidate) =>
+                !used.has(candidate) &&
+                candidate.command === reference.command &&
+                candidate.refId === reference.refId &&
+                candidate.linkId === reference.linkId,
+        );
+        if (section !== undefined) used.add(section);
+
+        const labels = REFERENCE_RESULT_LABELS[reference.command];
+
+        if (section?.url === undefined) {
+            return [
+                {
+                    label:
+                        section?.error === undefined
+                            ? action.labels.completed
+                            : action.labels.failed,
+                    target: action.target,
+                    isUrl: action.isUrl,
+                    error: section?.error,
+                },
+            ];
+        }
+
+        return [
+            {
+                label: section.error === undefined ? labels.completed : labels.failed,
+                target: section.url,
+                isUrl: true,
+                error: section.error,
+            },
+        ];
+    });
 }
 
 type WebRunResultLine = {

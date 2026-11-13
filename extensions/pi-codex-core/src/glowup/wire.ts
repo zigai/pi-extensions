@@ -55,6 +55,7 @@ export type GlowupWireCallContext = {
     readonly expanded: boolean;
     readonly showImages: boolean;
     readonly isError: boolean;
+    readonly hasResult?: boolean;
 };
 
 export type GlowupWireResultContext<Args = unknown> = GlowupWireCallContext & {

@@ -8,10 +8,18 @@ import {
     type GlowupWireRecord,
     type GlowupWireToolResult,
 } from "../../glowup/wire.ts";
-import { WEB_RUN_LABELS, webRunActions, webRunLabels, webRunResultLines } from "./rendering.ts";
+import {
+    WEB_RUN_LABELS,
+    webRunCallActions,
+    webRunLabels,
+    webRunReferenceRows,
+    webRunResultLines,
+    type WebRunReferenceRow,
+} from "./rendering.ts";
 
 function renderWebRunCall(args: GlowupWireRecord, context: GlowupWireCallContext) {
-    const actions = webRunActions(args).map((action) =>
+    const resultSucceeded = context.hasResult === true && !context.isError;
+    const actions = webRunCallActions(args, resultSucceeded).map((action) =>
         call(webRunLabels(action.labels, context.phase, context.isError), {
             body: text({
                 kind: "text",
@@ -20,11 +28,29 @@ function renderWebRunCall(args: GlowupWireRecord, context: GlowupWireCallContext
             }),
         }),
     );
+    if (actions.length === 0 && resultSucceeded) return empty();
     if (actions.length === 0)
         return call(webRunLabels(WEB_RUN_LABELS, context.phase, context.isError));
 
     const first = actions[0];
     return actions.length === 1 && first !== undefined ? first : stack(actions);
+}
+
+function renderReferenceRow(row: WebRunReferenceRow) {
+    const target = { kind: "text", text: row.target, tone: row.isUrl ? "url" : "accent" } as const;
+
+    return call(
+        { static: row.label },
+        {
+            state: row.error === undefined ? "success" : "error",
+            body:
+                row.error === undefined
+                    ? text(target)
+                    : text(`${row.target} (${row.error})`, {
+                          parts: [target, { kind: "text", text: ` (${row.error})`, tone: "muted" }],
+                      }),
+        },
+    );
 }
 
 export const webRunGlowupRendering = {
@@ -36,11 +62,15 @@ export const webRunGlowupRendering = {
         // Let Glowup's error fallback retain the failure text, even when collapsed.
         if (context.isError) return undefined;
 
-        // Undefined means fallback, not hidden: successful collapsed results are explicitly empty.
-        if (!context.expanded) return empty();
+        const rawOutput = glowupWireTextOutput(result) ?? "";
+        const references = webRunReferenceRows(context.args, rawOutput).map(renderReferenceRow);
 
-        return stack(
-            webRunResultLines(glowupWireTextOutput(result) ?? "").map((line) =>
+        // Undefined means fallback, not hidden: successful collapsed results are explicitly empty.
+        if (!context.expanded) return references.length === 0 ? empty() : stack(references);
+
+        return stack([
+            ...references,
+            ...webRunResultLines(rawOutput).map((line) =>
                 text({
                     kind: "text",
                     text: line.text,
@@ -53,6 +83,6 @@ export const webRunGlowupRendering = {
                               : "default",
                 }),
             ),
-        );
+        ]);
     },
 } satisfies GlowupRenderer<GlowupWireRecord, GlowupWireToolResult>;

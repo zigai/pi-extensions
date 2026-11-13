@@ -229,7 +229,7 @@ test("web_run renders one semantic action line per request without result or opt
             '• Searched the web for "second query"',
             '• Searched the web for "third query"',
             "• Opened https://example.org/docs?version=2",
-            "• Clicked turn0view0#12",
+            "• Followed link 12 on an earlier page",
             '• Searched for "render result" in turn0view0',
         ].join("\n"),
     );
@@ -240,7 +240,7 @@ test("web_run renders one semantic action line per request without result or opt
                 content: [{ type: "text", text: "Source content that stays hidden" }],
                 details: { sourceCount: 20 },
             }),
-            { ...completeContext, args },
+            { ...completeContext, args: parseArgs(renderer, { search_query: [{ q: "docs" }] }) },
         ),
         { kind: "empty" },
     );
@@ -274,7 +274,7 @@ test("web_run highlights search queries with Pi accent while keeping URLs blue",
             { kind: "text", text: { kind: "text", text: "https://example.org/docs", tone: "url" } },
             {
                 kind: "text",
-                text: { kind: "text", text: "https://example.org/docs#3", tone: "url" },
+                text: { kind: "text", text: "link 3 on https://example.org/docs", tone: "url" },
             },
             {
                 kind: "text",
@@ -325,10 +325,10 @@ test("web_run keeps operation-specific lifecycle labels even in static label mod
         [{ open: [{ ref_id: "source-1" }] }, "Open", "Opening", "Opened", "Failed to open"],
         [
             { click: [{ ref_id: "source-1", id: 2 }] },
-            "Click",
-            "Clicking",
-            "Clicked",
-            "Failed to click",
+            "Follow",
+            "Following",
+            "Followed",
+            "Failed to follow",
         ],
         [
             { find: [{ ref_id: "source-1", pattern: "Renderer" }] },
@@ -548,6 +548,158 @@ test("web_run handles streaming arguments, partial results, empty output, and er
     assert.equal(
         renderer.renderResult(partial, { ...completeContext, args, expanded: true, isError: true }),
         undefined,
+    );
+});
+
+const REFERENCE_ARGS = {
+    search_query: [{ q: "plugins" }],
+    open: [{ ref_id: "https://example.org/start" }, { ref_id: "turn0view0", lineno: 40 }],
+    click: [
+        { ref_id: "turn0view0", id: 5 },
+        { ref_id: "turn0view0", id: 6 },
+        { ref_id: "turn0view0", id: 7 },
+        { ref_id: "turn0view0", id: 8 },
+        { ref_id: "turn0view0", id: 9 },
+        { ref_id: "turn0view0", id: 10 },
+    ],
+};
+
+// Sections arrive in Codex's order, not the argument order, and titles may wrap.
+const REFERENCE_OUTPUT = [
+    "Plugins A (https://example.org/a)\n【turn1view3】 [wordlim: 200] Content type: text/html; " +
+        'Source: click({"ref_id":"turn0view0","id":5}); Total lines: 3\nL0: This page lists every available search plugin.',
+    "Internal Error ()\n【turn1view4】 [wordlim: 200] " +
+        'Source: click({"ref_id":"turn0view0","id":6}); \nFailed to fetch https://example.org/b: (403) Forbidden',
+    "Internal Error ()\n【turn1view5】 [wordlim: 200] " +
+        'Source: click({"ref_id":"turn0view0","id":7}); Total lines: 1\n' +
+        "L0: URL https://example.org/c is not accessible via this tool.",
+    "Start (https://example.org/start)\n【turn1view0】 [wordlim: 200] " +
+        'Source: open({"ref_id":"https://example.org/start","lineno":null}); Total lines: 1\nL0: Start',
+    "Earlier page with a\n long title (https://example.org/earlier)\n【turn1view1】 [wordlim: 200] " +
+        'Source: open({"ref_id":"turn0view0","lineno":40}); Total lines: 9\nL40: Middle',
+    "Internal Error ()\n【turn1view6】 [wordlim: 200] " +
+        'Source: click({"ref_id":"turn0view0","id":8}); Total lines: 0',
+    "Widget (software) (https://example.org/wiki/Widget_(software))\n【turn1view7】 [wordlim: 200] " +
+        'Source: click({"ref_id":"turn0view0","id":10}); Total lines: 2\n' +
+        "L0: The client logs Failed to fetch https://example.org/api: (500) Server Error when offline.",
+].join("\n--------------------------------------------------------------------------------\n");
+
+function plainNode(
+    node: GlowupWireValue | undefined,
+    context: { readonly expanded?: boolean; readonly isError?: boolean } = {},
+): string {
+    const decoded = decodeGlowupNode(node);
+    assert.ok(decoded);
+    return compactPresentation
+        .renderNode(
+            decoded,
+            { fg: (_token, value) => value, bold: (value) => value },
+            { ...completeContext, ...context, args: {} },
+            "static",
+        )
+        .render(200)
+        .map((line) => line.trimEnd())
+        .join("\n");
+}
+
+test("web_run shows the pages that clicks and earlier-page opens reached", () => {
+    const renderer = createWebRunTool({
+        getConfig: () => DEFAULT_CODEX_CORE_CONFIG,
+    }).glowupRendering;
+    const args = parseArgs(renderer, REFERENCE_ARGS);
+    const settled = { ...completeContext, hasResult: true };
+    const result = parseResult(renderer, { content: [{ type: "text", text: REFERENCE_OUTPUT }] });
+
+    assert.equal(
+        plainNode(renderer.renderCall(args, settled)),
+        ['• Searched the web for "plugins"', "• Opened https://example.org/start"].join("\n"),
+    );
+    const rows = [
+        "• Opened https://example.org/earlier",
+        "• Followed link to https://example.org/a",
+        "• Failed to follow link to https://example.org/b (403 Forbidden)",
+        "• Failed to follow link to https://example.org/c (not accessible via this tool)",
+        "• Failed to follow link 8 on an earlier page (request failed)",
+        "• Followed link 9 on an earlier page",
+        "• Followed link to https://example.org/wiki/Widget_(software)",
+    ];
+    assert.equal(plainNode(renderer.renderResult(result, { ...settled, args })), rows.join("\n"));
+
+    const expanded = plainNode(
+        renderer.renderResult(result, { ...settled, args, expanded: true }),
+        { expanded: true },
+    );
+    assert.ok(expanded.startsWith(rows.join("\n")));
+    assert.match(expanded, /lists every available search plugin/u);
+    const styled = JSON.stringify(renderer.renderResult(result, { ...settled, args }));
+    assert.match(styled, /"text":"https:\/\/example\.org\/b","tone":"url"/u);
+    assert.match(styled, /"text":" \(403 Forbidden\)","tone":"muted"/u);
+    assert.match(styled, /"state":"error"/u);
+});
+
+test("web_run names referenced pages by position until a result arrives or when the call fails", () => {
+    const renderer = createWebRunTool({
+        getConfig: () => DEFAULT_CODEX_CORE_CONFIG,
+    }).glowupRendering;
+    const args = parseArgs(renderer, {
+        open: [{ ref_id: "turn0view0" }],
+        click: [{ ref_id: "turn0view0", id: 65 }],
+    });
+
+    assert.equal(
+        plainNode(renderer.renderCall(args, { ...completeContext, phase: "running" })),
+        ["• Opening an earlier page", "• Following link 65 on an earlier page"].join("\n"),
+    );
+    assert.equal(
+        plainNode(
+            renderer.renderCall(args, { ...completeContext, hasResult: true, isError: true }),
+            { isError: true },
+        ),
+        ["• Failed to open an earlier page", "• Failed to follow link 65 on an earlier page"].join(
+            "\n",
+        ),
+    );
+    assert.deepEqual(renderer.renderCall(args, { ...completeContext, hasResult: true }), {
+        kind: "empty",
+    });
+});
+
+test("native web_run shows the same reached pages as Glowup", () => {
+    const tool = createWebRunTool({ getConfig: () => DEFAULT_CODEX_CORE_CONFIG });
+    assert.ok(tool.renderCall);
+    assert.ok(tool.renderResult);
+    const renderer = tool.glowupRendering;
+    const result = {
+        content: [{ type: "text" as const, text: REFERENCE_OUTPUT }],
+        details: {
+            fullOutputPath: "/existing/artifact.txt",
+            outputCharacters: REFERENCE_OUTPUT.length,
+            sourceCount: 4,
+        },
+    };
+    const context = makeRenderContext(REFERENCE_ARGS);
+    const plainComponent = (component: { render: (width: number) => string[] }) =>
+        component
+            .render(200)
+            .map((line) => line.trimEnd())
+            .join("\n");
+
+    assert.equal(
+        plainComponent(tool.renderCall(REFERENCE_ARGS, TEST_THEME, context)),
+        ['Searched the web for "plugins"', "Opened https://example.org/start"].join("\n"),
+    );
+    const glowupRows = plainNode(
+        renderer.renderResult(parseResult(renderer, result), {
+            ...completeContext,
+            hasResult: true,
+            args: parseArgs(renderer, REFERENCE_ARGS),
+        }),
+    );
+    assert.equal(
+        plainComponent(
+            tool.renderResult(result, { expanded: false, isPartial: false }, TEST_THEME, context),
+        ),
+        glowupRows.replaceAll("• ", ""),
     );
 });
 
