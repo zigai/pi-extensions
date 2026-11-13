@@ -236,6 +236,18 @@ describe("embedded program extraction", () => {
         ]);
     });
 
+    it("highlights Markdown written to a Markdown file", () => {
+        const source = `mkdir -p notes; cat > notes/plan.md <<'EOF'\n# Plan\n- step\nEOF`;
+        expect(programs(source)).toEqual([
+            {
+                language: "markdown",
+                origin: "file-heredoc",
+                source: "# Plan\n- step\n",
+                code: "# Plan\n- step\n",
+            },
+        ]);
+    });
+
     it("maps nested heredoc programs past stripped leading tabs", () => {
         const source = `bash <<-'SH'\n\tpython -c 'print(4)'\n\tSH`;
         const programs = extractEmbeddedPrograms(source);

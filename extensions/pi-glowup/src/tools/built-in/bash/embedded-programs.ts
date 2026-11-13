@@ -673,6 +673,7 @@ function outputLanguage(redirects: readonly Redirect[]): string | undefined {
     if (/\.(?:ts|mts|cts)$/iu.test(text)) return "typescript";
     if (/\.tsx$/iu.test(text)) return "tsx";
     if (/\.(?:sh|bash)$/iu.test(text)) return "bash";
+    if (/\.(?:md|markdown)$/iu.test(text)) return "markdown";
     return undefined;
 }
 
