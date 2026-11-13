@@ -36,6 +36,7 @@ const UiTweaksConfigSchema = Type.Object(
         autocompleteAboveInput: Type.Optional(Type.Boolean()),
         bashExecPromptSpacing: Type.Optional(Type.Boolean()),
         anchorInputToBottom: Type.Optional(Type.Boolean()),
+        clearSelectionAfterCopy: Type.Optional(Type.Boolean()),
         compactModelSelector: Type.Optional(Type.Boolean()),
         compactStartup: Type.Optional(Type.Boolean()),
         dimInputBorder: Type.Optional(Type.Boolean()),
@@ -68,6 +69,7 @@ const DEFAULT_UI_TWEAKS_CONFIG: UiTweaksConfig = {
     autocompleteAboveInput: true,
     bashExecPromptSpacing: true,
     anchorInputToBottom: false,
+    clearSelectionAfterCopy: true,
     compactModelSelector: true,
     compactStartup: false,
     dimInputBorder: true,
@@ -143,6 +145,7 @@ function buildUiTweaksConfig(settings: UiTweaksSettings): UiTweaksConfig {
             autocompleteAboveInput: false,
             bashExecPromptSpacing: false,
             anchorInputToBottom: false,
+            clearSelectionAfterCopy: false,
             compactModelSelector: false,
             compactStartup: false,
             dimInputBorder: false,
@@ -176,6 +179,8 @@ function buildUiTweaksConfig(settings: UiTweaksSettings): UiTweaksConfig {
             settings.bashExecPromptSpacing ?? DEFAULT_UI_TWEAKS_CONFIG.bashExecPromptSpacing,
         anchorInputToBottom:
             settings.anchorInputToBottom ?? DEFAULT_UI_TWEAKS_CONFIG.anchorInputToBottom,
+        clearSelectionAfterCopy:
+            settings.clearSelectionAfterCopy ?? DEFAULT_UI_TWEAKS_CONFIG.clearSelectionAfterCopy,
         compactModelSelector:
             settings.compactModelSelector ?? DEFAULT_UI_TWEAKS_CONFIG.compactModelSelector,
         compactStartup: settings.compactStartup ?? DEFAULT_UI_TWEAKS_CONFIG.compactStartup,

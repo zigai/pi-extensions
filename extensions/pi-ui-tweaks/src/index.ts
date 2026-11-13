@@ -13,6 +13,7 @@ import { installAutocompletePositionPatch } from "./autocomplete-position.ts";
 import { installAutocompleteScrollInfoPatch } from "./autocomplete-scroll-info.ts";
 import { installAnchorInputToBottomPatch } from "./anchor-input-to-bottom.ts";
 import { installBashExecSpacingEditor } from "./bash-exec-spacing.ts";
+import { installClearCopiedSelectionPatch } from "./clear-copied-selection.ts";
 import { installNeutralBorderColorPatch } from "./border-color.ts";
 import { installCompactStartupBootstrap, installCompactStartupPatch } from "./compact-startup.ts";
 import { installInputBorderPatch } from "./input-border.ts";
@@ -99,6 +100,7 @@ async function installUiTweaks(
         collect(installAutocompletePositionPatch(config));
         collect(installAutocompleteScrollInfoPatch(config));
         collect(installAnchorInputToBottomPatch(config));
+        collect(installClearCopiedSelectionPatch(config));
         collect(installBashExecSpacingEditor(ctx, config));
         collect(installInputBorderPatch(config));
         collect(installInputPromptPrefixPatch(config));

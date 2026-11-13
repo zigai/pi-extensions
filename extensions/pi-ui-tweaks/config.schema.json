@@ -31,6 +31,11 @@
       "default": false,
       "description": "Anchor the input editor to the terminal bottom."
     },
+    "clearSelectionAfterCopy": {
+      "type": "boolean",
+      "default": true,
+      "description": "Clear the selection highlight after Pi copies text on select."
+    },
     "compactModelSelector": {
       "type": "boolean",
       "default": true,

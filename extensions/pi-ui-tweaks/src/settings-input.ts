@@ -61,6 +61,7 @@ export type UiTweaksConfig = {
     readonly autocompleteAboveInput: boolean;
     readonly bashExecPromptSpacing: boolean;
     readonly anchorInputToBottom: boolean;
+    readonly clearSelectionAfterCopy: boolean;
     readonly compactModelSelector: boolean;
     readonly compactStartup: boolean;
     readonly dimInputBorder: boolean;
@@ -101,6 +102,7 @@ export type UiTweaksSettings = {
     autocompleteAboveInput?: boolean;
     bashExecPromptSpacing?: boolean;
     anchorInputToBottom?: boolean;
+    clearSelectionAfterCopy?: boolean;
     compactModelSelector?: boolean;
     compactStartup?: boolean;
     dimInputBorder?: boolean;
@@ -155,6 +157,10 @@ export const extensionSettingsInput = {
             anchorInputToBottom: Type.Boolean({
                 default: false,
                 description: "Anchor the input editor to the terminal bottom.",
+            }),
+            clearSelectionAfterCopy: Type.Boolean({
+                default: true,
+                description: "Clear the selection highlight after Pi copies text on select.",
             }),
             compactModelSelector: Type.Boolean({
                 default: true,

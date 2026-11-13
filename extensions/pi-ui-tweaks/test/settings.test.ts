@@ -29,6 +29,7 @@ test("loadUiTweaksSettings scaffolds missing global config and schema", async ()
             autocompleteAboveInput: true,
             bashExecPromptSpacing: true,
             anchorInputToBottom: false,
+            clearSelectionAfterCopy: true,
             compactModelSelector: true,
             compactStartup: false,
             dimInputBorder: true,
