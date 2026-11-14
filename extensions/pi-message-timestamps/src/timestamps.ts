@@ -5,7 +5,14 @@ import { installLinkedMethodPatch } from "@zigai/pi-extension-internals";
 import { Type, type StaticDecode } from "typebox";
 import { Value } from "typebox/value";
 import { formatTimestamp, type TimestampFormat } from "./format.ts";
-import { isDivider, renderTimestamp, type TimestampHit } from "./render.ts";
+import {
+    isDivider,
+    renderTimestamp,
+    renderTimestampAtEnd,
+    renderTimestampBelow,
+    type TimestampHit,
+    type TimestampRender,
+} from "./render.ts";
 import type { MessageTimestampsSettings } from "./settings.ts";
 
 const componentSchema = Type.Object({
@@ -37,6 +44,43 @@ const assistantEventSchema = Type.Object({
     message: Type.Object({ role: Type.Literal("assistant") }),
 });
 
+const detailSchema = Type.Object({
+    model: Type.Optional(Type.String()),
+    thinkingLevel: Type.Optional(Type.String()),
+    stopReason: Type.Optional(Type.String()),
+    usage: Type.Optional(
+        Type.Object({
+            input: Type.Number(),
+            output: Type.Number(),
+            cacheRead: Type.Number(),
+            cacheWrite: Type.Number(),
+        }),
+    ),
+});
+
+type MessageDetails = StaticDecode<typeof detailSchema>;
+type ChatMessage = StaticDecode<typeof messageSchema>;
+type AssistantEventMessage = StaticDecode<typeof assistantEventSchema>["message"];
+
+function messageDetails(message: ChatMessage | AssistantEventMessage): MessageDetails | undefined {
+    if (Value.Check(detailSchema, message)) return message;
+    return undefined;
+}
+
+function formatTokens(count: number): string {
+    if (count < 1000) return String(count);
+    return `${(count / 1000).toFixed(1).replace(/\.0$/u, "")}k`;
+}
+
+function formatDuration(milliseconds: number): string {
+    const seconds = Math.round(milliseconds / 1000);
+    if (seconds < 60) return `${seconds}s`;
+
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+    return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
 type Host = StaticDecode<typeof hostSchema> & { chatContainer: { children: unknown[] } };
 
 function isHost(value: unknown): value is Host {
@@ -50,13 +94,19 @@ const markerKey = Symbol.for("zigai.pi-message-timestamps.host-patches");
 
 export class Timestamps {
     private readonly patches: { dispose(): void }[] = [];
-    private readonly rows = new WeakMap<Component, { timestamp: Moment | undefined }>();
+
+    private readonly rows = new WeakMap<
+        Component,
+        { timestamp: Moment | undefined; details: string[] }
+    >();
+
     private readonly completions = new WeakMap<object, number>();
     private readonly history = new WeakMap<object, string>();
     private readonly prototype: StaticDecode<typeof prototypeSchema>;
     private host: Host | undefined;
     private timer: ReturnType<typeof setInterval> | undefined;
     private format: TimestampFormat;
+    private readonly placement: MessageTimestampsSettings["assistantPlacement"];
     private disposed = false;
     private warned = false;
 
@@ -65,6 +115,7 @@ export class Timestamps {
         settings: MessageTimestampsSettings,
     ) {
         this.format = settings.format;
+        this.placement = settings.assistantPlacement;
 
         if (!Value.Check(moduleSchema, sdk)) throw new Error("Interactive host unavailable");
 
@@ -117,7 +168,7 @@ export class Timestamps {
                             const timestamp = timestampFor(message);
                             if (timestamp !== undefined) {
                                 if (Value.Check(componentSchema, row))
-                                    attach(row, timestamp, message.role);
+                                    attach(row, timestamp, message.role, messageDetails(message));
                                 else warnHost();
                             }
                         },
@@ -204,13 +255,13 @@ export class Timestamps {
     private complete(
         host: Host,
         streaming: Component,
-        message: StaticDecode<typeof assistantEventSchema>["message"],
+        message: AssistantEventMessage,
         completed: number,
     ): void {
         if (this.disposed || !this.matchHost(host)) return;
 
         this.completions.set(message, completed);
-        this.attach(streaming, completed, "assistant");
+        this.attach(streaming, completed, "assistant", messageDetails(message));
         host.ui.requestRender();
     }
 
@@ -233,6 +284,47 @@ export class Timestamps {
         }
 
         return this.history.get(message);
+    }
+
+    private turnStart(message: MessageDetails): number | undefined {
+        let start: number | undefined;
+        for (const entry of this.ctx.sessionManager.getBranch()) {
+            if (entry.type !== "message") continue;
+            if (entry.message === message) return start;
+            if (entry.message.role === "user") start = entry.message.timestamp;
+        }
+
+        return start;
+    }
+
+    private details(message: MessageDetails | undefined, completed: Moment | undefined): string[] {
+        if (message === undefined || message.stopReason === "toolUse") return [];
+
+        const details: string[] = [];
+        if (message.model !== undefined) {
+            let model = message.model;
+            if (message.thinkingLevel !== undefined && message.thinkingLevel !== "off")
+                model += ` (${message.thinkingLevel})`;
+
+            details.push(model);
+        }
+
+        const start = this.turnStart(message);
+        if (start !== undefined && completed !== undefined) {
+            const end = new Date(completed).getTime();
+            if (Number.isFinite(end) && end >= start)
+                details.push(`worked ${formatDuration(end - start)}`);
+        }
+
+        if (message.usage !== undefined) {
+            const { input, output, cacheRead, cacheWrite } = message.usage;
+            details.push(
+                `${formatTokens(input + cacheRead + cacheWrite)} in`,
+                `${formatTokens(output)} out`,
+            );
+        }
+
+        return details;
     }
 
     private updateTimer(): void {
@@ -261,16 +353,25 @@ export class Timestamps {
         component: Component,
         timestamp: Moment | undefined,
         role: "user" | "assistant",
+        message?: MessageDetails,
     ): void {
         if (this.disposed) return;
+
+        const details = () => {
+            if (role !== "assistant" || this.placement !== "below") return [];
+            return this.details(message, timestamp);
+        };
 
         const existing = this.rows.get(component);
         if (existing !== undefined) {
             existing.timestamp = timestamp;
+            existing.details = details();
             return;
         }
 
-        const row = { timestamp };
+        const row = { timestamp, details: details() };
+        const placement = this.placement;
+        const style = (text: string) => this.ctx.ui.theme.fg("dim", text);
         let hit: TimestampHit | undefined;
         let assistantLayout: { width: number; contentWidth: number } | undefined;
         const currentFormat = () => this.format;
@@ -319,6 +420,31 @@ export class Timestamps {
                     function (width) {
                         if (isDisposed()) return previous.call(this, width);
 
+                        if (role === "assistant" && placement !== "first-line") {
+                            assistantLayout = undefined;
+
+                            const lines = previous.call(this, width);
+                            if (row.timestamp === undefined) {
+                                hit = undefined;
+                                return lines;
+                            }
+
+                            const label = formatTimestamp(row.timestamp, currentFormat());
+                            let placed: TimestampRender;
+                            if (placement === "below")
+                                placed = renderTimestampBelow(
+                                    lines,
+                                    width,
+                                    label,
+                                    row.details,
+                                    style,
+                                );
+                            else placed = renderTimestampAtEnd(lines, width, label, style);
+
+                            hit = placed.hit;
+                            return placed.lines;
+                        }
+
                         // A pending row reserves the same gutter as its completion label.
                         // Never lay out already-visible thinking at a new width just to
                         // attach a timestamp when message_end arrives.
@@ -348,7 +474,7 @@ export class Timestamps {
                             return lines;
                         }
 
-                        let rendered = renderTimestamp(lines, width, label);
+                        let rendered = renderTimestamp(lines, width, label, style);
                         if (role === "user" && !rendered.hit && contentWidth > 0) {
                             let wrapped = previous.call(this, contentWidth);
 
@@ -368,7 +494,7 @@ export class Timestamps {
                                 return line + background(" ".repeat(padding));
                             });
 
-                            rendered = renderTimestamp(wrapped, width, label);
+                            rendered = renderTimestamp(wrapped, width, label, style);
                             if (!rendered.hit) rendered = { lines: previous.call(this, width) };
                         }
 

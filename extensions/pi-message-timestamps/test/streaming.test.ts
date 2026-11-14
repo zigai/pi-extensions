@@ -20,6 +20,7 @@ import { Type } from "typebox";
 import { Compile } from "typebox/compile";
 import { afterAll, afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { TimestampFormat } from "../src/format.ts";
+import type { MessageTimestampsSettings } from "../src/settings.ts";
 import { Timestamps } from "../src/timestamps.ts";
 
 // Chalk reads FORCE_COLOR when the real host module is imported, not at render time.
@@ -105,7 +106,11 @@ function assistant(content: AssistantMessage["content"]): AssistantMessage {
     };
 }
 
-async function createHost(format: TimestampFormat, history: AssistantMessage[] = []) {
+async function createHost(
+    format: TimestampFormat,
+    history: Parameters<SessionManager["appendMessage"]>[0][] = [],
+    assistantPlacement: MessageTimestampsSettings["assistantPlacement"] = "first-line",
+) {
     const root = await mkdtemp(join(tmpdir(), "pi-timestamps-streaming-"));
     const sessionManager = SessionManager.inMemory(root);
     for (const message of history) sessionManager.appendMessage(message);
@@ -146,6 +151,7 @@ async function createHost(format: TimestampFormat, history: AssistantMessage[] =
     if (!model) throw new Error("Synthetic model missing");
 
     let timestamps: Timestamps | undefined;
+    let style: ((text: string) => string) | undefined;
     const notifications: string[] = [];
     const runtime = await createAgentSessionRuntime(
         async (options) => {
@@ -167,7 +173,12 @@ async function createHost(format: TimestampFormat, history: AssistantMessage[] =
                                     notifications.push(message);
                                     notify(message, type);
                                 };
-                                timestamps = new Timestamps(ctx, { enabled: true, format });
+                                style = (text) => ctx.ui.theme.fg("dim", text);
+                                timestamps = new Timestamps(ctx, {
+                                    enabled: true,
+                                    format,
+                                    assistantPlacement,
+                                });
                             });
                             pi.on("session_shutdown", () => timestamps?.dispose());
                         },
@@ -196,7 +207,7 @@ async function createHost(format: TimestampFormat, history: AssistantMessage[] =
     try {
         await interactive.init();
 
-        if (!timestamps) throw new Error("Timestamp extension did not activate");
+        if (!timestamps || !style) throw new Error("Timestamp extension did not activate");
 
         // The SDK keeps event delivery private. Validate its real host boundary rather
         // than replacing InteractiveMode methods or constructing a look-alike host.
@@ -205,6 +216,7 @@ async function createHost(format: TimestampFormat, history: AssistantMessage[] =
         return {
             host,
             timestamps,
+            style,
             notifications,
             sessionManager,
             restore: () => host.renderSessionEntries(sessionManager.buildContextEntries()),
@@ -281,7 +293,7 @@ it.each([
 
             await fixture.event({ type: "message_end", message });
             const after = row.render(width);
-            expect(after.join("\n")).toContain(`\x1b[2m${label}\x1b[22m`);
+            expect(after.join("\n")).toContain(fixture.style(label));
             expect(body(after, label)).toEqual(body(before));
             expect(after.find((line) => line.includes("https://example.test/reference"))).toBe(
                 linkBefore,
@@ -310,7 +322,7 @@ it("reserves the same gutter on restored assistants even when the first line has
 
         const reference = new AssistantMessageComponent(message, false, undefined, undefined, 0);
         const restored = row.render(64);
-        expect(restored.join("\n")).toContain("\x1b[2m10:30\x1b[22m");
+        expect(restored.join("\n")).toContain(fixture.style("10:30"));
         expect(restored.join("\n")).not.toContain("06:15");
         expect(body(restored, "10:30")).toEqual(body(reference.render(57)));
         fixture.timestamps.dispose();
@@ -356,7 +368,7 @@ it("updates the reserved gutter after format clicks and resize, without a pendin
         expect(row.handleMouse({ ...click, type: "press" })).not.toEqual({ handled: true });
         row.render(48);
         expect(row.handleMouse({ ...click, x: 31, width: 48 })).toEqual({ handled: true });
-        expect(row.render(48).join("\n")).toContain("\x1b[2mjust now\x1b[22m");
+        expect(row.render(48).join("\n")).toContain(fixture.style("just now"));
         expect(body(row.render(48), "just now")).toEqual(body(reference.render(38)));
     } finally {
         await fixture.dispose();
@@ -451,7 +463,7 @@ it("keeps assistant dividers full width and omits labels in terminals too narrow
         await fixture.event({ type: "message_end", message });
         const after = row.render(48);
         expect(after.map(stripTerminalSequences)).toContain("─".repeat(48));
-        expect(after.join("\n")).toContain("\x1b[2m02.01.2024 10:30\x1b[22m");
+        expect(after.join("\n")).toContain(fixture.style("02.01.2024 10:30"));
         expect(body(after, "02.01.2024 10:30")).toEqual(body(before));
 
         const reference = new AssistantMessageComponent(message, false, undefined, undefined, 0);
@@ -576,7 +588,7 @@ it("does not revisit existing rows when the SDK restores more session entries", 
         expect(reads.count()).toBe(0);
         expect(historyReads.count()).toBe(0);
         const restored = fixture.host.chatContainer.children.at(-1);
-        expect(restored?.render(64).join("\n")).toContain("\x1b[2m10:30\x1b[22m");
+        expect(restored?.render(64).join("\n")).toContain(fixture.style("10:30"));
         expect(fixture.notifications).toEqual([]);
     } finally {
         historyReads.restore();
@@ -602,7 +614,7 @@ it("ignores an unsupported historical component instead of rejecting a new strea
 
         expect.soft(Object.hasOwn(row, "render")).toBe(true);
         await fixture.event({ type: "message_end", message });
-        expect.soft(row.render(64).join("\n")).toContain("\x1b[2m10:30\x1b[22m");
+        expect.soft(row.render(64).join("\n")).toContain(fixture.style("10:30"));
         expect(fixture.notifications).toEqual([]);
     } finally {
         if (descriptor === undefined) Reflect.deleteProperty(historical, "render");
@@ -716,7 +728,7 @@ it("rechecks mutable required host capabilities without probing them for unrelat
         expect(fixture.notifications).toEqual([]);
         fixture.host.addMessageToChat(assistant([{ type: "text", text: "Unsupported host" }]));
         const skipped = fixture.host.chatContainer.children.at(-1);
-        expect(skipped?.render(64).join("\n")).not.toContain("\x1b[2m10:30\x1b[22m");
+        expect(skipped?.render(64).join("\n")).not.toContain(fixture.style("10:30"));
         expect(fixture.notifications).toEqual([
             "Message timestamps: unsupported interactive host shape; timestamps may be unavailable.",
         ]);
@@ -732,7 +744,7 @@ it("rechecks mutable required host capabilities without probing them for unrelat
             timestamp: Date.now(),
         });
         const recovered = fixture.host.chatContainer.children.at(-1);
-        expect(recovered?.render(64).join("\n")).toContain("\x1b[2m10:30\x1b[22m");
+        expect(recovered?.render(64).join("\n")).toContain(fixture.style("10:30"));
         expect(fixture.notifications).toHaveLength(1);
     } finally {
         restore();
@@ -752,7 +764,7 @@ it("observes completion before awaiting the SDK and preserves a foreign row patc
         const ended = fixture.event({ type: "message_end", message });
         vi.setSystemTime(new Date(2024, 0, 2, 11, 30));
         await ended;
-        expect(row.render(64).join("\n")).toContain("\x1b[2m10:30\x1b[22m");
+        expect(row.render(64).join("\n")).toContain(fixture.style("10:30"));
         foreign = installLinkedMethodPatch(
             row,
             "render",
@@ -795,7 +807,7 @@ it.each(["message_start", "message_end"] as const)(
                 value: SessionManager.inMemory(fixture.sessionManager.getCwd()),
             });
             await pending;
-            expect(row.render(64).join("\n")).not.toContain("\x1b[2m10:30\x1b[22m");
+            expect(row.render(64).join("\n")).not.toContain(fixture.style("10:30"));
 
             if (type === "message_start") expect(Object.hasOwn(row, "render")).toBe(false);
             expect(fixture.notifications).toEqual([]);
@@ -820,7 +832,84 @@ it("rechecks the event after awaiting a mutable predecessor", async () => {
         const pending = fixture.event(ended);
         Reflect.set(ended, "type", "agent_start");
         await pending;
-        expect(row.render(64).join("\n")).not.toContain("\x1b[2m10:30\x1b[22m");
+        expect(row.render(64).join("\n")).not.toContain(fixture.style("10:30"));
+    } finally {
+        await fixture.dispose();
+    }
+});
+
+it("puts the completion time right of the last line without narrowing the response", async () => {
+    const fixture = await createHost("time-only", [], "last-line");
+    const message = assistant([{ type: "text", text: "Short closing line." }]);
+    try {
+        await fixture.event({ type: "message_start", message });
+        const row = fixture.host.streamingComponent;
+        if (!row) throw new Error("Streaming assistant missing");
+
+        const reference = new AssistantMessageComponent(message, false, undefined, undefined, 0);
+        const before = row.render(64);
+        expect(body(before)).toEqual(body(reference.render(64)));
+        expect(before.join("\n")).not.toContain("10:30");
+
+        await fixture.event({ type: "message_end", message });
+        const after = row.render(64);
+        expect(body(after, "10:30")).toEqual(body(before));
+        const last = after.filter((line) => stripTerminalSequences(line).trim().length > 0).at(-1);
+        expect(last).toContain(fixture.style("10:30"));
+        expect(stripTerminalSequences(last ?? "")).toContain("Short closing line.");
+    } finally {
+        await fixture.dispose();
+    }
+});
+
+it("adds a blank line and a details line below a finished response", async () => {
+    const user = {
+        role: "user" as const,
+        content: "Question",
+        timestamp: new Date(2024, 0, 2, 10, 28).getTime(),
+    };
+    const answer = {
+        ...assistant([{ type: "text", text: "The answer wraps across lines in this terminal." }]),
+        usage: {
+            input: 200,
+            output: 1500,
+            cacheRead: 1000,
+            cacheWrite: 0,
+            totalTokens: 2700,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+    };
+    const toolCall = {
+        ...assistant([{ type: "text", text: "Checking a file first." }]),
+        stopReason: "toolUse" as const,
+    };
+    const fixture = await createHost("time-only", [user, toolCall, answer], "below");
+    try {
+        const rows = fixture.host.chatContainer.children;
+        const finished = rows.at(-1);
+        if (!finished) throw new Error("Restored assistant missing");
+
+        const reference = new AssistantMessageComponent(answer, false, undefined, undefined, 0);
+        const plain = body(finished.render(60));
+        const expected = body(reference.render(60));
+        let end = expected.length;
+        while (end > 0 && expected[end - 1] === "") end--;
+        expect(plain).toEqual([
+            ...expected.slice(0, end),
+            "",
+            "10:30 · sample · worked 2m 0s · 1.2k in · 1.5k out",
+            ...expected.slice(end),
+        ]);
+
+        const intermediate = rows.find(
+            (row) =>
+                row !== finished &&
+                body(row.render(40)).some((line) => line.includes("Checking a file first.")),
+        );
+        if (!intermediate) throw new Error("Restored tool-call assistant missing");
+
+        const footer = body(intermediate.render(40)).filter((line) => line.includes("10:30"));
+        expect(footer).toEqual(["10:30"]);
     } finally {
         await fixture.dispose();
     }

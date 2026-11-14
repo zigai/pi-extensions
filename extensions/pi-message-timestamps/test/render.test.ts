@@ -13,33 +13,38 @@ import { installLinkedMethodPatch } from "@zigai/pi-extension-internals";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import { Timestamps } from "../src/timestamps.ts";
-import { renderTimestamp } from "../src/render.ts";
+import { renderTimestamp, renderTimestampAtEnd, renderTimestampBelow } from "../src/render.ts";
+
+const dim = (text: string) => `\x1b[2m${text}\x1b[22m`;
 
 describe("message timestamp rendering", () => {
     it("places a muted timestamp at the right of the first nonblank line without adding lines", () => {
-        const result = renderTimestamp(["", "hello", "next"], 16, "12:34").lines;
+        const result = renderTimestamp(["", "hello", "next"], 16, "12:34", dim).lines;
         expect(result).toEqual(["", "hello     \x1b[2m12:34\x1b[22m ", "next"]);
         expect(visibleWidth(result[1])).toBe(16);
     });
 
     it("does not cover content or split wide and combining characters", () => {
-        expect(renderTimestamp(["你好 e\u0301  "], 10, "12:34").lines).toEqual(["你好 e\u0301  "]);
+        expect(renderTimestamp(["你好 e\u0301  "], 10, "12:34", dim).lines).toEqual([
+            "你好 e\u0301  ",
+        ]);
+
         expect(
-            stripTerminalSequences(renderTimestamp(["你好 e\u0301"], 15, "12:34").lines[0]),
+            stripTerminalSequences(renderTimestamp(["你好 e\u0301"], 15, "12:34", dim).lines[0]),
         ).toBe("你好 e\u0301   12:34 ");
     });
 
     it("omits the timestamp when the right margin would overlap message text", () => {
-        expect(stripTerminalSequences(renderTimestamp(["hello"], 12, "12:34").lines[0])).toBe(
+        expect(stripTerminalSequences(renderTimestamp(["hello"], 12, "12:34", dim).lines[0])).toBe(
             "hello 12:34 ",
         );
 
-        expect(renderTimestamp(["hello"], 11, "12:34").lines).toEqual(["hello"]);
+        expect(renderTimestamp(["hello"], 11, "12:34", dim).lines).toEqual(["hello"]);
     });
 
     it("keeps a divider intact and places the timestamp beside the message", () => {
         const lines = ["\x1b[2m────────────\x1b[0m", "", "hello"];
-        const result = renderTimestamp(lines, 12, "12:34");
+        const result = renderTimestamp(lines, 12, "12:34", dim);
         expect(result.lines.map(stripTerminalSequences)).toEqual([
             "────────────",
             "",
@@ -50,14 +55,14 @@ describe("message timestamp rendering", () => {
     });
 
     it("timestamps a short message made of divider characters", () => {
-        expect(stripTerminalSequences(renderTimestamp(["────"], 16, "12:34").lines[0])).toBe(
+        expect(stripTerminalSequences(renderTimestamp(["────"], 16, "12:34", dim).lines[0])).toBe(
             "────      12:34 ",
         );
     });
 
     it("retains backgrounds and OSC sequences in their original order", () => {
         const line = "\x1b]133;A\x07\x1b[44mhi         \x1b[0m\x1b]133;B\x07";
-        const result = renderTimestamp([line], 11, "12:34").lines[0];
+        const result = renderTimestamp([line], 11, "12:34", dim).lines[0];
         expect(result).toBe(
             "\x1b]133;A\x07\x1b[44mhi   \x1b[2m12:34\x1b[22m \x1b[0m\x1b]133;B\x07",
         );
@@ -66,44 +71,104 @@ describe("message timestamp rendering", () => {
     });
 
     it("coalesces printable padding without moving controls across the inserted label", () => {
-        expect(renderTimestamp(["\x1b[44mhi  \x1b[43m       \x1b[0m"], 11, "12:34").lines).toEqual([
-            "\x1b[44mhi  \x1b[43m \x1b[2m12:34\x1b[22m \x1b[0m",
-        ]);
+        expect(
+            renderTimestamp(["\x1b[44mhi  \x1b[43m       \x1b[0m"], 11, "12:34", dim).lines,
+        ).toEqual(["\x1b[44mhi  \x1b[43m \x1b[2m12:34\x1b[22m \x1b[0m"]);
 
-        expect(renderTimestamp(["hi    \x1b[43m     \x1b[0m"], 11, "12:34").lines).toEqual([
+        expect(renderTimestamp(["hi    \x1b[43m     \x1b[0m"], 11, "12:34", dim).lines).toEqual([
             "hi   \x1b[2m12:34\x1b[22m\x1b[43m \x1b[0m",
         ]);
     });
 
     it("never treats a space with a combining mark as replaceable ASCII padding", () => {
         const lines = ["a   \u0301"];
-        expect(renderTimestamp(lines, 10, "12:34").lines).toBe(lines);
+        expect(renderTimestamp(lines, 10, "12:34", dim).lines).toBe(lines);
     });
 
     it("leaves unsupported control sequences and lines without text untouched", () => {
-        expect(renderTimestamp(["\x1b?hello"], 20, "12:34").lines).toEqual(["\x1b?hello"]);
-        expect(renderTimestamp(["     "], 20, "12:34").lines).toEqual(["     "]);
+        expect(renderTimestamp(["\x1b?hello"], 20, "12:34", dim).lines).toEqual(["\x1b?hello"]);
+        expect(renderTimestamp(["     "], 20, "12:34", dim).lines).toEqual(["     "]);
     });
 });
 
 describe("timestamp hit geometry", () => {
     it("reports the label cells on the first nonblank row after ANSI and wide content", () => {
-        const rendered = renderTimestamp(["", "\x1b[44m你好\x1b[0m"], 15, "12:34");
+        const rendered = renderTimestamp(["", "\x1b[44m你好\x1b[0m"], 15, "12:34", dim);
         expect(rendered.hit).toEqual({ x: 9, y: 1, width: 5, renderWidth: 15 });
         expect(stripTerminalSequences(rendered.lines[1])).toBe("你好     12:34 ");
     });
 
     it("does not report a target when a label is omitted or no longer fits after resize", () => {
-        expect(renderTimestamp(["hello"], 12, "12:34").hit).toEqual({
+        expect(renderTimestamp(["hello"], 12, "12:34", dim).hit).toEqual({
             x: 6,
             y: 0,
             width: 5,
             renderWidth: 12,
         });
 
-        expect(renderTimestamp(["hello"], 11, "12:34").hit).toBeUndefined();
-        expect(renderTimestamp(["\x1b?hello"], 20, "12:34").hit).toBeUndefined();
-        expect(renderTimestamp(["hello"], 20, "").hit).toBeUndefined();
+        expect(renderTimestamp(["hello"], 11, "12:34", dim).hit).toBeUndefined();
+        expect(renderTimestamp(["\x1b?hello"], 20, "12:34", dim).hit).toBeUndefined();
+        expect(renderTimestamp(["hello"], 20, "", dim).hit).toBeUndefined();
+    });
+});
+
+describe("last-line timestamp placement", () => {
+    it("places the label on the last text line, past trailing blank lines", () => {
+        const result = renderTimestampAtEnd(["first", "last", ""], 16, "12:34", dim);
+        expect(result.lines.map(stripTerminalSequences)).toEqual(["first", "last      12:34 ", ""]);
+        expect(result.hit).toEqual({ x: 10, y: 1, width: 5, renderWidth: 16 });
+    });
+
+    it("adds a right-aligned line when the last line has no room", () => {
+        const result = renderTimestampAtEnd(["first", "a full last line", ""], 16, "12:34", dim);
+        expect(result.lines.map(stripTerminalSequences)).toEqual([
+            "first",
+            "a full last line",
+            "          12:34 ",
+            "",
+        ]);
+
+        expect(result.hit).toEqual({ x: 10, y: 2, width: 5, renderWidth: 16 });
+    });
+
+    it("leaves messages without text, and widths too narrow for the label, unchanged", () => {
+        expect(renderTimestampAtEnd(["", "  "], 16, "12:34", dim)).toEqual({ lines: ["", "  "] });
+        expect(renderTimestampAtEnd(["hi"], 5, "12:34", dim)).toEqual({ lines: ["hi"] });
+    });
+});
+
+describe("timestamp line below the message", () => {
+    it("adds a blank line and an aligned details line after the last text line", () => {
+        const result = renderTimestampBelow(
+            ["", " first", " last", ""],
+            40,
+            "12:34",
+            ["model", "1.2k in"],
+            dim,
+        );
+        expect(result.lines.map(stripTerminalSequences)).toEqual([
+            "",
+            " first",
+            " last",
+            "",
+            " 12:34 · model · 1.2k in",
+            "",
+        ]);
+
+        expect(result.hit).toEqual({ x: 1, y: 4, width: 5, renderWidth: 40 });
+    });
+
+    it("truncates the details line to the render width", () => {
+        const result = renderTimestampBelow(["text"], 16, "12:34", ["a long model name"], dim);
+        const footer = result.lines.at(-1) ?? "";
+        expect(visibleWidth(footer)).toBeLessThanOrEqual(16);
+        expect(stripTerminalSequences(footer).startsWith("12:34 · ")).toBe(true);
+    });
+
+    it("leaves messages without text unchanged", () => {
+        expect(renderTimestampBelow(["", " "], 16, "12:34", ["model"], dim)).toEqual({
+            lines: ["", " "],
+        });
     });
 });
 
@@ -162,9 +227,16 @@ describe("session timestamp interaction", () => {
         // oxlint-disable-next-line typescript/no-unsafe-type-assertion, antislop/no-chained-type-assertions -- The fixture intentionally implements only the exercised host boundary.
         const ctx = { sessionManager, ui: { notify() {} } } as unknown as ExtensionContext;
         Object.defineProperty(ctx.ui, "theme", {
-            value: { bg: (_name: string, text: string) => text },
+            value: {
+                bg: (_name: string, text: string) => text,
+                fg: (_name: string, text: string) => dim(text),
+            },
         });
-        const controller = new Timestamps(ctx, { enabled: true, format: "auto" });
+        const controller = new Timestamps(ctx, {
+            enabled: true,
+            format: "auto",
+            assistantPlacement: "first-line",
+        });
         let successor: { dispose(): void } | undefined;
         try {
             const methods = Type.Object({
@@ -261,7 +333,11 @@ describe("session timestamp interaction", () => {
             expect(vi.getTimerCount()).toBe(0);
             successor?.dispose();
             expect(Object.hasOwn(bare, "handleMouse")).toBe(false);
-            const reset = new Timestamps(ctx, { enabled: true, format: "relative" });
+            const reset = new Timestamps(ctx, {
+                enabled: true,
+                format: "relative",
+                assistantPlacement: "first-line",
+            });
             expect(vi.getTimerCount()).toBe(1);
             reset.dispose();
             expect(vi.getTimerCount()).toBe(0);

@@ -24,6 +24,7 @@ const fixtures = [
 ];
 
 console.log(JSON.stringify({ node: process.version, repeats, iterations }));
+const dim = (text: string) => `\x1b[2m${text}\x1b[22m`;
 
 for (const fixture of fixtures) {
     const lines = [fixture.line];
@@ -31,9 +32,9 @@ for (const fixture of fixtures) {
         global.gc?.();
 
         const started = performance.now();
-        let rendered = renderTimestamp(lines, fixture.width, "02.01.2024 12:00");
+        let rendered = renderTimestamp(lines, fixture.width, "02.01.2024 12:00", dim);
         for (let index = 1; index < iterations; index += 1)
-            rendered = renderTimestamp(lines, fixture.width, "02.01.2024 12:00");
+            rendered = renderTimestamp(lines, fixture.width, "02.01.2024 12:00", dim);
 
         const ms = performance.now() - started;
         assert.equal(rendered.lines.length, lines.length);

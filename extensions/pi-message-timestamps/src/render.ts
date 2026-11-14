@@ -1,4 +1,4 @@
-import { stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
+import { stripTerminalSequences, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 // Keep every control sequence in its original order. Only ordinary padding spaces may
 // be replaced; a wide grapheme, tab, or other non-space content is never overwritten.
@@ -67,17 +67,31 @@ export function isDivider(line: string, width: number): boolean {
     return /^─{2,}$/u.test(content) && visibleWidth(content) === width;
 }
 
-/** Add a label to the first message line without changing the number of lines. */
-export function renderTimestamp(lines: string[], width: number, label: string): TimestampRender {
+export type LabelStyle = (text: string) => string;
+
+function isContent(line: string, width: number): boolean {
+    return stripTerminalSequences(line).trim().length > 0 && !isDivider(line, width);
+}
+
+function validLabel(width: number, label: string): boolean {
+    return Boolean(label) && Number.isInteger(width) && width > 0 && !/\p{Cc}/u.test(label);
+}
+
+function lastContentIndex(lines: string[], width: number): number {
+    for (let index = lines.length - 1; index >= 0; index--)
+        if (isContent(lines[index], width)) return index;
+
+    return -1;
+}
+
+function placeOnLine(
+    lines: string[],
+    index: number,
+    width: number,
+    label: string,
+    style: LabelStyle,
+): TimestampRender {
     const unchanged = { lines };
-
-    if (!label || !Number.isInteger(width) || width <= 0 || /\p{Cc}/u.test(label)) return unchanged;
-
-    const index = lines.findIndex(
-        (line) => stripTerminalSequences(line).trim().length > 0 && !isDivider(line, width),
-    );
-    if (index < 0) return unchanged;
-
     const line = lines.at(index);
     if (line === undefined) return unchanged;
 
@@ -111,7 +125,7 @@ export function renderTimestamp(lines: string[], width: number, label: string): 
             const before = Math.max(0, start - position);
             output += " ".repeat(before);
             if (!inserted) {
-                output += `\x1b[2m${label}\x1b[22m`;
+                output += style(label);
                 inserted = true;
             }
 
@@ -132,4 +146,72 @@ export function renderTimestamp(lines: string[], width: number, label: string): 
     const result = lines.slice();
     result[index] = output;
     return { lines: result, hit: { x: start, y: index, width: labelWidth, renderWidth: width } };
+}
+
+/** Add a label to the first message line without changing the number of lines. */
+export function renderTimestamp(
+    lines: string[],
+    width: number,
+    label: string,
+    style: LabelStyle,
+): TimestampRender {
+    if (!validLabel(width, label)) return { lines };
+
+    const index = lines.findIndex((line) => isContent(line, width));
+    if (index < 0) return { lines };
+
+    return placeOnLine(lines, index, width, label, style);
+}
+
+/** Put the label right of the last message line, or on a new line below it when the line is full. */
+export function renderTimestampAtEnd(
+    lines: string[],
+    width: number,
+    label: string,
+    style: LabelStyle,
+): TimestampRender {
+    if (!validLabel(width, label)) return { lines };
+
+    const index = lastContentIndex(lines, width);
+    if (index < 0) return { lines };
+
+    const placed = placeOnLine(lines, index, width, label, style);
+    if (placed.hit) return placed;
+
+    const labelWidth = visibleWidth(label);
+    const start = width - labelWidth - 1;
+    if (start < 1) return { lines };
+
+    const result = lines.slice();
+    result.splice(index + 1, 0, " ".repeat(start) + style(label) + " ");
+
+    return {
+        lines: result,
+        hit: { x: start, y: index + 1, width: labelWidth, renderWidth: width },
+    };
+}
+
+/** Add a blank line and then a line holding the label and its details below the message. */
+export function renderTimestampBelow(
+    lines: string[],
+    width: number,
+    label: string,
+    details: string[],
+    style: LabelStyle,
+): TimestampRender {
+    if (!validLabel(width, label)) return { lines };
+
+    const index = lastContentIndex(lines, width);
+    if (index < 0) return { lines };
+
+    const first = stripTerminalSequences(lines.find((line) => isContent(line, width)) ?? "");
+    const indent = first.length - first.trimStart().length;
+    const text = truncateToWidth([label, ...details].join(" · "), Math.max(1, width - indent));
+    const result = lines.slice();
+    result.splice(index + 1, 0, "", " ".repeat(indent) + style(text));
+
+    return {
+        lines: result,
+        hit: { x: indent, y: index + 2, width: visibleWidth(label), renderWidth: width },
+    };
 }

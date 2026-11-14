@@ -37,6 +37,24 @@
       ],
       "default": "auto",
       "description": "Timestamp format: auto shows time today and date and time on other days; time-only, date-time, or relative always use that format."
+    },
+    "assistantPlacement": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "first-line"
+        },
+        {
+          "type": "string",
+          "const": "last-line"
+        },
+        {
+          "type": "string",
+          "const": "below"
+        }
+      ],
+      "default": "first-line",
+      "description": "Where response timestamps appear: first-line puts the time right of the first line; last-line puts it right of the last line; below adds a blank line and then a line with the time, model, duration, and tokens."
     }
   }
 }
