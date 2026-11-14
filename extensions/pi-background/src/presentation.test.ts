@@ -1,5 +1,11 @@
 import { expect, it } from "vitest";
-import { commandLabel, commandStatus, plainOutput, runningShellStatus } from "./presentation.ts";
+import {
+    commandLabel,
+    commandStatus,
+    commandTiming,
+    plainOutput,
+    runningShellStatus,
+} from "./presentation.ts";
 import type { CommandSnapshot } from "./commands.ts";
 
 function job(overrides: Partial<CommandSnapshot> = {}): CommandSnapshot {
@@ -12,6 +18,10 @@ function job(overrides: Partial<CommandSnapshot> = {}): CommandSnapshot {
         state: "running",
         exitCode: null,
         error: null,
+        startedAt: 0,
+        endedAt: null,
+        lastOutputAt: null,
+        timeoutSeconds: 1800,
         ...overrides,
     };
 }
@@ -49,8 +59,25 @@ it.each([
     [job(), "running"],
     [job({ state: "stopped" }), "stopped"],
     [job({ state: "failed" }), "failed"],
+    [job({ state: "timed_out" }), "timed out"],
     [job({ state: "completed", exitCode: 0 }), "done"],
     [job({ state: "completed", exitCode: 7 }), "exit 7"],
 ])("keeps detailed statuses available for the job picker", (snapshot, text) => {
     expect(commandStatus(snapshot).text).toBe(text);
+});
+
+it.each([
+    [
+        job({ lastOutputAt: 60_000 }),
+        "Running for 7m; last output 6m ago; stopped in 23m unless it finishes.",
+    ],
+    [job(), "Running for 7m; no output yet; stopped in 23m unless it finishes."],
+    [
+        job({ kind: "service", timeoutSeconds: null, lastOutputAt: 419_000 }),
+        "Running for 7m; last output 1s ago; runs until stopped.",
+    ],
+    [job({ state: "completed", exitCode: 0, endedAt: 63_000 }), "Ran for 1m 3s."],
+    [job({ state: "timed_out", endedAt: 1_800_000 }), "Stopped at its 30m timeout."],
+])("tells the agent how long a job has run and been silent", (snapshot, text) => {
+    expect(commandTiming(snapshot, 420_000)).toBe(text);
 });

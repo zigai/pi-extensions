@@ -4,6 +4,8 @@ import { commandSchema } from "./commands.ts";
 import {
     renderJobResult,
     renderOutputResult,
+    parseResultDetails,
+    renderResultMessage,
     renderStartCall,
     renderWaitCall,
     renderWaitResult,
@@ -27,6 +29,10 @@ const job = {
     state: "completed" as const,
     exitCode: 7,
     error: null,
+    startedAt: 1_000,
+    endedAt: 2_000,
+    lastOutputAt: 1_500,
+    timeoutSeconds: 1800,
 };
 
 it("shows command state and requested output without internal job metadata", () => {
@@ -42,7 +48,7 @@ it("shows command state and requested output without internal job metadata", () 
     expect(rendered).not.toContain("/private");
 });
 
-it("restores pre-kind job results without weakening the current output contract", () => {
+it("restores job results saved before kinds and deadlines without weakening the current output contract", () => {
     const legacyJob = {
         id: job.id,
         command: job.command,
@@ -57,7 +63,7 @@ it("restores pre-kind job results without weakening the current output contract"
     for (const renderer of [startRendering, statusRendering, stopRendering]) {
         expect(renderer.parseResult(result)).toEqual({
             kind: "available",
-            job,
+            job: { ...legacyJob, kind: "task" },
             output: "",
             truncated: false,
         });
@@ -234,4 +240,21 @@ it("renders unavailable wait errors safely instead of exposing raw tool errors",
         expect(glowup + fallback).not.toContain(job.id);
         expect(glowup + fallback).not.toContain("/private");
     }
+});
+
+it("shows a delivered result as one status line and its output only when expanded", () => {
+    const result = parseResultDetails({
+        job: { ...job, state: "timed_out", exitCode: null },
+        output: "hung",
+        truncated: false,
+    });
+    const render = (value: typeof result, expanded: boolean) =>
+        renderResultMessage(value, { expanded }, theme)
+            .render(120)
+            .map((line) => line.trim())
+            .join("\n");
+
+    expect(render(result, false)).toBe("Background result task · npm test · timed out");
+    expect(render(result, true)).toContain("hung");
+    expect(render(parseResultDetails({}), false)).toContain("unavailable");
 });

@@ -6,12 +6,15 @@ import { createLocalBashOperations, DEFAULT_MAX_BYTES } from "@earendil-works/pi
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { BackgroundCommands, type CommandSnapshot } from "./commands.ts";
+import { BackgroundCommands, type CommandOutput, type CommandSnapshot } from "./commands.ts";
 
 let directory: string;
 let commands: BackgroundCommands;
 let notifications: CommandSnapshot[];
 let nextCompletion: Promise<CommandSnapshot>;
+let deliveries: CommandOutput[];
+let nextDelivery: Promise<CommandOutput>;
+let clock: number;
 let server: Server | undefined;
 const sockets: Socket[] = [];
 
@@ -19,17 +22,34 @@ beforeEach(async () => {
     await mkdir(join(process.cwd(), ".cache"), { recursive: true });
     directory = await mkdtemp(join(process.cwd(), ".cache", "background-test-"));
     notifications = [];
+    deliveries = [];
+    clock = 1_000;
+    let resolveDelivery: (result: CommandOutput) => void = () => undefined;
+    nextDelivery = new Promise((resolve) => {
+        resolveDelivery = resolve;
+    });
     nextCompletion = new Promise((resolve) => {
-        commands = new BackgroundCommands(
-            createLocalBashOperations(),
-            join(directory, "output"),
-            (job) => {
+        commands = new BackgroundCommands({
+            operations: createLocalBashOperations(),
+            directory: join(directory, "output"),
+            onChange: (job) => {
                 notifications.push(job);
                 resolve(job);
             },
-        );
+            onResult: (result) => {
+                deliveries.push(result);
+                resolveDelivery(result);
+            },
+            now: () => clock,
+        });
     });
 });
+
+async function settleDeliveries(): Promise<void> {
+    return new Promise((resolve) => {
+        setImmediate(resolve);
+    });
+}
 
 afterEach(async () => {
     await commands.dispose();
@@ -225,21 +245,22 @@ it("returns running output at the default checkpoint and later collects the task
     });
 });
 
-it("collects only completed jobs at a checkpoint", async () => {
-    const finished = commands.start("printf ready", directory);
-    await nextCompletion;
+it("collects only completed jobs at a checkpoint and does not also deliver them", async () => {
     const fixture = await blockingCommand();
     const running = commands.start(fixture.command, directory);
     const socket = await fixture.connection;
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
+        const finished = commands.start("printf ready", directory);
         const waiting = commands.wait(undefined, { timeout: 1 });
+        await nextCompletion;
+        await settleDeliveries();
         await vi.advanceTimersByTimeAsync(1_000);
         expect(await waiting).toMatchObject({
             timedOut: true,
             jobs: [
-                { job: { id: finished.id, state: "completed" }, output: "ready" },
                 { job: { id: running.id, state: "running" } },
+                { job: { id: finished.id, state: "completed" }, output: "ready" },
             ],
         });
     } finally {
@@ -248,6 +269,8 @@ it("collects only completed jobs at a checkpoint", async () => {
 
     socket.write("finish");
     expect((await commands.wait()).jobs.map((result) => result.job.id)).toEqual([running.id]);
+    await settleDeliveries();
+    expect(deliveries).toEqual([]);
 });
 
 it("rejects unbounded or invalid wait budgets without losing completed results", async () => {
@@ -326,4 +349,92 @@ it("keeps uncollected results available when a wait is already cancelled", async
     expect(await commands.wait()).toMatchObject({
         jobs: [{ job: { id: job.id }, output: "done" }],
     });
+});
+
+it("stops a task at its deadline with its child processes and reports the timeout", async () => {
+    const fixture = await blockingCommand();
+    const job = commands.start(fixture.command, directory, { timeout: 1 });
+    const socket = await fixture.connection;
+    const disconnected = once(socket, "close");
+
+    const timedOut = await nextCompletion;
+    await disconnected;
+
+    expect(job.timeoutSeconds).toBe(1);
+    expect(timedOut).toMatchObject({ id: job.id, state: "timed_out", exitCode: null });
+    expect((await nextDelivery).job).toMatchObject({ id: job.id, state: "timed_out" });
+});
+
+it("gives tasks a default deadline and services none", () => {
+    const task = commands.start("printf task", directory);
+    const service = commands.start("printf service", directory, { kind: "service" });
+
+    expect(task.timeoutSeconds).toBe(1800);
+    expect(service.timeoutSeconds).toBeNull();
+});
+
+it("rejects service timeouts and out-of-range task timeouts without starting a job", () => {
+    expect(() =>
+        commands.start("printf service", directory, { kind: "service", timeout: 10 }),
+    ).toThrow("Services run until stopped");
+
+    for (const timeout of [0, -1, 1.5, Number.NaN, 7201]) {
+        expect(() => commands.start("printf task", directory, { timeout })).toThrow("timeout");
+    }
+
+    expect(commands.list()).toEqual([]);
+});
+
+it("delivers a finished result once when nothing collected it, then leaves it out of waits", async () => {
+    const job = commands.start("printf done; exit 3", directory);
+
+    expect(await nextDelivery).toMatchObject({
+        job: { id: job.id, state: "completed", exitCode: 3 },
+        output: "done",
+    });
+    await settleDeliveries();
+    expect(deliveries).toHaveLength(1);
+    expect(await commands.wait()).toEqual({ jobs: [], timedOut: false });
+});
+
+it("delivers a service that exits on its own", async () => {
+    const service = commands.start("printf crashed; exit 1", directory, { kind: "service" });
+
+    expect(await nextDelivery).toMatchObject({
+        job: { id: service.id, state: "completed", exitCode: 1 },
+        output: "crashed",
+    });
+});
+
+it("does not deliver results that a wait or stop collected", async () => {
+    const waited = await blockingCommand();
+    const job = commands.start(waited.command, directory);
+    const socket = await waited.connection;
+    const waiting = commands.wait([job.id]);
+    socket.write("finish");
+    expect(await waiting).toMatchObject({ jobs: [{ job: { id: job.id, state: "completed" } }] });
+
+    const looping = commands.start("while :; do sleep 0.01; done", directory);
+    await commands.stop(looping.id);
+    await settleDeliveries();
+
+    expect(deliveries).toEqual([]);
+});
+
+it("does not deliver results after shutdown", async () => {
+    commands.start("printf done", directory);
+    await nextCompletion;
+    await commands.dispose();
+    await settleDeliveries();
+
+    expect(deliveries).toEqual([]);
+});
+
+it("records when a task started, last wrote output, and ended", async () => {
+    const job = commands.start("printf done", directory);
+    clock = 4_000;
+    const completed = await nextCompletion;
+
+    expect(job).toMatchObject({ startedAt: 1_000, lastOutputAt: null, endedAt: null });
+    expect(completed).toMatchObject({ startedAt: 1_000, lastOutputAt: 4_000, endedAt: 4_000 });
 });

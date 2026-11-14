@@ -177,12 +177,10 @@ describe.each(["task", "service"] as const)("%s completion lifecycle", (kind) =>
     it.each([
         ["idle", "success"],
         ["idle", "failure"],
-        ["idle", "stop"],
         ["active", "success"],
         ["active", "failure"],
-        ["active", "stop"],
     ] as const)(
-        "does not deliver hidden follow-ups or wake a real %s Pi session on %s",
+        "delivers an uncollected result to a real %s Pi session on %s and starts a turn",
         async (state, outcome) => {
             const runtime = await createRuntime();
             runtime.controls.holdResponses = state === "active";
@@ -190,42 +188,21 @@ describe.each(["task", "service"] as const)("%s completion lifecycle", (kind) =>
             await expect.poll(() => runtime.requests.length).toBe(1);
 
             if (state === "idle") await prompt;
+
+            let command = "printf done";
+            let expected = "done";
+            if (outcome === "failure") {
+                command = "printf failed; exit 7";
+                expected = "failed";
+            }
+
             try {
-                let command = "printf done";
-                if (outcome === "failure") command = "printf failed; exit 7";
-                if (outcome === "stop") command = "printf ready; while :; do sleep 0.01; done";
+                await runtime.execute("background_start", { command, kind });
 
-                const result = await runtime.execute("background_start", { command, kind });
-                const job = snapshotParser.Parse(result.details);
-                if (outcome === "stop") {
-                    await expect
-                        .poll(async () => {
-                            const result = await runtime.execute("background_status", {
-                                id: job.id,
-                            });
-                            return outputParser.Parse(result.details).output;
-                        })
-                        .toContain("ready");
-                    const stopped = await runtime.execute("background_stop", { id: job.id });
-                    expect(snapshotParser.Parse(stopped.details).state).toBe("stopped");
-                } else {
-                    await expect
-                        .poll(async () => {
-                            const status = await runtime.execute("background_status", {
-                                id: job.id,
-                            });
-                            return outputParser.Parse(status.details).job.state;
-                        })
-                        .toBe("completed");
+                if (state === "active") {
+                    await expect.poll(() => runtime.session.agent.hasQueuedMessages()).toBe(true);
+                    expect(runtime.requests).toEqual(["synthetic"]);
                 }
-
-                expect(
-                    runtime.session.messages.filter((message) => message.role === "custom"),
-                ).toEqual([]);
-
-                expect(runtime.session.getFollowUpMessages()).toEqual([]);
-                expect(runtime.session.getSteeringMessages()).toEqual([]);
-                expect(runtime.requests).toEqual(["synthetic"]);
             } finally {
                 runtime.controls.holdResponses = false;
 
@@ -233,25 +210,46 @@ describe.each(["task", "service"] as const)("%s completion lifecycle", (kind) =>
                 await prompt;
             }
 
+            await expect.poll(() => runtime.requests.length).toBe(2);
             await runtime.session.waitForIdle();
-            expect(runtime.session.messages.filter((message) => message.role === "custom")).toEqual(
-                [],
+            const delivered = runtime.session.messages.filter(
+                (message) => message.role === "custom",
             );
-
-            expect(runtime.requests).toEqual(["synthetic"]);
-            expect(runtime.session.isIdle).toBe(true);
-
-            // A next-turn message is hidden from the current transcript and queues until consumed.
-            // A later user request must not reveal deferred completion context either.
-            await runtime.session.prompt("A later user request");
-            expect(runtime.requests).toEqual(["synthetic", "synthetic"]);
-            expect(runtime.session.messages.filter((message) => message.role === "custom")).toEqual(
-                [],
-            );
-
+            expect(delivered).toHaveLength(1);
+            expect(delivered[0]).toMatchObject({ customType: "pi-background.result" });
+            expect(JSON.stringify(delivered[0]?.content)).toContain(expected);
             expect(runtime.errors).toEqual([]);
         },
     );
+
+    it("does not deliver the result of a job the agent stopped", async () => {
+        const runtime = await createRuntime();
+        await runtime.session.prompt("One foreground request");
+        const job = snapshotParser.Parse(
+            (
+                await runtime.execute("background_start", {
+                    command: "printf ready; while :; do sleep 0.01; done",
+                    kind,
+                })
+            ).details,
+        );
+        await expect
+            .poll(async () => {
+                const result = await runtime.execute("background_status", { id: job.id });
+                return outputParser.Parse(result.details).output;
+            })
+            .toContain("ready");
+
+        const stopped = await runtime.execute("background_stop", { id: job.id });
+        expect(snapshotParser.Parse(stopped.details).state).toBe("stopped");
+
+        await new Promise((resolve) => {
+            setTimeout(resolve, 50);
+        });
+        await runtime.session.waitForIdle();
+        expect(runtime.session.messages.filter((message) => message.role === "custom")).toEqual([]);
+        expect(runtime.requests).toEqual(["synthetic"]);
+    });
 });
 
 it("defaults to finite tasks and collects their results without waiting for services", async () => {
@@ -351,7 +349,7 @@ it("returns an inspection checkpoint through Pi without cancelling the running c
             .filter((part) => part.type === "text")
             .map((part) => part.text)
             .join("\n"),
-    ).toContain("Inspect");
+    ).toMatch(/Running for \d+s; last output \d+s ago; stopped in .+ unless it finishes\./u);
 
     expect(
         outputParser.Parse((await runtime.execute("background_status", { id: job.id })).details).job

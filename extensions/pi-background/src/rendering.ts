@@ -22,34 +22,50 @@ import { commandLabel, commandStatus, plainOutput } from "./presentation.ts";
 type StartArgs = StaticDecode<typeof startArgsSchema>;
 type JobArgs = StaticDecode<typeof jobArgsSchema>;
 type WaitArgs = StaticDecode<typeof waitArgsSchema>;
-
-type WaitResult =
-    | { kind: "available"; jobs: StaticDecode<typeof outputSchema>[] }
-    | { kind: "unavailable" };
-
+type WaitResult = { kind: "available"; jobs: SavedOutput[] } | { kind: "unavailable" };
 type RenderTheme = Pick<Theme, "fg" | "bold">;
 
-type Result =
-    | { kind: "available"; job: CommandSnapshot; output: string; truncated: boolean }
-    | { kind: "unavailable" };
-
-// Saved sessions from before task/service support have no kind. Only the rendering
-// boundary accepts that legacy shape; new tool results still use commandSchema.
+// Saved sessions from before task/service support have no kind, and ones from before
+// task deadlines have no timing fields. Only the rendering boundary accepts those
+// shapes; new tool results still use commandSchema.
 const savedCommandSchema = Type.Object(
-    { ...commandSchema.properties, kind: Type.Optional(commandSchema.properties.kind) },
+    {
+        ...commandSchema.properties,
+        kind: Type.Optional(commandSchema.properties.kind),
+        startedAt: Type.Optional(commandSchema.properties.startedAt),
+        endedAt: Type.Optional(commandSchema.properties.endedAt),
+        lastOutputAt: Type.Optional(commandSchema.properties.lastOutputAt),
+        timeoutSeconds: Type.Optional(commandSchema.properties.timeoutSeconds),
+    },
     { additionalProperties: false },
 );
 const savedOutputSchema = Type.Object(
     { ...outputSchema.properties, job: savedCommandSchema },
     { additionalProperties: false },
 );
+
+type SavedJob = Omit<StaticDecode<typeof savedCommandSchema>, "kind"> & {
+    kind: CommandSnapshot["kind"];
+};
+
+type SavedOutput = { job: SavedJob; output: string; truncated: boolean };
+export type Result = ({ kind: "available" } & SavedOutput) | { kind: "unavailable" };
+
 const jobResultSchema = Type.Object({ details: savedCommandSchema });
 const outputResultSchema = Type.Object({ details: savedOutputSchema });
+const savedOutputValidator = Compile(savedOutputSchema);
 const startValidator = Compile(startArgsSchema);
 const jobValidator = Compile(jobArgsSchema);
 const resultValidator = Compile(Type.Union([jobResultSchema, outputResultSchema]));
 const waitValidator = Compile(waitArgsSchema);
-const waitResultValidator = Compile(Type.Object({ details: waitOutputSchema }));
+const waitResultValidator = Compile(
+    Type.Object({
+        details: Type.Object(
+            { ...waitOutputSchema.properties, jobs: Type.Array(savedOutputSchema) },
+            { additionalProperties: false },
+        ),
+    }),
+);
 
 function parseWait(value: unknown): WaitArgs | undefined {
     try {
@@ -62,7 +78,14 @@ function parseWait(value: unknown): WaitArgs | undefined {
 function parseWaitResult(value: unknown): WaitResult {
     try {
         const parsed = waitResultValidator.Parse(value);
-        return { kind: "available", jobs: parsed.details.jobs };
+
+        return {
+            kind: "available",
+            jobs: parsed.details.jobs.map((result) => ({
+                ...result,
+                job: { ...result.job, kind: result.job.kind ?? "task" },
+            })),
+        };
     } catch {
         return { kind: "unavailable" };
     }
@@ -154,6 +177,33 @@ function outputLines(result: Result, expanded: boolean): string[] {
     }
 
     return lines;
+}
+
+export function parseResultDetails(details: unknown): Result {
+    try {
+        const parsed = savedOutputValidator.Parse(details);
+        return {
+            kind: "available",
+            ...parsed,
+            job: { ...parsed.job, kind: parsed.job.kind ?? "task" },
+        };
+    } catch {
+        return { kind: "unavailable" };
+    }
+}
+
+/** Shows a result delivered as a message: a status line, plus output when expanded. */
+export function renderResultMessage(
+    result: Result,
+    options: Pick<ToolRenderResultOptions, "expanded">,
+    theme: RenderTheme,
+): Component {
+    let tone: "accent" | "success" | "error" | "dim" = "error";
+    if (result.kind === "available") tone = commandStatus(result.job).tone;
+
+    const [label = "", ...rest] = outputLines(result, options.expanded);
+    const title = theme.fg("accent", theme.bold("Background result"));
+    return new Text([`${title} ${theme.fg(tone, label)}`, ...rest].join("\n"), 1, 0);
 }
 
 export function renderOutputResult(
