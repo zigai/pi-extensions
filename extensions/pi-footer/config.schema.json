@@ -16,6 +16,20 @@
       "default": "·",
       "description": "Text placed between visible footer slots."
     },
+    "thinkingStyle": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "squares"
+        },
+        {
+          "type": "string",
+          "const": "text"
+        }
+      ],
+      "default": "squares",
+      "description": "Thinking level appearance: five-square meter or the original text-only label."
+    },
     "showGitAheadBehind": {
       "type": "boolean",
       "default": false,

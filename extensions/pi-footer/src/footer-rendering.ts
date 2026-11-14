@@ -1,3 +1,4 @@
+import { thinkingDisplay } from "./thinking-display.ts";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 import { getFooterSlotSnapshots, subscribeFooterSlotUpdates } from "./footer-slot-api.ts";
@@ -222,6 +223,7 @@ function buildFooterItems(
     ctx: FooterContext,
     footerData: FooterData,
     thinkingLevel: string,
+    thinkingStyle: FooterConfig["thinkingStyle"],
     customSlots: readonly FooterSlotSnapshot[],
     gitAheadBehindSource: GitAheadBehindSource | undefined,
 ): Map<FooterSlotId, FooterItem> {
@@ -255,9 +257,11 @@ function buildFooterItems(
         text: modelLabel,
         colors: { bg: "", fg: "" },
     });
+    let thinkingText = thinkingLevel;
+    if (thinkingStyle === "squares") thinkingText = thinkingDisplay(thinkingLevel);
     items.set("thinking", {
         key: "thinking",
-        text: thinkingLevel,
+        text: thinkingText,
         colors: { bg: "", fg: "" },
     });
     items.set("context", {
@@ -388,6 +392,7 @@ export function createFooterComponent(
                 ctx,
                 footerData,
                 getThinkingLevel(),
+                config.thinkingStyle,
                 customSlots,
                 activeGitAheadBehindSource,
             );

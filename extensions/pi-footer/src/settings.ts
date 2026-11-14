@@ -46,6 +46,7 @@ const FooterConfigSchema = Type.Object(
     {
         $schema: Type.Optional(Type.String()),
         separator: Type.Optional(Type.String()),
+        thinkingStyle: Type.Optional(Type.Union([Type.Literal("squares"), Type.Literal("text")])),
         showGitAheadBehind: Type.Optional(Type.Boolean()),
         layout: Type.Optional(FooterLayoutSchema),
     },
@@ -69,6 +70,7 @@ const FOOTER_CUSTOM_SLOT_ID_REGEX = new RegExp(FOOTER_CUSTOM_SLOT_ID_PATTERN);
 
 export const DEFAULT_FOOTER_CONFIG: FooterConfig = {
     separator: "·",
+    thinkingStyle: "squares",
     showGitAheadBehind: false,
     layout: {
         left: [...FOOTER_LAYOUT.left],
@@ -173,6 +175,7 @@ function buildParsedFooterSettings(
 ): FooterSettingsParseResult {
     if (
         parsed.separator === undefined &&
+        parsed.thinkingStyle === undefined &&
         parsed.showGitAheadBehind === undefined &&
         parsed.layout === undefined
     ) {
@@ -189,6 +192,10 @@ function buildParsedFooterSettings(
         } else {
             nextSettings.separator = sanitized;
         }
+    }
+
+    if (parsed.thinkingStyle !== undefined) {
+        nextSettings.thinkingStyle = parsed.thinkingStyle;
     }
 
     if (parsed.showGitAheadBehind !== undefined) {
@@ -210,6 +217,7 @@ function buildParsedFooterSettings(
 function buildFooterConfig(settings: FooterSettings): FooterConfig {
     return {
         separator: settings.separator ?? DEFAULT_FOOTER_CONFIG.separator,
+        thinkingStyle: settings.thinkingStyle ?? DEFAULT_FOOTER_CONFIG.thinkingStyle,
         showGitAheadBehind: settings.showGitAheadBehind ?? DEFAULT_FOOTER_CONFIG.showGitAheadBehind,
         layout: {
             left: cloneSlotIds(settings.layout?.left ?? DEFAULT_FOOTER_CONFIG.layout.left),
@@ -287,6 +295,7 @@ export function resolveFooterConfig(
         return {
             config: {
                 separator: config.separator,
+                thinkingStyle: config.thinkingStyle,
                 showGitAheadBehind: config.showGitAheadBehind,
                 layout: buildDefaultFooterLayout(),
             },

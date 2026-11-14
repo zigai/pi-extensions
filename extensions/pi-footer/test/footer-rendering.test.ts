@@ -415,3 +415,43 @@ test("createFooterComponent disposes the branch-change subscription", () => {
     component.dispose();
     assert.equal(unsubscribed, true);
 });
+
+test.each([
+    ["off", "□□□□□ off"],
+    ["minimal", "□□□□□ minimal"],
+    ["low", "■□□□□ low"],
+    ["medium", "■■□□□ medium"],
+    ["high", "■■■□□ high"],
+    ["xhigh", "■■■■□ xhigh"],
+    ["max", "■■■■■ max"],
+    ["auto", "□□□□□ auto"],
+])("renders OMP's thinking meter for %s", (level, expected) => {
+    const component = createFooterComponent(
+        footerContext(),
+        footerData(null, new Map()),
+        () => level,
+        () => undefined,
+        {
+            ...DEFAULT_FOOTER_CONFIG,
+            layout: { left: ["model", "thinking"], right: [], hidden: [] },
+        },
+    );
+    assert.equal(stripAnsi(component.render(80)[0] ?? "").trim(), `gpt-5 · ${expected}`);
+});
+
+test("text thinking style restores the original model and level display", () => {
+    const ctx = footerContext();
+    ctx.model = { provider: "openai-codex", id: "gpt-6.1-sol", name: "GPT-6.1 Sol" };
+    const component = createFooterComponent(
+        ctx,
+        footerData(null, new Map()),
+        () => "medium",
+        () => undefined,
+        {
+            ...DEFAULT_FOOTER_CONFIG,
+            thinkingStyle: "text",
+            layout: { left: ["model", "thinking"], right: [], hidden: [] },
+        },
+    );
+    assert.equal(stripAnsi(component.render(80)[0] ?? "").trim(), "GPT-6.1 Sol · medium");
+});

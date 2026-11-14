@@ -26,6 +26,7 @@ test("loadFooterSettings scaffolds missing global config and schema", async () =
         assert.deepEqual(JSON.parse(await readFile(configPath, "utf8")), {
             $schema: "./schemas/pi-footer.schema.json",
             separator: "·",
+            thinkingStyle: "squares",
             showGitAheadBehind: false,
             layout: {
                 left: ["path", "branch", "provider", "model", "thinking"],
@@ -280,4 +281,19 @@ test("resolveFooterConfig lets hidden slots appear in both configured sides", ()
         hidden: ["model"],
     });
     assert.deepEqual(loaded.errors, []);
+});
+
+test("thinking style defaults to squares and accepts layered text-only configuration", () => {
+    assert.equal(resolveFooterConfig([]).config.thinkingStyle, "squares");
+    const loaded = resolveFooterConfig([
+        { label: "global", settings: { thinkingStyle: "squares" } },
+        { label: "project", settings: { thinkingStyle: "text" } },
+    ]);
+    assert.deepEqual(loaded.errors, []);
+    assert.equal(loaded.config.thinkingStyle, "text");
+    const invalid = resolveFooterConfig([
+        { label: "invalid", settings: { thinkingStyle: "other" } },
+    ]);
+    assert.equal(invalid.config.thinkingStyle, "squares");
+    assert.equal(invalid.errors.length, 1);
 });

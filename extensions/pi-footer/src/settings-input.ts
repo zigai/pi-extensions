@@ -13,6 +13,7 @@ export const FOOTER_LAYOUT = {
 
 export type FooterConfig = {
     readonly separator: string;
+    readonly thinkingStyle: "squares" | "text";
     readonly showGitAheadBehind: boolean;
     readonly layout: FooterLayout;
 };
@@ -30,6 +31,7 @@ export type FooterSettingsSource = {
 export type FooterSettings = {
     $schema?: string;
     separator?: string;
+    thinkingStyle?: "squares" | "text";
     showGitAheadBehind?: boolean;
     layout?: FooterLayoutSettings;
 };
@@ -81,6 +83,11 @@ export const extensionSettingsInput = {
             separator: Type.String({
                 default: "·",
                 description: "Text placed between visible footer slots.",
+            }),
+            thinkingStyle: Type.Union([Type.Literal("squares"), Type.Literal("text")], {
+                default: "squares",
+                description:
+                    "Thinking level appearance: five-square meter or the original text-only label.",
             }),
             showGitAheadBehind: Type.Boolean({
                 default: false,
