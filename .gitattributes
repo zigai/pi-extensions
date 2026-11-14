@@ -1,7 +1,4 @@
-extensions/*/README.md text eol=lf
-extensions/*/config.schema.json text eol=lf
-extensions/*/src/settings.prevalidated.ts text eol=lf
-packages/*/README.md text eol=lf
+* text=auto eol=lf
 
 # Hash-pinned upstream prompts retain their original trailing whitespace.
 extensions/pi-codex-core/src/prompt/codex-gpt-*.md whitespace=-blank-at-eol,-blank-at-eof

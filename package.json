@@ -31,7 +31,7 @@
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
     "build:internals": "npm run build -w @zigai/pi-extension-internals",
-    "architecture:check": "node scripts/architecture-check.ts",
+    "architecture:check": "npm run build && node scripts/architecture-check.ts",
     "collection:generate": "node scripts/generate-collection.ts generate",
     "collection:check": "node scripts/generate-collection.ts check",
     "test": "npm run build && node scripts/workspace-tasks.ts test",
