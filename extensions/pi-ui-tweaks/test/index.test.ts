@@ -347,3 +347,35 @@ test("compact startup never patches non-TUI sessions", async () => {
         await shutdown(sessionShutdown, headlessContext());
     }
 });
+
+test("session_start installs the startup diagnostic filter before host resource presentation and shutdown restores it", async () => {
+    const marker = Symbol.for("zigai.pi-ui-tweaks.identical-skill-warnings-patch");
+    const original = Object.getOwnPropertyDescriptor(
+        InteractiveMode.prototype,
+        "showLoadedResources",
+    );
+    const handlers = registerLifecycleHandlers();
+    const start = handlers.get("session_start");
+    const shutdown = handlers.get("session_shutdown");
+    assert.ok(start);
+    assert.ok(shutdown);
+    const context = { ...headlessContext(), hasUI: true };
+    try {
+        // Pi 1.5 bindCurrentSessionExtensions awaits bindExtensions/session_start
+        // before calling showLoadedResources, so this is the presentation boundary.
+        await start(sessionStart, context);
+        assert.equal(Object.hasOwn(InteractiveMode.prototype, marker), true);
+        assert.notDeepEqual(
+            Object.getOwnPropertyDescriptor(InteractiveMode.prototype, "showLoadedResources"),
+            original,
+        );
+    } finally {
+        await shutdown(sessionShutdown, context);
+    }
+
+    assert.equal(Object.hasOwn(InteractiveMode.prototype, marker), false);
+    assert.deepEqual(
+        Object.getOwnPropertyDescriptor(InteractiveMode.prototype, "showLoadedResources"),
+        original,
+    );
+});

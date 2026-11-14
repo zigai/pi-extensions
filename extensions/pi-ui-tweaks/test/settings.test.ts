@@ -34,6 +34,7 @@ test("loadUiTweaksSettings scaffolds missing global config and schema", async ()
             compactStartup: false,
             dimInputBorder: true,
             hideAutocompleteScrollInfo: true,
+            hideIdenticalSkillWarnings: true,
             hideModelChangeStatus: true,
             hideModelProviderHint: true,
             hideSlashCommandSourceTags: true,
@@ -82,6 +83,7 @@ test("ui tweaks settings default to enabled tweaks", () => {
     assert.equal(loaded.config.compactModelSelector, true);
     assert.equal(loaded.config.compactStartup, false);
     assert.equal(loaded.config.hideAutocompleteScrollInfo, true);
+    assert.equal(loaded.config.hideIdenticalSkillWarnings, true);
     assert.equal(loaded.config.hideModelChangeStatus, true);
     assert.equal(loaded.config.hideModelProviderHint, true);
     assert.equal(loaded.config.hideSlashCommandSourceTags, true);
@@ -156,6 +158,7 @@ test("ui tweaks settings merge sources in precedence order", () => {
     assert.equal(loaded.config.bashExecPromptSpacing, true);
     assert.equal(loaded.config.compactModelSelector, false);
     assert.equal(loaded.config.hideAutocompleteScrollInfo, true);
+    assert.equal(loaded.config.hideIdenticalSkillWarnings, true);
     assert.equal(loaded.config.hideModelChangeStatus, true);
     assert.equal(loaded.config.hideModelProviderHint, true);
     assert.equal(loaded.config.hideSlashCommandSourceTags, false);
@@ -190,6 +193,7 @@ test("ui tweaks enabled false disables every tweak", () => {
     assert.equal(loaded.config.bashExecPromptSpacing, false);
     assert.equal(loaded.config.compactModelSelector, false);
     assert.equal(loaded.config.hideAutocompleteScrollInfo, false);
+    assert.equal(loaded.config.hideIdenticalSkillWarnings, false);
     assert.equal(loaded.config.hideModelChangeStatus, false);
     assert.equal(loaded.config.hideModelProviderHint, false);
     assert.equal(loaded.config.hideSlashCommandSourceTags, false);
@@ -234,6 +238,7 @@ test("ui tweaks settings report invalid custom values", () => {
     assert.equal(loaded.config.bashExecPromptSpacing, true);
     assert.equal(loaded.config.compactModelSelector, true);
     assert.equal(loaded.config.hideAutocompleteScrollInfo, true);
+    assert.equal(loaded.config.hideIdenticalSkillWarnings, true);
     assert.equal(loaded.config.hideModelChangeStatus, true);
     assert.equal(loaded.config.hideModelProviderHint, true);
     assert.equal(loaded.config.hideSlashCommandSourceTags, true);
@@ -363,4 +368,13 @@ test("off-peak rules are opt-in, exact, and disabled with the extension", () => 
     ]);
     assert.notDeepEqual(invalid.errors, []);
     assert.deepEqual(invalid.config.offPeakRules, []);
+});
+
+test("identical skill warning suppression can be disabled independently", () => {
+    const loaded = resolveUiTweaksConfig([
+        { label: "test", settings: { hideIdenticalSkillWarnings: false } },
+    ]);
+    assert.deepEqual(loaded.errors, []);
+    assert.equal(loaded.config.hideIdenticalSkillWarnings, false);
+    assert.equal(loaded.config.hideModelChangeStatus, true);
 });

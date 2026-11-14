@@ -66,6 +66,7 @@ export type UiTweaksConfig = {
     readonly compactStartup: boolean;
     readonly dimInputBorder: boolean;
     readonly hideAutocompleteScrollInfo: boolean;
+    readonly hideIdenticalSkillWarnings: boolean;
     readonly hideModelChangeStatus: boolean;
     readonly hideModelProviderHint: boolean;
     readonly hideSlashCommandSourceTags: boolean;
@@ -108,6 +109,7 @@ export type UiTweaksSettings = {
     dimInputBorder?: boolean;
     enabled?: boolean;
     hideAutocompleteScrollInfo?: boolean;
+    hideIdenticalSkillWarnings?: boolean;
     hideModelChangeStatus?: boolean;
     hideModelProviderHint?: boolean;
     hideSlashCommandSourceTags?: boolean;
@@ -178,6 +180,11 @@ export const extensionSettingsInput = {
             hideAutocompleteScrollInfo: Type.Boolean({
                 default: true,
                 description: "Hide autocomplete scroll-position text.",
+            }),
+            hideIdenticalSkillWarnings: Type.Boolean({
+                default: true,
+                description:
+                    "Hide startup skill-name collisions only when both complete skill bundles are byte-identical within conservative comparison limits.",
             }),
             hideModelChangeStatus: Type.Boolean({
                 default: true,

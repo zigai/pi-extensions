@@ -42,6 +42,7 @@ const UiTweaksConfigSchema = Type.Object(
         dimInputBorder: Type.Optional(Type.Boolean()),
         enabled: Type.Optional(Type.Boolean()),
         hideAutocompleteScrollInfo: Type.Optional(Type.Boolean()),
+        hideIdenticalSkillWarnings: Type.Optional(Type.Boolean()),
         hideModelChangeStatus: Type.Optional(Type.Boolean()),
         hideModelProviderHint: Type.Optional(Type.Boolean()),
         hideSlashCommandSourceTags: Type.Optional(Type.Boolean()),
@@ -74,6 +75,7 @@ const DEFAULT_UI_TWEAKS_CONFIG: UiTweaksConfig = {
     compactStartup: false,
     dimInputBorder: true,
     hideAutocompleteScrollInfo: true,
+    hideIdenticalSkillWarnings: true,
     hideModelChangeStatus: true,
     hideModelProviderHint: true,
     hideSlashCommandSourceTags: true,
@@ -150,6 +152,7 @@ function buildUiTweaksConfig(settings: UiTweaksSettings): UiTweaksConfig {
             compactStartup: false,
             dimInputBorder: false,
             hideAutocompleteScrollInfo: false,
+            hideIdenticalSkillWarnings: false,
             hideModelChangeStatus: false,
             hideModelProviderHint: false,
             hideSlashCommandSourceTags: false,
@@ -188,6 +191,9 @@ function buildUiTweaksConfig(settings: UiTweaksSettings): UiTweaksConfig {
         hideAutocompleteScrollInfo:
             settings.hideAutocompleteScrollInfo ??
             DEFAULT_UI_TWEAKS_CONFIG.hideAutocompleteScrollInfo,
+        hideIdenticalSkillWarnings:
+            settings.hideIdenticalSkillWarnings ??
+            DEFAULT_UI_TWEAKS_CONFIG.hideIdenticalSkillWarnings,
         hideModelChangeStatus:
             settings.hideModelChangeStatus ?? DEFAULT_UI_TWEAKS_CONFIG.hideModelChangeStatus,
         hideModelProviderHint:

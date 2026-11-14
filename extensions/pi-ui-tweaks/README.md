@@ -14,6 +14,12 @@ The Skills row reports the loaded count and **estimated tokens in the startup sk
 
 Counts are cached by the exact skill-section content, estimator revision and Pi version, in memory and across launches. The bounded 32-entry cache stores only hashes and counts at `$XDG_CACHE_HOME/pi-ui-tweaks/skill-tokens-v1.json` (normally `~/.cache/pi-ui-tweaks/skill-tokens-v1.json`). Cache hits do not estimate or rewrite the file. Changed descriptions/locations invalidate the relevant entry; unrelated context or skill-body-only changes do not. Cache corruption or unavailable storage falls back safely. No skill-file reads, tokenization, cache I/O or prompt construction occurs during header rendering.
 
+## Identical skill warnings
+
+By default, startup hides skill-name collision warnings only when both `SKILL.md` bundles have matching relative entries, file bytes and executable permissions, including references and scripts. This changes presentation only: Pi's selected skill and stored diagnostics remain untouched. Set `hideIdenticalSkillWarnings: false` to retain native warnings.
+
+Root directory symlinks are resolved, but nested symlinks, special files, unreadable or changing entries, and loose Markdown skills retain their warnings. Each presentation read shares a limit of 2,048 entries and 16 MiB of file bytes across comparisons, with at most 16 directory levels. Exceeding a limit preserves the warning; equality is not cached across reads.
+
 ## Install
 
 ```sh
@@ -36,6 +42,7 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-ui-tweaks.json`
 | `compactStartup`                       | boolean                                                     | `false` | Show a compact startup header; expand tools to reveal native help and loaded resources.                                                                                                                                                                                                                                                                                                                             |
 | `dimInputBorder`                       | boolean                                                     | `true`  | Dim the input editor's horizontal border lines.                                                                                                                                                                                                                                                                                                                                                                     |
 | `hideAutocompleteScrollInfo`           | boolean                                                     | `true`  | Hide autocomplete scroll-position text.                                                                                                                                                                                                                                                                                                                                                                             |
+| `hideIdenticalSkillWarnings`           | boolean                                                     | `true`  | Hide startup skill-name collisions only when both complete skill bundles are byte-identical within conservative comparison limits.                                                                                                                                                                                                                                                                                  |
 | `hideModelChangeStatus`                | boolean                                                     | `true`  | Hide model-change status messages.                                                                                                                                                                                                                                                                                                                                                                                  |
 | `hideModelProviderHint`                | boolean                                                     | `true`  | Hide provider hints in the model selector.                                                                                                                                                                                                                                                                                                                                                                          |
 | `hideSlashCommandSourceTags`           | boolean                                                     | `true`  | Hide source tags in slash-command completion.                                                                                                                                                                                                                                                                                                                                                                       |
@@ -68,6 +75,7 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-ui-tweaks.json`
   "compactStartup": false,
   "dimInputBorder": true,
   "hideAutocompleteScrollInfo": true,
+  "hideIdenticalSkillWarnings": true,
   "hideModelChangeStatus": true,
   "hideModelProviderHint": true,
   "hideSlashCommandSourceTags": true,

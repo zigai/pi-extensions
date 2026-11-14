@@ -56,6 +56,11 @@
       "default": true,
       "description": "Hide autocomplete scroll-position text."
     },
+    "hideIdenticalSkillWarnings": {
+      "type": "boolean",
+      "default": true,
+      "description": "Hide startup skill-name collisions only when both complete skill bundles are byte-identical within conservative comparison limits."
+    },
     "hideModelChangeStatus": {
       "type": "boolean",
       "default": true,

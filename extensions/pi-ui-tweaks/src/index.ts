@@ -16,6 +16,7 @@ import { installBashExecSpacingEditor } from "./bash-exec-spacing.ts";
 import { installClearCopiedSelectionPatch } from "./clear-copied-selection.ts";
 import { installNeutralBorderColorPatch } from "./border-color.ts";
 import { installCompactStartupBootstrap, installCompactStartupPatch } from "./compact-startup.ts";
+import { installIdenticalSkillWarningsPatch } from "./identical-skill-warnings.ts";
 import { installInputBorderPatch } from "./input-border.ts";
 import { installInputPromptPrefixPatch } from "./input-prompt-prefix.ts";
 import { installModelSelectorPeakPatch } from "./model-selector-peak.ts";
@@ -109,7 +110,11 @@ async function installUiTweaks(
         collect(installModelSelectorPeakPatch(config, () => ctx.ui.theme));
         collect(installModelStatusPatch(config));
 
-        if (ctx.hasUI) collect(installCompactStartupPatch(config));
+        if (ctx.hasUI) {
+            collect(installIdenticalSkillWarningsPatch(config));
+            collect(installCompactStartupPatch(config));
+        }
+
         collect(installPasteCollapsePatch(config));
         collect(installPasteCollapseEditor(ctx, config));
         collect(installPreserveCompactionHistoryPatch(config));
