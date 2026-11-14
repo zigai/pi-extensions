@@ -25,7 +25,6 @@ import {
     retireSyntaxHighlightSource,
     type SyntaxHighlightOptions,
 } from "../../../rendering/syntax/highlighter.ts";
-import { filePathText } from "../../../rendering/path.ts";
 import { createSyntaxComponent } from "../../../rendering/syntax/component-owner.ts";
 import {
     isPreviewMetaLine,
@@ -343,7 +342,7 @@ const initialShellHighlightState: ShellHighlightState = {
     subcommandSeen: false,
 };
 
-// Every color a highlighted shell line can contain, including both path styles.
+// Every color a highlighted shell line can contain.
 const SHELL_LINE_COLORS: readonly ThemeColor[] = [
     "dim",
     "syntaxFunction",
@@ -361,9 +360,7 @@ let shellLineCache: { readonly style: string; readonly lines: Map<string, string
 const heredocRowsCache = new Map<string, ReadonlySet<number>>();
 
 function shellLineStyle(theme: GlowupRenderTheme): string {
-    const samples = SHELL_LINE_COLORS.map((color) => theme.fg(color, "x"));
-    samples.push(filePathText(theme, "AGENTS.md"), filePathText(theme, "src/x"));
-    return samples.join("\0");
+    return SHELL_LINE_COLORS.map((color) => theme.fg(color, "x")).join("\0");
 }
 
 // Shell lines repeat across widths, render passes, and calls; their colors depend only on
@@ -1390,15 +1387,7 @@ function styleShellFlagToken(theme: GlowupRenderTheme, token: string): string {
 
 function shellPart(theme: GlowupRenderTheme, part: WordPart, quoted: boolean): string {
     switch (part.type) {
-        case "SingleQuoted": {
-            if (!part.text.endsWith("'")) return shellString(theme, part.text);
-
-            const value = part.text.slice(1, -1);
-            if (isPathLikeShellWord(value))
-                return `${shellString(theme, "'")}${filePathText(theme, value)}${shellString(theme, "'")}`;
-
-            return shellString(theme, part.text);
-        }
+        case "SingleQuoted":
         case "AnsiCQuoted":
             return shellString(theme, part.text);
         case "DoubleQuoted":
@@ -1425,17 +1414,11 @@ function shellPart(theme: GlowupRenderTheme, part: WordPart, quoted: boolean): s
             break;
     }
 
-    if (part.type === "Literal" && isPathLikeShellWord(part.text))
-        return filePathText(theme, part.text);
-
     if (quoted) return shellString(theme, part.text);
     return shellText(theme, part.text);
 }
 
 function shellValue(theme: GlowupRenderTheme, token: string): string {
-    // Plain words have no parsed parts; keep the same path styling as operands.
-    if (!/["'`$\\]/u.test(token) && isPathLikeShellWord(token)) return filePathText(theme, token);
-
     try {
         const command = parse(`: ${token}`).commands[0]?.command;
         if (command?.type === "Command") {
@@ -1562,7 +1545,7 @@ function styleShellToken(
         }
 
         let styled = shellCommand(theme, token);
-        if (isPathLikeShellWord(token)) styled = filePathText(theme, token);
+        if (isPathLikeShellWord(token)) styled = shellText(theme, token);
 
         return {
             styled,
@@ -1582,10 +1565,6 @@ function styleShellToken(
             styled: shellCommand(theme, token),
             state: { ...state, expectingFlagValue: false, subcommandSeen: true },
         };
-    }
-
-    if (isPathLikeShellWord(token)) {
-        return { styled: filePathText(theme, token), state: shellStateAfterOperand(state) };
     }
 
     return { styled: shellText(theme, token), state: shellStateAfterOperand(state) };

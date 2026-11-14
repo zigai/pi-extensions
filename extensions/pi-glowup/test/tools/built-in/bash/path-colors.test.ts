@@ -20,52 +20,45 @@ function render(code: string, expanded = false, width = 240): string[] {
     ).render(width);
 }
 
-describe("Bash semantic path colors", () => {
-    it.each([false, true])("uses the current theme path accent (expanded %s)", (expanded) => {
-        const code = "cd /work/project; cat modes/interactive/footer.js package.json";
+describe("Bash path rendering", () => {
+    it.each([false, true])("shows paths in the plain text color (expanded %s)", (expanded) => {
+        const code = "cd /work/project; cat modes/interactive/footer.js package.json AGENTS.md";
         const rendered = render(code, expanded).join("\n");
-        for (const path of ["/work/project", "modes/interactive/footer.js", "package.json"]) {
-            expect(rendered).toContain(theme.fg("accent", path));
-        }
-
-        expect(stripVTControlCharacters(rendered)).toContain(code);
-    });
-
-    it("colors quoted paths, flag values, assignments, redirects, and executable paths", () => {
-        const code = `OUT=/tmp/output.log ./bin/run --config=./config.json --file 'src/my file.ts' > "/tmp/my output.log"`;
-        const rendered = render(code).join("\n");
         for (const path of [
-            "/tmp/output.log",
-            "./bin/run",
-            "./config.json",
-            "src/my file.ts",
-            "/tmp/my output.log",
+            "/work/project",
+            "modes/interactive/footer.js",
+            "package.json",
+            "AGENTS.md",
         ]) {
-            expect(rendered).toContain(theme.fg("accent", path));
+            expect(rendered).toContain(theme.fg("toolTitle", path));
         }
 
+        expect(rendered).not.toContain(theme.getFgAnsi("accent"));
+        expect(rendered).not.toContain(theme.getFgAnsi("customMessageLabel"));
         expect(stripVTControlCharacters(rendered)).toContain(code);
     });
 
-    it("uses the instruction/skill color rather than the ordinary path accent", () => {
-        const paths = [
+    it("keeps quoted arguments containing slashes in the string color", () => {
+        const rendered = render(
+            `node eval 'items.filter(a=>/65M|75M/i.test(a.text))' --file 'src/my file.ts'`,
+        ).join("\n");
+
+        expect(rendered).toContain(
+            theme.fg("syntaxString", "'items.filter(a=>/65M|75M/i.test(a.text))'"),
+        );
+
+        expect(rendered).toContain(theme.fg("syntaxString", "'src/my file.ts'"));
+    });
+
+    it("colors instruction read targets apart from ordinary read targets", () => {
+        for (const path of [
             "AGENTS.md",
             "/work/.pi/agent/skills/review/SKILL.md",
             "skills/review/SKILL.md",
-        ];
-
-        const rendered = render(`cat ${paths.join(" ")}`).join("\n");
-        for (const path of paths) {
-            expect(rendered).toContain(theme.fg("customMessageLabel", path));
+        ])
             expect(formatPathTarget(theme, path)).toBe(theme.fg("customMessageLabel", path));
-        }
-    });
 
-    it("keeps non-markdown skill files in the ordinary path accent", () => {
         const script = "/work/.pi/agent/skills/review/scripts/run.ts";
-        const rendered = render(`bun run ${script} --check`).join("\n");
-        expect(rendered).toContain(theme.fg("accent", script));
-        expect(rendered).not.toContain(theme.getFgAnsi("customMessageLabel"));
         expect(formatPathTarget(theme, script)).toBe(theme.fg("accent", script));
         expect(
             formatPathTarget(theme, "/work/.pi/agent/skills/review/scripts/run.t", {
@@ -103,7 +96,9 @@ describe("Bash semantic path colors", () => {
         for (const width of [24, 60, 120]) {
             const lines = render(code, true, width);
             for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
-            expect(lines.join("\n")).toContain(theme.getFgAnsi("accent"));
+            expect(stripVTControlCharacters(lines.join("")).replaceAll(/\s/gu, "")).toContain(
+                code.replaceAll(" ", ""),
+            );
         }
     });
 });

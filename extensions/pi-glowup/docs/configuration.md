@@ -97,7 +97,7 @@ For compatibility with the previous appearance, `addedRowBackground` and
 | `scriptPreview.showPrologueOmission`      | `false`          | Show a count row for omitted leading setup imports.             |
 | `scriptPreview.shellLayout`               | `"auto"`         | Choose when composed Bash commands are safely reflowed.         |
 | `scriptPreview.shellOperatorPosition`     | `"trailing"`     | Place Bash chain operators before or after reflowed breaks.     |
-| `scriptPreview.shellOutputStyle`          | `"terminal"`     | Show Bash output flush left, or behind a dim `│` gutter.        |
+| `scriptPreview.shellOutputStyle`          | `"gutter"`       | Show Bash output flush left, or behind a dim `▏` gutter.        |
 | `scriptPreview.formatters`                | `{}`             | Commands that format script previews through stdin/stdout.      |
 
 ### Render diagnostics
@@ -195,7 +195,7 @@ events. Offsets are UTF-16 indices into the original command.
     "showPrologueOmission": false,
     "shellLayout": "auto",
     "shellOperatorPosition": "trailing",
-    "shellOutputStyle": "terminal",
+    "shellOutputStyle": "gutter",
     "formatters": {}
   }
 }

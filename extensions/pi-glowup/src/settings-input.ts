@@ -61,7 +61,7 @@ const DEFAULT_SCRIPT_PREVIEW = {
     showPrologueOmission: false,
     shellLayout: "auto",
     shellOperatorPosition: "trailing",
-    shellOutputStyle: "terminal",
+    shellOutputStyle: "gutter",
     formatters: {},
 } as const;
 
@@ -477,7 +477,7 @@ const scriptPreviewSchema = Type.Object(
         }),
         shellOutputStyle: Type.Union([Type.Literal("terminal"), Type.Literal("gutter")], {
             description:
-                "Show Bash command output flush left like a terminal, or behind a dim │ gutter.",
+                "Show Bash command output flush left like a terminal, or behind a dim ▏ gutter.",
         }),
         formatters: Type.Record(Type.String(), scriptFormatterProfileSchema, {
             description:

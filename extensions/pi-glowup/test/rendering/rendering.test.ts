@@ -1033,7 +1033,7 @@ describe("Glowup rendering helpers", () => {
         expect(rendered).toContain("<syntaxFunction>set</syntaxFunction>");
         expect(rendered).toContain("<syntaxFunction>find</syntaxFunction>");
         expect(rendered).toContain("<toolTitle>pipefail</toolTitle>");
-        expect(rendered).toContain("<accent>/tmp/sample-session/env.sh</accent>");
+        expect(rendered).toContain("<toolTitle>/tmp/sample-session/env.sh</toolTitle>");
 
         expect(rendered).toContain("<dim># Ensure a clean input before demo 1.</dim>");
         expect(rendered).toContain(
@@ -1045,8 +1045,8 @@ describe("Glowup rendering helpers", () => {
         expect(rendered).toContain("<syntaxKeyword>-name</syntaxKeyword>");
         expect(rendered).toContain("<syntaxKeyword>-80</syntaxKeyword>");
         expect(rendered).toContain("<toolTitle>3</toolTitle>");
-        expect(rendered).toContain("<accent>package.json</accent>");
-        expect(rendered).not.toContain("<accent>pipefail</accent>");
+        expect(rendered).toContain("<toolTitle>package.json</toolTitle>");
+        expect(rendered).not.toContain("<accent>");
         expect(rendered).not.toContain("<toolOutput></toolOutput>");
         expect(rendered).not.toContain("<toolDiffRemoved>-maxdepth</toolDiffRemoved>");
         expect(rendered).not.toContain("<toolDiffRemoved>-name</toolDiffRemoved>");
@@ -1064,14 +1064,16 @@ describe("Glowup rendering helpers", () => {
             .join("\n");
 
         expect(rendered).toContain("<syntaxFunction>python3</syntaxFunction>");
-        expect(rendered).toContain("<accent>manage.py</accent>");
+        expect(rendered).toContain("<toolTitle>manage.py</toolTitle>");
         expect(rendered).toContain("<syntaxFunction>validate</syntaxFunction>");
         expect(rendered).toContain("<syntaxKeyword>--os</syntaxKeyword>");
         expect(rendered).toContain("<toolTitle>sample</toolTitle>");
         expect(rendered).toContain("<syntaxFunction>rsync</syntaxFunction>");
         expect(rendered).toContain("<syntaxKeyword>-az</syntaxKeyword>");
-        expect(rendered).toContain("<accent>config/services/sample.toml</accent>");
-        expect(rendered).toContain("<accent>sample-host:~/config/services/sample.toml</accent>");
+        expect(rendered).toContain("<toolTitle>config/services/sample.toml</toolTitle>");
+        expect(rendered).toContain(
+            "<toolTitle>sample-host:~/config/services/sample.toml</toolTitle>",
+        );
 
         expect(rendered).not.toContain("<dim>--</dim>");
         expect(rendered).not.toContain("<dim>-</dim><syntaxOperator>az</syntaxOperator>");

@@ -503,7 +503,7 @@
               "const": "gutter"
             }
           ],
-          "description": "Show Bash command output flush left like a terminal, or behind a dim │ gutter."
+          "description": "Show Bash command output flush left like a terminal, or behind a dim ▏ gutter."
         },
         "formatters": {
           "type": "object",
@@ -798,7 +798,7 @@
         "showPrologueOmission": false,
         "shellLayout": "auto",
         "shellOperatorPosition": "trailing",
-        "shellOutputStyle": "terminal",
+        "shellOutputStyle": "gutter",
         "formatters": {}
       }
     },

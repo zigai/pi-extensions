@@ -874,7 +874,7 @@ export function createNativeBashFeature(
         const output = textOutput(result);
         const language = detectStructuredOutputLanguage(output);
         let prefix = "";
-        if (shellOutputStyle() === "gutter") prefix = theme.fg("dim", "│ ");
+        if (shellOutputStyle() === "gutter") prefix = theme.fg("dim", "▏ ");
 
         let outputOptions: GlowupOutputRenderOptions = {
             expanded: options.expanded,

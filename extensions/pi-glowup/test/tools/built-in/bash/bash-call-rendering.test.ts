@@ -822,13 +822,13 @@ describe("bash result rendering", () => {
         const rows = renderResult("ls", output, "gutter");
 
         expect(rows.length).toBeGreaterThan(2);
-        expect(rows.every((row) => row.startsWith("│ "))).toBe(true);
+        expect(rows.every((row) => row.startsWith("▏ "))).toBe(true);
         expect(rows.some((row) => row.includes("…"))).toBe(true);
         expect(rows.every((row) => visibleWidth(row) <= 40)).toBe(true);
     });
 
     it("uses the shell output style for interpreter script calls", () => {
         expect(renderResult(`python -c "print('hi')"`, "hi", "terminal")).toEqual(["hi"]);
-        expect(renderResult(`python -c "print('hi')"`, "hi", "gutter")).toEqual(["│ hi"]);
+        expect(renderResult(`python -c "print('hi')"`, "hi", "gutter")).toEqual(["▏ hi"]);
     });
 });

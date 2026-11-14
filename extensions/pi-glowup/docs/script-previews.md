@@ -14,7 +14,7 @@ hi
 bye
 ```
 
-`scriptPreview.shellOutputStyle` shows output flush left (`"terminal"`) or behind a dim `│` gutter (`"gutter"`).
+`scriptPreview.shellOutputStyle` shows output flush left (`"terminal"`) or behind a dim `▏` gutter (`"gutter"`, the default).
 
 ## Shell Layout
 
