@@ -1,5 +1,6 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import {
     createAgentSessionFromServices,
     createAgentSessionRuntime,
@@ -76,8 +77,16 @@ it("rejects workspace activation while busy without detaching live assistant or 
             toolName: "bash",
             args: { command: "echo sample" },
         });
+        fixture.host.chatContainer.addChild(new Text("Startup notice", 0, 0));
+
         const before = [...fixture.host.chatContainer.children];
-        expect(before).toHaveLength(2);
+        const transcript = stripVTControlCharacters(
+            before.flatMap((row) => row.render(fixture.terminal.columns)).join("\n"),
+        );
+
+        expect(transcript).toContain("Streaming");
+        expect(transcript).toContain("echo sample");
+
         const command = fixture.runner
             .getRegisteredCommands()
             .find((item) => item.name === "workspace-on");
@@ -85,7 +94,7 @@ it("rejects workspace activation while busy without detaching live assistant or 
 
         const editor = fixture.host.editor;
         await command.handler("", { ...fixture.ctx, isIdle: () => false });
-        expect(fixture.host.chatContainer.children.slice(0, 2)).toEqual(before);
+        expect(fixture.host.chatContainer.children.slice(0, before.length)).toEqual(before);
         expect(fixture.host.editor).toBe(editor);
         Workspace.assertAvailable();
         await command.handler("", { ...fixture.ctx, isIdle: () => true });

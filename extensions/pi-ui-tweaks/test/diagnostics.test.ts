@@ -21,17 +21,6 @@ type DiagnosticSession = {
 
 const sessions = new Map<boolean, DiagnosticSession>();
 
-beforeAll(async () => {
-    for (const hasUI of [true, false]) {
-        sessions.set(hasUI, await startDiagnosticSession(hasUI));
-    }
-    await Promise.all([...sessions.values()].map((session) => session.ready));
-});
-
-afterAll(async () => {
-    await Promise.all([...sessions.values()].map((session) => session.dispose()));
-});
-
 // A fresh process records the actual terminal streams, without replacing console or stream methods.
 async function startDiagnosticSession(hasUI: boolean): Promise<DiagnosticSession> {
     const directory = await mkdtemp(path.join(tmpdir(), "pi-ui-diagnostics-"));
@@ -133,9 +122,11 @@ async function startDiagnosticSession(hasUI: boolean): Promise<DiagnosticSession
         child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
             stdout += chunk;
         });
+
         child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
             stderr += chunk;
         });
+
         const finished = once(child, "close").then((): DiagnosticResult => ({
             status: child.exitCode,
             stdout,
@@ -149,9 +140,10 @@ async function startDiagnosticSession(hasUI: boolean): Promise<DiagnosticSession
                 throw new Error(`Diagnostic process exited before readiness: ${result.stderr}`);
             }),
         ]);
+
         return {
             ready,
-            run() {
+            async run() {
                 child.send("run");
                 return finished;
             },
@@ -169,6 +161,18 @@ async function startDiagnosticSession(hasUI: boolean): Promise<DiagnosticSession
         throw error;
     }
 }
+
+beforeAll(async () => {
+    for (const hasUI of [true, false]) {
+        sessions.set(hasUI, await startDiagnosticSession(hasUI));
+    }
+
+    await Promise.all([...sessions.values()].map(async (session) => session.ready));
+});
+
+afterAll(async () => {
+    await Promise.all([...sessions.values()].map(async (session) => session.dispose()));
+});
 
 test("factory routes startup, active and reload diagnostics through UI without terminal writes", async () => {
     const session = sessions.get(true);
