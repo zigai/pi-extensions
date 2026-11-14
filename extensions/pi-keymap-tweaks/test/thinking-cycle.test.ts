@@ -17,6 +17,7 @@ import {
 } from "../src/editor-keymap.ts";
 import type { KeymapTweaksConfig } from "../src/settings-input.ts";
 import {
+    cycleThinkingLevel,
     cycleThinkingLevelBackward,
     isThinkingBackwardKeyMatch,
     matchesKeyChord,
@@ -163,6 +164,22 @@ describe("cycleThinkingLevelBackward", () => {
     });
 });
 
+describe("cycleThinkingLevel", () => {
+    it("honors explicit unsupported levels and extended model efforts", () => {
+        const model = createFakeModel({
+            thinkingLevelMap: { minimal: null, low: null, xhigh: "xhigh", max: "max" },
+        });
+        const setter = (): void => undefined;
+        assert.equal(cycleThinkingLevel(model, "off", setter, 1), "medium");
+        assert.equal(cycleThinkingLevel(model, "high", setter, 1), "xhigh");
+        assert.equal(cycleThinkingLevel(model, "xhigh", setter, 1), "max");
+        assert.equal(cycleThinkingLevel(model, "max", setter, 1), "off");
+        assert.equal(cycleThinkingLevel(model, undefined, setter, 1), "off");
+        assert.equal(cycleThinkingLevel(model, undefined, setter, -1), "max");
+        assert.equal(cycleThinkingLevel(undefined, "high", setter, 1), undefined);
+    });
+});
+
 describe("matchesKeyChord and isThinkingBackwardKeyMatch", () => {
     it("matches alt+shift+tab with legacy and modern escape sequences", () => {
         assert.equal(matchesKeyChord("\x1b\x1b[Z", "alt+shift+tab"), true);
@@ -253,5 +270,43 @@ describe("editor integration with backward thinking cycle", () => {
         editor.render(80);
         editor.handleInput("\x1b\x1b[Z");
         assert.deepEqual(setCalls, []);
+    });
+});
+
+describe("OMP thinking arrow shortcuts", () => {
+    it("cycles both directions, wraps, and preserves the draft", () => {
+        let currentLevel: ThinkingLevel = "high";
+        const setCalls: ThinkingLevel[] = [];
+        const editor = createTestKeymapEditor({
+            getModel: () => createFakeModel(),
+            getThinkingLevel: () => currentLevel,
+            setThinkingLevel: (level) => {
+                currentLevel = level;
+                setCalls.push(level);
+            },
+        });
+        editor.setText("keep this draft");
+        editor.render(80);
+        editor.handleInput("\x1b[1;7C");
+        editor.handleInput("\x1b[1;7D");
+        editor.handleInput("\x1b[1;7D");
+        assert.deepEqual(setCalls, ["off", "high", "medium"]);
+        assert.equal(editor.getText(), "keep this draft");
+    });
+
+    it("warns without editing the draft for non-reasoning models", () => {
+        const notifications: string[] = [];
+        const editor = createTestKeymapEditor({
+            getModel: () => createFakeModel({ reasoning: false }),
+            getThinkingLevel: () => "off",
+            setThinkingLevel: () => assert.fail("must not change thinking"),
+            notify: (message) => notifications.push(message),
+        });
+        editor.setText("keep");
+        editor.render(80);
+        editor.handleInput("\x1b[1;7C");
+        editor.handleInput("\x1b[1;7D");
+        assert.equal(notifications.length, 2);
+        assert.equal(editor.getText(), "keep");
     });
 });

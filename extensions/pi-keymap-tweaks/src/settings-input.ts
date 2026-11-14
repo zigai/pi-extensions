@@ -7,7 +7,7 @@ export const KeymapTweaksConfigSchema = Type.Object(
         cycleThinkingBackwardKey: Type.Union([Type.String({ minLength: 1 }), Type.Null()], {
             default: DEFAULT_CYCLE_THINKING_BACKWARD_KEY,
             description:
-                "Keybinding to cycle thinking level backward (e.g. 'alt+shift+tab'). Unbound by default.",
+                "Additional keybinding to cycle thinking backward (e.g. 'alt+shift+tab'). Ctrl+Alt+Left is always available.",
         }),
     },
     { additionalProperties: false },

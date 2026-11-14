@@ -8,7 +8,11 @@ import {
 import { registerEditorEnhancer, type EditorEnhancerHandle } from "@zigai/pi-extension-internals";
 
 import type { KeymapTweaksConfig } from "./settings-input.ts";
-import { cycleThinkingLevelBackward, isThinkingBackwardKeyMatch } from "./thinking-cycle.ts";
+import {
+    cycleThinkingLevel,
+    isThinkingBackwardKeyMatch,
+    matchesKeyChord,
+} from "./thinking-cycle.ts";
 
 const KEYMAP_EDITOR_ENHANCER = Symbol.for("zigai.pi-keymap-tweaks.editor-enhancer");
 
@@ -245,16 +249,23 @@ function enhanceEditor(
 
         const userBindings = keybindings.getUserBindings();
         const userKeybinding = userBindings["app.thinking.cycleBackward"];
-        if (isThinkingBackwardKeyMatch(data, configuredThinkingKey, userKeybinding)) {
+        const thinkingBackward =
+            matchesKeyChord(data, "ctrl+alt+left") ||
+            isThinkingBackwardKeyMatch(data, configuredThinkingKey, userKeybinding);
+        const thinkingForward = matchesKeyChord(data, "ctrl+alt+right");
+        if (thinkingBackward || thinkingForward) {
             if (
                 options.getModel !== undefined &&
                 options.getThinkingLevel !== undefined &&
                 options.setThinkingLevel !== undefined
             ) {
-                const newLevel = cycleThinkingLevelBackward(
+                let direction: -1 | 1 = 1;
+                if (thinkingBackward) direction = -1;
+                const newLevel = cycleThinkingLevel(
                     options.getModel(),
                     options.getThinkingLevel(),
                     options.setThinkingLevel,
+                    direction,
                 );
                 if (newLevel === undefined) {
                     notify("Current model does not support thinking", "warning");

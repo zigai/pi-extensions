@@ -13,11 +13,14 @@ Opinionated editor and message-submit key tweaks for Pi.
 - Adds Codex-style line start/end behavior for Pi's configured `tui.editor.cursorLineStart` and `tui.editor.cursorLineEnd` actions:
   - line start moves to the previous line when already at column 0
   - line end moves to the next line when already at the current line end
-- Supports cycling thinking levels backward, unbound by default and configurable via extension settings or Pi keybindings.
+- Matches the omp thinking navigation: `Ctrl+Alt+Left` cycles backward and `Ctrl+Alt+Right` cycles forward, wrapping through the current model's supported Pi levels.
+- Supports additional backward shortcuts via extension settings or Pi's `app.thinking.cycleBackward` keybinding. Pi's native forward shortcut remains available.
+
+Unlike omp, Pi does not expose an `auto` thinking level; these shortcuts only select levels supported by Pi.
 
 ## Recommended keybindings
 
-This extension provides behavior; key assignments still live in your Pi keybindings config.
+The thinking arrow shortcuts are built in. Other key assignments live in your Pi keybindings config.
 
 ```json
 {
@@ -45,9 +48,9 @@ pi install npm:@zigai/pi-keymap-tweaks
 
 Global settings are stored in `~/.pi/agent/extension-settings/pi-keymap-tweaks.json`.
 
-| Option                     | Type           | Default | Description                                                                             |
-| -------------------------- | -------------- | ------- | --------------------------------------------------------------------------------------- |
-| `cycleThinkingBackwardKey` | string \| null | `null`  | Keybinding to cycle thinking level backward (e.g. 'alt+shift+tab'). Unbound by default. |
+| Option                     | Type           | Default | Description                                                                                                 |
+| -------------------------- | -------------- | ------- | ----------------------------------------------------------------------------------------------------------- |
+| `cycleThinkingBackwardKey` | string \| null | `null`  | Additional keybinding to cycle thinking backward (e.g. 'alt+shift+tab'). Ctrl+Alt+Left is always available. |
 
 ```json
 {

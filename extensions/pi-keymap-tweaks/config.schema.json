@@ -22,7 +22,7 @@
         }
       ],
       "default": null,
-      "description": "Keybinding to cycle thinking level backward (e.g. 'alt+shift+tab'). Unbound by default."
+      "description": "Additional keybinding to cycle thinking backward (e.g. 'alt+shift+tab'). Ctrl+Alt+Left is always available."
     }
   }
 }

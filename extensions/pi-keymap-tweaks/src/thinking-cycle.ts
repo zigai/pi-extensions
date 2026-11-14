@@ -6,10 +6,11 @@ function isString(value: unknown): value is string {
     return typeof value === "string";
 }
 
-export function cycleThinkingLevelBackward(
+export function cycleThinkingLevel(
     model: Model<Api> | undefined,
     currentLevel: ThinkingLevel | undefined,
     setThinkingLevel: (level: ThinkingLevel) => void,
+    direction: -1 | 1,
 ): ThinkingLevel | undefined {
     if (model === undefined || !model.reasoning) {
         return undefined;
@@ -26,16 +27,25 @@ export function cycleThinkingLevelBackward(
     }
 
     let nextIndex: number;
-    if (currentIndex <= 0) {
-        nextIndex = levels.length - 1;
+    if (currentIndex < 0) {
+        if (direction === 1) nextIndex = 0;
+        else nextIndex = levels.length - 1;
     } else {
-        nextIndex = currentIndex - 1;
+        nextIndex = (currentIndex + direction + levels.length) % levels.length;
     }
 
     const nextLevel = levels[nextIndex];
     setThinkingLevel(nextLevel);
 
     return nextLevel;
+}
+
+export function cycleThinkingLevelBackward(
+    model: Model<Api> | undefined,
+    currentLevel: ThinkingLevel | undefined,
+    setThinkingLevel: (level: ThinkingLevel) => void,
+): ThinkingLevel | undefined {
+    return cycleThinkingLevel(model, currentLevel, setThinkingLevel, -1);
 }
 
 export function matchesKeyChord(data: string, chord: string): boolean {
