@@ -235,6 +235,11 @@
       "default": 10,
       "description": "Line threshold that collapses pasted content."
     },
+    "pasteCollapseRevealOnRepeat": {
+      "type": "boolean",
+      "default": true,
+      "description": "Pasting the same collapsed content again reveals the existing marker instead of adding another."
+    },
     "pasteCollapseUseToolExpandKey": {
       "type": "boolean",
       "default": true,
