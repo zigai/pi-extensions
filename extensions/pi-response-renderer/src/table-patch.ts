@@ -233,12 +233,17 @@ function createTablePatch(host: TableHost, settings: TableStyle) {
         undefined,
         (predecessor) =>
             function (this: TableHost, width) {
+                // Owners may override invalidate() on an instance to request a repaint.
+                // This render already returns the fresh lines, so clear only the
+                // Markdown cache; a repaint request here would render again forever.
+                const clearCache = () => host.invalidate.call(this);
+
                 // Pi 1.5's setText clears the outer cache, not invalidate().
                 // Boundary metadata belongs to the source, and reused table blocks
                 // must be rendered again when rebuilding that metadata.
                 if (Value.Check(sourceSchema, this)) {
                     if (sources.get(this) !== this.text) {
-                        if (affected.has(this)) this.invalidate();
+                        if (affected.has(this)) clearCache();
                         sources.set(this, this.text);
                     }
                 }
@@ -246,13 +251,13 @@ function createTablePatch(host: TableHost, settings: TableStyle) {
                 const accent = settings.accent;
                 const sample = accent?.("\u0000") ?? "";
                 if (accentSamples.get(this) !== sample) {
-                    this.invalidate();
+                    clearCache();
                     accentSamples.set(this, sample);
                 }
 
                 const revision = tableRenderingState().revision;
                 if (revisions.get(this) !== revision) {
-                    this.invalidate();
+                    clearCache();
                     revisions.set(this, revision);
                 }
 

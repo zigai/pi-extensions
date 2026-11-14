@@ -581,6 +581,32 @@ it("does not change a registered table renderer's cached output while adding spa
     }
 });
 
+it("renders new and reselected tables without asking the owner to repaint", async () => {
+    const handle = await installResponseRendering();
+    try {
+        selectTableRenderer("codex");
+        const markdown = new Markdown("| Name |\n| --- |\n| alpha |", 0, 0, theme);
+        markFencesHidden(markdown);
+        const clearCache = markdown.invalidate.bind(markdown);
+        let repaints = 0;
+        markdown.invalidate = () => {
+            clearCache();
+            repaints += 1;
+        };
+
+        const lines = () =>
+            markdown.render(40).map((line) => stripVTControlCharacters(line).trimEnd());
+        expect(lines()).toEqual([" Name", "━━━━━━━", " alpha"]);
+
+        selectTableRenderer("native");
+        expect(lines().join("\n")).toContain("┌");
+        expect(repaints).toBe(0);
+    } finally {
+        selectTableRenderer("codex");
+        handle.dispose();
+    }
+});
+
 it("updates already-rendered tables when selecting, updating, and disposing implementations", async () => {
     const handle = await installResponseRendering();
     const contribution = registerTableRenderer("labels", (input) =>
