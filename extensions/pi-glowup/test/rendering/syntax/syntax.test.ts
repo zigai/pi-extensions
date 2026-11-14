@@ -453,8 +453,8 @@ describe("central syntax highlighting", () => {
         expect(rendered).toContain("38;2;156;220;254m$?");
         expect(rendered).toContain("38;2;156;220;254m$result");
         expect(rendered).toContain(`${STRING_RGB_CODE}m'%s\\n'`);
-        expect(rendered).toContain(piTheme.fg("accent", "/dev/null"));
-        expect(rendered).toContain(piTheme.fg("accent", "before.log"));
+        expect(rendered).toContain(piTheme.fg("toolTitle", "/dev/null"));
+        expect(rendered).toContain(piTheme.fg("toolTitle", "before.log"));
         expect(rendered).toContain("38;2;220;220;170mgit");
         const command = `NAME="literal $value" printf 'literal $value' "\\$value" "\${value:-fallback}" 3>log.txt 4>&1`;
         const mixed = renderScriptCall(
@@ -800,7 +800,7 @@ describe("central syntax highlighting", () => {
             maxPreviewLines: 5,
             syntax: { language: "json" },
         }).render(160);
-        const markerIndex = rendered.findIndex((line) => line.includes("lines ("));
+        const markerIndex = rendered.findIndex((line) => line.includes("… +"));
         const argvIndex = rendered.findIndex((line) => line.includes('"argv"'));
         const slowestIndex = rendered.findIndex((line) => line.includes('"slowest_ms"'));
 

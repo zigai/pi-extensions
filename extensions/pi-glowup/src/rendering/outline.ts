@@ -7,13 +7,7 @@ import { Value } from "typebox/value";
 import { inlineObjectSchema, decodeGlowupNode } from "../tools/protocol/decode.ts";
 import { stringParser } from "../json-scalar.ts";
 
-import {
-    makeComponent,
-    omittedLinesLabel,
-    toolExpandHint,
-    wrapStyledText,
-    fitToWidth,
-} from "./component.ts";
+import { makeComponent, omittedLinesLabel, wrapStyledText, fitToWidth } from "./component.ts";
 import {
     PREVIEW_MUTATION_SETTINGS,
     showsFullMutation,
@@ -321,13 +315,7 @@ function nodeRows(
                 });
                 const omitted = file.lines.length - indices.length;
                 if (omitted > 0)
-                    body.push(
-                        fitToWidth(
-                            theme.fg("dim", `${omittedLinesLabel(omitted)} (${toolExpandHint()})`),
-                            width,
-                            "…",
-                        ),
-                    );
+                    body.push(fitToWidth(theme.fg("dim", omittedLinesLabel(omitted)), width, "…"));
 
                 return [header, ...body];
             });

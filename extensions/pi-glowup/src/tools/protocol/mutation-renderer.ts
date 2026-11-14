@@ -217,10 +217,6 @@ class ProtocolMutationComponent implements Component {
                 pierreContext = { ...pierreContext, invalidate: update.context.invalidate };
             }
 
-            if (update.context.keyHint !== undefined) {
-                pierreContext = { ...pierreContext, keyHint: update.context.keyHint };
-            }
-
             const diff =
                 payload === undefined
                     ? renderGlowupDiff(update.theme, [diffSection(file)], expanded, diffOptions)

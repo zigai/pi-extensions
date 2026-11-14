@@ -1,6 +1,6 @@
 import { parseStreamingJson } from "@earendil-works/pi-ai";
 import type { CodePreview, CodeSource } from "../../rendering/streaming/presentation.ts";
-import { makeComponent, wrapPrefixedLine, toolExpandHint } from "../../rendering/component.ts";
+import { makeComponent, wrapPrefixedLine } from "../../rendering/component.ts";
 import type { ScriptBlockFormatter } from "../built-in/bash/formatter.ts";
 import { recordScriptAnalysis } from "../built-in/bash/script-analysis.ts";
 import { recordRenderError, renderDiagnosticsEnabled } from "../../diagnostics/render-events.ts";
@@ -447,12 +447,7 @@ function callRows(
     const displayed = calls.slice(expanded ? -MAX_CALLS : -VISIBLE_CALLS);
     const rows: string[] = [];
     if (calls.length > displayed.length) {
-        rows.push(
-            muted(
-                theme,
-                `… ${calls.length - displayed.length} earlier calls (${toolExpandHint()})`,
-            ),
-        );
+        rows.push(muted(theme, `… ${calls.length - displayed.length} earlier calls`));
     }
 
     for (const value of displayed) {

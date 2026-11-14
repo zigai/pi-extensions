@@ -47,7 +47,6 @@ import {
 } from "./prologue.ts";
 import {
     wrapSinglePhysicalLineWithContinuation,
-    toolExpandHint,
     makeComponent,
     fitToWidth,
 } from "../../../rendering/component.ts";
@@ -833,7 +832,6 @@ export type ScriptCallRenderOptions = {
     readonly expanded: boolean;
     readonly maxCodePreviewLines?: number;
     readonly showPrologueOmission?: boolean;
-    readonly omittedHint?: string;
     readonly invalidate?: () => void;
     readonly lastComponent?: Component | undefined;
     readonly onContentWidth?: (contentWidth: number, renderWidth: number) => void;
@@ -923,7 +921,6 @@ function createScriptCallComponent(
     const maxCodePreviewLines = options.maxCodePreviewLines ?? 8;
     const showPrologueOmission = options.showPrologueOmission ?? false;
     const retained = invocation;
-    const omittedHint = options.omittedHint ?? toolExpandHint();
     const prepared = getPreparedScriptSyntax(retained);
     const ownerOptions = childHighlightOptions(options.invalidate, options.signal);
     const childOptions = (key: string, source: string): SyntaxHighlightOptions => {
@@ -1171,7 +1168,6 @@ function createScriptCallComponent(
                   fullHighlighted.join("\n"),
                   maxCodePreviewLines,
                   "head",
-                  omittedHint,
               );
         const highlighted =
             collapsedPreview?.isEmpty === true
@@ -1247,7 +1243,7 @@ function createScriptCallComponent(
                     lines++;
 
                 const omitted = Math.max(0, lines - hiddenLines.size - shownLines);
-                if (omitted > 0) marker = `… +${omitted} lines (${omittedHint})`;
+                if (omitted > 0) marker = `… +${omitted} lines`;
             }
 
             rendered.push(

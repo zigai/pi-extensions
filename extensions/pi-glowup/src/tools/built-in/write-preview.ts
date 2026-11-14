@@ -15,12 +15,7 @@ import {
     truncateGraphemeText,
     truncateUtf8ByGrapheme,
 } from "../../text-boundaries.ts";
-import {
-    makeComponent,
-    emptyComponent,
-    omittedLinesLabel,
-    toolExpandHint,
-} from "../../rendering/component.ts";
+import { makeComponent, emptyComponent, omittedLinesLabel } from "../../rendering/component.ts";
 import { formatPathTarget } from "../../rendering/path.ts";
 import {
     renderGlowupCall,
@@ -254,10 +249,7 @@ class PartialWriteContentPreview {
             return lines.join("\n");
         }
 
-        return [
-            ...lines,
-            `${omittedLinesLabel(snapshot.lineCount - lines.length)} (${toolExpandHint()})`,
-        ].join("\n");
+        return [...lines, omittedLinesLabel(snapshot.lineCount - lines.length)].join("\n");
     }
 
     private movingPreviewText(snapshot: PreviewSnapshot): string {
@@ -266,10 +258,7 @@ class PartialWriteContentPreview {
         }
 
         const tailLines = snapshot.tailLines.slice(-PARTIAL_WRITE_MOVING_TAIL_LINES);
-        return [
-            `${omittedLinesLabel(snapshot.lineCount - tailLines.length)} (${toolExpandHint()})`,
-            ...tailLines,
-        ].join("\n");
+        return [omittedLinesLabel(snapshot.lineCount - tailLines.length), ...tailLines].join("\n");
     }
 
     private reset(): void {

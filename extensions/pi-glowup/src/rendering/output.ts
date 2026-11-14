@@ -11,7 +11,6 @@ import {
 import { syntaxLanguageFromFile } from "./syntax/language.ts";
 import { observeSyntaxHighlightSource } from "./syntax/highlighter.ts";
 import {
-    toolExpandHint,
     emptyComponent,
     makeComponent,
     wrapPrefixedLine,
@@ -69,7 +68,6 @@ export function collapsedPreviewLinesFromText(
     text: string,
     maxPreviewLines: number,
     mode: "headTail" | "head" | "hidden",
-    omittedHint: string,
 ): CollapsedTextPreview {
     if (mode === "hidden") {
         return { isEmpty: false, lines: [], sourceIndices: [] };
@@ -186,10 +184,7 @@ export function collapsedPreviewLinesFromText(
     if (mode === "head") {
         return {
             isEmpty: false,
-            lines: [
-                ...headLines.map(materialize),
-                `${omittedLinesLabel(lineCount - headLines.length)} (${omittedHint})`,
-            ],
+            lines: [...headLines.map(materialize), omittedLinesLabel(lineCount - headLines.length)],
             sourceIndices: [...headLines.map(({ index }) => index), undefined],
         };
     }
@@ -198,7 +193,7 @@ export function collapsedPreviewLinesFromText(
         isEmpty: false,
         lines: [
             ...headLines.map(materialize),
-            `${omittedLinesLabel(lineCount - headLines.length - tailLines.length)} (${omittedHint})`,
+            omittedLinesLabel(lineCount - headLines.length - tailLines.length),
             ...tailLines.map(materialize),
         ],
         sourceIndices: [
@@ -375,7 +370,6 @@ function renderCollapsedWrappedPreview(
         readonly prefixFirst: string;
         readonly prefixRest: string;
         readonly width: number;
-        readonly omittedHint: string;
         readonly theme: GlowupRenderTheme;
     },
 ): string[] {
@@ -387,8 +381,8 @@ function renderCollapsedWrappedPreview(
 
     const markerText =
         metaIndex === -1
-            ? `… preview truncated (${options.omittedHint})`
-            : (lines[metaIndex]?.text ?? `… preview truncated (${options.omittedHint})`);
+            ? "… preview truncated"
+            : (lines[metaIndex]?.text ?? "… preview truncated");
     const before = flattenWrappedRows(
         lines.filter((line, index) => !line.isMeta && (metaIndex === -1 || index < metaIndex)),
     );
@@ -430,7 +424,6 @@ export type GlowupOutputRenderOptions = {
     readonly prefixRest?: string;
     readonly dimContent?: boolean;
     readonly noOutputLabel?: string | null;
-    readonly omittedHint?: string;
     readonly syntax?: CodeOutputSyntax;
     readonly syntaxSource?: string;
     readonly invalidate?: (() => void) | undefined;
@@ -446,7 +439,6 @@ export function renderGlowupOutput(
     const prefixFirst = options.prefixFirst ?? dim(theme, "  └ ");
     const prefixRest = options.prefixRest ?? "    ";
     const dimContent = options.dimContent ?? true;
-    const omittedHint = options.omittedHint ?? toolExpandHint();
     const noOutputLabel = options.noOutputLabel;
     let syntax = options.syntax;
     if (syntax !== undefined && syntax.invalidate === undefined) {
@@ -461,12 +453,7 @@ export function renderGlowupOutput(
         ? { kind: "expanded", text: normalizeOutputText(text ?? "") }
         : {
               kind: "collapsed",
-              preview: collapsedPreviewLinesFromText(
-                  text ?? "",
-                  maxPreviewLines,
-                  mode,
-                  omittedHint,
-              ),
+              preview: collapsedPreviewLinesFromText(text ?? "", maxPreviewLines, mode),
           };
 
     reportRetainedOutput(retained, text, mode);
@@ -591,7 +578,6 @@ export function renderGlowupOutput(
             prefixFirst,
             prefixRest,
             width,
-            omittedHint,
             theme,
         });
     });

@@ -1,5 +1,4 @@
 import Type, { type Static } from "typebox";
-import type { ToolKeyHint } from "../../rendering/component.ts";
 import { Value } from "typebox/value";
 import type {
     Theme,
@@ -31,7 +30,6 @@ export type ToolExecutionInstance = {
 };
 
 export type PiToolRenderContext = {
-    readonly keyHint?: ToolKeyHint;
     readonly args: unknown;
     readonly toolCallId: string;
     readonly state?: unknown;
@@ -56,7 +54,7 @@ type SdkToolRenderContext = Parameters<NonNullable<PiRendererDefinition["renderC
 export type BuiltInToolRenderContext = Omit<SdkToolRenderContext, "args" | "state"> & {
     readonly args: unknown;
     readonly state: unknown;
-} & Pick<PiToolRenderContext, "result" | "shellCall" | "keyHint">;
+} & Pick<PiToolRenderContext, "result" | "shellCall">;
 
 export type ToolCallArguments = PiToolRenderContext["args"];
 

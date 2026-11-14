@@ -570,9 +570,6 @@ export function thirdPartyRenderContext(
         showImages: context.showImages,
         isError: context.isError,
     };
-    if (context.keyHint !== undefined) {
-        renderContext = { ...renderContext, keyHint: context.keyHint };
-    }
 
     if (context.cwd !== undefined) {
         renderContext = { ...renderContext, cwd: context.cwd };

@@ -91,7 +91,7 @@ describe("syntax code component helpers", () => {
             component.render(100);
             await settleSyntaxHighlights();
             const lines = component.render(100);
-            expect(stripVTControlCharacters(lines.join("\n"))).toContain("lines (");
+            expect(stripVTControlCharacters(lines.join("\n"))).toContain("… +");
             expect(lines.join("\n")).toContain("\u001b[38;2;");
             expect(lines.join("\n")).not.toContain("\u001b[38;2;244;71;71m");
         } finally {

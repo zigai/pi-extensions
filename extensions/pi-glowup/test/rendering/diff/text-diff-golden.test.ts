@@ -4,7 +4,6 @@ import { fc } from "@fast-check/vitest";
 import { stripVTControlCharacters } from "node:util";
 import { clearCompletedLineCache } from "../../../src/rendering/rendered-line-cache.ts";
 import { propertyReplayParameters } from "../../support/property-replay.ts";
-import { toolExpandHint } from "../../../src/rendering/component.ts";
 import {
     configureRenderingAppearance,
     type RenderingAppearance,
@@ -104,9 +103,7 @@ it("suppresses identical replacement sides even when their counterpart is outsid
                         .render(120)
                         .map(stripVTControlCharacters)
                         .map((line) => line.trim()),
-                ).toEqual([
-                    `… +${omitted} ${noun} (${stripVTControlCharacters(toolExpandHint())})`,
-                ]);
+                ).toEqual([`… +${omitted} ${noun}`]);
             },
         ),
         { ...propertyReplayParameters(), numRuns: 60 },

@@ -1,1 +1,1 @@
-a56a0f3fe6d1b7e1150d5cc5aec3539debc3fdd19694a7fc8e446c28db1c6aed  test/tools/protocol/golden/protocol-decoding.json
+069fa72806aa8d95583c87a13f6b6b6fa9c090eefe878eae8e096bfc05cea813  test/tools/protocol/golden/protocol-decoding.json

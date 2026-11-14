@@ -1,7 +1,6 @@
 import { RenderedLineCache, RenderedValueCache } from "../rendered-line-cache.ts";
 import { displayDiffPath } from "../path.ts";
-import { asciiStyledWidth, omittedLinesLabel, type ToolKeyHint, fitToWidth } from "../component.ts";
-import { keyHint } from "@earendil-works/pi-coding-agent";
+import { asciiStyledWidth, omittedLinesLabel, fitToWidth } from "../component.ts";
 import Type from "typebox";
 import { Compile } from "typebox/compile";
 import {
@@ -427,7 +426,6 @@ function isDefined<T>(value: T | undefined): value is T {
 
 /** Context fields Pierre's lazy renderer consumes from Pi's public render context. */
 export type PierreDiffRenderContext = {
-    readonly keyHint?: ToolKeyHint;
     readonly lastComponent: Component | undefined;
     readonly invalidate?: () => void;
     readonly toolCallId?: string;
@@ -522,17 +520,9 @@ export function renderPierreDiff(
                   options.expanded,
                   context.toolCallId,
                   context.invalidate,
-                  context.keyHint,
               );
 
-    component.update(
-        payload,
-        theme,
-        rowPolicy,
-        options.expanded,
-        context.invalidate,
-        context.keyHint,
-    );
+    component.update(payload, theme, rowPolicy, options.expanded, context.invalidate);
 
     return component;
 }
@@ -607,7 +597,6 @@ class PierreDiffComponent implements Component {
     private readonly cachedSplitRows = new RenderedValueCache<ReadonlyArray<SplitDiffRow>>();
     private readonly toolCallId: string | undefined;
     private requestRender: (() => void) | undefined;
-    private expandHint: string;
 
     constructor(
         payload: PierreRenderableDiffPayload,
@@ -616,9 +605,7 @@ class PierreDiffComponent implements Component {
         expanded: boolean,
         toolCallId: string | undefined,
         requestRender: (() => void) | undefined,
-        injectedKeyHint?: ToolKeyHint,
     ) {
-        this.expandHint = pierreExpandHint(injectedKeyHint);
         this.payload = payload;
         this.palette = getPierrePalette(theme);
         this.highlighted = emptyHighlightedDiffSet();
@@ -641,9 +628,7 @@ class PierreDiffComponent implements Component {
         rowPolicy: PierreRowPolicy,
         expanded: boolean,
         requestRender: (() => void) | undefined,
-        injectedKeyHint?: ToolKeyHint,
     ): void {
-        const nextExpandHint = pierreExpandHint(injectedKeyHint);
         const previousPayload = this.payload;
         const previousKey = refreshKeyFor(previousPayload);
         const nextKey = refreshKeyFor(payload);
@@ -652,7 +637,6 @@ class PierreDiffComponent implements Component {
         const nextSyntaxVersion = syntaxHighlightingVersion();
         const syntaxChanged = this.syntaxVersion !== nextSyntaxVersion;
         const canReuseRenderedCache =
-            this.expandHint === nextExpandHint &&
             previousPayload.modelKey === payload.modelKey &&
             pierreRowPoliciesEqual(this.rowPolicy, rowPolicy) &&
             this.expanded === expanded &&
@@ -660,7 +644,6 @@ class PierreDiffComponent implements Component {
             !syntaxChanged &&
             pierrePalettesEqual(this.palette, nextPalette);
 
-        this.expandHint = nextExpandHint;
         this.payload = payload;
         this.palette = nextPalette;
         this.rowPolicy = rowPolicy;
@@ -826,7 +809,7 @@ class PierreDiffComponent implements Component {
                   ...visible,
                   {
                       kind: "collapsed",
-                      text: `${omittedLinesLabel(selection.omitted)} (${this.expandHint})`,
+                      text: omittedLinesLabel(selection.omitted),
                       fg: this.palette.metadataFg,
                       bg: this.palette.metadataBg,
                   },
@@ -859,7 +842,7 @@ class PierreDiffComponent implements Component {
                   ...visible,
                   {
                       kind: "collapsed",
-                      text: `${omittedLinesLabel(selection.omitted)} (${this.expandHint})`,
+                      text: omittedLinesLabel(selection.omitted),
                       fg: this.palette.metadataFg,
                       bg: this.palette.metadataBg,
                   },
@@ -949,15 +932,6 @@ function renderPierreDiffSummary(
         },
         invalidate() {},
     };
-}
-
-function pierreExpandHint(injectedKeyHint?: ToolKeyHint): string {
-    try {
-        if (injectedKeyHint !== undefined) return injectedKeyHint("app.tools.expand", "to expand");
-        return keyHint("app.tools.expand", "to expand");
-    } catch {
-        return "expand to inspect";
-    }
 }
 
 function omittedDiffLineCount(

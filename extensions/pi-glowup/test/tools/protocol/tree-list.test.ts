@@ -151,7 +151,7 @@ describe("protocol list styles", () => {
         const collapsed = lines(component(node, { expanded: false }).render(width));
         expect(collapsed).toHaveLength(5);
         expect(collapsed.slice(0, 2)).toEqual(["  ├ item 0", "  ├ item 1"]);
-        expect(collapsed[2]).toMatch(/^… \+8 lines \(.+\)$/u);
+        expect(collapsed[2]).toBe("… +8 lines");
         expect(collapsed.slice(-2)).toEqual(["  ├ item 10", "  └ item 11"]);
         const expanded = lines(component(node).render(width));
         expect(expanded).toHaveLength(9);
@@ -174,7 +174,7 @@ describe("protocol list styles", () => {
             expect(rows).toHaveLength(5);
             expect(rows[0]).toMatch(/^  ├ first/u);
             expect(rows[1]).toMatch(/^  │ /u);
-            expect(rows[2]).toContain("lines (");
+            expect(rows[2]).toContain("… +");
             expect(rows.slice(-2)).toEqual(["  └ last", "    last continuation"]);
             expect(rows.every((row) => visibleWidth(row) <= width)).toBe(true);
         },

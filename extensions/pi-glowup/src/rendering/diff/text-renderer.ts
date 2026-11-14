@@ -24,7 +24,6 @@ import {
     fitPrefixedSegment,
     wrapStyledSegments,
     makeComponent,
-    toolExpandHint,
     wrapPrefixedLine,
     omittedLinesLabel,
     fitToWidth,
@@ -560,7 +559,6 @@ function createDiffComponent(
                     ]),
                 ]),
                 configuredRenderingAppearanceVersion(),
-                toolExpandHint(),
                 process.env.HOME,
                 process.env.USERPROFILE,
                 (
@@ -608,11 +606,10 @@ function createDiffComponent(
 
         const renderOmission = (): void => {
             const omitted = allDiffLineCount - collapsedIndices.length;
-            const hint = toolExpandHint();
 
             rendered.push(
                 fitToWidth(
-                    `${dim(theme, omissionMargin)} ${muted(theme, `${omittedLinesLabel(omitted)} (`)}${hint}${muted(theme, ")")}`,
+                    `${dim(theme, omissionMargin)} ${muted(theme, omittedLinesLabel(omitted))}`,
                     width,
                     "…",
                 ),

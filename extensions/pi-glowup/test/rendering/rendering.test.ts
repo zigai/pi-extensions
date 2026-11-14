@@ -73,7 +73,7 @@ function materializedPreview(physical: readonly string[], requestedBudget: numbe
         isEmpty: false,
         lines: [
             ...rows.slice(0, head).map((row) => row.text),
-            `… +${omitted} ${noun} (hint)`,
+            `… +${omitted} ${noun}`,
             ...ending.map((row) => row.text),
         ],
         sourceIndices: [
@@ -492,17 +492,19 @@ describe("Glowup rendering helpers", () => {
         }
     });
 
-    it("marks collapsed call previews as truncated instead of expandable", () => {
+    it("marks non-expandable call previews as truncated", () => {
         const component = renderGlowupCall(plainTheme, {
             state: "success",
             statusText: "Called",
             body: Array.from({ length: 8 }, (_value, index) => `line ${index + 1}`).join("\n"),
             maxRenderedLines: 3,
+            omittedHint: "truncated",
         });
 
         const rendered = component.render(100).join("\n");
 
         expect(rendered).toContain("… +5 lines (truncated)");
+        expect(rendered).not.toContain("to expand");
     });
 
     it("wraps single-line collapsed call previews without truncating them", () => {
@@ -531,7 +533,6 @@ describe("Glowup rendering helpers", () => {
             {
                 expanded: false,
                 maxPreviewLines: 5,
-                omittedHint: "hint",
             },
         );
 
@@ -539,7 +540,7 @@ describe("Glowup rendering helpers", () => {
             "  └ one",
             "    two",
             "    three",
-            "    … +5 lines (hint)",
+            "    … +5 lines",
             "    nine",
             "    ten",
         ]);
@@ -555,7 +556,6 @@ describe("Glowup rendering helpers", () => {
                 expanded: false,
                 maxPreviewLines: 2,
                 mode,
-                omittedHint: "hint",
             });
 
             expect(component.render(40)).toEqual(["  └ first", "    second", "    third"]);
@@ -611,7 +611,6 @@ describe("Glowup rendering helpers", () => {
             statusText: "Call",
             body: "first\nsecond\nthird",
             maxRenderedLines: 2,
-            omittedHint: "hint",
         });
 
         expect(component.render(40)).toEqual(["• Call first", "  │ second", "  │ third"]);
@@ -623,21 +622,15 @@ describe("Glowup rendering helpers", () => {
             statusText: "Call",
             body: `first\nsecond\n${"long ".repeat(60)}`,
             maxRenderedLines: 2,
-            omittedHint: "hint",
         });
 
         const rows = component.render(40);
-        expect(rows).toEqual(["• Call first", "  │ second", "  │ … +1 line (hint)"]);
+        expect(rows).toEqual(["• Call first", "  │ second", "  │ … +1 line"]);
     });
 
     it("keeps duplicate preview rows at their original coordinates", () => {
         expect(
-            collapsedPreviewLinesFromText(
-                "\nsame\nsame\nmiddle\nsame\nsame\n",
-                4,
-                "headTail",
-                "hint",
-            ),
+            collapsedPreviewLinesFromText("\nsame\nsame\nmiddle\nsame\nsame\n", 4, "headTail"),
         ).toEqual({
             isEmpty: false,
             lines: ["same", "same", "middle", "same", "same"],
@@ -645,28 +638,24 @@ describe("Glowup rendering helpers", () => {
         });
 
         expect(
-            collapsedPreviewLinesFromText("same\nsame\na\nb\nsame\nsame", 4, "headTail", "hint"),
+            collapsedPreviewLinesFromText("same\nsame\na\nb\nsame\nsame", 4, "headTail"),
         ).toEqual({
             isEmpty: false,
-            lines: ["same", "same", "… +2 lines (hint)", "same", "same"],
+            lines: ["same", "same", "… +2 lines", "same", "same"],
             sourceIndices: [0, 1, undefined, 4, 5],
         });
     });
 
     it("preserves pending blank samples and drops only status separators", () => {
-        expect(
-            collapsedPreviewLinesFromText("a\n \n\t\n  \n   \nb\n \n", 4, "headTail", "hint"),
-        ).toEqual({
+        expect(collapsedPreviewLinesFromText("a\n \n\t\n  \n   \nb\n \n", 4, "headTail")).toEqual({
             isEmpty: false,
-            lines: ["a", " ", "… +2 lines (hint)", "   ", "b"],
+            lines: ["a", " ", "… +2 lines", "   ", "b"],
             sourceIndices: [0, 1, undefined, 4, 5],
         });
 
-        expect(
-            collapsedPreviewLinesFromText("a\n \n\t\n  \n   \n    \nb", 4, "headTail", "hint"),
-        ).toEqual({
+        expect(collapsedPreviewLinesFromText("a\n \n\t\n  \n   \n    \nb", 4, "headTail")).toEqual({
             isEmpty: false,
-            lines: ["a", " ", "… +3 lines (hint)", "", "b"],
+            lines: ["a", " ", "… +3 lines", "", "b"],
             sourceIndices: [0, 1, undefined, 5, 6],
         });
 
@@ -675,7 +664,6 @@ describe("Glowup rendering helpers", () => {
                 "a\n \n\t\n Command exited with code 2 \n\n",
                 4,
                 "headTail",
-                "hint",
             ),
         ).toEqual({
             isEmpty: false,
@@ -716,9 +704,9 @@ describe("Glowup rendering helpers", () => {
                     "",
                     " ",
                 ];
-                expect(
-                    collapsedPreviewLinesFromText(physical.join("\n"), budget, mode, "hint"),
-                ).toEqual(materializedPreview(physical, budget, mode));
+                expect(collapsedPreviewLinesFromText(physical.join("\n"), budget, mode)).toEqual(
+                    materializedPreview(physical, budget, mode),
+                );
             }),
             { seed: 0x5eed2026, numRuns: 100 },
         );
@@ -736,7 +724,7 @@ describe("Glowup rendering helpers", () => {
         },
         { text: "a\r\nb\rnew\r\nlast", lines: ["a", "new", "last"], indices: [0, 1, 2] },
     ])("preserves normalized rows for $text", ({ text, lines, indices }) => {
-        const result = collapsedPreviewLinesFromText(text, 4, "headTail", "hint");
+        const result = collapsedPreviewLinesFromText(text, 4, "headTail");
         if (lines.length === 0) expect(result).toEqual({ isEmpty: true });
         else expect(result).toEqual({ isEmpty: false, lines, sourceIndices: indices });
     });
@@ -750,7 +738,7 @@ describe("Glowup rendering helpers", () => {
                     const clusters = Array.from({ length: repeats }, () => units).flat();
                     const source = clusters.join("");
                     const line = expectedPreviewLine(clusters);
-                    expect(collapsedPreviewLinesFromText(source, 4, "head", "hint")).toEqual({
+                    expect(collapsedPreviewLinesFromText(source, 4, "head")).toEqual({
                         isEmpty: false,
                         lines: [line],
                         sourceIndices: [0],
@@ -766,7 +754,7 @@ describe("Glowup rendering helpers", () => {
         { length: 4096, expected: "x".repeat(4096) },
         { length: 4097, expected: `${"x".repeat(4093)}…` },
     ])("keeps the exact line-byte boundary for $length bytes", ({ length, expected }) => {
-        expect(collapsedPreviewLinesFromText("x".repeat(length), 4, "head", "hint")).toEqual({
+        expect(collapsedPreviewLinesFromText("x".repeat(length), 4, "head")).toEqual({
             isEmpty: false,
             lines: [expected],
             sourceIndices: [0],
@@ -775,12 +763,7 @@ describe("Glowup rendering helpers", () => {
 
     it("maps CRLF rows and bare-CR progress rewrites to normalized source rows", () => {
         expect(
-            collapsedPreviewLinesFromText(
-                "old\rnew\r\n\rprogress\nlast\rfinal",
-                4,
-                "headTail",
-                "hint",
-            ),
+            collapsedPreviewLinesFromText("old\rnew\r\n\rprogress\nlast\rfinal", 4, "headTail"),
         ).toEqual({
             isEmpty: false,
             lines: ["new", "progress", "final"],
@@ -789,7 +772,7 @@ describe("Glowup rendering helpers", () => {
     });
 
     it.each(["head", "headTail"] as const)("keeps the extra small-input row in %s mode", (mode) => {
-        expect(collapsedPreviewLinesFromText("a\nb\nc", 2, mode, "hint")).toEqual({
+        expect(collapsedPreviewLinesFromText("a\nb\nc", 2, mode)).toEqual({
             isEmpty: false,
             lines: ["a", "b", "c"],
             sourceIndices: [0, 1, 2],
@@ -799,13 +782,13 @@ describe("Glowup rendering helpers", () => {
     it("truncates selected lines on grapheme boundaries and detaches invalid Unicode", () => {
         const cluster = "👩‍💻";
         const prefix = cluster.repeat(Math.floor((4096 - 3) / Buffer.byteLength(cluster)));
-        expect(collapsedPreviewLinesFromText(cluster.repeat(1000), 4, "head", "hint")).toEqual({
+        expect(collapsedPreviewLinesFromText(cluster.repeat(1000), 4, "head")).toEqual({
             isEmpty: false,
             lines: [`${prefix}…`],
             sourceIndices: [0],
         });
 
-        expect(collapsedPreviewLinesFromText("a\ud800", 4, "head", "hint")).toEqual({
+        expect(collapsedPreviewLinesFromText("a\ud800", 4, "head")).toEqual({
             isEmpty: false,
             lines: ["a�"],
             sourceIndices: [0],
@@ -869,7 +852,6 @@ describe("Glowup rendering helpers", () => {
             {
                 expanded: false,
                 maxPreviewLines: 5,
-                omittedHint: "hint",
             },
         );
 
@@ -877,7 +859,7 @@ describe("Glowup rendering helpers", () => {
             "  └ start",
             "    line 1",
             "    line 2",
-            "    … +17 lines (hint)",
+            "    … +17 lines",
             "    line 20",
             "    Command exited with code 2",
         ]);
@@ -894,7 +876,6 @@ describe("Glowup rendering helpers", () => {
             {
                 expanded: false,
                 maxPreviewLines: 5,
-                omittedHint: "hint",
             },
         );
 
@@ -955,7 +936,6 @@ describe("Glowup rendering helpers", () => {
             {
                 expanded: false,
                 maxPreviewLines: 5,
-                omittedHint: "hint",
             },
         );
 
@@ -963,7 +943,7 @@ describe("Glowup rendering helpers", () => {
 
         expect(rendered).toContain("start");
         expect(rendered).toContain("middle 1");
-        expect(rendered).toContain("… +1997 lines (hint)");
+        expect(rendered).toContain("… +1997 lines");
         expect(rendered).toContain("middle 2000");
         expect(rendered).toContain("end");
         expect(rendered).not.toContain("middle 1000");
@@ -973,13 +953,12 @@ describe("Glowup rendering helpers", () => {
         const component = renderGlowupOutput(plainTheme, `start${"\n".repeat(2_000)}end`, {
             expanded: false,
             maxPreviewLines: 5,
-            omittedHint: "hint",
         });
 
         const rendered = component.render(100).join("\n");
 
         expect(rendered).toContain("start");
-        expect(rendered).toContain("… +1996 lines (hint)");
+        expect(rendered).toContain("… +1996 lines");
         expect(rendered).toContain("end");
     });
 
@@ -1003,7 +982,6 @@ describe("Glowup rendering helpers", () => {
         const component = renderGlowupOutput(plainTheme, [hugeLine, "done"].join("\n"), {
             expanded: false,
             maxPreviewLines: 5,
-            omittedHint: "hint",
         });
 
         const lines = component.render(80);
@@ -1012,9 +990,9 @@ describe("Glowup rendering helpers", () => {
         expect(lines.length).toBeLessThanOrEqual(6);
         expectLinesWithinWidth(lines, 80);
         expect(rendered).toContain("rollout.jsonl:648");
-        expect(rendered).toContain("… preview truncated (hint)");
+        expect(rendered).toContain("… preview truncated");
         expect(rendered).toContain("done");
-        expect(rendered).not.toContain("rows (hint)");
+        expect(rendered.match(/…/gu)).toHaveLength(1);
     });
 
     it("does not add a row marker to an already truncated output preview", () => {
@@ -1031,19 +1009,17 @@ describe("Glowup rendering helpers", () => {
             {
                 expanded: false,
                 maxPreviewLines: 5,
-                omittedHint: "hint",
             },
         );
 
         const rendered = component.render(80).join("\n");
 
-        expect(rendered.match(/… \+94 lines \(hint\)/gu)).toHaveLength(1);
+        expect(rendered.match(/… \+94 lines/gu)).toHaveLength(1);
         expect(rendered).toContain("first wrapped");
         expect(rendered).toContain("last");
-        expect(rendered).not.toContain("rows (hint)");
     });
 
-    it("renders bash previews with lightweight syntax and semantic path accents", () => {
+    it("renders bash previews with lightweight syntax and paths as plain text", () => {
         const command =
             'set -euo pipefail\nsource /tmp/sample-session/env.sh\n# Ensure a clean input before demo 1.\ntmux send-keys -t "$target" C-u\nfind . -maxdepth 3 -name package.json | head -80';
         const rendered = renderScriptCall(
@@ -1572,7 +1548,7 @@ describe("Glowup rendering helpers", () => {
             renderScriptCall(
                 plainTheme,
                 { label: "Python", language: "python", code: source(count) },
-                { state: "success", expanded: false, omittedHint: "hint" },
+                { state: "success", expanded: false },
             ).render(80);
 
         const oneExtra = render(9);
@@ -1580,7 +1556,7 @@ describe("Glowup rendering helpers", () => {
         expect(oneExtra.join("\n")).not.toContain("…");
 
         const twoExtra = render(10).join("\n");
-        expect(twoExtra).toContain("… +2 lines (hint)");
+        expect(twoExtra).toContain("… +2 lines");
         expect(twoExtra).not.toContain("value_9 = 8");
         expect(render(10)).toHaveLength(oneExtra.length);
     });
@@ -1626,7 +1602,6 @@ describe("Glowup rendering helpers", () => {
                 state: "success",
                 expanded: false,
                 maxCodePreviewLines: 4,
-                omittedHint: "hint",
             })
                 .render(120)
                 .join("\n");
@@ -1641,7 +1616,7 @@ describe("Glowup rendering helpers", () => {
             expect(collapsed).toContain("delta = 4");
             expect(collapsed).not.toContain("echo = 5");
             expect(collapsed).not.toContain("import math");
-            expect(collapsed).toContain("… +6 lines (hint)");
+            expect(collapsed).toContain("… +6 lines");
             expect(expanded).toContain("import math");
             expect(expanded).toContain("juliet = 10");
         },

@@ -184,7 +184,8 @@ describe("actual Pi CLI in a real PTY", () => {
                 resolve("artifacts/pty"),
             ]);
             const initialBlock = mutationBlock(initial, "restored.ts", "SESSION_SENTINEL");
-            expect(initialBlock).toMatch(/ctrl\+o\b/u);
+            expect(initialBlock).toContain("… +");
+            expect(initialBlock).not.toContain("ctrl+o");
             expect(initialBlock).not.toContain("restored5");
             expect(initial.text).toContain("Candidates · Which candidates should be restored?");
             expect(initial.text).toContain("Stable only");
@@ -1041,7 +1042,8 @@ describe("actual Pi CLI in a real PTY", () => {
                 );
                 expect(collapsed.text).not.toContain("import json");
                 expect(collapsed.text).not.toContain("import/setup lines omitted");
-                expect(collapsed.text).toMatch(/… \+6 lines[^\n]*\bctrl\+o\b/u);
+                expect(collapsed.text).toMatch(/… \+6 lines/u);
+                expect(collapsed.text).not.toContain("ctrl+o");
                 const argvIndex = collapsed.rows.findIndex((row) => row.text.includes('"argv"'));
                 const outputMarkerIndex = collapsed.rows.findIndex(
                     (row, index) => index > argvIndex && row.text.includes("… +8 lines"),

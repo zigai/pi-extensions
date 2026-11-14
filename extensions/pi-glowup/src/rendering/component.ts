@@ -7,7 +7,6 @@ import {
 } from "@earendil-works/pi-tui";
 import { stripVTControlCharacters } from "node:util";
 import { neutralizeTerminalControls, sgrSequenceEnd } from "../text-boundaries.ts";
-import { keyHint } from "@earendil-works/pi-coding-agent";
 import type { RenderedLineCache } from "./rendered-line-cache.ts";
 
 const MAX_COMPONENT_CACHE_LINES = 300;
@@ -362,15 +361,4 @@ export function omittedLinesLabel(count: number): string {
     }
 
     return `… +${count} lines`;
-}
-
-export type ToolKeyHint = (keybinding: "app.tools.expand", description: string) => string;
-
-export function toolExpandHint(injectedKeyHint?: ToolKeyHint): string {
-    try {
-        if (injectedKeyHint !== undefined) return injectedKeyHint("app.tools.expand", "to expand");
-        return keyHint("app.tools.expand", "to expand");
-    } catch {
-        return "to expand";
-    }
 }

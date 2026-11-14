@@ -50,7 +50,7 @@ function wrapPreviewPhysicalLines(
     firstPrefix: string,
     restPrefix: string,
     maxPhysicalLines: number | undefined,
-    omittedHint: string,
+    omittedHint: string | undefined,
     theme: GlowupRenderTheme,
 ): string[] {
     if (maxPhysicalLines === undefined || text === undefined) {
@@ -67,8 +67,9 @@ function wrapPreviewPhysicalLines(
     const visibleText = physicalLines.slice(0, lineBudget).join("\n");
     const omitted = physicalLines.length - lineBudget;
     const visibleRows = wrapPrefixedLine(visibleText, width, firstPrefix, restPrefix);
+    const label = omittedLinesLabel(omitted);
     const markerRows = wrapPrefixedLine(
-        muted(theme, `${omittedLinesLabel(omitted)} (${omittedHint})`),
+        muted(theme, omittedHint === undefined ? label : `${label} (${omittedHint})`),
         width,
         restPrefix,
         restPrefix,
@@ -105,7 +106,7 @@ export function renderGlowupCall(
             prefix,
             restPrefix,
             options.maxRenderedLines,
-            options.omittedHint ?? "truncated",
+            options.omittedHint,
             theme,
         );
     });

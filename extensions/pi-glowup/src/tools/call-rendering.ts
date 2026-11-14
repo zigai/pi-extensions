@@ -1,6 +1,6 @@
 import type { Component } from "@earendil-works/pi-tui";
-import { emptyComponent, omittedLinesLabel, toolExpandHint } from "../rendering/component.ts";
-import { renderGlowupCall } from "../rendering/tool-header.ts";
+import { emptyComponent, omittedLinesLabel } from "../rendering/component.ts";
+import { renderGlowupCall, type GlowupCallRenderOptions } from "../rendering/tool-header.ts";
 import { renderGlowupOutput, type GlowupOutputRenderOptions } from "../rendering/output.ts";
 import { type GlowupCallState, type GlowupRenderTheme } from "../rendering/theme.ts";
 import {
@@ -98,37 +98,18 @@ export function renderThirdPartyCall(
 ): Component {
     const maxRenderedLines =
         options.expanded && options.expandable !== false ? undefined : options.maxRenderedLines;
-    if (options.body === undefined) {
-        if (maxRenderedLines === undefined) {
-            return renderGlowupCall(theme, {
-                state: options.state,
-                statusText: options.statusText,
-            });
-        }
-
-        return renderGlowupCall(theme, {
-            state: options.state,
-            statusText: options.statusText,
-            maxRenderedLines,
-            omittedHint: options.expandable === false ? "truncated" : toolExpandHint(),
-        });
-    }
-
-    if (maxRenderedLines === undefined) {
-        return renderGlowupCall(theme, {
-            state: options.state,
-            statusText: options.statusText,
-            body: options.body,
-        });
-    }
-
-    return renderGlowupCall(theme, {
+    let callOptions: GlowupCallRenderOptions = {
         state: options.state,
         statusText: options.statusText,
-        body: options.body,
-        maxRenderedLines,
-        omittedHint: options.expandable === false ? "truncated" : toolExpandHint(),
-    });
+    };
+    if (options.body !== undefined) callOptions = { ...callOptions, body: options.body };
+    if (maxRenderedLines !== undefined) {
+        callOptions = { ...callOptions, maxRenderedLines };
+        if (options.expandable === false)
+            callOptions = { ...callOptions, omittedHint: "truncated" };
+    }
+
+    return renderGlowupCall(theme, callOptions);
 }
 
 export function createGenericRenderer(

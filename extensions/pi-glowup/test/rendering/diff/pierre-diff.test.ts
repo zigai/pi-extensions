@@ -1446,25 +1446,6 @@ describe("Pierre diff rendering", () => {
 
         expect(lines.at(-1)).toContain("… +34 lines");
         expect(lines.slice(0, -1).every((line) => !line.includes("… +34 lines"))).toBe(true);
-
-        const keyHint = vi.fn(() => "ctrl+shift+x to expand");
-        const component = renderPierreDiff(
-            payload,
-            testTheme,
-            { expanded: false },
-            { lastComponent: undefined, keyHint },
-        );
-        expect(stripAnsi(component.render(80).join("\n"))).toContain("ctrl+shift+x to expand");
-        expect(keyHint).toHaveBeenCalledWith("app.tools.expand", "to expand");
-        const reused = renderPierreDiff(
-            payload,
-            testTheme,
-            { expanded: false },
-            { lastComponent: component, keyHint: () => "alt+x to expand" },
-        );
-        expect(reused).toBe(component);
-        expect(stripAnsi(reused.render(80).join("\n"))).toContain("alt+x to expand");
-        expect(stripAnsi(reused.render(80).join("\n"))).not.toContain("ctrl+shift+x");
     });
 
     it("hides edge collapsed markers but keeps middle collapsed markers", () => {

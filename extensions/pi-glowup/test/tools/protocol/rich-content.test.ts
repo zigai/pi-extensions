@@ -1,14 +1,6 @@
 import { resolve } from "node:path";
 import { stripVTControlCharacters } from "node:util";
-import {
-    getKeybindings,
-    KeybindingsManager,
-    Markdown,
-    setKeybindings,
-    visibleWidth,
-    type MarkdownTheme,
-} from "@earendil-works/pi-tui";
-import { initTheme } from "@earendil-works/pi-coding-agent";
+import { Markdown, visibleWidth, type MarkdownTheme } from "@earendil-works/pi-tui";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { configureMarkdownSyntaxPatch } from "../../../src/pi/patches/markdown-syntax.ts";
 import { renderOutlineNode } from "../../../src/rendering/outline.ts";
@@ -241,29 +233,6 @@ for (const backend of ["compact", "outline"] as const) {
             expect(present.mock.calls[2]?.[0]).toMatchObject({ key, complete: true });
             component(node, { ...partialContext, toolCallId: "other-call" }).render(80);
             expect(present.mock.calls[3]?.[0].key).not.toBe(key);
-        });
-
-        it("uses the configured expansion key for omission hints", () => {
-            initTheme("dark");
-            const previous = getKeybindings();
-            setKeybindings(
-                new KeybindingsManager(
-                    { "app.tools.expand": { defaultKeys: "ctrl+o" } },
-                    { "app.tools.expand": "alt+x" },
-                ),
-            );
-
-            onTestFinished(() => setKeybindings(previous));
-            const node = output(
-                Array.from({ length: 12 }, (_, index) => `- item ${index}`).join("\n"),
-                {
-                    format: "markdown",
-                    preview: { collapsedLines: 2 },
-                },
-            );
-            const rows = plain(component(node, { expanded: false }).render(80)).join("\n");
-            expect(rows).toMatch(/(?:alt|option)\+x to expand/u);
-            expect(rows).not.toContain("ctrl+o");
         });
     });
 }

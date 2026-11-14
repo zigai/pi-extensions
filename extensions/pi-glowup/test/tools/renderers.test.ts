@@ -375,7 +375,7 @@ describe("outline mutation policy", () => {
             "  + row 100",
         ]);
 
-        expect(rows[4]).toMatch(/^  … \+97 lines \(.*to expand\)$/u);
+        expect(rows[4]).toBe("  … +97 lines");
     });
 
     it.each([
