@@ -11,6 +11,16 @@
       "default": "./schemas/pi-keymap-tweaks.schema.json",
       "description": "JSON Schema used by editors for this settings file."
     },
+    "continueLists": {
+      "type": "boolean",
+      "default": true,
+      "description": "Start the next list item when inserting a newline on a numbered or bullet list line. A newline on an empty item ends the list."
+    },
+    "undoEarlyCancel": {
+      "type": "boolean",
+      "default": true,
+      "description": "Cancelling with the interrupt key before the response shows any output removes the prompt from the session and puts its text back in the editor."
+    },
     "cycleThinkingBackwardKey": {
       "anyOf": [
         {
