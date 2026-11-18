@@ -124,6 +124,7 @@
     "optionalExtensions": [
       "@zigai/pi-background",
       "@zigai/pi-lazy-mcp",
+      "@zigai/pi-monitor",
       "@zigai/pi-workspace"
     ],
     "collections": [
