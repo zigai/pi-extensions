@@ -109,6 +109,7 @@ const renderingAdapterSchema = Type.Object(
                 {
                     kind: Type.Literal("bash"),
                     background: Type.Optional(Type.Boolean()),
+                    label: Type.Optional(Type.String({ minLength: 1 })),
                 },
                 { additionalProperties: false },
             ),

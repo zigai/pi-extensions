@@ -64,11 +64,11 @@ afterEach(async () => {
     terminal.dispose();
 });
 
-function row(name: string, command: string) {
+function row(name: string, command: string, rendering: GlowupRenderer<unknown, unknown> = adapter) {
     const definition = {
         renderCall: () => new Text("Plain Pi fallback", 0, 0),
         renderResult: () => new Text("Plain Pi result", 0, 0),
-        glowupRendering: adapter,
+        glowupRendering: rendering,
     };
 
     return new ToolExecutionComponent(
@@ -127,6 +127,46 @@ it("reuses the actual native Bash call renderer for declared shell tools while r
     expect(backgroundLines.every((line) => visibleWidth(line) <= 80)).toBe(true);
 });
 
+it("draws a declared label before the prompt and leaves the rest of the call unchanged", async () => {
+    const command = "python - <<'PY'\nprint('hello world')\nPY";
+    const labeled = row("custom_monitor", command, {
+        ...adapter,
+        callStyle: { kind: "bash", background: true, label: "Monitor" },
+    });
+    const plain = row("custom_background", command);
+    for (const component of [labeled, plain]) {
+        component.setArgsComplete();
+        component.updateResult({ content: [], isError: false, durationMs: 1250 });
+        component.render(80);
+    }
+
+    await bash.settled();
+    await settleSyntaxHighlights();
+    const labeledLines = screen(labeled);
+    const plainLines = screen(plain);
+    expect(labeledLines[0]).toMatch(/^Monitor \$ python.* 1\.25s\s*$/u);
+    expect(plainLines[0]).toMatch(/^\$ python/u);
+    expect(labeledLines.slice(1)).toEqual(plainLines.slice(1));
+});
+
+it("keeps a labeled call within a narrow width", async () => {
+    const component = row(
+        "custom_monitor",
+        "tail -F build.log | grep --line-buffered -E 'ERROR|FAILED|passed'",
+        { ...adapter, callStyle: { kind: "bash", background: true, label: "Monitor" } },
+    );
+    component.setArgsComplete();
+    component.updateResult({ content: [], isError: false, durationMs: 10 });
+    for (const width of [40, 24, 12]) {
+        component.render(width);
+        await bash.settled();
+        await settleSyntaxHighlights();
+        const lines = screen(component, width);
+        expect(lines.join("\n")).toContain("Monitor");
+        expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+    }
+});
+
 it("uses the native asynchronous formatter for declared shell calls without native Bash events", async () => {
     bash.clear();
     let formatted = 0;
@@ -171,6 +211,8 @@ it("falls back to the tool's own rendering when Glowup patches are disabled", ()
 it.each([
     { kind: "other", background: true },
     { kind: "bash", background: "true" },
+    { kind: "bash", label: "" },
+    { kind: "bash", label: 3 },
 ])("rejects malformed native Bash rendering metadata: %j", (callStyle) => {
     expect(glowupRenderingAdapter({ glowupRendering: { ...adapter, callStyle } })).toBeUndefined();
 });

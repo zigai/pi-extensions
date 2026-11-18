@@ -572,6 +572,7 @@ export function createNativeBashFeature(
                     signal: sessionSignal,
                     durationMs: context.durationMs,
                     background: context.shellCall?.background ?? false,
+                    label: context.shellCall?.label,
                     profileFor,
                     ...(profile !== undefined && { profile }),
                 },
@@ -621,6 +622,7 @@ export function createNativeBashFeature(
                     signal: sessionSignal,
                     durationMs: context.durationMs,
                     background: context.shellCall?.background ?? false,
+                    label: context.shellCall?.label,
                     profileFor,
                 },
                 true,
@@ -701,6 +703,7 @@ export function createNativeBashFeature(
                     signal: sessionSignal,
                     durationMs: context.durationMs,
                     background: context.shellCall?.background ?? false,
+                    label: context.shellCall?.label,
                     profileFor,
                 },
             );
@@ -750,6 +753,7 @@ export function createNativeBashFeature(
             signal: sessionSignal,
             durationMs: context.durationMs,
             background: context.shellCall?.background ?? false,
+            label: context.shellCall?.label,
             profileFor,
         };
         if (stableScript !== undefined && context.argsComplete) {
