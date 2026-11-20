@@ -86,7 +86,7 @@ const lines = Array.from({ length: 2_000 }, (_, index) => [
     `\u001b[31mLong paragraph ${index} has enough text to avoid the micro-heading heuristic.\u001b[0m`,
     "",
 ]).flat();
-const outputs: string[][] = [];
+const outputs: (readonly string[])[] = [];
 
 await collect();
 

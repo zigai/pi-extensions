@@ -678,7 +678,7 @@ test("native web_run shows the same reached pages as Glowup", () => {
         },
     };
     const context = makeRenderContext(REFERENCE_ARGS);
-    const plainComponent = (component: { render: (width: number) => string[] }) =>
+    const plainComponent = (component: { render: (width: number) => readonly string[] }) =>
         component
             .render(200)
             .map((line) => line.trimEnd())

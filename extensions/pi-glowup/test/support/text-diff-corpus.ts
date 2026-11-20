@@ -103,7 +103,7 @@ export async function textDiffGolden(): Promise<string> {
 
                     for (const expanded of [false, true]) {
                         const component = renderGlowupDiff(theme, sections, expanded);
-                        const frames: string[][] = [];
+                        const frames: (readonly string[])[] = [];
                         for (const width of [20, 80, 180, 80]) {
                             component.render(width);
                             await settleSyntaxHighlights();

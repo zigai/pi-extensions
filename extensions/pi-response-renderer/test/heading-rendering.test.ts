@@ -244,7 +244,7 @@ test("restores the outer heading scope after a guarded same-instance SDK render"
         const expectedInner = control.render(40);
 
         let entered = false;
-        let nested: string[] | undefined;
+        let nested: readonly string[] | undefined;
         const markdown = new Markdown(source, 0, 0, {
             ...styledTheme,
             bold(text) {

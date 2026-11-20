@@ -666,7 +666,7 @@ class PierreDiffComponent implements Component {
         this.maybeRefreshHighlightedDiff();
     }
 
-    render(width: number): string[] {
+    render(width: number): readonly string[] {
         const safeWidth = Math.max(1, Math.floor(width));
         const nextSyntaxVersion = syntaxHighlightingVersion();
         if (this.syntaxVersion !== nextSyntaxVersion) {

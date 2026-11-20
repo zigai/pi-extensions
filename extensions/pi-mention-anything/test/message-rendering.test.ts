@@ -179,6 +179,55 @@ test("does not confuse hidden destinations with repeated visible mentions", asyn
     }
 });
 
+test("colors persisted Markdown mentions when a transformer uses message metadata", async ({
+    onTestFinished,
+}) => {
+    const { UserMessageComponent, initTheme } = await import("@earendil-works/pi-coding-agent");
+    const keys = [
+        Symbol.for("@earendil-works/pi-coding-agent:theme"),
+        Symbol.for("@mariozechner/pi-coding-agent:theme"),
+    ];
+    const previous = keys.map((key) => Object.getOwnPropertyDescriptor(globalThis, key));
+    initTheme(undefined, false);
+    onTestFinished(() => {
+        keys.forEach((key, index) => {
+            const descriptor = previous[index];
+            if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+            else Reflect.deleteProperty(globalThis, key);
+        });
+    });
+    const { installUserMentionRendering } = await import("../src/message-rendering.ts");
+    const messageId = "saved-entry";
+    const timestamp = "2026-02-01T10:30:00.000Z";
+    const user = new UserMessageComponent(
+        "**hello** %team",
+        undefined,
+        1,
+        [
+            (text, context) => {
+                if (context.messageId === messageId && context.timestamp === timestamp)
+                    return `Saved: ${text}`;
+
+                return text;
+            },
+        ],
+        messageId,
+        timestamp,
+    );
+    const cached = Object.freeze(user.render(50));
+    const before = cached.map(stripTerminalSequences);
+    assert.match(before.join(""), /Saved: hello %team/);
+    const patch = installUserMentionRendering([{ id: "team", trigger: "%" }], () => color);
+    try {
+        const lines = user.render(50);
+        assert.deepEqual(lines.map(stripTerminalSequences), before);
+        assert.match(lines.join(""), /\x1b\[35m%team/);
+        assert.doesNotMatch(cached.join(""), /\x1b\[35m%team/);
+    } finally {
+        patch.dispose();
+    }
+});
+
 test("leaves output unchanged when the marker probe changes the rendered text", async () => {
     const { UserMessageComponent, initTheme } = await import("@earendil-works/pi-coding-agent");
 

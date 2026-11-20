@@ -176,7 +176,7 @@ class ProtocolMutationComponent implements Component {
         this.rendered = this.build(update);
     }
 
-    render(width: number): string[] {
+    render(width: number): readonly string[] {
         return this.rendered.render(width);
     }
 

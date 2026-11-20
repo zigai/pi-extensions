@@ -30,7 +30,7 @@ function runStreamingWriteScenario(updates: number): StreamingRenderBounds {
     clearSyntaxHighlightCache();
     let content = "";
     let lastComponent: Component | undefined;
-    let lines: string[] = [];
+    let lines: readonly string[] = [];
 
     for (let index = 1; index <= updates; index += 1) {
         content += `export const generatedValue${index} = ${index};\n`;

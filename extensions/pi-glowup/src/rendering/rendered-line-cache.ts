@@ -10,12 +10,12 @@ export type CompletedLineCacheLimits = {
 type CacheState = {
     value?: unknown;
     width?: number | undefined;
-    lines?: string[] | undefined;
+    lines?: readonly string[] | undefined;
 };
 
 type LineState = {
     width: number | undefined;
-    lines: string[] | undefined;
+    lines: readonly string[] | undefined;
 };
 
 // The LRU/finalizer hold only reclaimable data state, never component owners.
@@ -88,7 +88,7 @@ export class RenderedLineCache {
         return this.state.width === width && this.state.lines !== undefined;
     }
 
-    get(width: number): string[] | undefined {
+    get(width: number): readonly string[] | undefined {
         if (this.state.width !== width || this.state.lines === undefined) {
             misses += 1;
             return undefined;
@@ -105,7 +105,7 @@ export class RenderedLineCache {
         return this.state.lines;
     }
 
-    set(width: number, lines: string[]): void {
+    set(width: number, lines: readonly string[]): void {
         this.clear();
 
         let bytes = lines.length * COMPLETED_LINE_CACHE_ENTRY_OVERHEAD_BYTES;

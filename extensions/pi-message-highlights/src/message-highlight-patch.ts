@@ -23,11 +23,17 @@ const MESSAGE_HIGHLIGHTS_PATCH_KEY = Symbol.for("zigai.pi-message-highlights.pat
 type HighlightStylesProvider = () => HighlightStyles;
 
 type RenderableInstance = {
-    render: (this: RenderableInstance, width: number) => string[];
+    render: (this: RenderableInstance, width: number) => readonly string[];
 };
 
-type RenderablePrototype = { render: (this: RenderableInstance, width: number) => string[] };
-type RenderPatchHandle = LinkedMethodPatchHandle<RenderableInstance, [width: number], string[]>;
+type RenderablePrototype = {
+    render: (this: RenderableInstance, width: number) => readonly string[];
+};
+type RenderPatchHandle = LinkedMethodPatchHandle<
+    RenderableInstance,
+    [width: number],
+    readonly string[]
+>;
 
 export type MessageHighlightPatchHandle = {
     update(config: MessageHighlightsConfig): void;
@@ -45,10 +51,10 @@ type EditorHighlightPrototype = RenderablePrototype & {
 };
 
 type CachedHighlight = {
-    lines: string[];
+    lines: readonly string[];
     styles: HighlightStyles;
     source: string | undefined;
-    result: string[];
+    result: readonly string[];
 };
 
 class HighlightRenderCache {
@@ -56,7 +62,7 @@ class HighlightRenderCache {
     private frames = new WeakMap<RenderableInstance, Set<WeakRef<RenderableInstance>>>();
     private activeFrame: Set<RenderableInstance> | undefined;
 
-    renderFrame(target: RenderableInstance, render: () => string[]): string[] {
+    renderFrame(target: RenderableInstance, render: () => readonly string[]): readonly string[] {
         const previousActive = this.activeFrame;
         const frame = new Set<RenderableInstance>();
         this.activeFrame = frame;
@@ -149,7 +155,7 @@ function patchRenderablePrototype(
     return installLinkedRenderPatch(
         prototype,
         (predecessor) =>
-            function highlightedRender(this: RenderableInstance, width: number): string[] {
+            function highlightedRender(this: RenderableInstance, width: number): readonly string[] {
                 const lines = predecessor.call(this, width);
                 const styles = getStyles();
 
@@ -303,7 +309,7 @@ function patchAssistantChild(
     const patch = installLinkedRenderPatch(
         child,
         (render) =>
-            function (this: RenderableInstance, width: number): string[] {
+            function (this: RenderableInstance, width: number): readonly string[] {
                 if (!active || gate.depth === 0) return render.call(this, width);
 
                 let styles = gate.styles.at(-1);
@@ -407,13 +413,15 @@ function patchAssistantContainer(
                     (mutate) =>
                         function (this: Container, ...args) {
                             if (!active) return mutate.apply(this, args);
+
+                            // Pi pairs the child list with its rendered lines for the current frame.
+                            if (gate.depth > 0 && key !== "clear")
+                                this.children = [...this.children];
+
                             try {
                                 return mutate.apply(this, args);
                             } finally {
-                                // SDK streaming clears then adds all children. Defer
-                                // additions to the layout boundary, except while an
-                                // in-progress layout can visit the new child now.
-                                if (key !== "addChild" || gate.depth > 0) synchronize();
+                                if (key !== "addChild") synchronize();
                             }
                         },
                 ),
@@ -455,7 +463,10 @@ function patchAssistantPrototype(
     const patch = installLinkedRenderPatch(
         prototype,
         (predecessor) =>
-            function highlightedAssistantRender(this: RenderableInstance, width: number): string[] {
+            function highlightedAssistantRender(
+                this: RenderableInstance,
+                width: number,
+            ): readonly string[] {
                 if (!active) return predecessor.call(this, width);
                 return cache.renderFrame(this, () =>
                     webCache.renderFrame(this, () => {
@@ -527,7 +538,10 @@ function patchEditorPrototype(
     return installLinkedRenderPatch(
         prototype,
         (predecessor) =>
-            function highlightedEditorRender(this: RenderableInstance, width: number): string[] {
+            function highlightedEditorRender(
+                this: RenderableInstance,
+                width: number,
+            ): readonly string[] {
                 const renderedLines = predecessor.call(this, width);
                 if (isEditorHighlightTarget(this)) {
                     return highlightEditorRenderLines(this, width, renderedLines, getStyles());
@@ -571,7 +585,7 @@ export function installMessageHighlightPatch(
                 installLinkedRenderPatch(
                     prototype,
                     (predecessor) =>
-                        function (this: RenderableInstance, width: number): string[] {
+                        function (this: RenderableInstance, width: number): readonly string[] {
                             const lines = predecessor.call(this, width);
                             if (disposed || thinking.active > 0) return lines;
 

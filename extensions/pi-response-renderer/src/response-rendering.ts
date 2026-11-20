@@ -65,7 +65,7 @@ function contentIsAppendOnly(previous: ContentSnapshot[], current: ContentSnapsh
 type RenderFrame = {
     readonly width: number;
     readonly source: readonly string[];
-    readonly output: string[];
+    readonly output: readonly string[];
 };
 
 type MarkdownFrame = RenderFrame & {
@@ -82,7 +82,7 @@ function sameRenderFrame(frame: RenderFrame, width: number, lines: readonly stri
 
 type ForeignMarkdownPatch = {
     component: Component;
-    handle: LinkedMethodPatchHandle<Component, [width: number], string[]>;
+    handle: LinkedMethodPatchHandle<Component, [width: number], readonly string[]>;
 };
 
 function hasForeignMarkdownContract(component: Component): boolean {
@@ -102,7 +102,7 @@ function hideForeignMarkdownFences(patch: MarkdownFencesPatchRecord, component: 
 
     const handle = installLinkedRenderPatch(component, (predecessor) => {
         let frame: RenderFrame | undefined;
-        return function (this: Component, width: number): string[] {
+        return function (this: Component, width: number): readonly string[] {
             const source = predecessor.call(this, width);
             if (frame !== undefined && sameRenderFrame(frame, width, source)) return frame.output;
 
@@ -136,12 +136,12 @@ function hideAssistantMarkdownFences(patch: MarkdownFencesPatchRecord, component
 type AssistantRenderPatchHandle = LinkedMethodPatchHandle<
     AssistantMessageComponentInstance,
     [width: number],
-    string[]
+    readonly string[]
 >;
 
 type MarkdownFencesPatchRecord = {
     readonly owners: Set<symbol>;
-    markdownRenderPatch?: LinkedMethodPatchHandle<Markdown, [width: number], string[]>;
+    markdownRenderPatch?: LinkedMethodPatchHandle<Markdown, [width: number], readonly string[]>;
     markdownInvalidatePatch?: LinkedMethodPatchHandle<Markdown, [], void>;
     markdownSetTextPatch?: LinkedMethodPatchHandle<Markdown, [text: string], void>;
     foreignMarkdownPatches: ForeignMarkdownPatch[];
@@ -266,7 +266,7 @@ async function patchMarkdownFences(owner: symbol): Promise<MarkdownFencesPatchRe
             function assistantRenderWithoutItalics(
                 this: AssistantMessageComponentInstance,
                 width: number,
-            ): string[] {
+            ): readonly string[] {
                 const headingGroup = headingGroups.get(this);
                 if (headingGroup !== undefined) {
                     prepareHeadingGroup(headingGroup, width);

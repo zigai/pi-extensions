@@ -1,8 +1,18 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { stripVTControlCharacters } from "node:util";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
     AssistantMessageComponent,
+    discoverAndLoadExtensions,
+    ExtensionRunner,
     getMarkdownTheme,
     initTheme,
+    ModelRegistry,
+    ModelRuntime,
+    SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import { expect, test } from "vitest";
 
@@ -70,33 +80,49 @@ test("preserves streaming transitions and omitted flags for response and thinkin
     }
 });
 
-test("registered transformer renders closed assistant table fences without changing thinking or source", async () => {
-    const { discoverAndLoadExtensions } = await import("@earendil-works/pi-coding-agent");
-    const { stripVTControlCharacters } = await import("node:util");
-    const { fileURLToPath } = await import("node:url");
+test("registered transformer renders closed assistant table fences without changing thinking or source", async ({
+    onTestFinished,
+}) => {
+    const directory = await mkdtemp(join(tmpdir(), "pi-response-renderer-"));
+    onTestFinished(() => rm(directory, { recursive: true, force: true }));
     const loaded = await discoverAndLoadExtensions(
         [fileURLToPath(new URL("../src/index.ts", import.meta.url))],
-        "/tmp/pi-response-renderer-no-project",
-        "/tmp/pi-response-renderer-no-agent",
+        directory,
+        join(directory, "agent"),
     );
     expect(loaded.errors).toEqual([]);
-    const transformer = loaded.extensions[0]?.markdownTransformer;
-    expect(transformer).toBeDefined();
-
-    if (!transformer) throw new Error("transformer not registered");
+    const models = await ModelRuntime.create({
+        authPath: join(directory, "auth.json"),
+        modelsPath: null,
+        refreshOnCreate: false,
+    });
+    const runner = new ExtensionRunner(
+        loaded.extensions,
+        loaded.runtime,
+        directory,
+        SessionManager.inMemory(directory),
+        new ModelRegistry(models),
+    );
+    const transformers = runner.getMarkdownTransformers();
+    const transformer = transformers.at(0);
+    if (transformer === undefined) throw new Error("transformer not registered");
 
     const table = "```md\n| Name | Value |\n| --- | --- |\n| alpha | 1 |\n```";
-    expect(
-        transformer(table, {
-            messageType: "assistant-thinking",
-            isStreaming: true,
-            availableWidth: 80,
-        }),
-    ).toBe(table);
-
-    expect(
-        transformer(table, { messageType: "user", isStreaming: false, availableWidth: 80 }),
-    ).toBe(table);
+    for (const messageType of [
+        "assistant-thinking",
+        "user",
+        "custom",
+        "summary",
+        "changelog",
+    ] as const) {
+        expect(
+            transformer(table, {
+                messageType,
+                isStreaming: messageType === "assistant-thinking",
+                availableWidth: 80,
+            }),
+        ).toBe(table);
+    }
     const handle = await installResponseRendering();
     try {
         const component = new AssistantMessageComponent(
@@ -105,7 +131,7 @@ test("registered transformer renders closed assistant table fences without chang
             getMarkdownTheme(),
             "Thinking",
             0,
-            [transformer],
+            transformers,
         );
         const partial: AssistantMessage = {
             ...message,

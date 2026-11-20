@@ -77,7 +77,7 @@ export function configureWorkingWidgetSpacingPatch(
     const wrapperRender = function renderWithWorkingWidgetSpacing(
         this: Container,
         width: number,
-    ): string[] {
+    ): readonly string[] {
         if (!nextState.enabled) {
             return originalRender.call(this, width);
         }

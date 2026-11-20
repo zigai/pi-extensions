@@ -71,7 +71,7 @@ class InheritedChildrenContainer implements Component {
         return [this.child];
     }
 
-    render(width: number): string[] {
+    render(width: number): readonly string[] {
         return this.child.render(width);
     }
 

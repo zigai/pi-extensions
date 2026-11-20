@@ -114,5 +114,8 @@
       "./node_modules/@zigai/pi-enhanced-skills/src/index.ts",
       "./node_modules/@zigai/pi-input-corrections/src/index.ts"
     ]
+  },
+  "engines": {
+    "node": ">=22.19.0"
   }
 }

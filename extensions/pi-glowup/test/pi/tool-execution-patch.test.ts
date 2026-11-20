@@ -60,7 +60,7 @@ function installThirdPartyToolRendererPatch(
 const plainTheme = createPlainTheme();
 
 type FakeComponent = {
-    render(width: number): string[];
+    render(width: number): readonly string[];
     invalidate(): void;
 };
 

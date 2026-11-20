@@ -125,11 +125,16 @@ describe("latest native settings contract", () => {
     );
 
     it("persists cache warming in global scope", async () => {
-        const { tab, globalSettings, notifications } = await fixture();
+        const { tab, globalSettings, notifications, agentDir } = await fixture();
+        expect(globalSettings.getCacheWarmingMode()).toBe("idle");
         openSetting(tab, "Cache warming");
         await tab.flush();
 
-        expect(globalSettings.getCacheWarmingMode()).toBe("idle");
+        expect(globalSettings.getCacheWarmingMode()).toBe("off");
+        expect(JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8"))).toMatchObject({
+            cacheWarming: "off",
+        });
+
         expect(notifications).toEqual([]);
     });
 
@@ -139,9 +144,10 @@ describe("latest native settings contract", () => {
         openSetting(tab, "Cache warming");
         await tab.flush();
 
-        expect(globalSettings.getCacheWarmingMode()).toBe("streaming");
+        expect(globalSettings.getCacheWarmingMode()).toBe("idle");
+        expect(globalSettings.getSettings()).not.toHaveProperty("cacheWarming");
         expect(notifications).toEqual(["Cache warming can only be changed in global Pi settings."]);
-        expect(tab.render(100).join("\n")).toContain("streaming");
+        expect(tab.render(100).join("\n")).toContain("idle");
         await expect(readFile(join(cwd, ".pi", "settings.json"), "utf8")).rejects.toMatchObject({
             code: "ENOENT",
         });

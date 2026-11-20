@@ -229,7 +229,7 @@ async function createHost(
     }
 }
 
-function body(lines: string[], label?: string): string[] {
+function body(lines: readonly string[], label?: string): string[] {
     return lines.map((line) => {
         let plain = stripTerminalSequences(line);
         if (label !== undefined) plain = plain.replace(label, "");

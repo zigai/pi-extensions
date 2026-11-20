@@ -202,7 +202,7 @@ export class PlainMarkdownText implements Component {
         return;
     }
 
-    render(width: number): string[] {
+    render(width: number): readonly string[] {
         if (this.text.trim().length === 0) {
             return [];
         }

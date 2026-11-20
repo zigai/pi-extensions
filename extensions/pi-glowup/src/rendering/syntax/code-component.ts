@@ -23,7 +23,7 @@ export function renderSyntaxComponent(
     component: Component,
     invalidate: () => void,
     width: number,
-): string[] {
+): readonly string[] {
     return observeHighlightComponentRender(component, invalidate, width);
 }
 

@@ -236,9 +236,18 @@ test("shutting down one Codex tokenizer does not affect another owner", async ()
     }
 });
 
-test.each([false, true])(
-    "native compaction matches Pi transcript conversion after a checkpoint=%s",
-    (afterCheckpoint) => {
+test.each([
+    { afterCheckpoint: false, supportsMidConvoSystemMessages: true },
+    { afterCheckpoint: true, supportsMidConvoSystemMessages: true },
+    { afterCheckpoint: false, supportsMidConvoSystemMessages: false },
+])(
+    "native compaction matches Pi transcript conversion with checkpoint=$afterCheckpoint and in-place system updates=$supportsMidConvoSystemMessages",
+    ({ afterCheckpoint, supportsMidConvoSystemMessages }) => {
+        const initialTool = {
+            name: "read",
+            description: "Read a file.",
+            parameters: Type.Object({ path: Type.String() }),
+        };
         const grammarTool = {
             name: "patch_file",
             description: "Apply a change.",
@@ -260,7 +269,7 @@ test.each([false, true])(
             contextWindow: 200_000,
             maxTokens: 8192,
             compat: {
-                supportsMidConvoSystemMessages: true,
+                supportsMidConvoSystemMessages,
                 supportsAdditionalTools: true,
                 supportsOpenAIGrammarTools: true,
             },
@@ -273,7 +282,13 @@ test.each([false, true])(
         };
 
         const messages: Message[] = [
-            { role: "system", content: "base instructions", timestamp: 0 },
+            {
+                role: "system",
+                content: "base instructions",
+                sections: { project: "base project rules" },
+                toolsAdded: [initialTool],
+                timestamp: 0,
+            },
             { role: "user", content: "start", timestamp: 1 },
             {
                 role: "system",
@@ -356,14 +371,26 @@ test.each([false, true])(
             };
         });
         let selectedEntries = entries;
-        let referenceMessages: Message[] = messages;
+        let referenceMessages: Message[];
 
         if (afterCheckpoint) {
             selectedEntries = entries.slice(3);
             referenceMessages = [
-                { role: "system", content: "", toolsAdded: [grammarTool], timestamp: 0 },
+                {
+                    role: "system",
+                    content: "",
+                    toolsAdded: [initialTool, grammarTool],
+                    timestamp: 0,
+                },
                 ...messages.slice(3),
             ];
+        } else if (supportsMidConvoSystemMessages) {
+            referenceMessages = [
+                { role: "system", content: "", toolsAdded: [initialTool], timestamp: 0 },
+                ...messages.slice(1),
+            ];
+        } else {
+            referenceMessages = messages.filter((message) => message.role !== "system");
         }
 
         const expected = convertResponsesMessages(
@@ -371,9 +398,8 @@ test.each([false, true])(
             normalizeContext({ messages: referenceMessages }),
             new Set(["openai", "openai-codex", "opencode"]),
             {
-                includeSystemPrompt: false,
                 grammarToolInputProperties: createGrammarToolInputProperties([grammarTool], true),
-                supportsMidConvoSystemMessages: true,
+                supportsMidConvoSystemMessages,
                 supportsAdditionalTools: true,
                 toolOptions: {
                     strict: null,
@@ -411,7 +437,13 @@ test.each([false, true])(
         assert.equal(input.find((item) => item.type === "function_call")?.namespace, "files");
         assert.equal(input.find((item) => item.type === "custom_tool_call")?.input, "change");
         assert.equal(input.filter((item) => item.type === "custom_tool_call_output").length, 1);
-        if (!afterCheckpoint) assert.match(JSON.stringify(input), /updated project rules/);
+        const transcript = JSON.stringify(input);
+        assert.doesNotMatch(transcript, /base instructions|base project rules/);
+        if (!afterCheckpoint && supportsMidConvoSystemMessages) {
+            assert.match(transcript, /updated project rules/);
+        } else {
+            assert.doesNotMatch(transcript, /updated project rules/);
+        }
     },
 );
 

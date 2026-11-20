@@ -162,7 +162,7 @@ for (const foreignFirst of [false, true]) {
     }
 }
 
-test("discovers children added by predecessors and during container layout; removal restores immediately", () => {
+test("highlights children added during layout on the next frame and restores them on removal", () => {
     const container = new Container();
     const added = new MouseRegion(
         new Text("https://example.org src/added.ts", 0, 0),
@@ -197,6 +197,7 @@ test("discovers children added by predecessors and during container layout; remo
     try {
         target.render(100);
         add = true;
+        target.render(100);
         expect(target.render(100).join("\n")).toContain("\u001b[1mhttps://example.org");
         container.removeChild(added);
         expect(added.render).toBe(original);
@@ -293,7 +294,7 @@ test("one style snapshot per frame survives child side effects, nested frames, a
     let color = "31";
     let themeReads = 0;
     let recurse = true;
-    let nested: string[] = [];
+    let nested: readonly string[] = [];
     const target = {
         contentContainer: container,
         render: (width: number) => container.render(width),
@@ -506,7 +507,7 @@ for (const opaque of [false, true]) {
         try {
             target.render(100);
             const retired = container.render;
-            replacement = function (this: Container, width: number): string[] {
+            replacement = function (this: Container, width: number): readonly string[] {
                 if (opaque) return retired.call(this, width);
                 return this.children.flatMap((component) => component.render(width));
             };
@@ -552,7 +553,7 @@ test("captured assistant/container/mutation wrappers cannot reinstall after shut
         const clear = container.clear;
         const remove = container.removeChild;
         const child = new Text("https://example.org/after src/after.ts", 0, 0);
-        container.render = function (this: Container, width: number): string[] {
+        container.render = function (this: Container, width: number): readonly string[] {
             patch.dispose(); // Owner style stack is still active until this frame returns.
             clear.call(this);
             add.call(this, child);

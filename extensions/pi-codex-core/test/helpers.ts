@@ -75,7 +75,7 @@ type ExtensionEventHandler = (
 ) => ExtensionHarnessResult | Promise<ExtensionHarnessResult>;
 
 type MessageComponent = {
-    readonly render: (width: number) => string[];
+    readonly render: (width: number) => readonly string[];
     readonly invalidate: () => void;
 };
 
@@ -489,7 +489,7 @@ type TestRenderContext<TState extends object, TArgs> = {
     keyHint: typeof keyHint;
 };
 
-export function renderComponent(component: { render(width: number): string[] }): string {
+export function renderComponent(component: { render(width: number): readonly string[] }): string {
     return component.render(200).join("\n");
 }
 

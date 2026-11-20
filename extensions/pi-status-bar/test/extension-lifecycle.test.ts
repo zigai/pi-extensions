@@ -46,7 +46,7 @@ type LifecycleEvent = {
 type WidgetFactory = (
     tui: TUI,
     theme: { fg(role: string, text: string): string },
-) => { render(width: number): string[] };
+) => { render(width: number): readonly string[] };
 type LifecycleContext = Parameters<ReturnType<typeof createStatusBarLifecycle>["agent_start"]>[1];
 type LifecycleHarness = {
     readonly appendEntries: WorkedForState[];

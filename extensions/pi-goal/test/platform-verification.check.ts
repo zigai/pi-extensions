@@ -384,7 +384,7 @@ test("platform verification config and package scripts require macOS, Ubuntu, an
     PlatformPackageSchema,
     JSON.parse(readFileSync("package.json", "utf8")),
   );
-  assert.equal(packageJson.engines?.node, ">=24.0.0");
+  assert.equal(packageJson.engines?.node, ">=22.19.0");
   assert.ok(packageJson.files?.includes("scripts"));
   assert.ok(packageJson.files?.includes("platform-verification.config.mjs"));
   assert.ok(packageJson.files?.includes(".crabboxignore"));

@@ -34,7 +34,7 @@ type PatchableTuiInstance = {
     };
 };
 
-type PatchableTuiRender = (this: PatchableTuiInstance, width: number) => string[];
+type PatchableTuiRender = (this: PatchableTuiInstance, width: number) => readonly string[];
 
 type ChildLineRange = {
     index: number;
@@ -91,10 +91,6 @@ function warnAnchorInputToBottomPatchUnavailable(reason?: string): void {
     reportExtensionDiagnostic(
         `[pi-ui-tweaks] anchor input to bottom patch unavailable; Pi internals may have changed${suffix}`,
     );
-}
-
-interface CompactableComponent extends Component {
-    render: (this: Component, width: number) => string[];
 }
 
 function isComponentContainer(component: Component): component is ComponentContainer {
@@ -159,7 +155,7 @@ function renderWithChildLineRanges(
     tui: PatchableTuiInstance,
     width: number,
     render: PatchableTuiRender,
-): string[] {
+): readonly string[] {
     const frame = tui[CHILD_LINE_RANGES_FRAME_KEY];
     if (frame?.width !== width || frame.recording) {
         return render.call(tui, width);
@@ -286,7 +282,7 @@ function getFullscreenBlankPrecedingComponent(
 }
 
 function temporarilyCompactBlankComponent(
-    component: CompactableComponent | undefined,
+    component: Component | undefined,
 ): (() => void) | undefined {
     if (component === undefined) return undefined;
 
@@ -297,7 +293,7 @@ function temporarilyCompactBlankComponent(
     const compactedRender: Component["render"] = function compactedBlankComponentRender(
         this: Component,
         width: number,
-    ): string[] {
+    ): readonly string[] {
         const lines = originalRender.call(this, width);
         if (lines.length === 0 || hasVisibleLine(lines, 0, lines.length)) return lines;
 
@@ -440,7 +436,7 @@ export type AnchorInputToBottomHandle = {
 
 type AnchorPatchRecord = {
     readonly original: PatchableTuiRender;
-    readonly patch: LinkedMethodPatchHandle<PatchableTuiInstance, [number], string[]>;
+    readonly patch: LinkedMethodPatchHandle<PatchableTuiInstance, [number], readonly string[]>;
     readonly handle: AnchorInputToBottomHandle;
 };
 

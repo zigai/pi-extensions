@@ -227,7 +227,7 @@ export async function installAssistantStreaming(
     try {
         patches.push(
             installLinkedMethodPatch(Component.prototype, "render", (previous) => {
-                return function renderStreamingContent(width): string[] {
+                return function renderStreamingContent(width): readonly string[] {
                     const state = states.get(this);
                     if (active && state !== undefined && Number.isFinite(width)) {
                         if (state.renderWidth !== width) {

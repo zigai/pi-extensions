@@ -12,7 +12,7 @@ const theme = new Theme(
     "truecolor",
 );
 
-function render(code: string, expanded = false, width = 240): string[] {
+function render(code: string, expanded = false, width = 240): readonly string[] {
     return renderScriptCall(
         theme,
         { label: "Bash", language: "bash", code },

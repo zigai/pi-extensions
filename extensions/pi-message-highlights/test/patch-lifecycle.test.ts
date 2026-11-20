@@ -24,40 +24,6 @@ import { DEFAULT_MESSAGE_HIGHLIGHTS_CONFIG } from "../src/settings.ts";
 import plainUserMessagesExtension from "../../pi-plain-user-messages/src/index.ts";
 import { installResponseRendering } from "../../pi-response-renderer/src/response-rendering.ts";
 
-type RenderPrototype = {
-    render: (this: MessageComponent, width: number) => string[];
-};
-
-type MessageComponent = {
-    render: (this: MessageComponent, width: number) => string[];
-};
-
-/** Declared shapes of the unexported Pi message component module exports. */
-type AssistantMessageModuleView = {
-    AssistantMessageComponent?:
-        | ((new (
-              message: AssistantMessage,
-              hideThinkingBlock: boolean,
-              theme: MarkdownTheme,
-              hiddenThinkingLabel: string,
-              outputPad: number,
-          ) => MessageComponent) & {
-              prototype?: {
-                  render?: unknown;
-                  updateContent?: (this: MessageComponent, message: AssistantMessage) => void;
-              };
-          })
-        | undefined;
-};
-
-type UserMessageModuleView = {
-    UserMessageComponent?:
-        | ((new (text: string, theme: MarkdownTheme, outputPad: number) => MessageComponent) & {
-              prototype?: { render?: unknown };
-          })
-        | undefined;
-};
-
 type ThemeSnapshot = {
     readonly key: symbol;
     readonly descriptor: PropertyDescriptor | undefined;
@@ -210,42 +176,6 @@ class FakeTerminal implements Terminal {
 
 const ESC = String.fromCharCode(0x1b);
 
-/** Verifies one component prototype exposes the render method the patches wrap. */
-function verifiedRenderPrototype<P extends { render?: unknown }>(
-    prototype: P | undefined,
-    label: string,
-): P & RenderPrototype {
-    if (typeof prototype?.render !== "function") {
-        assert.fail(`invalid ${label} prototype`);
-    }
-
-    // SAFETY: The runtime check proves render is callable; the patches wrap only that method
-    // and forward `this`, so the remaining prototype shape is irrelevant here.
-    return prototype as P & RenderPrototype;
-}
-
-async function loadAssistantMessageComponent(): Promise<
-    NonNullable<AssistantMessageModuleView["AssistantMessageComponent"]>
-> {
-    // SAFETY: Resolved from the installed Pi package at runtime; the export is verified
-    // callable below before any member is read.
-    const module = (await import("@earendil-works/pi-coding-agent")) as AssistantMessageModuleView;
-    const component = module.AssistantMessageComponent;
-    if (component === undefined) assert.fail("missing AssistantMessageComponent");
-    return component;
-}
-
-async function loadUserMessageComponent(): Promise<
-    NonNullable<UserMessageModuleView["UserMessageComponent"]>
-> {
-    // SAFETY: Resolved from the installed Pi package at runtime; the export is verified
-    // present below before any member is read.
-    const module = (await import("@earendil-works/pi-coding-agent")) as UserMessageModuleView;
-    const component = module.UserMessageComponent;
-    if (component === undefined) assert.fail("missing UserMessageComponent");
-    return component;
-}
-
 type LifecycleApi = {
     readonly api: NonNullable<Parameters<typeof plainUserMessagesExtension>[0]>;
     readonly shutdownHandlers: Array<() => void>;
@@ -272,13 +202,10 @@ test("message render wrappers restore cleanly across reload cycles", async () =>
     const restoreOriginalTheme = suspendPiTheme();
     let restoreInitializedTheme: (() => void) | undefined;
     try {
-        const assistantClass = await loadAssistantMessageComponent();
-        const userClass = await loadUserMessageComponent();
-        const assistantPrototype = verifiedRenderPrototype(
-            assistantClass.prototype,
-            "AssistantMessageComponent",
-        );
-        const userPrototype = verifiedRenderPrototype(userClass.prototype, "UserMessageComponent");
+        const { AssistantMessageComponent, UserMessageComponent } =
+            await import("@earendil-works/pi-coding-agent");
+        const assistantPrototype = AssistantMessageComponent.prototype;
+        const userPrototype = UserMessageComponent.prototype;
         const originalAssistantRender = assistantPrototype.render;
         const originalAssistantUpdateContent = assistantPrototype.updateContent;
         const originalUserRender = userPrototype.render;
@@ -317,8 +244,6 @@ test("message render wrappers restore cleanly across reload cycles", async () =>
                 highlightsLifecycle.shutdownHandlers.push(() => patch.dispose());
                 restoreInitializedTheme ??= await initializePiTheme();
 
-                const AssistantMessageComponent = assistantClass;
-                const UserMessageComponent = userClass;
                 const message = {
                     role: "assistant",
                     content: [{ type: "text", text: "Read https://example.com/docs now" }],

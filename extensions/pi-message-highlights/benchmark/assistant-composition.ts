@@ -132,7 +132,7 @@ try {
         const heapBefore = process.memoryUsage().heapUsed;
         const cpu = process.cpuUsage();
         const started = performance.now();
-        let output: string[] = [];
+        let output: readonly string[] = [];
         for (let index = 0; index < frames; index += 1) {
             if (variant === "streaming" && index % 10 === 0)
                 component.updateContent(message(index), true);
@@ -223,7 +223,7 @@ ownership.dispose();
 class DetachedAssistant {
     contentContainer = new Container();
 
-    render(width: number): string[] {
+    render(width: number): readonly string[] {
         return this.contentContainer.render(width);
     }
 }

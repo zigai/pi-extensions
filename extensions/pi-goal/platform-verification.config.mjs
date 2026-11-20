@@ -14,7 +14,7 @@ export default {
     minVersion: "0.26.0",
   },
   ubuntuContainerImage: "cimg/node:24.16",
-  nodeValidationMajor: 24,
+  nodeValidationMajor: 22,
   macosStaticSsh: {
     host: "localhost",
     workRoot: "/Users/$USER/crabbox/pi-codex-goal",

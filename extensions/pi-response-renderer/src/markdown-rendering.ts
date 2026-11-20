@@ -42,7 +42,7 @@ function isBlankRenderedLine(line: string): boolean {
     return stripAnsi(line).trim().length === 0;
 }
 
-export type MarkdownRender = (this: Markdown, width: number) => string[];
+export type MarkdownRender = (this: Markdown, width: number) => readonly string[];
 
 type StyledMarkdownInstance = {
     text?: string;
@@ -505,7 +505,7 @@ function* presentedLines(
 }
 
 export function collapseAssistantBlankLines(
-    lines: string[],
+    lines: readonly string[],
     headingPrefix: string,
     headingLineTexts: ReadonlySet<string>,
     tableBoundaryLineTexts?: ReadonlySet<string>,

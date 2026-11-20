@@ -34,14 +34,21 @@ const transformContext = Type.Object({
         Type.Literal("user"),
         Type.Literal("assistant"),
         Type.Literal("assistant-thinking"),
+        Type.Literal("custom"),
+        Type.Literal("summary"),
+        Type.Literal("changelog"),
     ]),
     isStreaming: Type.Boolean(),
     availableWidth: Type.Number(),
+    messageId: Type.Optional(Type.String()),
+    timestamp: Type.Optional(Type.String()),
 });
 
 const probeConfigSchema = Type.Object({
     markdownTheme: markdownThemeSchema,
     outputPad: Type.Number(),
+    messageId: Type.Optional(Type.String()),
+    timestamp: Type.Optional(Type.String()),
     markdownTransformers: Type.Array(
         Type.Function([Type.String(), transformContext], Type.String()),
     ),
@@ -194,7 +201,11 @@ function probeConfig(component: UserMessageComponent): Static<typeof probeConfig
         component,
         "markdownTransformers",
     )?.value;
+    const messageId: unknown = Object.getOwnPropertyDescriptor(component, "messageId")?.value;
+    const timestamp: unknown = Object.getOwnPropertyDescriptor(component, "timestamp")?.value;
     const fields = { markdownTheme, outputPad, markdownTransformers };
+    if (messageId !== undefined) Object.assign(fields, { messageId });
+    if (timestamp !== undefined) Object.assign(fields, { timestamp });
     if (!Value.Check(probeConfigSchema, fields)) {
         throw new Error("Pi user message Markdown render configuration is unavailable or invalid");
     }
@@ -209,7 +220,7 @@ function colorMarkdownMentions(
     width: number,
     spans: readonly Span[],
     prefix: string,
-    render: (this: UserMessageComponent, width: number) => string[],
+    render: (this: UserMessageComponent, width: number) => readonly string[],
 ): string[] {
     if (!prefix || !spans.length || text.includes(MARKER_PREFIX)) return [...lines];
 
@@ -255,6 +266,8 @@ function colorMarkdownMentions(
         fields.markdownTheme,
         fields.outputPad,
         fields.markdownTransformers,
+        fields.messageId,
+        fields.timestamp,
     );
     const probe = render.call(clone, width);
     if (
@@ -329,7 +342,7 @@ export function installUserMentionRendering(
     return installLinkedRenderPatch(
         UserMessageComponent.prototype,
         (predecessor) =>
-            function (this: UserMessageComponent, width: number): string[] {
+            function (this: UserMessageComponent, width: number): readonly string[] {
                 const lines = predecessor.call(this, width);
                 const descriptor = Object.getOwnPropertyDescriptor(this, "text");
                 if (descriptor === undefined || !Object.hasOwn(descriptor, "value")) return lines;
@@ -353,6 +366,8 @@ export function installUserMentionRendering(
                     JSON.stringify(spans),
                     JSON.stringify(lines),
                     fields.outputPad,
+                    fields.messageId,
+                    fields.timestamp,
                     fields.markdownTheme,
                     fields.markdownTheme.heading,
                     fields.markdownTheme.link,

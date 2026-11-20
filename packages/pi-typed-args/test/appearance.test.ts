@@ -160,7 +160,7 @@ describe("global presentation config", () => {
             formatDetailedHelp(command, appearance.detailedHelp),
             /Help.*\/appearance-helper/,
         );
-        let form: string[] = [];
+        let form: readonly string[] = [];
         const ctx = createTestExtensionCommandContext({
             ui: {
                 custom: async (factory) => {
@@ -784,7 +784,7 @@ describe("global presentation config", () => {
             issues: [],
             mode: "run",
         };
-        let renderedLines: string[] = [];
+        let renderedLines: readonly string[] = [];
         const colorCalls: Array<{ color: string; text: string }> = [];
         const recordingTheme = createTestTheme({
             fg(color: string, text: string) {

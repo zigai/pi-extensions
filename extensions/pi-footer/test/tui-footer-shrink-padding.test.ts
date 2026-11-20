@@ -161,7 +161,7 @@ class CountingLines implements Component {
 class CountingContainer extends Container {
     renderCount = 0;
 
-    override render(width: number): string[] {
+    override render(width: number): readonly string[] {
         this.renderCount += 1;
         return super.render(width);
     }
@@ -184,7 +184,7 @@ class InheritedChildrenContainer implements Component {
         return [this.child];
     }
 
-    render(width: number): string[] {
+    render(width: number): readonly string[] {
         return this.child.render(width);
     }
 

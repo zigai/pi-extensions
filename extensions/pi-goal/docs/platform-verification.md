@@ -1,6 +1,6 @@
 # Platform verification testing
 
-`@zigai/pi-goal` uses GitHub-hosted CI on macOS, Ubuntu Linux, and native Windows for release-sensitive changes. Each `pi-goal` job runs the shared `platform-build.mjs` command on Node 24: workspace builds, the full goal verification suite, packing, and installation into an isolated Pi project. No model credentials or Crabbox setup are required.
+`@zigai/pi-goal` uses GitHub-hosted CI on macOS, Ubuntu Linux, and native Windows for release-sensitive changes. Each `pi-goal` job runs the shared `platform-build.mjs` command on Node 22.19.0: workspace builds, the full goal verification suite, packing, and installation into an isolated Pi project. No model credentials or Crabbox setup are required.
 
 The root CI job also runs shared and per-workspace checks. Run the platform-build command locally from `extensions/pi-goal` with `node scripts/platform-verification/platform-build.mjs`.
 
@@ -36,7 +36,7 @@ npm run verify:platform:windows-native
 
 ## Required environment
 
-Install Crabbox `0.26.0` or newer with Homebrew so `crabbox` is on `PATH`. Use `PLATFORM_VERIFICATION_CRABBOX=/path/to/crabbox` only when testing a non-default binary. The supported package runtime floor is Node 24, matching the local and Crabbox platform validation baseline.
+Install Crabbox `0.26.0` or newer with Homebrew so `crabbox` is on `PATH`. Use `PLATFORM_VERIFICATION_CRABBOX=/path/to/crabbox` only when testing a non-default binary. The supported runtime floor is Node 22.19. The default Ubuntu image uses Node 24.
 
 ```sh
 PLATFORM_VERIFICATION_MAC_HOST=localhost
@@ -70,7 +70,7 @@ Hosted CI runs `platform-build` on each platform. The optional Crabbox harness r
 
 ### `platform-build`
 
-1. Verify Node major version is at least the configured Node 24 validation baseline.
+1. Verify Node major version is at least the configured Node 22 validation baseline.
 2. Run `npm ci` at the synced monorepo root, using its shared lockfile.
 3. Run root `npm run build` to build shared runtime dependencies, then workspace `just check`.
 4. Pack this workspace and its built local settings, Glowup, and typed-args dependencies. The packages keep normal exact runtime dependency declarations, not bundled workspace sources.

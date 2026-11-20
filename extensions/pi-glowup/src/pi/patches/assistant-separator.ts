@@ -61,7 +61,7 @@ type ChatTransitionPatchState = {
 };
 
 type ChatContainerPrototype = {
-    render?: (this: ChatContainerInstance, width: number) => string[];
+    render?: (this: ChatContainerInstance, width: number) => readonly string[];
     [TRANSCRIPT_PRESENTATION]?: (this: ChatContainerInstance) => void;
     [CHAT_TRANSITION_PATCH_STATE_KEY]?: ChatTransitionPatchState;
 };
@@ -233,7 +233,7 @@ function createChatTransitionSeparatorWrapper(
     return function renderWithChatTransitionSeparator(
         this: ChatContainerInstance,
         width: number,
-    ): string[] {
+    ): readonly string[] {
         prepare.call(this);
         return originalRender.call(this, width);
     };
@@ -332,7 +332,7 @@ function installAssistantPrototypePatch(assistantPrototype: AssistantRenderProto
             ? function renderWithAssistantSeparator(
                   this: AssistantRenderInstance,
                   width: number,
-              ): string[] {
+              ): readonly string[] {
                   const lines = originalRender.call(this, width);
                   if (
                       !nextState.enabled ||

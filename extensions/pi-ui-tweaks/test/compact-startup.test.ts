@@ -106,7 +106,7 @@ function startup(customHeader?: Text) {
     };
 }
 
-function text(lines: string[]): string {
+function text(lines: readonly string[]): string {
     return lines.map((line) => stripTerminalSequences(line).trimEnd()).join("\n");
 }
 

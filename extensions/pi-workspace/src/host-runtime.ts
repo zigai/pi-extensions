@@ -4,7 +4,10 @@ import { Value } from "typebox/value";
 import { Compile } from "typebox/compile";
 
 export const componentSchema = Type.Object({
-    render: Type.Function([Type.Number()], Type.Array(Type.String())),
+    render: Type.Function(
+        [Type.Number()],
+        Type.Unsafe<readonly string[]>(Type.Array(Type.String())),
+    ),
     invalidate: Type.Function([], Type.Void()),
 });
 

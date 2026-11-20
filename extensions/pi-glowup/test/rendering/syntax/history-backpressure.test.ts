@@ -100,7 +100,7 @@ it("colors the last real script preview after a restored history burst", async (
     await initializeSyntaxHighlighting({}, { preloadLanguages: ["python"] });
     const theme = createPlainTheme();
     const components: Array<Component | undefined> = [];
-    const rendered: string[][] = [];
+    const rendered: (readonly string[])[] = [];
     const redraws = Array.from({ length: 140 }, (_value, index) => {
         const redraw = (): void => {
             const component = renderScriptCall(

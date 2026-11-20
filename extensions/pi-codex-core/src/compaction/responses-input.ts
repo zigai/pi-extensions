@@ -5,7 +5,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import type { Message, Tool } from "@earendil-works/pi-ai";
 import type { createGrammarToolInputProperties } from "@earendil-works/pi-ai/api/constrained-sampling";
 import type { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
-import type { getDeclaredTools, normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
+import type {
+    getDeclaredTools,
+    normalizeContext,
+    resolveTranscript,
+} from "@earendil-works/pi-ai/utils/transcript";
 import {
     buildSessionProjection,
     convertToLlm,
@@ -46,6 +50,9 @@ const HostProviderModulesDecoder = compileSchema(
                 Type.Function([], Type.Unknown()),
             ),
             normalizeContext: Type.Unsafe<typeof normalizeContext>(
+                Type.Function([], Type.Unknown()),
+            ),
+            resolveTranscript: Type.Unsafe<typeof resolveTranscript>(
                 Type.Function([], Type.Unknown()),
             ),
         }),
@@ -200,7 +207,7 @@ function serializeMessagesToResponsesInput(
     let transcriptMessages = messages;
     if (!initialTranscript) {
         // The checkpoint tail may contain calls whose declarations preceded it.
-        // Pi 1.5 emits additional_tools from transcript declarations, not the
+        // Pi emits additional_tools from transcript declarations, not the
         // grammar-property lookup alone, so carry the projected tool loadout.
         transcriptMessages = [
             { role: "system", content: "", toolsAdded: declaredTools, timestamp: 0 },
@@ -208,21 +215,44 @@ function serializeMessagesToResponsesInput(
         ];
     }
 
-    const context = transcriptApi.normalizeContext({ messages: transcriptMessages });
     const compat = JsonObjectDecoder.decode(model.compat);
     const supportsOpenAIGrammarTools = compat?.supportsOpenAIGrammarTools === true;
+    const supportsMidConvoSystemMessages = compat?.supportsMidConvoSystemMessages === true;
+    const supportsAdditionalTools = compat?.supportsAdditionalTools === true;
+    let context = transcriptApi.resolveTranscript(
+        transcriptApi.normalizeContext({ messages: transcriptMessages }),
+        supportsMidConvoSystemMessages,
+    );
+
+    // Compaction supplies its instructions separately. Pi 1.6 always emits the
+    // leading prompt, so blank it after Pi has folded any later updates into it.
+    // Keep the system message in place so its tool declarations still get emitted.
+    // Pi drops failed assistant turns before deciding which message leads.
+    const leadingIndex = context.messages.findIndex(
+        (message) =>
+            message.role !== "assistant" ||
+            (message.stopReason !== "error" && message.stopReason !== "aborted"),
+    );
+    const leading = context.messages[leadingIndex];
+    if (leading?.role === "system") {
+        const messages = [...context.messages];
+        const system = { ...leading, content: "", sections: {} };
+        // Only the in-place changes layout emits removal notices.
+        if (supportsMidConvoSystemMessages && supportsAdditionalTools) system.toolsRemoved = [];
+        messages[leadingIndex] = system;
+        context = transcriptApi.normalizeContext({ messages });
+    }
     const converted = responsesApi.convertResponsesMessages(
         model,
         context,
         CODEX_TOOL_CALL_PROVIDERS,
         {
-            includeSystemPrompt: false,
             grammarToolInputProperties: grammarApi.createGrammarToolInputProperties(
                 declaredTools,
                 supportsOpenAIGrammarTools,
             ),
-            supportsMidConvoSystemMessages: compat?.supportsMidConvoSystemMessages === true,
-            supportsAdditionalTools: compat?.supportsAdditionalTools === true,
+            supportsMidConvoSystemMessages,
+            supportsAdditionalTools,
             supportsToolSearch: compat?.supportsToolSearch === true,
             toolOptions: {
                 strict: null,

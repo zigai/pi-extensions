@@ -135,7 +135,7 @@ function nodeRows(
     mode: ToolLabelMode,
     width: number,
     mutations: MutationSettings,
-): string[] {
+): readonly string[] {
     switch (node.kind) {
         case "empty":
             return [];
@@ -241,7 +241,7 @@ function nodeRows(
                 outputOptions = { ...outputOptions, syntax: node.syntax };
 
             const content = protocolContent(node, context, Math.max(1, width));
-            let rows: string[];
+            let rows: readonly string[];
             if (node.kind === "output" && node.format === "markdown") {
                 let rendered = markdownRows(content, theme, width, context.invalidate);
                 if (
@@ -262,9 +262,10 @@ function nodeRows(
             } else rows = renderGlowupOutput(theme, content, outputOptions).render(width);
 
             if (node.kind === "code" && node.title !== undefined)
-                rows.unshift(
+                return [
                     ...wrapStyledText(theme.fg("accent", renderInline(theme, node.title)), width),
-                );
+                    ...rows,
+                ];
 
             return rows;
         }

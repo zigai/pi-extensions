@@ -497,7 +497,7 @@ test("restores durable image detail markers in provider requests", () => {
     ]);
 });
 
-function renderUnpadded(component: { render(width: number): string[] }): string {
+function renderUnpadded(component: { render(width: number): readonly string[] }): string {
     return component
         .render(200)
         .map((line) => line.trimEnd())

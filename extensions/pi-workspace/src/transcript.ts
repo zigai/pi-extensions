@@ -52,7 +52,7 @@ class MetadataBadge extends Text {
         super("", 0, 0);
     }
 
-    override render(width: number): string[] {
+    override render(width: number): readonly string[] {
         const metadata = this.source.metadata(this.owner);
         const fields: string[] = [];
         if (metadata.role !== undefined) fields.push(metadata.role);

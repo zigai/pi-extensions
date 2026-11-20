@@ -439,7 +439,7 @@ class PartialWriteCallPreviewComponent implements Component {
     private sourceLineCount: number | undefined;
     private waitingForCode = false;
     private cachedWidth: number | undefined;
-    private cachedLines: string[] | undefined;
+    private cachedLines: readonly string[] | undefined;
     private invalidateHost: (() => void) | undefined;
 
     private readonly invalidateSyntax = (): void => {
@@ -474,7 +474,7 @@ class PartialWriteCallPreviewComponent implements Component {
         this.invalidate();
     }
 
-    render(width: number): string[] {
+    render(width: number): readonly string[] {
         if (this.cachedWidth === width && this.cachedLines !== undefined) {
             return this.cachedLines;
         }
@@ -601,7 +601,7 @@ class StreamingWritePreviewComponent implements Component {
         this.invalidate();
     }
 
-    render(width: number): string[] {
+    render(width: number): readonly string[] {
         return renderSyntaxComponent(this.rendered, this.input.invalidate, width);
     }
 
@@ -609,7 +609,7 @@ class StreamingWritePreviewComponent implements Component {
         this.rendered.invalidate();
     }
 
-    private renderPreview(width: number): string[] {
+    private renderPreview(width: number): readonly string[] {
         const { args, theme, context, streamCode, invalidate } = this.input;
         const path = args.path ?? "";
         const content = args.content ?? "";

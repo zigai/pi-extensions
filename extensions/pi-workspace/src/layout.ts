@@ -41,7 +41,7 @@ class SummaryPanel extends Text {
         super("", 0, 0);
     }
 
-    override render(width: number): string[] {
+    override render(width: number): readonly string[] {
         const summary = this.summary();
         let activity = "Idle";
         if (summary.working) activity = "Working";

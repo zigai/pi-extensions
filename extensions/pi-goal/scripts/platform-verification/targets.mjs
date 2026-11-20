@@ -458,7 +458,7 @@ export function buildGoalRuntimeVerificationCommand(config, targetName) {
 export function buildPlatformBuildCommand(
   targetName,
   packageName = "@zigai/pi-goal",
-  nodeValidationMajor = 24,
+  nodeValidationMajor = 22,
 ) {
   if (platformFor(targetName) === "powershell") {
     return `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "Set-Location .\\extensions\\pi-goal; & .\\scripts\\platform-verification\\platform-build-windows.ps1 -PackageName ${psSingleQuote(packageName)} -NodeValidationMajor ${nodeValidationMajor}"`;
@@ -798,7 +798,7 @@ export async function runTargetSuite(config, targetName, suiteName, leaseSession
     { id: "platform-marker", fn: () => stdout.includes("PLATFORM_BUILD_OK") },
     {
       id: "node-version",
-      fn: () => nodeMajor >= (config.nodeValidationMajor ?? 24),
+      fn: () => nodeMajor >= (config.nodeValidationMajor ?? 22),
       error: `Node major ${nodeMajor}`,
     },
     { id: "npm-ci", fn: () => /PLATFORM_NPM_CI_EXIT=0/.test(stdout) },

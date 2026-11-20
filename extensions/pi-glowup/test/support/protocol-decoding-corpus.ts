@@ -100,7 +100,7 @@ export function protocolDecodingGolden(): string {
         const decoded = decodeGlowupNode(input);
         if (decoded === undefined) throw new Error(`Corpus node ${index} rejected`);
 
-        const frames: string[][] = [];
+        const frames: (readonly string[])[] = [];
         for (const expanded of [false, true]) {
             for (const isPartial of [false, true]) {
                 const component = renderProtocolNode(

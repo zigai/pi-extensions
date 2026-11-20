@@ -55,10 +55,10 @@
     "@zigai/pi-extension-settings": "0.6.1"
   },
   "devDependencies": {
-    "@earendil-works/pi-agent-core": "1.5.0",
-    "@earendil-works/pi-ai": "1.5.0",
-    "@earendil-works/pi-coding-agent": "1.5.0",
-    "@earendil-works/pi-tui": "1.5.0",
+    "@earendil-works/pi-agent-core": "1.6.0",
+    "@earendil-works/pi-ai": "1.6.0",
+    "@earendil-works/pi-coding-agent": "1.6.0",
+    "@earendil-works/pi-tui": "1.6.0",
     "@types/node": "^24.10.1",
     "@vitest/coverage-v8": "4.1.11",
     "oxfmt": "0.77.0",
@@ -77,14 +77,13 @@
     "typebox": "*"
   },
   "overrides": {
-    "@earendil-works/pi-agent-core": "1.5.0",
-    "@earendil-works/pi-ai": "1.5.0",
-    "@earendil-works/pi-codemode": "1.5.0",
-    "@earendil-works/pi-coding-agent": "1.5.0",
-    "@earendil-works/pi-mcp": "1.5.0",
-    "@earendil-works/pi-telemetry": "1.5.0",
-    "@earendil-works/pi-tui": "1.5.0",
-    "undici": "8.12.2"
+    "@earendil-works/pi-agent-core": "1.6.0",
+    "@earendil-works/pi-ai": "1.6.0",
+    "@earendil-works/pi-codemode": "1.6.0",
+    "@earendil-works/pi-coding-agent": "1.6.0",
+    "@earendil-works/pi-mcp": "1.6.0",
+    "@earendil-works/pi-telemetry": "1.6.0",
+    "@earendil-works/pi-tui": "1.6.0"
   },
   "allowScripts": {
     "node-pty@1.1.0": true,
@@ -129,5 +128,9 @@
     "collections": [
       "@zigai/pi-tweaks"
     ]
-  }
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "packageManager": "npm@11.19.0"
 }

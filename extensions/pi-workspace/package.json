@@ -41,5 +41,8 @@
     "prevalidation": "./src/settings.prevalidated.ts",
     "schema": "./config.schema.json",
     "readme": "./README.md"
+  },
+  "engines": {
+    "node": ">=22.19.0"
   }
 }

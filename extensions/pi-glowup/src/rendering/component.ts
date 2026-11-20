@@ -13,14 +13,14 @@ const MAX_COMPONENT_CACHE_LINES = 300;
 const MAX_COMPONENT_CACHE_BYTES = 128 * 1024;
 
 export function makeComponent(
-    renderLines: (width: number) => string[],
+    renderLines: (width: number) => readonly string[],
     sharedCache?: RenderedLineCache,
 ): Component {
     let cachedWidth: number | undefined;
-    let cachedLines: string[] | undefined;
+    let cachedLines: readonly string[] | undefined;
 
     return {
-        render(width: number): string[] {
+        render(width: number): readonly string[] {
             const safeWidth = Math.max(1, Math.floor(width));
             if (cachedWidth === safeWidth && cachedLines !== undefined) {
                 return cachedLines;

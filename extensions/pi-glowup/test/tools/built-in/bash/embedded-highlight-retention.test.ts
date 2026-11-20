@@ -111,7 +111,8 @@ it.each([
             await settleSyntaxHighlights();
             invalidate();
             const colored = render(source);
-            const anchor = (lines: string[]) => lines.find((line) => line.includes("ANCHOR"));
+            const anchor = (lines: readonly string[]) =>
+                lines.find((line) => line.includes("ANCHOR"));
             expect(anchor(colored)).toContain("\u001b[38;2;");
             const next = source + suffix;
             const pending = render(next);
@@ -310,7 +311,7 @@ it("hands a revealed statement prefix to completion before retiring its live sig
     render(command);
     await settleSyntaxHighlights();
     invalidate();
-    const row = (lines: string[]) =>
+    const row = (lines: readonly string[]) =>
         lines.find((line) => stripVTControlCharacters(line).includes("const HANDOFF_KEEP"));
     const before = row(render(command));
     expect(before).toContain("\u001b[38;2;86;156;214mconst");
@@ -370,7 +371,7 @@ it.each([
         render(command);
         await settleSyntaxHighlights();
         invalidate();
-        const row = (lines: string[]) => lines.find((line) => line.includes("handoff_0"));
+        const row = (lines: readonly string[]) => lines.find((line) => line.includes("handoff_0"));
         const before = row(render(command));
         expect(before).toContain("\u001b[38;2;86;156;214mconst");
         expect(stripVTControlCharacters(before ?? "")).toContain("const value0 =");
@@ -471,7 +472,8 @@ it("preserves large sibling syntax colors when switching to a reflowed layout", 
     render(command);
     await settleSyntaxHighlights();
     invalidate();
-    const row = (lines: string[]) => lines.find((line) => line.includes("blank_sibling_0"));
+    const row = (lines: readonly string[]) =>
+        lines.find((line) => line.includes("blank_sibling_0"));
     const before = row(render(command));
     expect(before).toContain("\u001b[38;2;86;156;214mconst");
     display.layout = "always";
@@ -495,7 +497,8 @@ it("keeps sibling syntax colors when an earlier heredoc becomes blank", async ()
     render(command);
     await settleSyntaxHighlights();
     invalidate();
-    const row = (lines: string[]) => lines.find((line) => line.includes("blank_rewrite_0"));
+    const row = (lines: readonly string[]) =>
+        lines.find((line) => line.includes("blank_rewrite_0"));
     const before = row(render(command));
     expect(before).toContain("\u001b[38;2;86;156;214mconst");
     const next = command.replace("print(1)", "   ");
@@ -604,7 +607,8 @@ it.each([false, true])(
         render(command);
         await settleSyntaxHighlights();
         invalidate();
-        const anchor = (lines: string[]) => lines.find((line) => line.includes("transition_0"));
+        const anchor = (lines: readonly string[]) =>
+            lines.find((line) => line.includes("transition_0"));
         expect(anchor(render(command))).toContain("\u001b[38;2;86;156;214mconst");
         const next = `${command}echo done\n`;
         const pending = render(next);
@@ -686,7 +690,7 @@ it("carries a partially revealed standalone prefix into a compound view", async 
     const command = `node <<'JS'\n${source}\nJS\n`;
     render(command);
     await feature.settled();
-    const anchor = (lines: string[]) => lines.find((line) => line.includes("prefix_0"));
+    const anchor = (lines: readonly string[]) => lines.find((line) => line.includes("prefix_0"));
     await vi.waitFor(() => {
         invalidate();
         expect(anchor(render(command))).toContain("\u001b[38;2;86;156;214mconst");

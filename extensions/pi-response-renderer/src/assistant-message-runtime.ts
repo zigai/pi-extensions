@@ -10,7 +10,7 @@ export type AssistantMessageComponentInstance = AssistantMessageComponentPrototy
 };
 
 export type AssistantMessageComponentPrototype = {
-    render: (this: AssistantMessageComponentInstance, width: number) => string[];
+    render: (this: AssistantMessageComponentInstance, width: number) => readonly string[];
 
     updateContent: (
         this: AssistantMessageComponentInstance,

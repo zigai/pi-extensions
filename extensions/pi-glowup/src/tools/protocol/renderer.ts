@@ -49,7 +49,7 @@ class ProtocolMutationCallSlot implements Component {
         this.hidden = true;
     }
 
-    render(width: number): string[] {
+    render(width: number): readonly string[] {
         return this.hidden ? [] : this.component.render(width);
     }
 

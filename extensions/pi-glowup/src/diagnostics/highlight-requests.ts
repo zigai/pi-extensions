@@ -339,7 +339,7 @@ export function observeHighlightComponentRender(
     component: Component,
     invalidate: () => void,
     width: number,
-): string[] {
+): readonly string[] {
     if (!renderDiagnosticsEnabled()) return component.render(width);
 
     const observationEpoch = currentEpoch();
@@ -353,7 +353,7 @@ export function observeHighlightComponentRender(
     };
     componentRender = observation;
 
-    let lines: string[];
+    let lines: readonly string[];
     try {
         lines = component.render(width);
     } finally {

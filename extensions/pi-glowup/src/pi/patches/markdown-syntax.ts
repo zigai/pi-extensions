@@ -29,14 +29,14 @@ type MarkdownInstance = {
     readonly defaultTextStyle?: { readonly italic?: boolean };
 };
 
-type MarkdownRender = (this: MarkdownInstance, width: number) => string[];
+type MarkdownRender = (this: MarkdownInstance, width: number) => readonly string[];
 type MarkdownSetText = (this: MarkdownInstance, text: string) => void;
 type MarkdownInvalidate = (this: MarkdownInstance) => void;
 
 type RenderedWidth = {
     readonly width: number;
     readonly source: string;
-    readonly lines: string[];
+    readonly lines: readonly string[];
 };
 
 // Rendered lines for the two most recent widths. `stale` marks a setText call since
@@ -246,7 +246,7 @@ export function configureMarkdownSyntaxPatch(
         activeMarkdownSource = current;
 
         const restoreSyntaxTheme = prepareSyntaxTheme(this);
-        let lines: string[];
+        let lines: readonly string[];
         try {
             lines = originalRender?.call(this, width) ?? [];
         } finally {

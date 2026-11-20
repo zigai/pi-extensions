@@ -54,8 +54,8 @@ export function sources(): string[] {
     return updates;
 }
 
-export function exactFrames(render: typeof renderWriteCallPreview): string[][] {
-    const frames: string[][] = [];
+export function exactFrames(render: typeof renderWriteCallPreview): (readonly string[])[] {
+    const frames: (readonly string[])[] = [];
     for (const movingViewport of [false, true]) {
         for (const streamed of [false, true]) {
             let previous: Component | undefined;

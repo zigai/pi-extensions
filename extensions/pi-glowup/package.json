@@ -94,9 +94,9 @@
     "web-tree-sitter": "0.27.1"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "1.5.0",
-    "@earendil-works/pi-coding-agent": "1.5.0",
-    "@earendil-works/pi-tui": "1.5.0",
+    "@earendil-works/pi-ai": "1.6.0",
+    "@earendil-works/pi-coding-agent": "1.6.0",
+    "@earendil-works/pi-tui": "1.6.0",
     "@fast-check/vitest": "^0.4.1",
     "@types/node": "^24.10.1",
     "@vitest/coverage-v8": "4.1.11",
@@ -130,7 +130,7 @@
     }
   },
   "engines": {
-    "node": ">=22.19.0 <27"
+    "node": ">=22.19.0"
   },
   "packageManager": "npm@11.19.0",
   "pi": {

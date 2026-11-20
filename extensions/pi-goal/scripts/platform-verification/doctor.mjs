@@ -253,7 +253,7 @@ export async function runDoctor(config, options = {}) {
   const skipWindowsDisposableProbe = options.skipWindowsDisposableProbe === true;
   const packageName = config?.packageName ?? "@zigai/pi-goal";
   const artifactRoot = config?.artifactRoot ?? ".artifacts/platform-verification";
-  const nodeMajor = config?.nodeValidationMajor ?? 24;
+  const nodeMajor = config?.nodeValidationMajor ?? 22;
   const requiredTargets = config?.requiredTargets ?? [];
 
   const requiredProviders = [

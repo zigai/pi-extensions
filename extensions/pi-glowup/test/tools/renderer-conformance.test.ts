@@ -106,7 +106,7 @@ const cases: ReadonlyArray<RendererConformanceCase> = [
     },
 ];
 
-function renderCallLines(testCase: RendererConformanceCase, width: number): string[] {
+function renderCallLines(testCase: RendererConformanceCase, width: number): readonly string[] {
     const renderer = createThirdPartyToolRenderer(testCase.toolName, {
         labelMode: "lifecycle",
     });
@@ -114,7 +114,7 @@ function renderCallLines(testCase: RendererConformanceCase, width: number): stri
     return renderer.renderCall(testCase.args, theme, context).render(width);
 }
 
-function renderResultLines(testCase: RendererConformanceCase, width: number): string[] {
+function renderResultLines(testCase: RendererConformanceCase, width: number): readonly string[] {
     if (testCase.result === undefined) return [];
 
     const renderer = createThirdPartyToolRenderer(testCase.toolName, {

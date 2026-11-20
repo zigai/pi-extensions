@@ -43,7 +43,7 @@ function stripAnsi(value: string): string {
     return value.replace(ANSI_ESCAPE_PATTERN, "");
 }
 
-export function autocompleteStartIndex(renderedLines: string[]): number {
+export function autocompleteStartIndex(renderedLines: readonly string[]): number {
     for (let index = renderedLines.length - 1; index >= 0; index -= 1) {
         const line = renderedLines.at(index);
         if (line !== undefined && stripAnsi(line).startsWith("─")) return index + 1;

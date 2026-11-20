@@ -72,7 +72,7 @@ class WorkingIndicator extends Text {
         super("", 0, 0);
     }
 
-    override render(width: number): string[] {
+    override render(width: number): readonly string[] {
         if (this.ctx.isIdle()) this.setText("Workspace · Idle");
         else this.setText("Workspace · Working");
 

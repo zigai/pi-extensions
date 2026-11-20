@@ -91,7 +91,7 @@ describe("dense argument form", () => {
             args: definitions,
             formSymbols: symbols,
         };
-        let rendered: string[] = [];
+        let rendered: readonly string[] = [];
         const ctx = createTestExtensionCommandContext({
             mode: "tui",
             ui: {
@@ -204,7 +204,7 @@ describe("dense argument form", () => {
             mode: "run",
         };
 
-        let renderedLines: string[] = [];
+        let renderedLines: readonly string[] = [];
         const ctx = createTestExtensionCommandContext({
             mode: "tui",
             ui: {
@@ -318,7 +318,7 @@ describe("dense argument form", () => {
             mode: "run",
         };
 
-        let renderedLines: string[] = [];
+        let renderedLines: readonly string[] = [];
         const ctx = createTestExtensionCommandContext({
             mode: "tui",
             ui: {
@@ -364,7 +364,7 @@ describe("dense argument form", () => {
             mode: "run",
         };
 
-        let renderedLines: string[] = [];
+        let renderedLines: readonly string[] = [];
         const ctx = createTestExtensionCommandContext({
             mode: "tui",
             ui: {
@@ -421,7 +421,7 @@ describe("dense argument form", () => {
             mode: "run",
         };
 
-        let renderedLines: string[] = [];
+        let renderedLines: readonly string[] = [];
         const ctx = createTestExtensionCommandContext({
             mode: "tui",
             ui: {
@@ -509,9 +509,9 @@ describe("dense argument form", () => {
             mode: "run",
         };
 
-        let initialLines: string[] = [];
-        let afterTabLines: string[] = [];
-        let afterToggleLines: string[] = [];
+        let initialLines: readonly string[] = [];
+        let afterTabLines: readonly string[] = [];
+        let afterToggleLines: readonly string[] = [];
         const ctx = createTestExtensionCommandContext({
             mode: "tui",
             ui: {
@@ -597,8 +597,8 @@ describe("dense argument form", () => {
             mode: "run",
         };
 
-        let selectedLines: string[] = [];
-        let collapsedLines: string[] = [];
+        let selectedLines: readonly string[] = [];
+        let collapsedLines: readonly string[] = [];
         const ctx = createTestExtensionCommandContext({
             mode: "tui",
             ui: {
@@ -685,7 +685,7 @@ describe("dense argument form", () => {
             issues: [],
             mode: "run",
         };
-        let rendered: string[] = [];
+        let rendered: readonly string[] = [];
         const ctx = createTestExtensionCommandContext({
             mode: "tui",
             ui: {
@@ -895,7 +895,7 @@ describe("dense argument form", () => {
             mode: "run",
         };
         let firstSubmitCompleted = false;
-        let issueLines: string[] = [];
+        let issueLines: readonly string[] = [];
         const ctx = createTestExtensionCommandContext({
             mode: "tui",
             ui: {
@@ -945,7 +945,7 @@ describe("dense argument form", () => {
             "tui.input.tab": "ctrl+n",
             "tui.select.cancel": "ctrl+x",
         });
-        let renderedLines: string[] = [];
+        let renderedLines: readonly string[] = [];
         const ctx = createTestExtensionCommandContext({
             mode: "tui",
             ui: {

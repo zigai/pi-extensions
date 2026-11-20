@@ -44,9 +44,8 @@ it("recomputes current rows and coordinates after invalidation and width changes
 });
 
 // Failure cases: large unchanged frames repeatedly parse;
-// mutable source/coordinates, style changes and syntax completion reuse stale output;
-// callers mutate returned arrays; aggregate line-cache eviction must still allow cold rebuilds.
-it("reuses large unchanged diff frames without sharing mutable arrays", () => {
+// Mutable source/coordinates, style changes and syntax completion can leave stale output.
+it("refreshes a large diff frame after its source changes", () => {
     const section = {
         lines: Array.from({ length: 400 }, (_, i) => `+${i + 1} row ${i}`),
         added: 400,
@@ -55,12 +54,7 @@ it("reuses large unchanged diff frames without sharing mutable arrays", () => {
     const sections = [section];
     const component = renderGlowupDiff(createPlainTheme(), sections, true);
     const first = component.render(100);
-    const expected = [...first];
-    const warm = component.render(100);
-    expect(warm).toEqual(expected);
-    first[0] = "changed by caller";
-    warm[1] = "changed warm result";
-    expect(component.render(100)).toEqual(expected);
+    expect(component.render(100)).toEqual(first);
     section.lines[0] = "+99 new text";
     component.invalidate();
     expect(component.render(100)).toEqual(

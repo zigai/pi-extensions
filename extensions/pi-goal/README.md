@@ -11,7 +11,7 @@ active goal continues until it is completed, paused, blocked, or stopped by an o
 
 ## Install
 
-Requires Node.js 24 or newer and Pi 1.3 or newer. Install the current npm release with Pi:
+Requires Node.js 22.19 or newer and Pi 1.3 or newer. Install the current npm release with Pi:
 
 ```sh
 pi install npm:@zigai/pi-goal
