@@ -1,3 +1,4 @@
+import { compile, obj, oneOf, opt, str, type Static } from "@earendil-works/pi-schema";
 import { Type } from "typebox";
 
 import { compileSchema } from "../../schema-parsing.ts";
@@ -90,23 +91,19 @@ const DescriptionResponseSchema = compileSchema(
     }),
 );
 
-const VIEW_IMAGE_PARAMETERS = Type.Object(
-    {
-        path: Type.String({ description: "Local filesystem path to an image file." }),
-        detail: Type.Optional(
-            Type.Enum(["high", "original"], {
-                description:
-                    "Image detail level. Defaults to `high`; use `original` to preserve exact resolution.",
-            }),
-        ),
-    },
-    { additionalProperties: false },
-);
+const VIEW_IMAGE_PARAMETERS = obj({
+    path: str({ description: "Local filesystem path to an image file." }),
+    detail: opt(
+        oneOf(["high", "original"], {
+            description:
+                "Image detail level. Defaults to `high`; use `original` to preserve exact resolution.",
+        }),
+    ),
+});
 
-type ViewImageParams = {
-    readonly path: string;
-    readonly detail?: "high" | "original";
-};
+const ViewImageParametersValidator = compile(VIEW_IMAGE_PARAMETERS);
+
+type ViewImageParams = Static<typeof VIEW_IMAGE_PARAMETERS>;
 
 type ViewImageDetails = {
     readonly path: string;
@@ -159,19 +156,23 @@ export function createViewImageTool(options: ViewImageToolOptions): ToolDefiniti
         glowupRendering: viewImageGlowupRendering,
         parameters: VIEW_IMAGE_PARAMETERS,
         prepareArguments: prepareViewImageArguments,
-        renderCall(args, theme, _context) {
-            const parts = [args.path || "..."];
-            if (args.detail) parts.push(`detail=${args.detail}`);
+        renderCall(input, theme, _context) {
+            const args = ViewImageArgumentsSchema.decode(input);
+            const path = args?.path ?? "";
+            const parts = [path || "..."];
+            if (args?.detail) parts.push(`detail=${args.detail}`);
 
             const text =
                 theme.fg("toolTitle", theme.bold("view_image ")) +
-                theme.fg(args.path ? "accent" : "dim", parts.join(" • "));
+                theme.fg(path ? "accent" : "dim", parts.join(" • "));
             return new Text(text, 0, 0);
         },
         renderResult(result, { expanded, isPartial }, theme, context) {
             if (isPartial) return new Text(theme.fg("warning", "Loading image..."), 0, 0);
 
-            const path = result.details.path || context.args.path || "image";
+            let path = result.details.path;
+            if (!path) path = ViewImageArgumentsSchema.decode(context.args)?.path ?? "";
+            if (!path) path = "image";
             const displayedImage = firstImageContent(result.content);
             const capabilities = (
                 options.capabilities ?? defaultCapabilitiesProvider
@@ -220,7 +221,11 @@ export function createViewImageTool(options: ViewImageToolOptions): ToolDefiniti
 
             return container;
         },
-        async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+        async execute(_toolCallId, input, signal, _onUpdate, ctx) {
+            const parsed = ViewImageParametersValidator.validate(input);
+            if (!parsed.ok) throw new Error("Invalid view_image arguments.");
+
+            const params = parsed.value;
             const image = await loadImageContent(params.path, ctx.cwd, {
                 signal,
                 allowOutsideWorkspace: true,

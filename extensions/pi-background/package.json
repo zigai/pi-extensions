@@ -20,6 +20,7 @@
     "access": "public"
   },
   "dependencies": {
+    "@earendil-works/pi-schema": "1.6.0",
     "@zigai/pi-extension-internals": "0.2.0",
     "@zigai/pi-glowup": "2.0.0",
     "@zigai/pi-status-bar": "0.9.1"

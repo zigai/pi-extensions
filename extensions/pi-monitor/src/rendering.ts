@@ -1,20 +1,20 @@
-import type { Theme } from "@earendil-works/pi-coding-agent";
+import type { Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Text, type Component } from "@earendil-works/pi-tui";
 import { call, output, stack, text, type GlowupRenderer } from "@zigai/pi-glowup/protocol";
 import { Type, type StaticDecode } from "typebox";
 import { Compile } from "typebox/compile";
 import {
-    listArgsSchema,
+    listArgsValidator,
     listOutputSchema,
-    monitorArgsSchema,
+    monitorArgsValidator,
     type ListArgs,
     type MonitorArgs,
     type CommandArgs,
     type WebSocketArgs,
     type StopResult,
     monitorSchema,
-    commandArgsSchema,
-    websocketArgsSchema,
+    commandArgsValidator,
+    websocketArgsValidator,
     stopOutputSchema,
     formatDuration,
     type MonitorSnapshot,
@@ -37,10 +37,6 @@ export type NotificationDetails = StaticDecode<typeof notificationDetailsSchema>
 
 const COLLAPSED_EVENT_LINES = 6;
 const notificationValidator = Compile(notificationDetailsSchema);
-const commandArgsValidator = Compile(commandArgsSchema);
-const websocketArgsValidator = Compile(websocketArgsSchema);
-const monitorArgsValidator = Compile(monitorArgsSchema);
-const listArgsValidator = Compile(listArgsSchema);
 const monitorResultValidator = Compile(Type.Object({ details: monitorSchema }));
 const stopResultValidator = Compile(Type.Object({ details: stopOutputSchema }));
 const listResultValidator = Compile(Type.Object({ details: listOutputSchema }));
@@ -53,37 +49,29 @@ export function parseNotificationDetails(value: unknown): NotificationDetails | 
     }
 }
 
-function parseCommandArgs(value: unknown): CommandArgs | undefined {
-    try {
-        return commandArgsValidator.Parse(value);
-    } catch {
-        return undefined;
-    }
-}
+const parseCommandArgs: GlowupRenderer<CommandArgs>["parseArgs"] = (value) => {
+    const parsed = commandArgsValidator.validate(value);
+    if (!parsed.ok) return undefined;
+    return parsed.value;
+};
 
-function parseWebSocketArgs(value: unknown): WebSocketArgs | undefined {
-    try {
-        return websocketArgsValidator.Parse(value);
-    } catch {
-        return undefined;
-    }
-}
+const parseWebSocketArgs: GlowupRenderer<WebSocketArgs>["parseArgs"] = (value) => {
+    const parsed = websocketArgsValidator.validate(value);
+    if (!parsed.ok) return undefined;
+    return parsed.value;
+};
 
-function parseMonitorArgs(value: unknown): MonitorArgs | undefined {
-    try {
-        return monitorArgsValidator.Parse(value);
-    } catch {
-        return undefined;
-    }
-}
+const parseMonitorArgs: GlowupRenderer<MonitorArgs>["parseArgs"] = (value) => {
+    const parsed = monitorArgsValidator.validate(value);
+    if (!parsed.ok) return undefined;
+    return parsed.value;
+};
 
-function parseListArgs(value: unknown): ListArgs | undefined {
-    try {
-        return listArgsValidator.Parse(value);
-    } catch {
-        return undefined;
-    }
-}
+const parseListArgs: GlowupRenderer<ListArgs>["parseArgs"] = (value) => {
+    const parsed = listArgsValidator.validate(value);
+    if (!parsed.ok) return undefined;
+    return parsed.value;
+};
 
 function parseStartResult(value: unknown): StartResult {
     try {
@@ -242,32 +230,33 @@ export const listRendering = {
 } satisfies GlowupRenderer<ListArgs, ListDetails>;
 
 /** Plain renderers used when Glowup is not loaded. */
-export function renderCommandCall(args: Partial<CommandArgs>, theme: RenderTheme): Component {
+export const renderCommandCall = ((args, theme: RenderTheme): Component => {
     let label = theme.fg("accent", theme.bold("Monitor"));
-    const parsed = parseCommandArgs(args);
-    if (parsed !== undefined) label += ` ${plainText(parsed.description)}`;
+    const parsed = commandArgsValidator.validate(args);
+    if (parsed.ok) label += ` ${plainText(parsed.value.description)}`;
 
     return new Text(label, 0, 0);
-}
+}) satisfies NonNullable<ToolDefinition["renderCall"]>;
 
-export function renderWebSocketCall(args: Partial<WebSocketArgs>, theme: RenderTheme): Component {
+export const renderWebSocketCall = ((args, theme: RenderTheme): Component => {
     let label = theme.fg("accent", theme.bold("Monitor WebSocket"));
-    const parsed = parseWebSocketArgs(args);
-    if (parsed !== undefined) label += ` ${plainText(parsed.description)}`;
+    const parsed = websocketArgsValidator.validate(args);
+    if (parsed.ok) label += ` ${plainText(parsed.value.description)}`;
 
     return new Text(label, 0, 0);
-}
+}) satisfies NonNullable<ToolDefinition["renderCall"]>;
 
-export function renderStopCall(args: Partial<MonitorArgs>, theme: RenderTheme): Component {
+export const renderStopCall = ((args, theme: RenderTheme): Component => {
     let label = theme.fg("accent", theme.bold("Stop monitor"));
-    if (args.id !== undefined) label += ` ${args.id}`;
+    const parsed = monitorArgsValidator.validate(args);
+    if (parsed.ok) label += ` ${parsed.value.id}`;
 
     return new Text(label, 0, 0);
-}
+}) satisfies NonNullable<ToolDefinition["renderCall"]>;
 
-export function renderListCall(_args: ListArgs, theme: RenderTheme): Component {
+export const renderListCall = ((_args, theme: RenderTheme): Component => {
     return new Text(theme.fg("accent", theme.bold("List monitors")), 0, 0);
-}
+}) satisfies NonNullable<ToolDefinition["renderCall"]>;
 
 export function renderMonitorSummary(monitor: MonitorSnapshot): string {
     return `${monitor.id} · ${plainText(monitor.description)} · ${monitorStatus(monitor).text} · ${sourceLabel(monitor)}`;

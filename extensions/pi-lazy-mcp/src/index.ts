@@ -6,8 +6,10 @@ import {
     getAgentDir,
     type ExtensionAPI,
     type ExtensionContext,
+    type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { McpAbortError, type McpRequestOptions } from "@earendil-works/pi-mcp";
+import { Compile } from "typebox/compile";
 
 import { catalogKey, catalogsPath, readCatalogs, saveCatalog, type Catalog } from "./catalog.ts";
 import {
@@ -19,21 +21,17 @@ import {
     usesAuthentication,
     type McpServerEntry,
 } from "./config.ts";
+import { jsonObjectSchema } from "./json.ts";
 import { toolResult } from "./result.ts";
 import { LazyServer } from "./server.ts";
 import { MCP_SERVERS_SECTION, renderServersSection } from "./servers-section.ts";
 import { loadLazyMcpSettings } from "./settings.ts";
-import {
-    assignToolNames,
-    createToolDefinition,
-    reachesServer,
-    toolNamespace,
-    type McpTool,
-} from "./tools.ts";
+import { assignToolNames, createToolDefinition, reachesServer, toolNamespace } from "./tools.ts";
 
 const CODEMODE_TOOL = "codemode";
 const TOOL_SEARCH_TOOL = "tool_search";
 const DIRECT_DISCOVERY_WAIT_MS = 10_000;
+const toolArguments = Compile(jsonObjectSchema);
 
 type ManagedServer = {
     entry: McpServerEntry;
@@ -60,7 +58,7 @@ export default function extension(pi: ExtensionAPI): void {
     let warnedUnreachable = false;
     let waitedForDirect = false;
     const ignoredRegistrations = new Set<string>();
-    const definitions = new Map<string, McpTool>();
+    const definitions = new Map<string, ToolDefinition>();
     const registered = new Set<string>();
     const withdrawnActive = new Map<string, boolean>();
     const toolOwners = new Map<string, string>();
@@ -136,7 +134,8 @@ export default function extension(pi: ExtensionAPI): void {
                 name,
                 exposure: toolExposureOf(entry.config, tool.name),
                 namespace,
-                async execute(_id, args, signal, onUpdate, ctx) {
+                async execute(_id, input, signal, onUpdate, ctx) {
+                    const args = toolArguments.Parse(input);
                     const version = generation;
                     await assertOwnership(ctx, version);
 

@@ -1,16 +1,14 @@
 import { createHash } from "node:crypto";
 
 import type { ToolAnnotations, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { Type, type TUnsafe } from "typebox";
 
 import type { Catalog, CatalogTool } from "./catalog.ts";
 import { mcpNamespace, type McpExposure, type McpServerEntry } from "./config.ts";
-import { isJsonString, type JsonObject } from "./json.ts";
+import { isJsonString } from "./json.ts";
 import { mcpResultSchema } from "./result.ts";
 
-export type McpTool = ToolDefinition<TUnsafe<JsonObject>>;
-type ToolNamespace = NonNullable<McpTool["namespace"]>;
-type ToolExecute = McpTool["execute"];
+type ToolNamespace = NonNullable<ToolDefinition["namespace"]>;
+type ToolExecute = ToolDefinition["execute"];
 
 const MAX_TOOL_NAME_LENGTH = 64;
 
@@ -126,18 +124,18 @@ export function createToolDefinition(options: {
     exposure: McpExposure;
     namespace: ToolNamespace;
     execute: ToolExecute;
-}): McpTool {
+}): ToolDefinition {
     const { server, tool } = options;
     const schema = tool.inputSchema;
-    const definition: McpTool = {
+    const definition: ToolDefinition = {
         name: options.name,
         label: `${server}/${tool.name}`,
         description: toolDescription(server, tool),
-        parameters: Type.Unsafe<JsonObject>({
+        parameters: {
             ...schema,
             type: schema.type ?? "object",
             properties: schema.properties ?? {},
-        }),
+        },
         outputSchema: mcpResultSchema(tool.outputSchema),
         exposure: toToolExposure(options.exposure),
         namespace: options.namespace,

@@ -1,27 +1,32 @@
 import type {
     AgentToolResult,
     Theme,
+    ToolDefinition,
     ToolRenderResultOptions,
 } from "@earendil-works/pi-coding-agent";
 import { Text, type Component } from "@earendil-works/pi-tui";
 import { call, empty, output, stack, text, type GlowupRenderer } from "@zigai/pi-glowup/protocol";
+import { type Static } from "@earendil-works/pi-schema";
 import { Type, type StaticDecode } from "typebox";
 import { Compile } from "typebox/compile";
 import { Value } from "typebox/value";
 import {
     commandSchema,
     jobArgsSchema,
+    jobValidator,
     outputSchema,
     startArgsSchema,
+    startValidator,
     waitArgsSchema,
+    waitValidator,
     waitOutputSchema,
     type CommandSnapshot,
 } from "./commands.ts";
 import { commandLabel, commandStatus, plainOutput } from "./presentation.ts";
 
-type StartArgs = StaticDecode<typeof startArgsSchema>;
-type JobArgs = StaticDecode<typeof jobArgsSchema>;
-type WaitArgs = StaticDecode<typeof waitArgsSchema>;
+type StartArgs = Static<typeof startArgsSchema>;
+type JobArgs = Static<typeof jobArgsSchema>;
+type WaitArgs = Static<typeof waitArgsSchema>;
 type WaitResult = { kind: "available"; jobs: SavedOutput[] } | { kind: "unavailable" };
 type RenderTheme = Pick<Theme, "fg" | "bold">;
 
@@ -54,10 +59,8 @@ export type Result = ({ kind: "available" } & SavedOutput) | { kind: "unavailabl
 const jobResultSchema = Type.Object({ details: savedCommandSchema });
 const outputResultSchema = Type.Object({ details: savedOutputSchema });
 const savedOutputValidator = Compile(savedOutputSchema);
-const startValidator = Compile(startArgsSchema);
-const jobValidator = Compile(jobArgsSchema);
+
 const resultValidator = Compile(Type.Union([jobResultSchema, outputResultSchema]));
-const waitValidator = Compile(waitArgsSchema);
 const waitResultValidator = Compile(
     Type.Object({
         details: Type.Object(
@@ -67,13 +70,11 @@ const waitResultValidator = Compile(
     }),
 );
 
-function parseWait(value: unknown): WaitArgs | undefined {
-    try {
-        return waitValidator.Parse(value);
-    } catch {
-        return undefined;
-    }
-}
+const parseWait: GlowupRenderer<WaitArgs>["parseArgs"] = (value) => {
+    const parsed = waitValidator.validate(value);
+    if (!parsed.ok) return undefined;
+    return parsed.value;
+};
 
 function parseWaitResult(value: unknown): WaitResult {
     try {
@@ -91,21 +92,17 @@ function parseWaitResult(value: unknown): WaitResult {
     }
 }
 
-function parseStart(value: unknown): StartArgs | undefined {
-    try {
-        return startValidator.Parse(value);
-    } catch {
-        return undefined;
-    }
-}
+const parseStart: GlowupRenderer<StartArgs>["parseArgs"] = (value) => {
+    const parsed = startValidator.validate(value);
+    if (!parsed.ok) return undefined;
+    return parsed.value;
+};
 
-function parseJob(value: unknown): JobArgs | undefined {
-    try {
-        return jobValidator.Parse(value);
-    } catch {
-        return undefined;
-    }
-}
+const parseJob: GlowupRenderer<JobArgs>["parseArgs"] = (value) => {
+    const parsed = jobValidator.validate(value);
+    if (!parsed.ok) return undefined;
+    return parsed.value;
+};
 
 function parseResult(value: unknown): Result {
     try {
@@ -135,28 +132,28 @@ function resultLabel(result: Result): string {
     return `${result.job.kind} · ${commandLabel(result.job.command)} · ${commandStatus(result.job).text}`;
 }
 
-export function renderStartCall(args: Partial<StartArgs>, theme: RenderTheme): Component {
-    const parsed = parseStart(args);
-    let title = "Background";
-    if (parsed !== undefined) title += ` ${parsed.kind ?? "task"}`;
+export const renderStartCall = ((args, theme: RenderTheme): Component => {
+    const parsed = startValidator.validate(args);
+    if (!parsed.ok) return new Text(theme.fg("accent", theme.bold("Background")), 0, 0);
 
-    let label = theme.fg("accent", theme.bold(title));
-    if (parsed !== undefined) label += ` ${commandLabel(parsed.command)}`;
+    const { kind, command } = parsed.value;
+    const title = theme.fg("accent", theme.bold(`Background ${kind ?? "task"}`));
+    const label = `${title} ${commandLabel(command)}`;
 
     return new Text(label, 0, 0);
-}
+}) satisfies NonNullable<ToolDefinition["renderCall"]>;
 
-export function renderStatusCall(_args: JobArgs, theme: RenderTheme): Component {
+export const renderStatusCall = ((_args, theme: RenderTheme): Component => {
     return new Text(theme.fg("accent", theme.bold("Background output")), 0, 0);
-}
+}) satisfies NonNullable<ToolDefinition["renderCall"]>;
 
-export function renderWaitCall(_args: WaitArgs, theme: RenderTheme): Component {
+export const renderWaitCall = ((_args, theme: RenderTheme): Component => {
     return new Text(theme.fg("accent", theme.bold("Wait for background tasks")), 0, 0);
-}
+}) satisfies NonNullable<ToolDefinition["renderCall"]>;
 
-export function renderStopCall(_args: JobArgs, theme: RenderTheme): Component {
+export const renderStopCall = ((_args, theme: RenderTheme): Component => {
     return new Text(theme.fg("accent", theme.bold("Stop background command")), 0, 0);
-}
+}) satisfies NonNullable<ToolDefinition["renderCall"]>;
 
 export function renderJobResult(result: AgentToolResult<unknown>): Component {
     const parsed = parseResult(result);

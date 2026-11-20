@@ -8,8 +8,10 @@ import { withGlowupRendering } from "@zigai/pi-glowup/protocol";
 import { goalToolResponse, toToolText, type GoalToolResponse } from "./format.ts";
 import {
   CreateGoalArgsSchema,
+  createGoalArgsValidator,
   GetGoalArgsSchema,
   UpdateGoalArgsSchema,
+  updateGoalArgsValidator,
   createGoalGlowupRendering,
   getGoalGlowupRendering,
   updateGoalGlowupRendering,
@@ -78,7 +80,11 @@ export function registerGoalTools(pi: ExtensionAPI, host: ToolHost): void {
         promptSnippet: "Create one goal with an objective and optional active-time constraints.",
         promptGuidelines: TOOL_PROMPT_GUIDELINES,
         parameters: CreateGoalArgsSchema,
-        async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+        async execute(_toolCallId, input, _signal, _onUpdate, ctx) {
+          const parsed = createGoalArgsValidator.validate(input);
+          if (!parsed.ok) throwToolError("Invalid create_goal arguments.");
+
+          const params = parsed.value;
           const current = host.getGoal();
           const shouldReplaceExisting =
             params.replace_existing === true && current !== null && current.status !== "complete";
@@ -112,7 +118,11 @@ export function registerGoalTools(pi: ExtensionAPI, host: ToolHost): void {
         promptSnippet: "Mark the current goal complete or blocked under the goal lifecycle rules.",
         promptGuidelines: TOOL_PROMPT_GUIDELINES,
         parameters: UpdateGoalArgsSchema,
-        async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+        async execute(_toolCallId, input, _signal, _onUpdate, ctx) {
+          const parsed = updateGoalArgsValidator.validate(input);
+          if (!parsed.ok) throwToolError("Invalid update_goal arguments.");
+
+          const params = parsed.value;
           const result =
             params.status === "complete"
               ? host.completeGoal("tool", ctx)

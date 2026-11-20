@@ -3,7 +3,18 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Type, type Static } from "typebox";
+import {
+    compile,
+    arr,
+    int,
+    lit,
+    obj,
+    oneOf,
+    opt,
+    str,
+    type Static,
+} from "@earendil-works/pi-schema";
+import { Type } from "typebox";
 import { Text } from "@earendil-works/pi-tui";
 import {
     withFileMutationQueue,
@@ -50,95 +61,107 @@ const WEB_RUN_DESCRIPTION_PATH = fileURLToPath(
 );
 let cachedWebRunDescription: string | undefined;
 
-const SearchQueryParameters = Type.Object({
-    q: Type.String({ description: "Search query." }),
-    recency: Type.Optional(
-        Type.Integer({ minimum: 0, description: "Number of recent days to filter by." }),
-    ),
-    domains: Type.Optional(Type.Array(Type.String(), { description: "Domains to filter by." })),
-});
+const SearchQueryParameters = obj(
+    {
+        q: str({ description: "Search query." }),
+        recency: opt(int({ minimum: 0, description: "Number of recent days to filter by." })),
+        domains: opt(arr(str(), { description: "Domains to filter by." })),
+    },
+    { open: true },
+);
 
-const WEB_RUN_PARAMETERS = Type.Object({
-    search_query: Type.Optional(
-        Type.Array(SearchQueryParameters, { description: "Internet search queries." }),
-    ),
-    image_query: Type.Optional(
-        Type.Array(SearchQueryParameters, { description: "Image search queries." }),
-    ),
-    open: Type.Optional(
-        Type.Array(
-            Type.Object({
-                ref_id: Type.String(),
-                lineno: Type.Optional(Type.Integer({ minimum: 0 })),
-            }),
-            { description: "Open pages by ref id or URL." },
+const WEB_RUN_PARAMETERS = obj(
+    {
+        search_query: opt(arr(SearchQueryParameters, { description: "Internet search queries." })),
+        image_query: opt(arr(SearchQueryParameters, { description: "Image search queries." })),
+        open: opt(
+            arr(
+                obj(
+                    {
+                        ref_id: str(),
+                        lineno: opt(int({ minimum: 0 })),
+                    },
+                    { open: true },
+                ),
+                { description: "Open pages by ref id or URL." },
+            ),
         ),
-    ),
-    click: Type.Optional(
-        Type.Array(Type.Object({ ref_id: Type.String(), id: Type.Integer({ minimum: 0 }) }), {
-            description: "Open numbered links from previously opened pages.",
-        }),
-    ),
-    find: Type.Optional(
-        Type.Array(Type.Object({ ref_id: Type.String(), pattern: Type.String() }), {
-            description: "Find text in an opened page.",
-        }),
-    ),
-    screenshot: Type.Optional(
-        Type.Array(Type.Object({ ref_id: Type.String(), pageno: Type.Integer({ minimum: 0 }) }), {
-            description: "Take screenshots of PDF pages.",
-        }),
-    ),
-    finance: Type.Optional(
-        Type.Array(
-            Type.Object({
-                ticker: Type.String(),
-                type: Type.Enum(["equity", "fund", "crypto", "index"] as const),
-                market: Type.Optional(Type.String()),
+        click: opt(
+            arr(obj({ ref_id: str(), id: int({ minimum: 0 }) }, { open: true }), {
+                description: "Open numbered links from previously opened pages.",
             }),
         ),
-    ),
-    weather: Type.Optional(
-        Type.Array(
-            Type.Object({
-                location: Type.String(),
-                start: Type.Optional(Type.String()),
-                duration: Type.Optional(Type.Integer({ minimum: 0 })),
+        find: opt(
+            arr(obj({ ref_id: str(), pattern: str() }, { open: true }), {
+                description: "Find text in an opened page.",
             }),
         ),
-    ),
-    sports: Type.Optional(
-        Type.Array(
-            Type.Object({
-                tool: Type.Optional(Type.Literal("sports")),
-                fn: Type.Enum(["schedule", "standings"] as const),
-                league: Type.Enum([
-                    "nba",
-                    "wnba",
-                    "nfl",
-                    "nhl",
-                    "mlb",
-                    "epl",
-                    "ncaamb",
-                    "ncaawb",
-                    "ipl",
-                ] as const),
-                team: Type.Optional(Type.String()),
-                opponent: Type.Optional(Type.String()),
-                date_from: Type.Optional(Type.String()),
-                date_to: Type.Optional(Type.String()),
-                num_games: Type.Optional(Type.Integer({ minimum: 0 })),
-                locale: Type.Optional(Type.String()),
+        screenshot: opt(
+            arr(obj({ ref_id: str(), pageno: int({ minimum: 0 }) }, { open: true }), {
+                description: "Take screenshots of PDF pages.",
             }),
         ),
-    ),
-    time: Type.Optional(Type.Array(Type.Object({ utc_offset: Type.String() }))),
-    response_length: Type.Optional(
-        Type.Enum(["short", "medium", "long"] as const, {
-            description: "Length of returned response.",
-        }),
-    ),
-});
+        finance: opt(
+            arr(
+                obj(
+                    {
+                        ticker: str(),
+                        type: oneOf(["equity", "fund", "crypto", "index"]),
+                        market: opt(str()),
+                    },
+                    { open: true },
+                ),
+            ),
+        ),
+        weather: opt(
+            arr(
+                obj(
+                    {
+                        location: str(),
+                        start: opt(str()),
+                        duration: opt(int({ minimum: 0 })),
+                    },
+                    { open: true },
+                ),
+            ),
+        ),
+        sports: opt(
+            arr(
+                obj(
+                    {
+                        tool: opt({ type: "string", ...lit("sports") }),
+                        fn: oneOf(["schedule", "standings"]),
+                        league: oneOf([
+                            "nba",
+                            "wnba",
+                            "nfl",
+                            "nhl",
+                            "mlb",
+                            "epl",
+                            "ncaamb",
+                            "ncaawb",
+                            "ipl",
+                        ]),
+                        team: opt(str()),
+                        opponent: opt(str()),
+                        date_from: opt(str()),
+                        date_to: opt(str()),
+                        num_games: opt(int({ minimum: 0 })),
+                        locale: opt(str()),
+                    },
+                    { open: true },
+                ),
+            ),
+        ),
+        time: opt(arr(obj({ utc_offset: str() }, { open: true }))),
+        response_length: opt(
+            oneOf(["short", "medium", "long"], {
+                description: "Length of returned response.",
+            }),
+        ),
+    },
+    { open: true },
+);
 
 const WEB_RUN_COMMAND_KEYS = [
     "search_query",
@@ -153,7 +176,7 @@ const WEB_RUN_COMMAND_KEYS = [
     "time",
 ] as const;
 
-const WebRunParametersValidator = compileSchema(WEB_RUN_PARAMETERS);
+const WebRunParametersValidator = compile(WEB_RUN_PARAMETERS);
 const TextContentBlockSchema = compileSchema(
     Type.Object({ type: Type.Literal("text"), text: Type.String() }),
 );
@@ -280,12 +303,15 @@ export function createWebRunTool(options: WebRunOptions): ToolDefinition<
 
             return new Text([...references, ...lines].join("\n"), 0, 0);
         },
-        async execute(toolCallId, params, signal, _onUpdate, ctx) {
+        async execute(toolCallId, input, signal, _onUpdate, ctx) {
+            const parsed = WebRunParametersValidator.validate(input);
+            if (!parsed.ok) throw new Error("Invalid web_run arguments.");
+
             const tokenizer = options.tokenizer ?? new CodexTokenizer();
 
             try {
                 const response = await executeWebRun(
-                    params,
+                    parsed.value,
                     ctx,
                     options.getConfig(),
                     signal,
@@ -325,14 +351,13 @@ function readWebRunDescription(): string {
     return cachedWebRunDescription;
 }
 
-function prepareWebRunArguments(args: unknown): WebRunParams {
-    const params = WebRunParametersValidator.decode(args);
-    if (!params) throw new Error("Invalid web_run arguments.");
+const prepareWebRunArguments = ((args): WebRunParams => {
+    const parsed = WebRunParametersValidator.validate(args);
+    if (!parsed.ok) throw new Error("Invalid web_run arguments.");
 
-    splitSearchRequest(params);
-
-    return params;
-}
+    splitSearchRequest(parsed.value);
+    return parsed.value;
+}) satisfies NonNullable<ToolDefinition["prepareArguments"]>;
 
 async function executeWebRun(
     params: WebRunParams,

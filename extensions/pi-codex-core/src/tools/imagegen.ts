@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { Type, type Static } from "typebox";
+import { compile, arr, bool, int, obj, opt, str, type Static } from "@earendil-works/pi-schema";
+import { Type } from "typebox";
 
 import { compileSchema } from "../schema-parsing.ts";
 import type { ImageContent } from "@earendil-works/pi-ai";
@@ -54,33 +55,30 @@ const PI_IMAGEGEN_GUIDANCE =
     "- imagegen may take a few minutes to finish. Wait for the tool result before continuing.";
 let cachedImagegenDescription: string | undefined;
 
-const IMAGEGEN_PARAMETERS = Type.Object(
-    {
-        prompt: Type.String({ description: "Detailed image generation or edit instruction." }),
-        transparent_background: Type.Optional(
-            Type.Boolean({
-                description:
-                    "Use a transparent background when true, opaque when false; omit to preserve automatic background handling, including existing transparency in edits.",
-            }),
-        ),
-        referenced_image_paths: Type.Optional(
-            Type.Array(Type.String(), {
-                maxItems: 5,
-                description: "Local image paths to edit.",
-            }),
-        ),
-        num_last_images_to_include: Type.Optional(
-            Type.Integer({
-                minimum: 1,
-                maximum: 5,
-                description: "Use the last N conversation images for editing.",
-            }),
-        ),
-    },
-    { additionalProperties: false },
-);
+const IMAGEGEN_PARAMETERS = obj({
+    prompt: str({ description: "Detailed image generation or edit instruction." }),
+    transparent_background: opt(
+        bool({
+            description:
+                "Use a transparent background when true, opaque when false; omit to preserve automatic background handling, including existing transparency in edits.",
+        }),
+    ),
+    referenced_image_paths: opt(
+        arr(str(), {
+            maxItems: 5,
+            description: "Local image paths to edit.",
+        }),
+    ),
+    num_last_images_to_include: opt(
+        int({
+            minimum: 1,
+            maximum: 5,
+            description: "Use the last N conversation images for editing.",
+        }),
+    ),
+});
 
-const ImagegenParametersValidator = compileSchema(IMAGEGEN_PARAMETERS);
+const ImagegenParametersValidator = compile(IMAGEGEN_PARAMETERS);
 const ImagegenResponseSchema = compileSchema(
     Type.Object({
         data: Type.Array(Type.Object({ b64_json: Type.Optional(Type.String()) })),
@@ -129,12 +127,7 @@ export function registerImagegenTool(pi: ExtensionAPI, options: ImagegenOptions)
     pi.registerTool(createImagegenTool(options));
 }
 
-export function createImagegenTool(options: ImagegenOptions): ToolDefinition<
-    typeof IMAGEGEN_PARAMETERS,
-    ImagegenDetails
-> & {
-    readonly glowupRendering: typeof imagegenGlowupRendering;
-} {
+export function createImagegenTool(options: ImagegenOptions) {
     return {
         name: IMAGEGEN_TOOL_NAME,
         label: "Image Generation",
@@ -151,7 +144,12 @@ export function createImagegenTool(options: ImagegenOptions): ToolDefinition<
         glowupRendering: imagegenGlowupRendering,
         parameters: IMAGEGEN_PARAMETERS,
         prepareArguments: prepareImagegenArguments,
-        renderCall(args, theme, _context) {
+        renderCall(input, theme, _context) {
+            const parsed = ImagegenParametersValidator.validate(input);
+            if (!parsed.ok) {
+                return new Text(theme.fg("toolTitle", theme.bold("imagegen ")), 0, 0);
+            }
+            const args = parsed.value;
             const prompt = quoteDisplayText(args.prompt);
             const optionsSummary = summarizeImagegenOptions(args);
             let text =
@@ -185,7 +183,11 @@ export function createImagegenTool(options: ImagegenOptions): ToolDefinition<
 
             return new Text(text, 0, 0);
         },
-        async execute(toolCallId, params, signal, _onUpdate, ctx) {
+        async execute(toolCallId, input, signal, _onUpdate, ctx) {
+            const parsed = ImagegenParametersValidator.validate(input);
+            if (!parsed.ok) throw new Error("Invalid imagegen arguments.");
+
+            const params = parsed.value;
             const config = options.getConfig();
             const editImages = await resolveEditImages(params, ctx, { signal });
             const response = await requestImageGeneration(
@@ -243,6 +245,8 @@ export function createImagegenTool(options: ImagegenOptions): ToolDefinition<
                 },
             };
         },
+    } satisfies ToolDefinition<typeof IMAGEGEN_PARAMETERS, ImagegenDetails> & {
+        readonly glowupRendering: typeof imagegenGlowupRendering;
     };
 }
 
@@ -255,9 +259,11 @@ function readImagegenDescription(): string {
     return cachedImagegenDescription;
 }
 
-export function prepareImagegenArguments(args: unknown): ImagegenParams {
-    const input = ImagegenParametersValidator.decode(args);
-    if (!input) throw new Error("Invalid imagegen arguments.");
+export const prepareImagegenArguments = ((args): ImagegenParams => {
+    const parsed = ImagegenParametersValidator.validate(args);
+    if (!parsed.ok) throw new Error("Invalid imagegen arguments.");
+
+    const input = parsed.value;
 
     const prompt = input.prompt.trim();
     if (prompt.length === 0) throw new Error("imagegen requires a non-empty prompt.");
@@ -278,7 +284,7 @@ export function prepareImagegenArguments(args: unknown): ImagegenParams {
     }
 
     return prepared;
-}
+}) satisfies NonNullable<ToolDefinition["prepareArguments"]>;
 
 function summarizeImagegenOptions(args: ImagegenParams): string {
     const parts: string[] = [];

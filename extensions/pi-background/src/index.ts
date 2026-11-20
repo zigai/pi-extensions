@@ -14,9 +14,12 @@ import {
     BackgroundCommands,
     commandSchema,
     jobArgsSchema,
+    jobValidator,
     outputSchema,
     startArgsSchema,
+    startValidator,
     waitArgsSchema,
+    waitValidator,
     waitOutputSchema,
     type CommandOutput,
     type CommandSnapshot,
@@ -297,7 +300,11 @@ export default function backgroundExtension(pi: ExtensionAPI): void {
                 outputSchema: commandSchema,
                 renderCall: renderStartCall,
                 renderResult: renderJobResult,
-                async execute(_toolCallId, args, signal, _onUpdate, ctx) {
+                async execute(_toolCallId, input, signal, _onUpdate, ctx) {
+                    const parsed = startValidator.validate(input);
+                    if (!parsed.ok) throw new Error("Invalid background_start arguments.");
+
+                    const args = parsed.value;
                     const job = current().start(args.command, resolve(ctx.cwd, args.cwd ?? "."), {
                         signal,
                         kind: args.kind,
@@ -329,8 +336,11 @@ export default function backgroundExtension(pi: ExtensionAPI): void {
                 outputSchema,
                 renderCall: renderStatusCall,
                 renderResult: renderOutputResult,
-                async execute(_toolCallId, { id }) {
-                    const output = current().output(id);
+                async execute(_toolCallId, input) {
+                    const parsed = jobValidator.validate(input);
+                    if (!parsed.ok) throw new Error("Invalid background_status arguments.");
+
+                    const output = current().output(parsed.value.id);
                     return {
                         content: [{ type: "text", text: describeOutput(output) }],
                         details: output,
@@ -353,9 +363,15 @@ export default function backgroundExtension(pi: ExtensionAPI): void {
                 outputSchema: waitOutputSchema,
                 renderCall: renderWaitCall,
                 renderResult: renderWaitResult,
-                async execute(_toolCallId, { ids, timeout }, signal) {
+                async execute(_toolCallId, input, signal) {
+                    const parsed = waitValidator.validate(input);
+                    if (!parsed.ok) throw new Error("Invalid background_wait arguments.");
+
+                    const { ids, timeout } = parsed.value;
                     const result = await current().wait(ids, { signal, timeout });
+
                     refresh();
+
                     let text = "No outstanding background tasks.";
                     if (result.jobs.length > 0)
                         text = result.jobs.map(describeOutput).join("\n\n---\n\n");
@@ -387,9 +403,12 @@ export default function backgroundExtension(pi: ExtensionAPI): void {
                 outputSchema: commandSchema,
                 renderCall: renderStopCall,
                 renderResult: renderJobResult,
-                async execute(_toolCallId, { id }, signal) {
+                async execute(_toolCallId, input, signal) {
                     signal?.throwIfAborted();
-                    const job = await current().stop(id);
+                    const parsed = jobValidator.validate(input);
+                    if (!parsed.ok) throw new Error("Invalid background_stop arguments.");
+
+                    const job = await current().stop(parsed.value.id);
 
                     refresh();
 

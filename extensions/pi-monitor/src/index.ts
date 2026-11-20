@@ -14,10 +14,13 @@ import {
     listArgsSchema,
     listOutputSchema,
     monitorArgsSchema,
+    monitorArgsValidator,
     monitorSchema,
     Monitors,
     commandArgsSchema,
+    commandArgsValidator,
     websocketArgsSchema,
+    websocketArgsValidator,
     stopOutputSchema,
 } from "./monitors.ts";
 import {
@@ -237,8 +240,12 @@ export default function monitorExtension(pi: ExtensionAPI): void {
                 parameters: commandArgsSchema,
                 outputSchema: monitorSchema,
                 renderCall: renderCommandCall,
-                async execute(_toolCallId, args, signal, _onUpdate, ctx) {
+                async execute(_toolCallId, input, signal, _onUpdate, ctx) {
                     signal?.throwIfAborted();
+                    const parsed = commandArgsValidator.validate(input);
+                    if (!parsed.ok) throw new Error("Invalid monitor arguments.");
+
+                    const args = parsed.value;
                     const cwd = resolve(ctx.cwd, args.cwd ?? ".");
                     const monitor = current().startCommand(args, cwd);
                     return {
@@ -261,9 +268,12 @@ export default function monitorExtension(pi: ExtensionAPI): void {
                 parameters: websocketArgsSchema,
                 outputSchema: monitorSchema,
                 renderCall: renderWebSocketCall,
-                async execute(_toolCallId, args, signal) {
+                async execute(_toolCallId, input, signal) {
                     signal?.throwIfAborted();
-                    const monitor = current().startWebSocket(args);
+                    const parsed = websocketArgsValidator.validate(input);
+                    if (!parsed.ok) throw new Error("Invalid monitor_websocket arguments.");
+
+                    const monitor = current().startWebSocket(parsed.value);
                     return {
                         content: [{ type: "text", text: startedText(monitor) }],
                         details: monitor,
@@ -285,9 +295,12 @@ export default function monitorExtension(pi: ExtensionAPI): void {
                 parameters: monitorArgsSchema,
                 outputSchema: stopOutputSchema,
                 renderCall: renderStopCall,
-                async execute(_toolCallId, { id }, signal) {
+                async execute(_toolCallId, input, signal) {
                     signal?.throwIfAborted();
-                    const result = await current().stop(id);
+                    const parsed = monitorArgsValidator.validate(input);
+                    if (!parsed.ok) throw new Error("Invalid monitor_stop arguments.");
+
+                    const result = await current().stop(parsed.value.id);
                     let text = describeMonitor(result.monitor, Date.now());
                     if (result.pending.length > 0)
                         text += `\n\nUndelivered lines:\n${result.pending}`;

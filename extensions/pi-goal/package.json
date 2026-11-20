@@ -57,6 +57,7 @@
     "verify:platform:all": "node scripts/platform-verification.mjs doctor --skip-windows-disposable-probe && node scripts/platform-verification.mjs run --target macos,ubuntu,windows-native"
   },
   "dependencies": {
+    "@earendil-works/pi-schema": "1.6.0",
     "@zigai/pi-glowup": "2.0.0",
     "pi-typed-args": "0.2.1"
   },

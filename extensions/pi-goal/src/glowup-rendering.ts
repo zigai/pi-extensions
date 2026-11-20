@@ -6,42 +6,65 @@ import {
   type GlowupToolResult,
 } from "@zigai/pi-glowup/protocol";
 
-import { Type, type Static } from "typebox";
+import {
+  bool,
+  compile,
+  int,
+  lit,
+  obj,
+  opt,
+  str,
+  union,
+  type Static,
+} from "@earendil-works/pi-schema";
+import { Type, type Static as TypeBoxStatic } from "typebox";
 import { Value } from "typebox/value";
 
 import { formatCompactTokenValue, formatDuration } from "./format.ts";
 
-export const GetGoalArgsSchema = Type.Object({});
-export const CreateGoalArgsSchema = Type.Object({
-  objective: Type.String({
-    description: "Concrete objective to pursue until completion.",
-  }),
-  minimum_time_minutes: Type.Optional(
-    Type.Integer({
-      description: "Optional positive whole minimum active time in minutes.",
-      minimum: 1,
+export const GetGoalArgsSchema = obj({}, { open: true });
+export const CreateGoalArgsSchema = obj(
+  {
+    objective: str({
+      description: "Concrete objective to pursue until completion.",
     }),
-  ),
-  maximum_time_minutes: Type.Optional(
-    Type.Integer({
-      description: "Optional positive whole maximum active time in minutes.",
-      minimum: 1,
-    }),
-  ),
-  replace_existing: Type.Optional(
-    Type.Boolean({
-      description:
-        "Replace an existing non-complete goal. Use only when the user explicitly asks to set a new goal over the current one.",
-    }),
-  ),
-});
+    minimum_time_minutes: opt(
+      int({
+        description: "Optional positive whole minimum active time in minutes.",
+        minimum: 1,
+      }),
+    ),
+    maximum_time_minutes: opt(
+      int({
+        description: "Optional positive whole maximum active time in minutes.",
+        minimum: 1,
+      }),
+    ),
+    replace_existing: opt(
+      bool({
+        description:
+          "Replace an existing non-complete goal. Use only when the user explicitly asks to set a new goal over the current one.",
+      }),
+    ),
+  },
+  { open: true },
+);
 
-export const UpdateGoalArgsSchema = Type.Object({
-  status: Type.Union([Type.Literal("complete"), Type.Literal("blocked")], {
-    description:
-      "Use complete only after every requirement is verified. Use blocked only when no safe in-scope path remains without unavailable input, authority, access, or dependencies.",
-  }),
-});
+export const UpdateGoalArgsSchema = obj(
+  {
+    status: union(
+      [
+        { type: "string", ...lit("complete") },
+        { type: "string", ...lit("blocked") },
+      ],
+      {
+        description:
+          "Use complete only after every requirement is verified. Use blocked only when no safe in-scope path remains without unavailable input, authority, access, or dependencies.",
+      },
+    ),
+  },
+  { open: true },
+);
 
 const RenderedGoalSchema = Type.Object({
   objective: Type.String(),
@@ -75,30 +98,28 @@ const GlowupTextResultSchema = Type.Object({
 export type GetGoalArgs = Static<typeof GetGoalArgsSchema>;
 export type CreateGoalArgs = Static<typeof CreateGoalArgsSchema>;
 export type UpdateGoalArgs = Static<typeof UpdateGoalArgsSchema>;
-type GoalRenderingResult = Static<typeof GoalRenderingResultSchema>;
+type GoalRenderingResult = TypeBoxStatic<typeof GoalRenderingResultSchema>;
+
+const getGoalArgsValidator = compile(GetGoalArgsSchema, { coerce: true });
+export const createGoalArgsValidator = compile(CreateGoalArgsSchema, { coerce: true });
+export const updateGoalArgsValidator = compile(UpdateGoalArgsSchema, { coerce: true });
 
 function parseGetGoalArgs(value: unknown): GetGoalArgs | undefined {
-  try {
-    return Value.Parse(GetGoalArgsSchema, value);
-  } catch {
-    return undefined;
-  }
+  const parsed = getGoalArgsValidator.parse(value);
+  if (!parsed.ok) return undefined;
+  return parsed.value;
 }
 
 function parseCreateGoalArgs(value: unknown): CreateGoalArgs | undefined {
-  try {
-    return Value.Parse(CreateGoalArgsSchema, value);
-  } catch {
-    return undefined;
-  }
+  const parsed = createGoalArgsValidator.parse(value);
+  if (!parsed.ok) return undefined;
+  return parsed.value;
 }
 
 function parseUpdateGoalArgs(value: unknown): UpdateGoalArgs | undefined {
-  try {
-    return Value.Parse(UpdateGoalArgsSchema, value);
-  } catch {
-    return undefined;
-  }
+  const parsed = updateGoalArgsValidator.parse(value);
+  if (!parsed.ok) return undefined;
+  return parsed.value;
 }
 
 function parseGoalResponse(value: unknown): GoalRenderingResult | undefined {
@@ -131,7 +152,7 @@ function resultText(result: GlowupToolResult): string | undefined {
 }
 
 function parseGoalResult(value: unknown): GoalRenderingResult | undefined {
-  let result: Static<typeof GlowupTextResultSchema>;
+  let result: TypeBoxStatic<typeof GlowupTextResultSchema>;
   try {
     result = Value.Parse(GlowupTextResultSchema, value);
   } catch {

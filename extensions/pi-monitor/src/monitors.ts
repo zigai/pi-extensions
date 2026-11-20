@@ -3,6 +3,7 @@ import { appendFileSync, closeSync, mkdirSync, openSync, writeSync } from "node:
 import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import type { BashOperations } from "@earendil-works/pi-coding-agent";
+import { arr, compile, int, obj, opt, str, type Static } from "@earendil-works/pi-schema";
 import { Type, type StaticDecode } from "typebox";
 import { EventStream } from "./event-stream.ts";
 
@@ -10,55 +11,69 @@ export const DEFAULT_TIMEOUT_SECONDS = 300;
 export const MAX_TIMEOUT_SECONDS = 1800;
 export const MAX_FRAME_BYTES = 1024 * 1024;
 
-const descriptionSchema = Type.String({
+const descriptionSchema = str({
     minLength: 1,
     description:
         'Short, specific description of what is being watched, shown with every event (for example "errors in deploy.log").',
 });
 
-const timeoutSchema = Type.Optional(
-    Type.Integer({
+const timeoutSchema = opt(
+    int({
         minimum: 1,
         maximum: MAX_TIMEOUT_SECONDS,
         description: `Seconds before the monitor expires and is stopped (default ${DEFAULT_TIMEOUT_SECONDS}, maximum ${MAX_TIMEOUT_SECONDS}). You get one notice at expiry and can start it again.`,
     }),
 );
 
-export const commandArgsSchema = Type.Object({
-    description: descriptionSchema,
-    command: Type.String({
-        minLength: 1,
-        description:
-            "Shell command or script. Each stdout line is an event; exit ends the watch. Stderr goes only to the output file.",
-    }),
-    cwd: Type.Optional(
-        Type.String({
-            description: "Working directory, relative to the current project or absolute",
+export const commandArgsSchema = obj(
+    {
+        description: descriptionSchema,
+        command: str({
+            minLength: 1,
+            description:
+                "Shell command or script. Each stdout line is an event; exit ends the watch. Stderr goes only to the output file.",
         }),
-    ),
-    timeout: timeoutSchema,
-});
+        cwd: opt(
+            str({
+                description: "Working directory, relative to the current project or absolute",
+            }),
+        ),
+        timeout: timeoutSchema,
+    },
+    { open: true },
+);
 
-export const websocketArgsSchema = Type.Object({
-    description: descriptionSchema,
-    url: Type.String({ minLength: 1, description: "ws:// or wss:// URL" }),
-    protocols: Type.Optional(
-        Type.Array(Type.String({ pattern: "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$" }), {
-            uniqueItems: true,
-            description: "WebSocket subprotocols to request",
+export const websocketArgsSchema = obj(
+    {
+        description: descriptionSchema,
+        url: str({ minLength: 1, description: "ws:// or wss:// URL" }),
+        protocols: opt(
+            arr(str({ pattern: "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$" }), {
+                uniqueItems: true,
+                description: "WebSocket subprotocols to request",
+            }),
+        ),
+        timeout: timeoutSchema,
+    },
+    { open: true },
+);
+
+export const listArgsSchema = obj({}, { open: true });
+
+export const monitorArgsSchema = obj(
+    {
+        id: str({
+            minLength: 1,
+            description: "Monitor ID returned by monitor or monitor_websocket",
         }),
-    ),
-    timeout: timeoutSchema,
-});
+    },
+    { open: true },
+);
 
-export const listArgsSchema = Type.Object({});
-
-export const monitorArgsSchema = Type.Object({
-    id: Type.String({
-        minLength: 1,
-        description: "Monitor ID returned by monitor or monitor_websocket",
-    }),
-});
+export const commandArgsValidator = compile(commandArgsSchema);
+export const websocketArgsValidator = compile(websocketArgsSchema);
+export const monitorArgsValidator = compile(monitorArgsSchema);
+export const listArgsValidator = compile(listArgsSchema);
 
 const sourceSchema = Type.Union([
     Type.Object(
@@ -101,10 +116,10 @@ export const listOutputSchema = Type.Object(
     { additionalProperties: false },
 );
 
-export type CommandArgs = StaticDecode<typeof commandArgsSchema>;
-export type WebSocketArgs = StaticDecode<typeof websocketArgsSchema>;
-export type MonitorArgs = StaticDecode<typeof monitorArgsSchema>;
-export type ListArgs = StaticDecode<typeof listArgsSchema>;
+export type CommandArgs = Static<typeof commandArgsSchema>;
+export type WebSocketArgs = Static<typeof websocketArgsSchema>;
+export type MonitorArgs = Static<typeof monitorArgsSchema>;
+export type ListArgs = Static<typeof listArgsSchema>;
 export type MonitorSnapshot = StaticDecode<typeof monitorSchema>;
 export type MonitorSource = StaticDecode<typeof sourceSchema>;
 export type StopResult = StaticDecode<typeof stopOutputSchema>;

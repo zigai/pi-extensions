@@ -1,4 +1,4 @@
-import { StringEnum } from "@earendil-works/pi-ai";
+import { compile, int, obj, oneOf, opt, str } from "@earendil-works/pi-schema";
 import {
     createToolSearchExtension,
     type ExtensionAPI,
@@ -48,6 +48,21 @@ const promptQuery = Compile(
     ),
 );
 const promptValue = Compile(Type.String());
+const searchParameters = obj({
+    query: str({
+        minLength: 1,
+        maxLength: 1_000,
+        description: "Capability or task to search for.",
+    }),
+    mode: opt({
+        type: "string",
+        ...oneOf(["tools"], {
+            description: "Capability catalog to search. Only tools are currently supported.",
+        }),
+    }),
+    limit: opt(int({ minimum: 1, maximum: 20 })),
+});
+const searchParametersValidator = compile(searchParameters);
 
 function notifyDiagnostics(service: TogglesService, ctx: ExtensionContext): void {
     if (service.diagnostics.length === 0) {
@@ -171,27 +186,14 @@ export default function extension(pi: ExtensionAPI): void | Promise<void> {
         promptGuidelines: [
             "Use search_capabilities only when the task needs a tool that is not currently available.",
         ],
-        parameters: Type.Object(
-            {
-                query: Type.String({
-                    minLength: 1,
-                    maxLength: 1_000,
-                    description: "Capability or task to search for.",
-                }),
-                mode: Type.Optional(
-                    StringEnum(["tools"] as const, {
-                        description:
-                            "Capability catalog to search. Only tools are currently supported.",
-                    }),
-                ),
-                limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
-            },
-            { additionalProperties: false },
-        ),
-        async execute(_toolCallId, params) {
+        parameters: searchParameters,
+        async execute(_toolCallId, input) {
             if (service === undefined) {
                 throw new Error("Pi Toggles has not initialized a session.");
             }
+            const parsed = searchParametersValidator.validate(input);
+            if (!parsed.ok) throw new Error("Invalid search_capabilities arguments.");
+            const params = parsed.value;
             const limit = Math.min(params.limit ?? service.lazyToolLimit, service.lazyToolLimit);
             const result = await service.activateLazy(params.query, limit);
             const text =

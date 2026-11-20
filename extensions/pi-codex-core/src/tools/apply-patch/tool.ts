@@ -13,7 +13,8 @@ import {
     type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { withGlowupRendering } from "@zigai/pi-glowup/protocol";
-import { Type, type Static } from "typebox";
+import { compile, obj, str, type Static } from "@earendil-works/pi-schema";
+import { Type } from "typebox";
 
 import { applyPatchGlowupRendering } from "./glowup-rendering.ts";
 import {
@@ -29,17 +30,13 @@ import { compileSchema, NodeErrorCodeDecoder, StringDecoder } from "../../schema
 
 export const APPLY_PATCH_TOOL_NAME = "apply_patch";
 
-const APPLY_PATCH_PARAMETERS = Type.Object(
-    {
-        patch: Type.String({
-            description:
-                "Full Codex apply_patch document, from *** Begin Patch through *** End Patch.",
-        }),
-    },
-    { additionalProperties: false },
-);
+const APPLY_PATCH_PARAMETERS = obj({
+    patch: str({
+        description: "Full Codex apply_patch document, from *** Begin Patch through *** End Patch.",
+    }),
+});
 
-const ApplyPatchParametersValidator = compileSchema(APPLY_PATCH_PARAMETERS);
+const ApplyPatchParametersValidator = compile(APPLY_PATCH_PARAMETERS);
 const ApplyPatchArgumentObjectSchema = Type.Object(
     {
         patch: Type.Optional(Type.String()),
@@ -121,11 +118,14 @@ export function createApplyPatchTool(): ToolDefinition<
             ],
             parameters: APPLY_PATCH_PARAMETERS,
             prepareArguments: prepareApplyPatchArguments,
-            async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+            async execute(_toolCallId, input, signal, _onUpdate, ctx) {
+                const params = ApplyPatchParametersValidator.validate(input);
+                if (!params.ok) throw new Error("Invalid apply_patch arguments.");
+
                 const cwd = resolve(ctx.cwd);
 
                 try {
-                    const parsedResult = parseApplyPatch(params.patch);
+                    const parsedResult = parseApplyPatch(params.value.patch);
                     if (parsedResult.isErr()) {
                         throw new Error(formatApplyPatchError(parsedResult.error));
                     }
@@ -168,7 +168,9 @@ export function createApplyPatchTool(): ToolDefinition<
                 }
             },
             renderCall(args, theme, _context) {
-                const parsed = parseApplyPatch(args.patch);
+                const parsed = parseApplyPatch(
+                    ApplyPatchArgumentObjectDecoder.decode(args)?.patch ?? "",
+                );
                 const summary = parsed.isErr()
                     ? "patch"
                     : formatPatchCallSummary(summarizePlannedPatchLines(parsed.value.hunks));
@@ -264,9 +266,9 @@ function hasNodeErrorCode(cause: unknown, code: string): boolean {
 
 function prepareApplyPatchArguments(args: unknown): ApplyPatchParams {
     const normalized = normalizeApplyPatchArguments(args);
-    const params = ApplyPatchParametersValidator.decode(normalized);
-    if (!params) throw new Error("Invalid apply_patch arguments.");
-    return params;
+    if (!ApplyPatchParametersValidator.check(normalized))
+        throw new Error("Invalid apply_patch arguments.");
+    return normalized;
 }
 
 function normalizeApplyPatchArguments(args: unknown): ApplyPatchParams | undefined {

@@ -6,55 +6,69 @@ import {
     truncateTail,
     type BashOperations,
 } from "@earendil-works/pi-coding-agent";
+import { arr, compile, int, num, obj, oneOf, opt, str } from "@earendil-works/pi-schema";
 import { Type, type StaticDecode } from "typebox";
 
 export const DEFAULT_TASK_TIMEOUT_SECONDS = 1800;
 export const MAX_TASK_TIMEOUT_SECONDS = 7200;
 
-export const startArgsSchema = Type.Object({
-    command: Type.String({ minLength: 1, description: "Shell command to execute" }),
-    kind: Type.Optional(
-        Type.Enum(["task", "service"], {
-            description:
-                "task (default): finite work to collect before your final answer. service: a server or watcher that stays running; verify readiness instead of waiting for exit.",
-        }),
-    ),
-    cwd: Type.Optional(
-        Type.String({
-            description: "Working directory, relative to the current project or absolute",
-        }),
-    ),
-    timeout: Type.Optional(
-        Type.Integer({
-            minimum: 1,
-            maximum: MAX_TASK_TIMEOUT_SECONDS,
-            description: `Seconds before a task is stopped together with its child processes (default ${DEFAULT_TASK_TIMEOUT_SECONDS}, maximum ${MAX_TASK_TIMEOUT_SECONDS}). Set it near the longest the command should need. Services take no timeout.`,
-        }),
-    ),
-});
+export const startArgsSchema = obj(
+    {
+        command: str({ minLength: 1, description: "Shell command to execute" }),
+        kind: opt(
+            oneOf(["task", "service"], {
+                description:
+                    "task (default): finite work to collect before your final answer. service: a server or watcher that stays running; verify readiness instead of waiting for exit.",
+            }),
+        ),
+        cwd: opt(
+            str({
+                description: "Working directory, relative to the current project or absolute",
+            }),
+        ),
+        timeout: opt(
+            int({
+                minimum: 1,
+                maximum: MAX_TASK_TIMEOUT_SECONDS,
+                description: `Seconds before a task is stopped together with its child processes (default ${DEFAULT_TASK_TIMEOUT_SECONDS}, maximum ${MAX_TASK_TIMEOUT_SECONDS}). Set it near the longest the command should need. Services take no timeout.`,
+            }),
+        ),
+    },
+    { open: true },
+);
 
-export const jobArgsSchema = Type.Object({
-    id: Type.String({ minLength: 1, description: "Job ID returned by background_start" }),
-});
+export const jobArgsSchema = obj(
+    {
+        id: str({ minLength: 1, description: "Job ID returned by background_start" }),
+    },
+    { open: true },
+);
 
-export const waitArgsSchema = Type.Object({
-    timeout: Type.Optional(
-        Type.Number({
-            minimum: 1,
-            maximum: 120,
-            description:
-                "Maximum seconds to wait before returning progress for inspection (default 60, maximum 120). Commands keep running.",
-        }),
-    ),
-    ids: Type.Optional(
-        Type.Array(Type.String({ minLength: 1 }), {
-            minItems: 1,
-            uniqueItems: true,
-            description:
-                "Task IDs to wait for. Omit to collect all outstanding tasks, including finished results not yet collected. Services cannot be waited on.",
-        }),
-    ),
-});
+export const waitArgsSchema = obj(
+    {
+        timeout: opt(
+            num({
+                minimum: 1,
+                maximum: 120,
+                description:
+                    "Maximum seconds to wait before returning progress for inspection (default 60, maximum 120). Commands keep running.",
+            }),
+        ),
+        ids: opt(
+            arr(str({ minLength: 1 }), {
+                minItems: 1,
+                uniqueItems: true,
+                description:
+                    "Task IDs to wait for. Omit to collect all outstanding tasks, including finished results not yet collected. Services cannot be waited on.",
+            }),
+        ),
+    },
+    { open: true },
+);
+
+export const startValidator = compile(startArgsSchema);
+export const jobValidator = compile(jobArgsSchema);
+export const waitValidator = compile(waitArgsSchema);
 
 export const commandSchema = Type.Object(
     {

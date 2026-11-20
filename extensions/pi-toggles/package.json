@@ -49,6 +49,7 @@
     "config:check": "pi-extension-settings check"
   },
   "dependencies": {
+    "@earendil-works/pi-schema": "1.6.0",
     "@zigai/pi-extension-internals": "0.2.0",
     "@zigai/pi-extension-settings": "0.6.1",
     "glob": "^14.0.6"
