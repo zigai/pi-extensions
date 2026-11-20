@@ -18,7 +18,8 @@ import {
     red,
     pathText,
 } from "../theme.ts";
-import { type TextRange, changedTextRanges, applyBackgroundToTextRanges } from "./intraline.ts";
+import { changedTextRanges, applyBackgroundToTextRanges } from "./intraline.ts";
+import { trimRangeWhitespace, type TextRange } from "./text-ranges.ts";
 import {
     asciiStyledWidth,
     fitPrefixedSegment,
@@ -255,7 +256,11 @@ function renderDiffRow(
     const styledContent =
         background === undefined || options?.changedRanges === undefined
             ? baseContent
-            : applyBackgroundToTextRanges(baseContent, options.changedRanges, background);
+            : applyBackgroundToTextRanges(
+                  baseContent,
+                  trimRangeWhitespace(parsed.content, options.changedRanges),
+                  background,
+              );
 
     if (parsed.content.length === 0) {
         const styledGutter = styleDiffGutter(parsed.kind, lineNumber, sign, theme);

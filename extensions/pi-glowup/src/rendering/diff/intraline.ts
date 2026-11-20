@@ -1,9 +1,5 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
-
-export type TextRange = {
-    readonly start: number;
-    readonly end: number;
-};
+import type { TextRange } from "./text-ranges.ts";
 
 type DiffToken = TextRange & {
     readonly text: string;

@@ -1618,6 +1618,40 @@ describe("Pierre diff rendering", () => {
         }
     });
 
+    it("keeps changed indentation in the row shade", async () => {
+        const payload = buildPierreDiffPayload({
+            path: "src/example.ts",
+            oldContent: "    total = 1000;\n",
+            newContent: "        total = 2000;\n",
+            oldSizeBytes: 18,
+            newSizeBytes: 22,
+            canBuildPierreDiff: true,
+        });
+        if (payload?.kind !== "renderable") {
+            throw new Error("expected renderable Pierre payload");
+        }
+
+        await loadHighlightedDiff(payload.metadata);
+        const lines = renderPierreDiff(
+            payload,
+            testTheme,
+            { expanded: false },
+            { lastComponent: undefined, invalidate() {} },
+        ).render(100);
+        const rows = await interpretedDiffRows(lines, 100);
+
+        for (const changed of ["= 1000", "= 2000"]) {
+            const row = rows.filter((candidate) => candidate.text.includes(changed));
+            const text = row[0]?.text ?? "";
+            const indentation = row[0]?.cells[text.indexOf("total") - 1];
+            const unchanged = tokenCell(row, "total");
+            const value = row[0]?.cells[text.indexOf(changed) + 2];
+
+            expect(indentation?.background).toBe(unchanged.background);
+            expect(value?.background).not.toBe(unchanged.background);
+        }
+    });
+
     it("honors independently configured two-tone shades", () => {
         configureRenderingAppearance({
             ...defaultAppearance,

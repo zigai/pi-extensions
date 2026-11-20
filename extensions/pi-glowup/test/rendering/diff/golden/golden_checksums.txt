@@ -1,1 +1,1 @@
-d7e7f6a6dbfba01483e7dd50d70383b7a3efc2f046bc7d20d889c83d568359f2  test/rendering/diff/golden/text-diff.json
+ff28e5851d46aa8279a879ae579689bf41fdcea54ac42b91526a42bbca72a380  test/rendering/diff/golden/text-diff.json

@@ -11,6 +11,7 @@ import {
     normalizeSyntaxLanguage,
     syntaxLanguageInput,
 } from "../syntax/language.ts";
+import { trimRangeWhitespace, type TextRange } from "./text-ranges.ts";
 
 const PIERRE_RENDER_OPTIONS = {
     useTokenTransformer: false,
@@ -161,6 +162,7 @@ function packLine(node: HighlightedDiffNode | undefined, state: PackState): Pack
 
     let text = "";
     const runs: number[] = [];
+    const spans: TextRange[] = [];
 
     function visit(current: HighlightedDiffNode, inherited: RunStyle): void {
         if (current.type === "text") {
@@ -194,16 +196,65 @@ function packLine(node: HighlightedDiffNode | undefined, state: PackState): Pack
         let color = inherited.color;
         if (value !== undefined) color = colorIndex(value, state);
 
-        const next: RunStyle = {
-            color,
-            emphasized: Object.hasOwn(properties, "data-diff-span") || inherited.emphasized,
-        };
+        const opensSpan = !inherited.emphasized && Object.hasOwn(properties, "data-diff-span");
+        const next: RunStyle = { color, emphasized: inherited.emphasized || opensSpan };
+        const start = text.length;
+
         for (const child of current.children) visit(child, next);
+
+        if (opensSpan) spans.push({ start, end: text.length });
     }
 
     visit(node, { color: -1, emphasized: false });
 
-    return [text, runs];
+    if (spans.length === 0) return [text, runs];
+
+    return [text, emphasizeOnly(runs, trimRangeWhitespace(text, spans))];
+}
+
+function emphasizeOnly(runs: readonly number[], kept: readonly TextRange[]): number[] {
+    const packed: number[] = [];
+    const push = (end: number, color: number, emphasized: number): void => {
+        const last = packed.length - 3;
+        if (last >= 0 && packed[last + 1] === color && packed[last + 2] === emphasized) {
+            packed[last] = end;
+            return;
+        }
+
+        packed.push(end, color, emphasized);
+    };
+
+    let start = 0;
+    let keptIndex = 0;
+    for (let index = 0; index + 2 < runs.length; index += 3) {
+        const end = runs[index] ?? start;
+        const color = runs[index + 1] ?? -1;
+        if (runs[index + 2] !== 1) {
+            push(end, color, 0);
+            start = end;
+            continue;
+        }
+
+        let offset = start;
+        while (offset < end) {
+            while ((kept[keptIndex]?.end ?? Infinity) <= offset) keptIndex += 1;
+
+            const range = kept[keptIndex];
+            if (range === undefined || range.start >= end) {
+                push(end, color, 0);
+                break;
+            }
+
+            if (range.start > offset) push(range.start, color, 0);
+
+            offset = Math.min(range.end, end);
+            push(offset, color, 1);
+        }
+
+        start = end;
+    }
+
+    return packed;
 }
 
 function colorIndex(color: string, state: PackState): number {

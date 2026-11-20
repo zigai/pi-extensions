@@ -69,6 +69,20 @@ afterEach(() => {
     clearCompletedLineCache();
 });
 
+it("keeps both rows of an indentation-only replacement", () => {
+    const component = renderGlowupDiff(
+        createPlainTheme(),
+        [{ lines: ["-1   total = 1", "+1     total = 1"], added: 1, removed: 1 }],
+        true,
+    );
+    const rows = component.render(80).map(stripVTControlCharacters);
+
+    expect(rows.map((row) => row.trimEnd())).toEqual([
+        expect.stringMatching(/- {2}total = 1$/u),
+        expect.stringMatching(/\+ {4}total = 1$/u),
+    ]);
+});
+
 it("suppresses identical replacement sides even when their counterpart is outside the preview", () => {
     fc.assert(
         fc.property(
