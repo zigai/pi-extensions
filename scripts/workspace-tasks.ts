@@ -1,7 +1,9 @@
 import { execFileSync } from "node:child_process";
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { Type } from "typebox";
+import { Value } from "typebox/value";
 import { loadWorkspacePackages, type WorkspacePackage } from "./workspace-packages.ts";
 
 export const isolatedDirectories = new Set([
@@ -54,6 +56,11 @@ export function planWorkspaceBuild(packages: readonly WorkspacePackage[]): Works
 
     return ordered;
 }
+
+const toolchainManifest = Type.Object({
+    engines: Type.Object({ node: Type.String({ pattern: "^>=\\d+\\.\\d+\\.\\d+$" }) }),
+    packageManager: Type.String({ pattern: "^npm@\\d+\\.\\d+\\.\\d+$" }),
+});
 
 function run(root: string, executable: string, args: readonly string[]): void {
     const windowsShim = process.platform === "win32" && executable !== "node";
@@ -109,6 +116,23 @@ export function runWorkspaceTask(root: string, task: string, args: readonly stri
         for (const workspace of isolated)
             run(root, "npm", ["run", "check:code", "-w", workspace.manifest.name]);
 
+        return;
+    }
+
+    if (task === "test:floor") {
+        const value: unknown = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
+        const { engines, packageManager } = Value.Parse(toolchainManifest, value);
+        run(root, "npm", [
+            "exec",
+            "--yes",
+            `--package=node@${engines.node.slice(">=".length)}`,
+            `--package=${packageManager}`,
+            "--",
+            "npm",
+            "test",
+            "--",
+            ...args,
+        ]);
         return;
     }
 

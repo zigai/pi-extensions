@@ -32,6 +32,10 @@ lint:
 test *args:
     @npm test -- "$@"
 
+# Run the tests on the lowest Node version Pi supports
+test-floor:
+    node scripts/workspace-tasks.ts test:floor
+
 # Static type check with TypeScript
 typecheck:
     npm run typecheck
@@ -140,6 +144,11 @@ lock:
 [no-exit-message]
 lockcheck:
     npm ci --dry-run --ignore-scripts
+
+# Update dependencies to their newest versions, keeping host-matched and pinned packages
+update:
+    npx npm-check-updates@22.2.9 -u --workspaces --root --enginesNode --reject '@types/node,@earendil-works/*,marked,@pierre/diffs,unbash'
+    npm install
 
 # List available recipes
 [default]
