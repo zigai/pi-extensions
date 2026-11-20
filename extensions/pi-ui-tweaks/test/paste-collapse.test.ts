@@ -22,6 +22,7 @@ import {
 
 const TOOL_EXPAND = "\x0f";
 const CUSTOM_EXPAND = "\x05";
+const UNDO = "\x1f";
 
 class FakeTerminal implements Terminal {
     columns = 80;
@@ -71,6 +72,7 @@ const defaultSettings: PasteCollapseSettings = {
     pasteCollapseEnabled: true,
     pasteCollapseExpandKey: null,
     pasteCollapseLineThreshold: 10,
+    pasteCollapseRevealOnRepeat: true,
     pasteCollapseUseToolExpandKey: true,
 };
 
@@ -198,6 +200,62 @@ test("tool expand key expands only the marker under the cursor", () => {
         editor.handleInput(TOOL_EXPAND);
         assert.equal(editor.getText(), "[paste #1 +2 lines] three\nfour");
         assert.equal(editor.getExpandedText(), "one\ntwo three\nfour");
+    });
+});
+
+test("pasting the same collapsed content again reveals it in place", () => {
+    withSettings({ pasteCollapseLineThreshold: 1 }, () => {
+        const editor = createPasteCollapseEditor();
+        editor.handleInput("before ");
+        editor.handleInput(paste("one\ntwo"));
+        editor.handleInput(paste("one\ntwo"));
+        editor.handleInput("!");
+        assert.equal(editor.getText(), "before one\ntwo!");
+        assert.equal(editor.getExpandedText(), "before one\ntwo!");
+    });
+});
+
+test("repeated paste reveals the matching marker and leaves other pastes collapsed", () => {
+    withSettings({ pasteCollapseLineThreshold: 1 }, () => {
+        const editor = createPasteCollapseEditor();
+        editor.handleInput(paste("one\ntwo"));
+        editor.handleInput(" ");
+        editor.handleInput(paste("three\nfour"));
+        editor.handleInput(" ");
+        editor.handleInput(paste("one\ntwo"));
+        assert.equal(editor.getText(), "one\ntwo [paste #2 +2 lines] ");
+        assert.equal(editor.getExpandedText(), "one\ntwo three\nfour ");
+    });
+});
+
+test("undo after a repeated paste restores the collapsed marker", () => {
+    withSettings({ pasteCollapseLineThreshold: 1 }, () => {
+        const editor = createPasteCollapseEditor();
+        editor.handleInput(paste("one\ntwo"));
+        editor.handleInput(paste("one\ntwo"));
+        editor.handleInput(UNDO);
+        assert.equal(editor.getText(), "[paste #1 +2 lines]");
+        assert.equal(editor.getExpandedText(), "one\ntwo");
+    });
+});
+
+test("repeated paste adds a second marker when reveal is disabled", () => {
+    withSettings({ pasteCollapseLineThreshold: 1, pasteCollapseRevealOnRepeat: false }, () => {
+        const editor = createPasteCollapseEditor();
+        editor.handleInput(paste("one\ntwo"));
+        editor.handleInput(paste("one\ntwo"));
+        assert.equal(editor.getText(), "[paste #1 +2 lines][paste #2 +2 lines]");
+    });
+});
+
+test("pasting content whose marker was deleted collapses it again", () => {
+    withSettings({ pasteCollapseCharThreshold: 5, pasteCollapseLineThreshold: 99 }, () => {
+        const editor = createPasteCollapseEditor();
+        editor.handleInput(paste("abcdef"));
+
+        for (const _character of "[paste #1 6 chars]") editor.handleInput("\x7f");
+        editor.handleInput(paste("abcdef"));
+        assert.match(editor.getText(), /^\[paste #\d+ 6 chars\]$/);
     });
 });
 

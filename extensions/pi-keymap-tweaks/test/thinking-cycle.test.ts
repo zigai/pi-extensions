@@ -98,7 +98,7 @@ function createFakeModel(
 
 function createTestKeymapEditor(
     options: {
-        readonly getSettings?: () => KeymapTweaksConfig;
+        readonly getSettings?: () => Pick<KeymapTweaksConfig, "cycleThinkingBackwardKey">;
         readonly getModel?: () => Model<Api> | undefined;
         readonly getThinkingLevel?: () => ThinkingLevel | undefined;
         readonly setThinkingLevel?: (level: ThinkingLevel) => void;

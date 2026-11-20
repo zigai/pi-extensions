@@ -1,11 +1,15 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
+import { installCancelUndo, type CancelUndoHandle } from "./cancel-undo.ts";
 import { applyKeymapEditor } from "./editor-keymap.ts";
+import { installListContinuation, type ListContinuationHandle } from "./list-continuation.ts";
 import { loadKeymapTweaksSettings, type LoadedKeymapTweaksConfig } from "./settings.ts";
 import { applySubmitModeKeymap } from "./submit-mode-patch.ts";
 
 let editorHandle: { dispose(): void } | undefined;
 let submitModeHandle: { dispose(): void } | undefined;
+let listContinuationHandle: ListContinuationHandle | undefined;
+let cancelUndoHandle: CancelUndoHandle | undefined;
 let sessionSettings: LoadedKeymapTweaksConfig | undefined;
 
 export default function piKeymap(pi: ExtensionAPI): void {
@@ -19,6 +23,12 @@ export default function piKeymap(pi: ExtensionAPI): void {
                 ctx.ui.notify(error, "error");
             }
         }
+
+        const { config } = sessionSettings;
+        listContinuationHandle?.dispose();
+        listContinuationHandle = installListContinuation(config.continueLists);
+        cancelUndoHandle?.dispose();
+        cancelUndoHandle = installCancelUndo(config.undoEarlyCancel);
 
         editorHandle?.dispose();
         editorHandle = applyKeymapEditor(ctx, {
@@ -39,6 +49,10 @@ export default function piKeymap(pi: ExtensionAPI): void {
     pi.on("session_shutdown", () => {
         editorHandle?.dispose();
         editorHandle = undefined;
+        cancelUndoHandle?.dispose();
+        cancelUndoHandle = undefined;
+        listContinuationHandle?.dispose();
+        listContinuationHandle = undefined;
         submitModeHandle?.dispose();
         submitModeHandle = undefined;
         sessionSettings = undefined;

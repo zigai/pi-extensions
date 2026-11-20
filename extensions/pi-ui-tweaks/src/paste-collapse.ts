@@ -15,6 +15,7 @@ import {
     DEFAULT_PASTE_COLLAPSE_ENABLED,
     DEFAULT_PASTE_COLLAPSE_EXPAND_KEY,
     DEFAULT_PASTE_COLLAPSE_LINE_THRESHOLD,
+    DEFAULT_PASTE_COLLAPSE_REVEAL_ON_REPEAT,
     DEFAULT_PASTE_COLLAPSE_USE_TOOL_EXPAND_KEY,
 } from "./settings.ts";
 
@@ -46,6 +47,7 @@ export type PasteCollapseSettings = {
     readonly pasteCollapseEnabled: boolean;
     readonly pasteCollapseExpandKey: string | null;
     readonly pasteCollapseLineThreshold: number;
+    readonly pasteCollapseRevealOnRepeat: boolean;
     readonly pasteCollapseUseToolExpandKey: boolean;
 };
 
@@ -59,6 +61,7 @@ let currentPasteCollapseSettings: PasteCollapseSettings = {
     pasteCollapseEnabled: DEFAULT_PASTE_COLLAPSE_ENABLED,
     pasteCollapseExpandKey: DEFAULT_PASTE_COLLAPSE_EXPAND_KEY,
     pasteCollapseLineThreshold: DEFAULT_PASTE_COLLAPSE_LINE_THRESHOLD,
+    pasteCollapseRevealOnRepeat: DEFAULT_PASTE_COLLAPSE_REVEAL_ON_REPEAT,
     pasteCollapseUseToolExpandKey: DEFAULT_PASTE_COLLAPSE_USE_TOOL_EXPAND_KEY,
 };
 
@@ -253,25 +256,6 @@ function pasteMarkerForContent(pasteId: number, filteredText: string): string {
     return `[paste #${pasteId} ${filteredText.length} chars]`;
 }
 
-function handlePasteWithUiTweaks(editor: PasteEditorInternals, pastedText: string): void {
-    editor.cancelAutocomplete();
-    editor.exitHistoryBrowsing();
-    editor.lastAction = null;
-    editor.pushUndoSnapshot();
-
-    const filteredText = normalizePastedText(editor, pastedText);
-    if (shouldCollapsePaste(filteredText)) {
-        editor.pasteCounter += 1;
-
-        const pasteId = editor.pasteCounter;
-        editor.pastes.set(pasteId, filteredText);
-        editor.insertTextAtCursorInternal(pasteMarkerForContent(pasteId, filteredText));
-        return;
-    }
-
-    editor.insertTextAtCursorInternal(filteredText);
-}
-
 function findPasteMarkerAtCursor(editor: PasteEditorInternals): PasteMarker | undefined {
     const line = editor.state.lines[editor.state.cursorLine] ?? "";
     const cursorCol = editor.state.cursorCol;
@@ -308,13 +292,41 @@ function findPasteMarkerAtCursor(editor: PasteEditorInternals): PasteMarker | un
     return undefined;
 }
 
+function findRepeatedPasteMarker(
+    editor: PasteEditorInternals,
+    content: string,
+): PasteMarker | undefined {
+    if (!currentPasteCollapseSettings.pasteCollapseRevealOnRepeat) return undefined;
+
+    let latest: PasteMarker | undefined;
+    for (const [line, text] of editor.state.lines.entries()) {
+        for (const match of text.matchAll(PASTE_MARKER_REGEX)) {
+            const pasteIdText = match.at(1);
+            if (pasteIdText === undefined) continue;
+
+            const pasteId = Number.parseInt(pasteIdText, 10);
+            if (editor.pastes.get(pasteId) !== content) continue;
+            if (latest !== undefined && latest.pasteId > pasteId) continue;
+
+            const start = match.index;
+            latest = { pasteId, content, line, start, end: start + match[0].length };
+        }
+    }
+
+    return latest;
+}
+
 function hasPasteMarker(editor: PasteEditorInternals, pasteId: number): boolean {
     const markerRegex = PASTE_MARKER_FOR_ID(pasteId);
 
     return editor.state.lines.some((line) => markerRegex.test(line));
 }
 
-function replaceMarkerWithContent(editor: PasteEditorInternals, marker: PasteMarker): void {
+function replaceMarkerWithContent(
+    editor: PasteEditorInternals,
+    marker: PasteMarker,
+    cursor: "start" | "end",
+): void {
     const line = editor.state.lines[marker.line] ?? "";
     const before = line.slice(0, marker.start);
     const after = line.slice(marker.end);
@@ -335,14 +347,49 @@ function replaceMarkerWithContent(editor: PasteEditorInternals, marker: PasteMar
         );
     }
 
-    editor.state.cursorLine = marker.line;
-    editor.setCursorCol(marker.start);
+    if (cursor === "start") {
+        editor.state.cursorLine = marker.line;
+        editor.setCursorCol(marker.start);
+    } else if (replacementLines.length === 1) {
+        editor.state.cursorLine = marker.line;
+        editor.setCursorCol(marker.start + firstReplacementLine.length);
+    } else {
+        const lastReplacementLine = replacementLines[replacementLines.length - 1] ?? "";
+        editor.state.cursorLine = marker.line + replacementLines.length - 1;
+        editor.setCursorCol(lastReplacementLine.length);
+    }
 
     if (!hasPasteMarker(editor, marker.pasteId)) {
         editor.pastes.delete(marker.pasteId);
     }
 
     editor.onChange?.(editor.getText());
+}
+
+function handlePasteWithUiTweaks(editor: PasteEditorInternals, pastedText: string): void {
+    editor.cancelAutocomplete();
+    editor.exitHistoryBrowsing();
+    editor.lastAction = null;
+    editor.pushUndoSnapshot();
+
+    const filteredText = normalizePastedText(editor, pastedText);
+    if (shouldCollapsePaste(filteredText)) {
+        const repeated = findRepeatedPasteMarker(editor, filteredText);
+        if (repeated !== undefined) {
+            replaceMarkerWithContent(editor, repeated, "end");
+            return;
+        }
+
+        editor.pasteCounter += 1;
+
+        const pasteId = editor.pasteCounter;
+        editor.pastes.set(pasteId, filteredText);
+        editor.insertTextAtCursorInternal(pasteMarkerForContent(pasteId, filteredText));
+
+        return;
+    }
+
+    editor.insertTextAtCursorInternal(filteredText);
 }
 
 /**
@@ -359,7 +406,7 @@ export function expandPasteMarkerAtCursor(editor: PasteCollapseEditor): boolean 
 
     internals.lastAction = null;
     internals.pushUndoSnapshot();
-    replaceMarkerWithContent(internals, marker);
+    replaceMarkerWithContent(internals, marker, "start");
     editor.requestRenderNow?.();
 
     return true;

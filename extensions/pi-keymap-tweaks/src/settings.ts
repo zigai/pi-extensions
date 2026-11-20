@@ -1,9 +1,12 @@
 import { loadPiExtensionSettings } from "@zigai/pi-extension-settings/pi";
 import { definePrevalidatedExtensionSettings } from "@zigai/pi-extension-settings/runtime";
+import { Type } from "typebox";
 import { Value } from "typebox/value";
 
 import {
+    DEFAULT_CONTINUE_LISTS,
     DEFAULT_CYCLE_THINKING_BACKWARD_KEY,
+    DEFAULT_UNDO_EARLY_CANCEL,
     extensionSettingsInput,
     KeymapTweaksConfigSchema,
     type KeymapTweaksConfig,
@@ -31,7 +34,9 @@ export type KeymapTweaksSettingsSource = {
 
 export type KeymapTweaksSettings = {
     $schema?: string;
+    continueLists?: boolean;
     cycleThinkingBackwardKey?: string | null;
+    undoEarlyCancel?: boolean;
 };
 
 function formatSchemaPath(instancePath: string): string {
@@ -51,10 +56,12 @@ type ParsedKeymapTweaksSettingsResult = {
     readonly errors: readonly string[];
 };
 
+const KeymapTweaksSourceSchema = Type.Partial(KeymapTweaksConfigSchema);
+
 const keymapTweaksSettingsParser = {
     parse(settings: unknown, label: string): ParsedKeymapTweaksSettingsResult {
         try {
-            const errors = [...Value.Errors(KeymapTweaksConfigSchema, settings)];
+            const errors = [...Value.Errors(KeymapTweaksSourceSchema, settings)];
             if (errors.length > 0) {
                 const messages = errors
                     .slice(0, 10)
@@ -67,7 +74,7 @@ const keymapTweaksSettingsParser = {
                 throw new Error(`${label} is invalid: ${messages.join("; ")}${suffix}`);
             }
 
-            const parsed = Value.Parse(KeymapTweaksConfigSchema, settings);
+            const parsed = Value.Parse(KeymapTweaksSourceSchema, settings);
             return {
                 settings: parsed,
                 errors: [],
@@ -85,8 +92,10 @@ const keymapTweaksSettingsParser = {
 
 function buildKeymapTweaksConfig(settings: KeymapTweaksSettings): KeymapTweaksConfig {
     return {
+        continueLists: settings.continueLists ?? DEFAULT_CONTINUE_LISTS,
         cycleThinkingBackwardKey:
             settings.cycleThinkingBackwardKey ?? DEFAULT_CYCLE_THINKING_BACKWARD_KEY,
+        undoEarlyCancel: settings.undoEarlyCancel ?? DEFAULT_UNDO_EARLY_CANCEL,
     };
 }
 

@@ -48,13 +48,17 @@ pi install npm:@zigai/pi-keymap-tweaks
 
 Global settings are stored in `~/.pi/agent/extension-settings/pi-keymap-tweaks.json`.
 
-| Option                     | Type           | Default | Description                                                                                                 |
-| -------------------------- | -------------- | ------- | ----------------------------------------------------------------------------------------------------------- |
-| `cycleThinkingBackwardKey` | string \| null | `null`  | Additional keybinding to cycle thinking backward (e.g. 'alt+shift+tab'). Ctrl+Alt+Left is always available. |
+| Option                     | Type           | Default | Description                                                                                                                                      |
+| -------------------------- | -------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `continueLists`            | boolean        | `true`  | Start the next list item when inserting a newline on a numbered or bullet list line. A newline on an empty item ends the list.                   |
+| `undoEarlyCancel`          | boolean        | `true`  | Cancelling with the interrupt key before the response shows any output removes the prompt from the session and puts its text back in the editor. |
+| `cycleThinkingBackwardKey` | string \| null | `null`  | Additional keybinding to cycle thinking backward (e.g. 'alt+shift+tab'). Ctrl+Alt+Left is always available.                                      |
 
 ```json
 {
   "$schema": "./schemas/pi-keymap-tweaks.schema.json",
+  "continueLists": true,
+  "undoEarlyCancel": true,
   "cycleThinkingBackwardKey": null
 }
 ```

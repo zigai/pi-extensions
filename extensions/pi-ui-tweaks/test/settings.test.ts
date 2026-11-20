@@ -46,6 +46,7 @@ test("loadUiTweaksSettings scaffolds missing global config and schema", async ()
             pasteCollapseEnabled: true,
             pasteCollapseExpandKey: null,
             pasteCollapseLineThreshold: 10,
+            pasteCollapseRevealOnRepeat: true,
             pasteCollapseUseToolExpandKey: true,
             pinnedModels: [],
             offPeakRules: [],

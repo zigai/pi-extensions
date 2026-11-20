@@ -5,6 +5,7 @@ export const DEFAULT_PASTE_COLLAPSE_LINE_THRESHOLD = 10;
 export const DEFAULT_PASTE_COLLAPSE_CHAR_THRESHOLD = 1000;
 export const DEFAULT_PASTE_COLLAPSE_EXPAND_KEY: string | null = null;
 export const DEFAULT_PASTE_COLLAPSE_USE_TOOL_EXPAND_KEY = true;
+export const DEFAULT_PASTE_COLLAPSE_REVEAL_ON_REPEAT = true;
 
 export const PeakRuleSchema = Type.Object(
     {
@@ -81,6 +82,7 @@ export type UiTweaksConfig = {
     readonly pasteCollapseEnabled: boolean;
     readonly pasteCollapseExpandKey: string | null;
     readonly pasteCollapseLineThreshold: number;
+    readonly pasteCollapseRevealOnRepeat: boolean;
     readonly pasteCollapseUseToolExpandKey: boolean;
     readonly preserveCompactionHistory: boolean;
     readonly restoreContentAfterAutocompleteClose: boolean;
@@ -124,6 +126,7 @@ export type UiTweaksSettings = {
     pasteCollapseEnabled?: boolean;
     pasteCollapseExpandKey?: string | null;
     pasteCollapseLineThreshold?: number;
+    pasteCollapseRevealOnRepeat?: boolean;
     pasteCollapseUseToolExpandKey?: boolean;
     preserveCompactionHistory?: boolean;
     restoreContentAfterAutocompleteClose?: boolean;
@@ -248,6 +251,11 @@ export const extensionSettingsInput = {
                 minimum: 0,
                 default: DEFAULT_PASTE_COLLAPSE_LINE_THRESHOLD,
                 description: "Line threshold that collapses pasted content.",
+            }),
+            pasteCollapseRevealOnRepeat: Type.Boolean({
+                default: DEFAULT_PASTE_COLLAPSE_REVEAL_ON_REPEAT,
+                description:
+                    "Pasting the same collapsed content again reveals the existing marker instead of adding another.",
             }),
             pasteCollapseUseToolExpandKey: Type.Boolean({
                 default: DEFAULT_PASTE_COLLAPSE_USE_TOOL_EXPAND_KEY,

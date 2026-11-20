@@ -842,6 +842,7 @@ export type ScriptCallRenderOptions = {
     readonly signal?: AbortSignal;
     readonly durationMs?: number | undefined;
     readonly background?: boolean | undefined;
+    readonly label?: string | undefined;
 };
 
 /** Renders a Bash call as a `$` prompt: the launcher (or first code line) beside `$`, code below. */
@@ -1029,7 +1030,9 @@ function createScriptCallComponent(
             }
         }
 
-        const promptPrefix = `${renderShellPrompt(theme)} `;
+        let promptPrefix = `${renderShellPrompt(theme)} `;
+        if (options.label !== undefined)
+            promptPrefix = `${theme.bold(options.label)} ${promptPrefix}`;
         let annotation = promptDuration(theme, state, options.durationMs);
         const background = options.background === true;
 

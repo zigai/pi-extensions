@@ -54,6 +54,7 @@ function scriptCallRenderOptions(options: BashCommandRenderOptions): ScriptCallR
         showPrologueOmission: options.showPrologueOmission,
         durationMs: options.durationMs,
         background: options.background,
+        label: options.label,
         lastComponent: options.lastComponent,
     };
     if (options.invalidate !== undefined) {
@@ -256,6 +257,7 @@ export type BashCommandRenderOptions = {
     readonly embeddedPrograms?: EmbeddedProgramLookup;
     readonly durationMs?: number | undefined;
     readonly background?: boolean | undefined;
+    readonly label?: string | undefined;
 };
 
 function renderScriptInvocation(

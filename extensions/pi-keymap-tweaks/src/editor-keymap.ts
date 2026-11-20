@@ -42,7 +42,7 @@ type Notifier = (message: string, type?: "info" | "warning" | "error") => void;
 type ModelProvider = () => Model<Api> | undefined;
 type ThinkingLevelProvider = () => ThinkingLevel | undefined;
 type ThinkingLevelSetter = (level: ThinkingLevel) => void;
-type SettingsProvider = () => KeymapTweaksConfig;
+type SettingsProvider = () => Pick<KeymapTweaksConfig, "cycleThinkingBackwardKey">;
 
 type KeymapEditorOptions = {
     readonly writeClipboard?: ClipboardWriter;

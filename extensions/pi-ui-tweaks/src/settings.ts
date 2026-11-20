@@ -9,6 +9,7 @@ import {
     DEFAULT_PASTE_COLLAPSE_ENABLED,
     DEFAULT_PASTE_COLLAPSE_EXPAND_KEY,
     DEFAULT_PASTE_COLLAPSE_LINE_THRESHOLD,
+    DEFAULT_PASTE_COLLAPSE_REVEAL_ON_REPEAT,
     DEFAULT_PASTE_COLLAPSE_USE_TOOL_EXPAND_KEY,
     LoadedUiTweaksConfig,
     OptionalPasteCollapseExpandKeySchema,
@@ -57,6 +58,7 @@ const UiTweaksConfigSchema = Type.Object(
         pasteCollapseEnabled: Type.Optional(Type.Boolean()),
         pasteCollapseExpandKey: Type.Optional(OptionalPasteCollapseExpandKeySchema),
         pasteCollapseLineThreshold: Type.Optional(Type.Integer({ minimum: 0 })),
+        pasteCollapseRevealOnRepeat: Type.Optional(Type.Boolean()),
         pasteCollapseUseToolExpandKey: Type.Optional(Type.Boolean()),
         preserveCompactionHistory: Type.Optional(Type.Boolean()),
         restoreContentAfterAutocompleteClose: Type.Optional(Type.Boolean()),
@@ -90,6 +92,7 @@ const DEFAULT_UI_TWEAKS_CONFIG: UiTweaksConfig = {
     pasteCollapseEnabled: DEFAULT_PASTE_COLLAPSE_ENABLED,
     pasteCollapseExpandKey: DEFAULT_PASTE_COLLAPSE_EXPAND_KEY,
     pasteCollapseLineThreshold: DEFAULT_PASTE_COLLAPSE_LINE_THRESHOLD,
+    pasteCollapseRevealOnRepeat: DEFAULT_PASTE_COLLAPSE_REVEAL_ON_REPEAT,
     pasteCollapseUseToolExpandKey: DEFAULT_PASTE_COLLAPSE_USE_TOOL_EXPAND_KEY,
     preserveCompactionHistory: false,
     restoreContentAfterAutocompleteClose: true,
@@ -167,6 +170,7 @@ function buildUiTweaksConfig(settings: UiTweaksSettings): UiTweaksConfig {
             pasteCollapseEnabled: false,
             pasteCollapseExpandKey: DEFAULT_UI_TWEAKS_CONFIG.pasteCollapseExpandKey,
             pasteCollapseLineThreshold: DEFAULT_UI_TWEAKS_CONFIG.pasteCollapseLineThreshold,
+            pasteCollapseRevealOnRepeat: false,
             pasteCollapseUseToolExpandKey: false,
             preserveCompactionHistory: false,
             restoreContentAfterAutocompleteClose: false,
@@ -224,6 +228,9 @@ function buildUiTweaksConfig(settings: UiTweaksSettings): UiTweaksConfig {
         pasteCollapseLineThreshold:
             settings.pasteCollapseLineThreshold ??
             DEFAULT_UI_TWEAKS_CONFIG.pasteCollapseLineThreshold,
+        pasteCollapseRevealOnRepeat:
+            settings.pasteCollapseRevealOnRepeat ??
+            DEFAULT_UI_TWEAKS_CONFIG.pasteCollapseRevealOnRepeat,
         pasteCollapseUseToolExpandKey:
             settings.pasteCollapseUseToolExpandKey ??
             DEFAULT_UI_TWEAKS_CONFIG.pasteCollapseUseToolExpandKey,

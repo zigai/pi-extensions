@@ -85,6 +85,9 @@ export type GlowupBashCallStyle = {
 
     /** Marks background execution beside the call duration; it is not job-completion state. */
     readonly background?: boolean;
+
+    /** Short name drawn before the `$` prompt, so the call reads as this tool rather than Bash. */
+    readonly label?: string;
 };
 
 type GlowupCallRendering<Args> = {
