@@ -49,10 +49,10 @@ export function defineTypedCommand<
 
             // SAFETY: normalizeRegisteredCommand compiled every named TSubcommands branch from its
             // exact merged shared/local definitions; the route supplies that same canonical name.
+            // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: validated canonical branch grammar proves the result; TypeScript cannot correlate dynamic keys with the mapped return type.
             return {
                 ...parsed,
                 subcommand: invocation.route.subcommand,
-                // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: validated canonical branch grammar proves the result; TypeScript cannot correlate dynamic keys with the mapped return type.
             } as TypedCommandParseResult<TDefinitions, TSubcommands>;
         },
         serialize(values: SerializableArgumentValues<TDefinitions>) {

@@ -45,14 +45,14 @@
   },
   "dependencies": {
     "@zigai/pi-extension-internals": "0.2.0",
-    "yaml": "2.9.0"
+    "yaml": "2.9.1"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "1.6.0",
-    "@types/node": "^24.10.1",
-    "@vitest/coverage-v8": "4.1.11",
+    "@types/node": "~22.19.21",
+    "@vitest/coverage-v8": "5.1.0",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.11"
+    "vitest": "^5.1.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"

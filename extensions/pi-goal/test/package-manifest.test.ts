@@ -53,7 +53,7 @@ test("package keeps the bundled creation template without exposing /create-goal"
   assert.equal(packageJson.bundleDependencies, undefined);
   assert.equal(packageJson.scripts?.test, "vitest run");
   assert.equal(packageJson.devDependencies?.tsx, undefined);
-  assert.match(packageJson.devDependencies?.vitest ?? "", /^\^4\./);
+  assert.match(packageJson.devDependencies?.vitest ?? "", /^\^5\./);
 });
 
 test("bundled creation prompt is a dynamic settings template", () => {

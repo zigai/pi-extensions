@@ -53,6 +53,9 @@
     "@earendil-works/pi-coding-agent": "^1.3.0",
     "typebox": "*"
   },
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "pi": {
     "extensions": [
       "./src/index.ts"
@@ -63,8 +66,5 @@
     "prevalidation": "./src/settings.prevalidated.ts",
     "schema": "./config.schema.json",
     "readme": "./README.md"
-  },
-  "engines": {
-    "node": ">=22.19.0"
   }
 }

@@ -355,7 +355,7 @@ class BashLayoutCollector {
                 const indented = segment.replace(/[\t ]+$/u, INDENT.repeat(breakpoint.indent));
                 if (indented !== segment) changed = true;
                 rendered += indented;
-            } else if (/\n$/u.test(segment) || /^[\t ]*\r?\n/u.test(this.#source.slice(start))) {
+            } else if (segment.endsWith("\n") || /^[\t ]*\r?\n/u.test(this.#source.slice(start))) {
                 rendered += segment;
             } else {
                 rendered += `${segment.replace(/[\t ]+$/u, "")}\n${INDENT.repeat(breakpoint.indent)}`;

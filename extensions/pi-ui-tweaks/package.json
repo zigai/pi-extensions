@@ -45,6 +45,9 @@
     "@earendil-works/pi-tui": "^1.3.0",
     "typebox": "*"
   },
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "pi": {
     "extensions": [
       "./src/index.ts"
@@ -55,8 +58,5 @@
     "schema": "./config.schema.json",
     "readme": "./README.md",
     "prevalidation": "./src/settings.prevalidated.ts"
-  },
-  "engines": {
-    "node": ">=22.19.0"
   }
 }

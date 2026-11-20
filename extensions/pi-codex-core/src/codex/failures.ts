@@ -14,12 +14,12 @@ export class CodexAuthUnavailable extends TaggedError("CodexAuthUnavailable")<{
     readonly operation: CodexOperation;
     readonly message: string;
     readonly cause?: unknown;
-}>() {}
+}> {}
 
 export class CodexUnsupportedModel extends TaggedError("CodexUnsupportedModel")<{
     readonly operation: CodexOperation;
     readonly message: string;
-}>() {}
+}> {}
 
 export class CodexNativeCompactionIncompatible extends TaggedError(
     "CodexNativeCompactionIncompatible",
@@ -28,27 +28,27 @@ export class CodexNativeCompactionIncompatible extends TaggedError(
     readonly checkpointModel: string;
     readonly requestModel: string;
     readonly message: string;
-}>() {}
+}> {}
 
 export class CodexRequestCancelled extends TaggedError("CodexRequestCancelled")<{
     readonly operation: CodexOperation;
     readonly message: string;
     readonly cause?: unknown;
-}>() {}
+}> {}
 
 export class CodexNetworkUnavailable extends TaggedError("CodexNetworkUnavailable")<{
     readonly operation: CodexOperation;
     readonly provider: string;
     readonly message: string;
     readonly cause: unknown;
-}>() {}
+}> {}
 
 export class CodexHttpRequestFailed extends TaggedError("CodexHttpRequestFailed")<{
     readonly operation: CodexOperation;
     readonly provider: string;
     readonly status: number;
     readonly message: string;
-}>() {}
+}> {}
 
 export class CodexStreamRetryable extends TaggedError("CodexStreamRetryable")<{
     readonly operation: CodexOperation;
@@ -56,20 +56,20 @@ export class CodexStreamRetryable extends TaggedError("CodexStreamRetryable")<{
     readonly message: string;
     readonly code: string | undefined;
     readonly retryAfterMs: number | undefined;
-}>() {}
+}> {}
 
 export class CodexInvalidJson extends TaggedError("CodexInvalidJson")<{
     readonly operation: CodexOperation;
     readonly provider: string;
     readonly message: string;
     readonly cause: unknown;
-}>() {}
+}> {}
 
 export class CodexUnexpectedResponse extends TaggedError("CodexUnexpectedResponse")<{
     readonly operation: CodexOperation;
     readonly provider: string;
     readonly message: string;
-}>() {}
+}> {}
 
 export type CodexFailure =
     | CodexAuthUnavailable
