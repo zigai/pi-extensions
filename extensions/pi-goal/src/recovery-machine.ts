@@ -186,7 +186,7 @@ export function planRecoveryForAssistantError(
   const signature = failureSignature(message.errorMessage);
   state.counters = countersForFailureSignature(state.counters, signature);
 
-  if (!isRetryableTransientError(message.errorMessage)) {
+  if (!isRetryableTransientError(message)) {
     return {
       type: "pause",
       reason: `non-retryable provider error (${signature})`,

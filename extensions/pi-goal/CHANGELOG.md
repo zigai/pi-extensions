@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Classify transient provider errors with Pi's own retry rules, so connection resets, busy servers
+  and 520/524 responses leave the goal pending instead of pausing it.
 - Consolidate generated and raw goal creation into `/goal`; default task text now uses a
   configurable dynamic creation template, while `-r` stores an exact objective.
 - Integrate the local `pi-typed-args` checkout by filesystem path and add a double-Tab expanded

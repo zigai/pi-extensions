@@ -1,4 +1,9 @@
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import {
+    CONFIG_DIR_NAME,
+    getAgentDir,
+    withFileMutationQueue,
+    type ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import { realpath } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { TObject } from "typebox";
@@ -6,7 +11,6 @@ import type { TObject } from "typebox";
 import { Type, Value } from "./typebox-runtime.ts";
 
 import type { ExtensionSettingsDefinition } from "./definition.ts";
-import { getPiAgentDir, PI_CONFIG_DIR_NAME } from "./pi-host-paths.ts";
 import { resolveGlobalSettingsPaths, resolveProjectSettingsPaths } from "./paths.ts";
 import {
     loadSettings,
@@ -16,11 +20,12 @@ import {
     type SettingsDiagnosticCode,
 } from "./settings-loader.ts";
 import type { PiSettingsRevision } from "./settings-revision.ts";
-import type {
-    PiSettingsUpdateIssue,
-    PiSettingsUpdateScope,
-    UpdatePiExtensionSettingsOptions,
-    UpdatePiExtensionSettingsResult,
+import {
+    updateSettingsTransaction,
+    type PiSettingsUpdateIssue,
+    type PiSettingsUpdateScope,
+    type UpdatePiExtensionSettingsOptions,
+    type UpdatePiExtensionSettingsResult,
 } from "./settings-transaction.ts";
 
 export type PiSettingsContext = Pick<ExtensionContext, "cwd" | "isProjectTrusted">;
@@ -51,7 +56,7 @@ export type {
  * @param extensionId The definition ID used in the settings filename.
  */
 export function getPiGlobalSettingsPath(extensionId: string): string {
-    return resolveGlobalSettingsPaths(getPiAgentDir(), extensionId).configPath;
+    return resolveGlobalSettingsPaths(getAgentDir(), extensionId).configPath;
 }
 
 /**
@@ -64,7 +69,7 @@ export function getPiGlobalSettingsPath(extensionId: string): string {
  * @param cwd The project directory, normally `ctx.cwd`.
  */
 export function getPiProjectSettingsPath(extensionId: string, cwd: string): string {
-    return resolveProjectSettingsPaths(cwd, PI_CONFIG_DIR_NAME, extensionId).configPath;
+    return resolveProjectSettingsPaths(cwd, CONFIG_DIR_NAME, extensionId).configPath;
 }
 
 /**
@@ -108,11 +113,11 @@ export function loadPiExtensionSettings<const Schema extends TObject>(
     options: LoadPiExtensionSettingsOptions,
 ): LoadedPiExtensionSettings<Schema> {
     return loadSettings(definition, {
-        agentDir: getPiAgentDir(),
+        agentDir: getAgentDir(),
         bundledSchema: options.bundledSchema,
         project: {
             cwd: context.cwd,
-            configDirName: PI_CONFIG_DIR_NAME,
+            configDirName: CONFIG_DIR_NAME,
             trusted: context.isProjectTrusted(),
         },
     });
@@ -192,13 +197,8 @@ export async function updatePiExtensionSettings<const Schema extends TObject>(
     context: PiSettingsContext,
     options: UpdatePiExtensionSettingsOptions<Schema>,
 ): Promise<UpdatePiExtensionSettingsResult> {
-    // Read-only consumers should not initialize the lock library or its process signal handlers.
-    const [{ updateSettingsTransaction }, { withFileMutationQueue }] = await Promise.all([
-        import("./settings-transaction.ts"),
-        import("@earendil-works/pi-coding-agent"),
-    ]);
-    const global = resolveGlobalSettingsPaths(getPiAgentDir(), definition.id);
-    const project = resolveProjectSettingsPaths(context.cwd, PI_CONFIG_DIR_NAME, definition.id);
+    const global = resolveGlobalSettingsPaths(getAgentDir(), definition.id);
+    const project = resolveProjectSettingsPaths(context.cwd, CONFIG_DIR_NAME, definition.id);
     const projectTrusted = context.isProjectTrusted();
     const paths =
         options.scope === "global"

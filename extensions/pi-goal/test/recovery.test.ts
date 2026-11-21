@@ -88,18 +88,33 @@ test("isAssistantContextOverflow detects silent stop and zero-output length over
   );
 });
 
+function errorAssistantMessage(errorMessage: string) {
+  return { role: "assistant", stopReason: "error", errorMessage };
+}
+
 test("isRetryableTransientError mirrors host retry classification", () => {
-  assert.equal(isRetryableTransientError("HTTP 429 too many requests"), true);
-  assert.equal(isRetryableTransientError("HTTP 500 internal server error"), true);
-  assert.equal(isRetryableTransientError("HTTP 502 bad gateway"), true);
-  assert.equal(isRetryableTransientError("HTTP 503 service unavailable"), true);
-  assert.equal(isRetryableTransientError("websocket closed"), true);
   assert.equal(
-    isRetryableTransientError("exceeded request buffer limit while retrying upstream"),
+    isRetryableTransientError(errorAssistantMessage("HTTP 429 too many requests")),
     true,
   );
-  assert.equal(isRetryableTransientError("context_length_exceeded"), false);
-  assert.equal(isRetryableTransientError("invalid api key"), false);
+  assert.equal(
+    isRetryableTransientError(errorAssistantMessage("HTTP 500 internal server error")),
+    true,
+  );
+  assert.equal(isRetryableTransientError(errorAssistantMessage("HTTP 502 bad gateway")), true);
+  assert.equal(
+    isRetryableTransientError(errorAssistantMessage("HTTP 503 service unavailable")),
+    true,
+  );
+  assert.equal(isRetryableTransientError(errorAssistantMessage("websocket closed")), true);
+  assert.equal(
+    isRetryableTransientError(
+      errorAssistantMessage("exceeded request buffer limit while retrying upstream"),
+    ),
+    true,
+  );
+  assert.equal(isRetryableTransientError(errorAssistantMessage("context_length_exceeded")), false);
+  assert.equal(isRetryableTransientError(errorAssistantMessage("invalid api key")), false);
 });
 
 const terminalProviderLimitErrors = [
@@ -116,7 +131,11 @@ const terminalProviderLimitErrors = [
 
 test("terminal provider-limit errors are not retryable transient errors", () => {
   for (const errorMessage of terminalProviderLimitErrors) {
-    assert.equal(isRetryableTransientError(errorMessage), false, errorMessage);
+    assert.equal(
+      isRetryableTransientError(errorAssistantMessage(errorMessage)),
+      false,
+      errorMessage,
+    );
   }
 });
 

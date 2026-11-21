@@ -29,8 +29,8 @@ function stopReasonFromAssistantError(stopReason: string | undefined): StopReaso
   }
 }
 
-/** Single adapter for pi-ai overflow checks; keeps AssistantMessage casts out of recovery logic. */
-export function assistantMessageForOverflowCheck(
+/** Single adapter for pi-ai error classifiers; keeps AssistantMessage casts out of recovery logic. */
+export function assistantMessageForPiClassifier(
   message: OverflowCheckAssistantMessage,
 ): AssistantMessage {
   const usage = message.usage ?? { input: 0, output: 0 };

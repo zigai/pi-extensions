@@ -1,6 +1,6 @@
-import { isContextOverflow } from "@earendil-works/pi-ai/compat";
+import { isContextOverflow, isRetryableAssistantError } from "@earendil-works/pi-ai/compat";
 
-import { assistantMessageForOverflowCheck } from "./recovery-adapters.ts";
+import { assistantMessageForPiClassifier } from "./recovery-adapters.ts";
 
 export const CONTEXT_OVERFLOW_SIGNATURE = "context_overflow";
 
@@ -53,7 +53,7 @@ export function isSuccessfulAssistantTurn(message: AssistantErrorMessage): boole
 
 export function isContextOverflowError(errorMessage: string | undefined): boolean {
   return isContextOverflow(
-    assistantMessageForOverflowCheck({
+    assistantMessageForPiClassifier({
       stopReason: "error",
       errorMessage: errorMessage ?? "",
     }),
@@ -72,7 +72,7 @@ export function isAssistantContextOverflow(
     return isContextOverflowError(message.errorMessage);
   }
 
-  return isContextOverflow(assistantMessageForOverflowCheck(message), contextWindow);
+  return isContextOverflow(assistantMessageForPiClassifier(message), contextWindow);
 }
 
 export function isProviderLimitError(errorMessage: string | undefined): boolean {
@@ -81,31 +81,12 @@ export function isProviderLimitError(errorMessage: string | undefined): boolean 
   );
 }
 
-function isNonRetryableProviderLimitError(errorMessage: string): boolean {
-  return isProviderLimitError(errorMessage);
-}
-
-/**
- * Mirrors the current Pi host AgentSession retryable-error classification for transient provider failures.
- * Context overflow is not transient retryable because host compaction handles that path.
- * Terminal quota, billing, and provider-limit errors are not retryable even when they contain 429 or rate-limit wording.
- */
-export function isRetryableTransientError(errorMessage: string | undefined): boolean {
-  if (!errorMessage) {
+export function isRetryableTransientError(message: AssistantErrorMessage): boolean {
+  if (isContextOverflowError(message.errorMessage) || isProviderLimitError(message.errorMessage)) {
     return false;
   }
 
-  if (isContextOverflowError(errorMessage)) {
-    return false;
-  }
-
-  if (isNonRetryableProviderLimitError(errorMessage)) {
-    return false;
-  }
-
-  return /overloaded|provider.?returned.?error|rate.?limit|too many requests|429|500|502|503|504|service.?unavailable|server.?error|internal.?error|network.?error|connection.?error|connection.?refused|connection.?lost|websocket.?closed|websocket.?error|other side closed|fetch failed|upstream.?connect|retrying upstream|request buffer limit|reset before headers|socket hang up|ended without|stream ended before message_stop|http2 request did not get a response|timed? out|timeout|terminated|retry delay/i.test(
-    errorMessage,
-  );
+  return isRetryableAssistantError(assistantMessageForPiClassifier(message));
 }
 
 function normalizeTransientSignature(line: string): string {

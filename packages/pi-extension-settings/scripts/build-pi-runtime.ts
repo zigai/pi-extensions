@@ -17,6 +17,7 @@ const external = [
     "@earendil-works/pi-tui/*",
     "@mariozechner/*",
     "@sinclair/typebox",
+    "proper-lockfile",
     "@sinclair/typebox/*",
     "typebox",
     "typebox/*",
