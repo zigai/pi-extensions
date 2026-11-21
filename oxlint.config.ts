@@ -228,7 +228,6 @@ const projectConfig = {
                 "extensions/pi-expanded-skills/**/*",
                 "extensions/pi-glowup/**/*",
                 "extensions/pi-toggles/**/*",
-                "packages/pi-extension-settings/**/*",
                 "packages/pi-typed-args/**/*",
             ],
             rules: {
@@ -248,11 +247,7 @@ const projectConfig = {
             },
         },
         {
-            files: [
-                "extensions/pi-branch/**/*",
-                "extensions/pi-glowup/**/*",
-                "packages/pi-extension-settings/**/*",
-            ],
+            files: ["extensions/pi-branch/**/*", "extensions/pi-glowup/**/*"],
             rules: {
                 "antislop/no-runtime-typeof": "error",
                 "antislop/no-unknown-parameters": "error",

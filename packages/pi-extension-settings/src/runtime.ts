@@ -53,6 +53,10 @@ function cloneJson<Value extends JsonObject>(value: Value): Value {
     return structuredClone(value);
 }
 
+function isObject(value: unknown): value is object {
+    return (typeof value === "object" && value !== null) || typeof value === "function";
+}
+
 function freezeRecursively<Value extends object>(value: Value, original: Value): void {
     const pending: object[] = [original, value];
     while (pending.length > 0) {
@@ -80,12 +84,9 @@ function freezeRecursively<Value extends object>(value: Value, original: Value):
 
             // TypeBox retains codec functions and other atomic values by identity. Only descend
             // into values that were copied; never mutate those caller-owned references.
-            if (child === originalChild) continue;
-            // SAFETY: Object.isFrozen false proves child is an object/function. Both clone
-            // operations preserve primitives, so its distinct data-property source is an object
-            // too. Ownership, codec, array and shared-reference tests cover this correspondence.
-            // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: the clone/source correspondence proves both worklist values are objects.
-            pending.push(...([originalChild, child] as [object, object]));
+            if (child === originalChild || !isObject(child) || !isObject(originalChild)) continue;
+
+            pending.push(originalChild, child);
         }
 
         Object.freeze(current);
