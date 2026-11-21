@@ -23,12 +23,12 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-status-bar.json
 
 | Option                                 | Type     | Default | Description                                              |
 | -------------------------------------- | -------- | ------- | -------------------------------------------------------- |
-| `statusBar.active.text`                | string   | —       | Custom active status text.                               |
-| `statusBar.active.spinner.frames`      | string[] | —       | Spinner frames displayed while Pi is active.             |
+| `statusBar.active.text`                | string   | none    | Custom active status text.                               |
+| `statusBar.active.spinner.frames`      | string[] | none    | Spinner frames displayed while Pi is active.             |
 | `statusBar.active.spinner.intervalMs`  | integer  | `160`   | Delay between working spinner frames in milliseconds.    |
 | `statusBar.active.timer.visible`       | boolean  | `true`  | Show the active-run timer.                               |
 | `statusBar.active.timer.paused`        | boolean  | `false` | Display the active-run timer as paused.                  |
-| `statusBar.idle.text`                  | string   | —       | Custom idle status text.                                 |
+| `statusBar.idle.text`                  | string   | none    | Custom idle status text.                                 |
 | `statusBar.idle.visible`               | boolean  | `true`  | Show the status bar while Pi is idle.                    |
 | `statusBar.idle.showLastRunSummary`    | boolean  | `true`  | Show the previous run summary while idle.                |
 | `statusBar.idle.showTokensPerSecond`   | boolean  | `true`  | Show model token throughput in the previous run summary. |
@@ -40,7 +40,7 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-status-bar.json
 | `rightMessages.dimmed`                 | boolean  | `true`  | Render rotating messages with dim styling.               |
 | `rightMessages.italic`                 | boolean  | `true`  | Render rotating messages with italic styling.            |
 | `rightMessages.messages`               | string[] | `[]`    | Inline rotating status messages.                         |
-| `rightMessages.messagesFile`           | string   | —       | Path to a newline-delimited messages file.               |
+| `rightMessages.messagesFile`           | string   | none    | Path to a newline-delimited messages file.               |
 
 ```json
 {

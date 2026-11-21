@@ -147,7 +147,7 @@ describe("README schema rendering", () => {
 
         expect(rendered).toContain("| `required` | boolean | `true` | Required setting. |");
         expect(rendered).toContain(
-            "| `optional` | string | — | Optional \\| setting. Second line. |",
+            "| `optional` | string | none | Optional \\| setting. Second line. |",
         );
 
         expect(rendered).toContain("| `limits` | number[] | *See JSON below* | Numeric limits. |");
@@ -191,7 +191,7 @@ describe("README schema rendering", () => {
             "| `tags` | (`stable` \\| `preview`)[] | `[]` | Release tags. |",
         );
 
-        expect(rendered).toContain("| `recursiveEntry` | Entry | — | A recursive entry. |");
+        expect(rendered).toContain("| `recursiveEntry` | Entry | none | A recursive entry. |");
         expect(rendered).toContain('| `choice` | `one` \\| `two` | `"one"`');
         expect(rendered).toContain("| `mystery` | JSON value | `null`");
         expect(rendered).not.toContain('"optional"');

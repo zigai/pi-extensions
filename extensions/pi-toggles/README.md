@@ -49,7 +49,7 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-toggles.json`.
 | `defaults.unknownCondition` | `no-match`                                                            | `"no-match"` | Treat unknown or failed condition facts as a non-match.                 |
 | `defaults.lazyToolLimit`    | integer                                                               | `5`          | Maximum tools activated by one lazy capability search.                  |
 | `defaults.showStatus`       | boolean                                                               | `true`       | Show a compact footer status when policy changes Pi or has diagnostics. |
-| `activeProfile`             | string                                                                | —            | Persistent profile selected at this settings scope.                     |
+| `activeProfile`             | string                                                                | none         | Persistent profile selected at this settings scope.                     |
 | `overrides`                 | [PolicyDecision](#settings-type-PolicyDecision)[]                     | `[]`         | Explicit persistent capability decisions.                               |
 | `profiles`                  | Record<string, [CapabilityProfile](#settings-type-CapabilityProfile)> | `{}`         | Named capability, prompt, model-role, mode, and compaction selections.  |
 | `promptFragments`           | [PromptFragment](#settings-type-PromptFragment)[]                     | `[]`         | Owned system-prompt fragments available to profiles and conditions.     |
