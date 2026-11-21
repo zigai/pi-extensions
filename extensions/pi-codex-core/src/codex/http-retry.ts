@@ -12,7 +12,6 @@ export type FetchTextOptions = {
     readonly initialDelayMs?: number;
 };
 
-/** Fetch a complete response body with Codex-style transport/429/5xx retries. */
 export async function fetchTextWithRetries(
     runtime: CodexRuntime,
     input: string,

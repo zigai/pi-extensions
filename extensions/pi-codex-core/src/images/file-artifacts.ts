@@ -13,11 +13,10 @@ import {
 import { detectImageMimeType } from "./metadata.ts";
 import type { ImageContent } from "@earendil-works/pi-ai";
 
-/** Maximum accepted size for an image loaded from disk. */
 export const MAX_INPUT_IMAGE_BYTES = 5 * 1024 * 1024;
+
 const IMAGE_VALIDATION_MAX_BYTES = 8 * 1024 * 1024;
 
-/** A validated image file loaded into memory. */
 export type LoadedImage = {
     readonly absolutePath: string;
     readonly bytes: Buffer;
@@ -29,9 +28,6 @@ export function normalizeImageReferencePath(path: string): string {
     return path.startsWith("@") ? path.slice(1) : path;
 }
 
-/**
- * Resolves and loads an image file after validating its size and signature.
- */
 export async function loadImageContent(
     path: string,
     cwd: string,
@@ -72,10 +68,6 @@ export async function loadImageContent(
     }
 }
 
-/**
- * Saves one generated PNG under a unique session artifact path and updates the
- * session's latest-image artifact.
- */
 export async function saveGeneratedImage(
     args: {
         readonly sessionId: string;
@@ -125,7 +117,6 @@ export async function saveGeneratedImage(
     });
 }
 
-/** Strictly decode a generated PNG into model-visible Pi image content. */
 export function generatedPngContent(base64: string): ImageContent {
     const bytes = decodeGeneratedPng(base64);
     return { type: "image", data: bytes.toString("base64"), mimeType: "image/png" };

@@ -292,7 +292,6 @@ function checkProjectArchitecture(workspaces: WorkspacePackages, program: Progra
     return [...diagnostics].sort();
 }
 
-/** Checks package imports and the complete runtime dependency closure of each settings definition. */
 export function checkArchitecture(workspaces: WorkspacePackages): string[] {
     // TypeScript 7 exposes its compiler API under /unstable. Keep that dependency local
     // to this development check; no extension or public package API depends on it.

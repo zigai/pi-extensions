@@ -1,7 +1,3 @@
-// Platform verification configuration for @zigai/pi-goal.
-// Reuses the portable Crabbox cross-platform testing lessons while keeping
-// this package's verification gate focused on build, verify, pack, and installed pi package behavior.
-
 export default {
   packageName: "@zigai/pi-goal",
   artifactRoot: ".artifacts/platform-verification",

@@ -163,7 +163,6 @@ function highlightSelectedProviderBadge(
     }
 }
 
-/** Installs or updates the selected-provider badge patch. */
 export async function installModelSelectorProviderBadgePatch(
     config: ModelSelectorProviderBadgeConfig,
     target?: ModelSelectorProviderBadgeTarget | null,

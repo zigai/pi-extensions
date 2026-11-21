@@ -92,7 +92,6 @@ export function fail<T = never>(error: CodexFailure): CodexResult<T> {
     return Result.err(error);
 }
 
-/** Convert a typed expected failure to a safe framework-boundary Error. */
 export function codexFailureToError(error: CodexFailure): Error {
     const frameworkError = new Error(error.message);
     frameworkError.name = error._tag;

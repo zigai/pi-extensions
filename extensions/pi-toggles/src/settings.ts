@@ -42,7 +42,6 @@ export const extensionSettingsDefinition = definePrevalidatedExtensionSettings(
     prevalidatedSettings,
 );
 
-/** Load resolved global and trusted-project settings for this session. */
 export function loadTogglesSettings(ctx: PiSettingsContext) {
     return loadPiExtensionSettings(extensionSettingsDefinition, ctx, {
         bundledSchema: {

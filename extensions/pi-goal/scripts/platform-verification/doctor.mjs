@@ -1,5 +1,3 @@
-/** Platform verification doctor. Fails before target runs when Crabbox/platform setup is missing. */
-
 import { execFileSync, execSync } from "node:child_process";
 import { accessSync, constants, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
 import { resolve } from "node:path";
@@ -155,7 +153,6 @@ function disposableWindowsSshProbe(cbox, config, probes) {
 
 function parseVersion(version) {
   const match = /\d+(?:\.\d+){0,2}/.exec(String(version));
-
   return match ? match[0].split(".").map((part) => Number(part)) : null;
 }
 
@@ -180,7 +177,6 @@ function npmPackFiles(probes) {
   try {
     const parsed = JSON.parse(output);
     const pack = Array.isArray(parsed) ? parsed[0] : Object.values(parsed)[0];
-
     return pack?.files?.map((file) => file.path) ?? [];
   } catch {
     return null;
@@ -432,13 +428,10 @@ export async function runDoctor(config, options = {}) {
 
         try {
           const snapshots = JSON.parse(snapshotsJson ?? "{}");
-
           snapshotMatch = Object.entries(snapshots).find(
             ([id, data]) => id === snapshot || data?.name === snapshot,
           );
-        } catch {
-          // Fall through to the failure below.
-        }
+        } catch {}
 
         let snapshotPowerOff = false;
         if (snapshotMatch) {

@@ -108,7 +108,6 @@ export function installTypedCommandUx(pi: ExtensionAPI, options: TypedCommandUxO
     });
 }
 
-/** Create a Pi extension entrypoint with custom typed-command UX options. */
 export function createTypedCommandUxExtension(
     options: TypedCommandUxOptions = {},
 ): ExtensionFactory {
@@ -117,7 +116,6 @@ export function createTypedCommandUxExtension(
     };
 }
 
-/** Pi extension entrypoint that installs the typed-args UX. */
 export default function piTypedCommandsExtension(pi: ExtensionAPI): void {
     installTypedCommandUx(pi);
 }

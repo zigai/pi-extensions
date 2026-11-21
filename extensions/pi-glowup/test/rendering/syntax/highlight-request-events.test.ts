@@ -52,7 +52,6 @@ const transitionSchema = Type.Object({
     terminal: Type.Boolean(),
 });
 
-/** Reconstruct the per-consumer pending ledger at every ordered checkpoint. */
 function verifyCheckpoints(): void {
     const epochs = new Map<
         string,

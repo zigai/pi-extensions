@@ -250,7 +250,6 @@ describe("protocol Markdown ownership", () => {
         expect(new Set(native.mock.contexts).size).toBe(1);
         expect(submissions()).toBe(1);
 
-        // Only the twenty deliberately requested invalidations, not syntax churn.
         expect(invalidateHost).toHaveBeenCalledTimes(21);
         expect(syntax.syntaxHighlightCacheStats().entries).toBe(0);
     });

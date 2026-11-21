@@ -109,7 +109,6 @@ function formatCause(cause: unknown): string {
         : String(cause);
 }
 
-/** Actual Pi child process in a native PTY with every synchronized render interpreted by xterm. */
 export class PiPtyProcess {
     private readonly terminal: HeadlessTerminal;
     private readonly process: IPty;
@@ -267,9 +266,7 @@ export class PiPtyProcess {
 
         try {
             this.process.kill("SIGKILL");
-        } catch {
-            // Process may have already exited
-        }
+        } catch {}
 
         const forceKilled = await Promise.race([
             this.exitPromise,

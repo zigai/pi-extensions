@@ -33,7 +33,6 @@ import {
     type StoredSessionNamingStateResult,
 } from "./session-naming.ts";
 
-/** Outcome of a picker attempt, classified so the caller can apply policy. */
 type PickSessionNameOutcome =
     | { readonly type: "picked"; readonly name: string }
     | { readonly type: "cancelled" }
@@ -411,7 +410,6 @@ async function pickSessionName(options: PickSessionNameOptions): Promise<PickSes
     }
 }
 
-/** Register the Pi Autoname Session Pi extension. */
 export default function extension(pi: ExtensionAPI): void {
     let settings: ExtensionSettings | undefined;
     let namingState: SessionNamingState | undefined;

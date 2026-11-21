@@ -5,8 +5,7 @@ import { expect, test } from "vitest";
 import { exactFrames, theme } from "../../../benchmark/write-preview.ts";
 import { renderWriteCallPreview } from "../../../src/tools/built-in/write-preview.ts";
 
-// Captured from the frozen /tmp/pi-glowup-round3/baseline before implementation.
-// Includes every ANSI byte, every update and every resize, not stripped text.
+// The frozen frames include every ANSI byte, every update and every resize, not stripped text.
 test("matches frozen baseline ANSI through CRLF, grapheme edges, rewrites and resizing", () => {
     const frames = exactFrames(renderWriteCallPreview);
     expect(frames).toHaveLength(1240);

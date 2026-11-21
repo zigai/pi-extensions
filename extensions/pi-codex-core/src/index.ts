@@ -44,10 +44,7 @@ import {
 import { registerCompactionHandler } from "@zigai/pi-extension-internals/compaction-handlers";
 import { prepareSystemPromptOptions } from "@zigai/pi-extension-internals/prompt-preparation";
 
-/** Package display name used in user-visible extension messages. */
 export const extensionName = "Pi Codex Core";
-
-/** Generated npm package name. */
 export const packageName = "pi-codex-core";
 
 const FAST_MODE_STARTUP_WARNING =
@@ -74,7 +71,6 @@ async function loadCompactionModule(): Promise<CompactionModule> {
     return compactionModulePromise;
 }
 
-/** Register the Pi Codex Core Pi extension. */
 export default function extension(pi: ExtensionAPI): void {
     if (activatedApis.has(pi)) return;
 

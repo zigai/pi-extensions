@@ -76,7 +76,6 @@ function notifyDiagnostics(service: TogglesService, ctx: ExtensionContext): void
     }
 }
 
-/** Register the Pi Toggles capability-policy extension. */
 export default function extension(pi: ExtensionAPI): void | Promise<void> {
     let service: TogglesService | undefined;
     let sessionGeneration = 0;

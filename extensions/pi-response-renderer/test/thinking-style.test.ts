@@ -96,7 +96,6 @@ for (const order of ["response-first", "glowup-first"] as const) {
             expect(markdownSyntaxPatchStats().renderInjections).toBe(before);
             expect(new Set(output.match(/\x1b\[(?:38;[\d;]+|3[0-7]|9[0-7])m/g)).size).toBe(1);
         } finally {
-            // Restore in installation order, exercising linked-patch composition too.
             if (order === "response-first") {
                 configureMarkdownSyntaxPatch(false);
                 handle.dispose();

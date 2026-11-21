@@ -227,7 +227,6 @@ const SETTING_LABEL_ACRONYMS = new Map([
     ["yaml", "YAML"],
 ]);
 
-/** Turn a JSON property name into the sentence-style labels used by Pi settings. */
 export function formatSettingLabel(value: string): string {
     const words = value
         .trim()
@@ -495,7 +494,6 @@ function numericSchemaValue(schema: SchemaObject, key: string): number | undefin
 
 function settingsControlHint(schema: SchemaObject): SettingsControlHint | undefined {
     const hint = schema["x-control"];
-
     return SETTINGS_CONTROL_HINTS.find((candidate) => candidate === hint);
 }
 
@@ -657,7 +655,6 @@ function stringOnlySchema(root: SchemaObject, value: JsonValue | undefined, dept
     if (choices !== undefined) return choices.every(isJsonString);
 
     const branches = schemaArray(schema, "anyOf") ?? schemaArray(schema, "oneOf");
-
     return (
         branches !== undefined &&
         branches.length > 0 &&
@@ -906,7 +903,6 @@ function defaultForSchema(
     return defaults;
 }
 
-/** Create the smallest useful value represented by a normalized settings node. */
 export function materializeSettingsValue(node: SettingsValueNode): JsonValue | undefined {
     if (node.defaultValue !== undefined) return structuredClone(node.defaultValue);
 
@@ -1046,7 +1042,6 @@ function extensionTitle(schemaTitleValue: string): string {
     return title === "" ? schemaTitleValue : title;
 }
 
-/** Parse and verify one generated extension-settings schema document. */
 export function parseExtensionSettingsSchema(
     id: string,
     schemaPath: string,
@@ -1144,7 +1139,6 @@ function safeValidationPath(schema: TSchema, instancePath: string): string {
     return `/${segments.join("/")}`;
 }
 
-/** Parse a persisted settings document and validate it against its extension schema. */
 export function parseSettingsDocument(
     extensionSchema: ExtensionSettingsSchema,
     text: string,
@@ -1191,7 +1185,6 @@ export function parseSettingsDocument(
     }
 }
 
-/** Parse an arbitrary JSON value entered through a structured settings control. */
 export function parseSettingsValue(text: string): ParseSettingsValueOutcome {
     const raw = parseJsonText(text);
     if (raw === undefined) {

@@ -49,7 +49,6 @@ export function syncCodexCoreTools(
     }
 }
 
-/** Activation defaults proposed to Pi Toggles when it owns tool policy. */
 export function codexCoreActivationDecisions(
     ctx: ExtensionContext,
     config: CodexCoreConfig,

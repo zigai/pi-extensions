@@ -86,7 +86,6 @@ function scanNeutralText(text: string): number {
     return columns;
 }
 
-/** Columns of text made only of printable ASCII and SGR sequences, else undefined. */
 export function asciiStyledWidth(text: string): number | undefined {
     const columns = scanNeutralText(text);
     if (columns < 0) return undefined;
@@ -172,7 +171,6 @@ function dropLeadingAsciiColumns(text: string, columns: number): string {
     return `${styles}${text.slice(index)}`;
 }
 
-/** Wraps like wrapStyledText and keeps the exact width of printable ASCII segments. */
 export function wrapStyledSegments(text: string, width: number): StyledSegment[] {
     const safeWidth = Math.max(1, Math.floor(width));
     const columns = scanNeutralText(text);
@@ -281,7 +279,6 @@ function wrapAsciiLine(
     });
 }
 
-/** Prefixes a segment and fits the row to the width, as fitToWidth does. */
 export function fitPrefixedSegment(
     prefix: string,
     prefixColumns: number | undefined,

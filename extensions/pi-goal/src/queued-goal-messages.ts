@@ -27,7 +27,6 @@ const QueuedGoalContentCandidateSchema = Type.Union([Type.String(), QueuedGoalCo
 
 type QueuedGoalContentCandidate = Static<typeof QueuedGoalContentCandidateSchema>;
 
-/** External provider-context message shape before normalization. */
 export interface QueuedGoalContextInput {
   role: string;
   customType?: string;
@@ -37,7 +36,6 @@ export interface QueuedGoalContextInput {
   timestamp?: unknown;
 }
 
-/** Normalized provider-context carrier with required runtime fields. */
 export interface QueuedGoalContextCarrier {
   role: string;
   timestamp: number;
@@ -125,14 +123,12 @@ export function textContentFromUnknown(content: unknown): string | null {
     }
 
     const parts = parseQueuedGoalTextParts(candidate);
-
     return parts.length === 0 ? null : parts.map((part) => part.text).join("\n");
   } catch {
     return null;
   }
 }
 
-/** Copies provider-context fields into a carrier with the runtime-required timestamp. */
 export function toQueuedGoalContextCarrier(
   message: QueuedGoalContextInput,
 ): QueuedGoalContextCarrier | null {
@@ -166,7 +162,6 @@ export function toQueuedGoalContextCarrier(
   return carrier;
 }
 
-/** Narrows a carrier to queued-goal user/custom work and normalizes its content. */
 export function toQueuedGoalWorkSource(
   message: QueuedGoalContextCarrier,
 ): QueuedGoalWorkSourceMessage | null {

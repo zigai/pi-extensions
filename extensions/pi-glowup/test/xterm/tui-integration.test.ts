@@ -522,7 +522,6 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
                 cwd,
             );
 
-            // Populate completed history without first warming this source in a streaming slot.
             tool.setArgsComplete();
             tool.updateResult({ content: [], isError: false });
             tool.updateArgs({ command: command(source) });
@@ -558,7 +557,6 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
                 expect(syntaxHighlightCacheStats().entries).toBe(0);
                 const settledCompletions = completions;
 
-                // Unrelated transcript repaints must neither lose colors nor submit another job.
                 for (let repaint = 0; repaint < 3; repaint += 1) {
                     activeTui.requestRender();
                     await pendingTerminal.settle();
@@ -616,7 +614,6 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
             expect(stripVTControlCharacters(tool.render(100).join("\n"))).toContain(firstLine);
         });
 
-        // Settle the real statement worker separately from the real syntax worker.
         await presentGlowupSnapshot({
             key: "xterm:statement-worker-barrier",
             kind: "prose",
@@ -721,7 +718,6 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
         tool.setArgsComplete();
         tool.markExecutionStarted();
 
-        // This synchronous render happens before the new worker result can arrive.
         expect(
             tool.render(100).find((line) => stripVTControlCharacters(line).includes(firstLine)),
         ).toBe(initialRow);
@@ -2817,7 +2813,6 @@ export const grownWriteTwelve = 12;
                 content: [],
                 details: {
                     diff: source.map((line, index) => `+${index + 1} ${line}`).join("\n"),
-                    // Semantic owner rows without a usable Pierre patch take the text path.
                     inputPatch: patch,
                     patch: "",
                 },

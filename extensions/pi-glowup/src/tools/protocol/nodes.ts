@@ -1,6 +1,5 @@
 import type { GlowupStreaming } from "./streaming.ts";
 
-/** Semantic tones understood by the Glowup style engine. */
 export type GlowupTone =
     | "default"
     | "muted"
@@ -12,7 +11,6 @@ export type GlowupTone =
     | "url"
     | "code";
 
-/** Inline text with optional semantic styling. */
 export type GlowupInline =
     | string
     | {
@@ -22,13 +20,11 @@ export type GlowupInline =
           readonly bold?: boolean;
       };
 
-/** Syntax metadata for code-bearing blocks. */
 export type GlowupSyntax = {
     readonly language?: string;
     readonly path?: string;
 };
 
-/** Shared collapsed/expanded preview policy. */
 export type GlowupPreview = {
     readonly mode?: "head" | "headTail" | "hidden";
     readonly collapsedLines?: number;
@@ -36,7 +32,6 @@ export type GlowupPreview = {
     readonly expandable?: boolean;
 };
 
-/** Lifecycle labels used by a call component. */
 export type GlowupCallLabels = {
     readonly static: string;
     readonly running?: string;
@@ -44,14 +39,12 @@ export type GlowupCallLabels = {
     readonly failed?: string;
 };
 
-/** Text component with a plain fallback and optional styled spans. */
 export type GlowupTextNode = {
     readonly kind: "text";
     readonly text: GlowupInline;
     readonly parts?: readonly GlowupInline[];
 };
 
-/** Structured label/value row. */
 export type GlowupSummaryNode = {
     readonly kind: "summary";
 
@@ -61,7 +54,6 @@ export type GlowupSummaryNode = {
     }>;
 };
 
-/** Syntax-aware code component. */
 export type GlowupCodeNode = {
     readonly kind: "code";
     readonly text: string;
@@ -71,28 +63,27 @@ export type GlowupCodeNode = {
     readonly preview?: GlowupPreview;
 };
 
-/** Bounded list component. */
 export type GlowupListNode = {
     readonly kind: "list";
     readonly items: ReadonlyArray<GlowupInline | GlowupNode>;
 
     /** Native tree connectors instead of bullets. Defaults to "bullet". */
     readonly style?: "bullet" | "tree";
+
     readonly preview?: GlowupPreview;
 };
 
-/** Tool call component. */
 export type GlowupCallNode = {
     readonly kind: "call";
     readonly labels: GlowupCallLabels;
 
     /** Overrides this call's native indicator and failure label, not its children. */
     readonly state?: "running" | "success" | "error" | "muted";
+
     readonly body?: GlowupNode;
     readonly preview?: GlowupPreview;
 };
 
-/** Tool output component. */
 export type GlowupOutputNode = {
     readonly kind: "output";
     readonly text?: string;
@@ -100,12 +91,12 @@ export type GlowupOutputNode = {
 
     /** Generated content opts in; ordinary stdout/log output stays immediate. */
     readonly streaming?: GlowupStreaming;
+
     readonly syntax?: GlowupSyntax;
     readonly preview?: GlowupPreview;
     readonly noOutputLabel?: string | null;
 };
 
-/** One semantic source row in a mutation preview. */
 export type GlowupMutationLine = {
     readonly kind: "context" | "addition" | "deletion" | "metadata" | "omission";
     readonly text: string;
@@ -113,7 +104,6 @@ export type GlowupMutationLine = {
     readonly newLine?: number;
 };
 
-/** One file changed by a mutation. */
 export type GlowupMutationFile = {
     readonly path: string;
     readonly previousPath?: string;
@@ -121,13 +111,13 @@ export type GlowupMutationFile = {
 
     /** Complete mutation statistics, which may exceed the bounded preview rows. */
     readonly added: number;
+
     readonly removed: number;
 
     /** False when a producer cannot determine a deletion's removed-line count. */
     readonly countsKnown?: boolean;
 };
 
-/** Responsive, syntax-aware file mutation component. */
 export type GlowupMutationNode = {
     readonly kind: "mutation";
     readonly labels: GlowupCallLabels;
@@ -137,18 +127,15 @@ export type GlowupMutationNode = {
     readonly patch?: string;
 };
 
-/** Ordered component composition. */
 export type GlowupStackNode = {
     readonly kind: "stack";
     readonly children: ReadonlyArray<GlowupNode>;
 };
 
-/** Intentionally empty component. */
 export type GlowupEmptyNode = {
     readonly kind: "empty";
 };
 
-/** Declarative component tree understood by pi-glowup. */
 export type GlowupNode =
     | GlowupCallNode
     | GlowupOutputNode
@@ -160,7 +147,6 @@ export type GlowupNode =
     | GlowupStackNode
     | GlowupEmptyNode;
 
-/** Creates a text component with semantic styling. */
 export function text(
     value: GlowupInline,
     options: { readonly parts?: readonly GlowupInline[] } = {},
@@ -172,14 +158,12 @@ export function text(
     };
 }
 
-/** Creates a structured summary component. */
 export function summary(
     rows: ReadonlyArray<{ readonly label: GlowupInline; readonly value: GlowupInline }>,
 ): GlowupSummaryNode {
     return { kind: "summary", rows };
 }
 
-/** Creates a syntax-aware code component. */
 export function code(
     value: string,
     options: {
@@ -207,7 +191,6 @@ export function code(
     return node;
 }
 
-/** Creates a bounded list component. */
 export function list(
     items: ReadonlyArray<GlowupInline | GlowupNode>,
     preview?: GlowupPreview,
@@ -223,7 +206,6 @@ export function list(
     return node;
 }
 
-/** Creates a tool call component. */
 export function call(
     labels: GlowupCallLabels,
     options: {
@@ -246,7 +228,6 @@ export function call(
     return node;
 }
 
-/** Creates an output component. */
 export function output(
     value: string | undefined,
     options: {
@@ -280,7 +261,6 @@ export function output(
     return node;
 }
 
-/** Creates a responsive, syntax-aware file mutation component. */
 export function mutation(
     labels: GlowupCallLabels,
     files: ReadonlyArray<GlowupMutationFile>,
@@ -294,12 +274,10 @@ export function mutation(
     return node;
 }
 
-/** Creates an ordered component composition. */
 export function stack(children: ReadonlyArray<GlowupNode>): GlowupStackNode {
     return { kind: "stack", children };
 }
 
-/** Creates an intentionally empty component. */
 export function empty(): GlowupEmptyNode {
     return { kind: "empty" };
 }

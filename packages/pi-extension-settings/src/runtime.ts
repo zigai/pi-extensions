@@ -32,7 +32,6 @@ type SettingsFingerprintPayload = {
     readonly exampleSettings: JsonObject | undefined;
 };
 
-/** Generated, authoring-validated values used by the startup-only definition fast path. */
 export type PrevalidatedExtensionSettingsArtifact = {
     readonly formatVersion: typeof PREVALIDATION_FORMAT_VERSION;
 
@@ -41,6 +40,7 @@ export type PrevalidatedExtensionSettingsArtifact = {
 
     /** Authoring-only fingerprint checked by `check`; codec function text can change in Pi. */
     readonly semanticFingerprint: string;
+
     readonly defaultSettings: JsonObject;
     readonly exampleSettings?: JsonObject;
 };
@@ -113,7 +113,6 @@ function fingerprintPayload(
     };
 }
 
-/** Computes the inexpensive runtime proof stored beside a prevalidated definition. */
 export function prevalidatedExtensionSettingsFingerprint(
     input: SettingsDefinitionFingerprintInput,
     defaultSettings: JsonObject,
@@ -133,7 +132,6 @@ function semanticFingerprint(
     )}`;
 }
 
-/** Creates the generated artifact payload from a fully authoring-validated definition. */
 export function createPrevalidatedExtensionSettingsArtifact<Schema extends TObject>(
     definition: ExtensionSettingsDefinition<Schema>,
 ): PrevalidatedExtensionSettingsArtifact {

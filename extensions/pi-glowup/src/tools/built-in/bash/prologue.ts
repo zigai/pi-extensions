@@ -129,7 +129,6 @@ function importStatementEnd(
     return undefined;
 }
 
-/** Selects a long script's complete leading import prologue without changing short scripts. */
 export function omitLeadingImportPrologue(
     code: string,
     language: string,

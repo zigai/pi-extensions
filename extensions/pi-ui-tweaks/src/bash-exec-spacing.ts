@@ -97,7 +97,6 @@ export function applyBashExecPromptSpacing(
     return false;
 }
 
-/** Installs or updates the shared bash-spacing editor enhancer. */
 export function installBashExecSpacingEditor(
     ctx: BashExecSpacingEditorContext,
     config: BashExecSpacingConfig,

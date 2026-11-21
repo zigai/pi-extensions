@@ -1,5 +1,3 @@
-/** Single source of truth for cheap platform-verification script checks. */
-
 export const platformVerificationSyntaxScripts = [
   "scripts/platform-verification.mjs",
   "scripts/platform-verification/artifacts.mjs",

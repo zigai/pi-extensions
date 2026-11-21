@@ -23,24 +23,12 @@ import type {
     UpdatePiExtensionSettingsResult,
 } from "./settings-transaction.ts";
 
-/**
- * Portion of Pi's extension context required to locate and authorize project settings.
- *
- * Pass the current `ExtensionContext` directly; callers do not need to construct this object.
- */
 export type PiSettingsContext = Pick<ExtensionContext, "cwd" | "isProjectTrusted">;
 
-/** Options for {@link loadPiExtensionSettings}. */
 export type LoadPiExtensionSettingsOptions = {
-    /** Generated schema bundled with the extension package. */
     readonly bundledSchema: BundledSchemaSource;
 };
 
-/**
- * Settings resolution result returned by {@link loadPiExtensionSettings}.
- *
- * @template Schema The TypeBox object schema from the supplied extension definition.
- */
 export type LoadedPiExtensionSettings<Schema extends TObject> = LoadedSettings<Schema>;
 
 export type {

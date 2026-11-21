@@ -12,6 +12,7 @@ import {
 } from "./source-contract.ts";
 
 export const COMMAND_PROVIDER_PROTOCOL_VERSION = 1 as const;
+
 const DEFAULT_MAX_OUTPUT_BYTES = 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 5_000;
 
@@ -231,7 +232,6 @@ export async function executeJsonCommand(
 }
 /* oxlint-enable antislop/no-unknown-returns, typescript/no-redundant-type-constituents */
 
-/** Adapts the explicit version-1 stdin/stdout protocol to the shared provider contract. */
 export function createCommandProvider(options: CommandProviderOptions): Provider {
     validateProcessOptions(options);
 

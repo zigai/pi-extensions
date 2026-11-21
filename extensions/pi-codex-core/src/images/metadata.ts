@@ -1,4 +1,3 @@
-/** Pixel dimensions read from an image header. */
 export type ImageDimensions = {
     readonly width: number;
     readonly height: number;
@@ -6,9 +5,6 @@ export type ImageDimensions = {
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
-/**
- * Detects a supported image MIME type from its signature bytes.
- */
 export function detectImageMimeType(bytes: Buffer): string | undefined {
     if (bytes.length >= 8 && bytes.subarray(0, 8).equals(PNG_SIGNATURE)) {
         return "image/png";
@@ -34,9 +30,6 @@ export function detectImageMimeType(bytes: Buffer): string | undefined {
     return undefined;
 }
 
-/**
- * Reads image dimensions directly from supported format headers.
- */
 export function imageDimensionsFromBytes(bytes: Buffer, mimeType: string): ImageDimensions {
     const dimensions = readImageDimensionsFromHeaders(bytes, mimeType);
     if (!dimensions) throw new Error(`Unable to read image dimensions for ${mimeType}`);

@@ -54,12 +54,12 @@ type SavedJob = Omit<StaticDecode<typeof savedCommandSchema>, "kind"> & {
 };
 
 type SavedOutput = { job: SavedJob; output: string; truncated: boolean };
+
 export type Result = ({ kind: "available" } & SavedOutput) | { kind: "unavailable" };
 
 const jobResultSchema = Type.Object({ details: savedCommandSchema });
 const outputResultSchema = Type.Object({ details: savedOutputSchema });
 const savedOutputValidator = Compile(savedOutputSchema);
-
 const resultValidator = Compile(Type.Union([jobResultSchema, outputResultSchema]));
 const waitResultValidator = Compile(
     Type.Object({
@@ -139,7 +139,6 @@ export const renderStartCall = ((args, theme: RenderTheme): Component => {
     const { kind, command } = parsed.value;
     const title = theme.fg("accent", theme.bold(`Background ${kind ?? "task"}`));
     const label = `${title} ${commandLabel(command)}`;
-
     return new Text(label, 0, 0);
 }) satisfies NonNullable<ToolDefinition["renderCall"]>;
 
@@ -189,7 +188,6 @@ export function parseResultDetails(details: unknown): Result {
     }
 }
 
-/** Shows a result delivered as a message: a status line, plus output when expanded. */
 export function renderResultMessage(
     result: Result,
     options: Pick<ToolRenderResultOptions, "expanded">,

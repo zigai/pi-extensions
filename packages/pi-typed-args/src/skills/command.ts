@@ -11,7 +11,6 @@ type TypedSkillFormFields = {
     ghostText?: string;
 };
 
-/** Extract the `SKILL.md` path from a Pi skill command record. */
 export function skillPathFromCommand(command: SlashCommandInfo): string | undefined {
     if (command.source !== "skill") {
         return undefined;
@@ -24,7 +23,6 @@ export function skillPathFromCommand(command: SlashCommandInfo): string | undefi
     return command.sourceInfo.path;
 }
 
-/** Adapt typed skill metadata into the internal typed command representation. */
 export function typedSkillCommandFromMetadata(
     skill: TypedSkillMetadata,
 ): RegisteredTypedCommand & { source: "skill"; skill: TypedSkillMetadata } {
@@ -93,7 +91,6 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** Return whether a registered typed command represents a complete typed skill invocation. */
 export function isTypedSkillCommand(
     command: RegisteredTypedCommand,
 ): command is RegisteredTypedCommand & { source: "skill"; skill: TypedSkillMetadata } {

@@ -70,7 +70,6 @@ test("native compaction renderer clips colored CJK and emoji by terminal columns
         for (const line of lines) {
             assert.ok(visibleWidth(line) <= width);
 
-            // Every escape must start a complete SGR sequence, including at the clipped edge.
             for (const segment of line.split("\u001b").slice(1)) {
                 assert.match(segment, /^\[[0-9;]*m/);
             }

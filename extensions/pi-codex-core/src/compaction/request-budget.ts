@@ -34,8 +34,8 @@ import type {
 const RETAINED_MESSAGE_TOKEN_BUDGET = 64_000;
 
 // Codex ModelInfo::usable_context_window defaults to 95%, independently of
-// auto_compact_token_limit. Pi exposes no per-model effective-window percentage;
-// retain that default headroom without reusing Pi's earlier 80% auto trigger.
+// auto_compact_token_limit. Pi exposes no per-model effective-window percentage,
+// so keep Codex's default headroom.
 const COMPACTION_USABLE_CONTEXT_PERCENT = 95;
 const TRUNCATED_TOOL_OUTPUT_MESSAGE =
     "Output exceeded the available model context and was truncated";

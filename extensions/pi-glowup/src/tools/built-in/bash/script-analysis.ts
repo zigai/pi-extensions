@@ -28,10 +28,7 @@ export type ScriptAnalysisInput = {
     /** Why embedded source was not offered to the formatter when no decision was recorded. */
     readonly embeddedSkipReason?: string;
 
-    /** Whether the stored preview differs from the original source. */
     readonly formatted?: boolean;
-
-    /** Final display source used for the shell reflow check. */
     readonly displayCode?: string;
 };
 

@@ -344,7 +344,6 @@ function renderSemanticList(
             const last = index === children.length - 1;
             const first = tree ? dim(theme, last ? "  └ " : "  ├ ") : "• ";
             const rest = tree && !last ? dim(theme, "  │ ") : " ".repeat(indent);
-
             return child
                 .render(Math.max(1, contentWidth - indent))
                 .map((row, rowIndex) => `${rowIndex === 0 ? first : rest}${row}`);
@@ -562,7 +561,6 @@ function renderProtocolContent(
     return titled;
 }
 
-/** Renders a decoded public protocol node through Glowup's private style engine. */
 export function renderProtocolNode(
     node: GlowupNode,
     theme: GlowupRenderTheme,

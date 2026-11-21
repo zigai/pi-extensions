@@ -105,7 +105,6 @@ function previewLines(value: string, expanded: boolean): string[] {
     return [...lines.slice(0, COLLAPSED_EVENT_LINES), `… ${hidden} more lines`];
 }
 
-/** Shows an event or end notice delivered as a message. */
 export function renderNotification(
     parsed: NotificationDetails | undefined,
     options: { readonly expanded: boolean },
@@ -229,7 +228,6 @@ export const listRendering = {
     },
 } satisfies GlowupRenderer<ListArgs, ListDetails>;
 
-/** Plain renderers used when Glowup is not loaded. */
 export const renderCommandCall = ((args, theme: RenderTheme): Component => {
     let label = theme.fg("accent", theme.bold("Monitor"));
     const parsed = commandArgsValidator.validate(args);

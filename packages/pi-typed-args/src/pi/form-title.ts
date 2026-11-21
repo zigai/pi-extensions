@@ -2,7 +2,6 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ArgumentDefinitions } from "../types.ts";
 import type { RegisteredTypedCommand } from "./command-types.ts";
 
-/** Adapt a Pi-facing form-title callback into the string consumed by the form module. */
 export function resolveTypedCommandFormTitle<TDefinitions extends ArgumentDefinitions>(
     command: RegisteredTypedCommand<TDefinitions>,
     ctx: ExtensionContext,

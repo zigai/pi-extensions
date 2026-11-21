@@ -18,7 +18,6 @@ const EMPTY_STYLE: AnsiTokenStyle = {
     strikethrough: false,
 };
 
-/** Converts Shiki themed token rows into truecolor ANSI terminal lines. */
 export function tokensToAnsiLines(
     tokenRows: ReadonlyArray<ReadonlyArray<ThemedToken>>,
     language?: string,

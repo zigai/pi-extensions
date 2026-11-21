@@ -13,14 +13,12 @@ export type ToolLifecycleContext = {
     readonly result?: unknown;
 };
 
-/** Returns whether a tool call is still receiving arguments or executing. */
 export function isActiveToolCall(context: ToolLifecycleContext): boolean {
     if (context.result !== undefined) return false;
 
     return context.isPartial || context.argsComplete === false;
 }
 
-/** Defers compact one-shot calls until their argument object is complete. */
 export function shouldDeferSimpleToolCall(context: ToolLifecycleContext): boolean {
     if (context.result !== undefined || context.executionStarted === true) {
         return false;
@@ -29,7 +27,6 @@ export function shouldDeferSimpleToolCall(context: ToolLifecycleContext): boolea
     return context.argsComplete === false;
 }
 
-/** Selects a stable label or the active/completed lifecycle form. */
 export function toolStatusLabel(
     mode: ToolLabelMode,
     context: ToolLifecycleContext,

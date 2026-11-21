@@ -34,21 +34,17 @@ const ARGUMENT_TYPES: ReadonlySet<string> = new Set([
     "key-value",
 ]);
 
-/** Parser lookup for non-positional flags, keyed by canonical flag name without leading dashes. */
 export type ArgumentLookup = {
     byFlag: Map<string, string>;
     definitions: FlatArgumentDefinitions;
 };
 
-/** Result of turning one raw CLI token into a typed argument value. */
 export type CoercedArgumentValue =
     | { ok: true; value: ArgumentValue }
     | { ok: false; issue: ParseIssue };
 
-/** Validation result for an already-coerced, defaulted, or form-collected value. */
 export type ArgumentValueValidation = { ok: true } | { ok: false; message: string };
 
-/** Presentation options for human-readable argument error messages. */
 export type ArgumentMessageOptions = {
     nameStyle?: "flag" | "field";
 };
@@ -72,7 +68,6 @@ export function createParseIssue(
     return result;
 }
 
-/** Parse the boolean spellings accepted by CLI values, such as `yes`, `no`, `on`, and `off`. */
 export function booleanFromString(value: string): boolean | undefined {
     const normalized = value.toLowerCase();
     if (["1", "true", "yes", "y", "on"].includes(normalized)) {
@@ -86,22 +81,18 @@ export function booleanFromString(value: string): boolean | undefined {
     return undefined;
 }
 
-/** Return whether a definition is parsed positionally instead of as a named flag. */
 export function isPositionalArgument(definition: ArgumentDefinition): boolean {
     return definition.position !== undefined;
 }
 
-/** Return whether an argument is intentionally available only in Pi's expanded form. */
 export function isFormOnlyArgument(definition: ArgumentDefinition): boolean {
     return definition.formOnly === true;
 }
 
-/** Return the canonical no-leading-dash flag name for an argument definition. */
 export function argumentFlagName(name: string, definition: ArgumentDefinition): string {
     return normalizeFlagName(definition.flag ?? name);
 }
 
-/** Return the canonical primary flag and all aliases for an argument definition. */
 export function argumentFlagNames(name: string, definition: ArgumentDefinition): string[] {
     const names = [argumentFlagName(name, definition)];
     for (const alias of definition.aliases ?? []) {
@@ -111,7 +102,6 @@ export function argumentFlagNames(name: string, definition: ArgumentDefinition):
     return names;
 }
 
-/** Format an argument definition's primary flag with leading `--`. */
 export function formatArgumentFlagName(name: string, definition: ArgumentDefinition): string {
     return `--${argumentFlagName(name, definition)}`;
 }
@@ -166,7 +156,6 @@ export function orderedArgumentEntries(
         .map((entry) => [entry.name, entry.definition]);
 }
 
-/** Return a registered command's arguments in parser/help order. */
 export function orderedCommandArgumentEntries<TDefinitions extends ArgumentDefinitions>(
     command: CoreRegisteredTypedCommand<TDefinitions>,
 ): Array<[string, ArgumentDefinition]> {
@@ -175,7 +164,6 @@ export function orderedCommandArgumentEntries<TDefinitions extends ArgumentDefin
     );
 }
 
-/** Return only positional arguments after applying the same flattening and ordering rules. */
 export function positionalArgumentEntries(
     definitions: ArgumentDefinitions,
 ): Array<[string, ArgumentDefinition]> {
@@ -918,7 +906,6 @@ function validateStringFormat(
     }
 }
 
-/** Validate a parsed, defaulted, or form-collected argument value against its full definition. */
 export function validateArgumentValue(
     name: string,
     definition: ArgumentDefinition,
@@ -1893,7 +1880,6 @@ export function createArgumentLookup(definitions: ArgumentDefinitions): Argument
     return { byFlag, definitions: flatDefinitions };
 }
 
-/** Resolve a raw or normalized flag spelling to the owning argument name. */
 export function findArgumentName(lookup: ArgumentLookup, flag: string): string | undefined {
     return lookup.byFlag.get(normalizeFlagName(flag));
 }
@@ -2132,7 +2118,6 @@ export function coerceArgumentValue(
     }
 }
 
-/** Return finite values suitable for select/radio/toggle form controls. */
 export function selectableArgumentValues(definition: ArgumentDefinition): ArgumentValue[] {
     switch (definition.type) {
         case "string":
@@ -2163,7 +2148,6 @@ export function selectableArgumentValues(definition: ArgumentDefinition): Argume
     }
 }
 
-/** Return built-in static completion candidates for booleans and enum-like arguments. */
 export function completionValuesForArgument(definition: ArgumentDefinition): string[] {
     switch (definition.type) {
         case "string":
@@ -2224,7 +2208,6 @@ export function normalizeTextArgumentInput(
     }
 }
 
-/** Return the compact type label shown in generated usage/help text. */
 export function argumentTypeHint(definition: ArgumentDefinition): string {
     switch (definition.type) {
         case "string":
@@ -2245,7 +2228,6 @@ export function argumentTypeHint(definition: ArgumentDefinition): string {
     }
 }
 
-/** Return the placeholder/value hint shown for an argument in usage, help, and forms. */
 export function argumentValueHint(definition: ArgumentDefinition, name?: string): string {
     if (definition.placeholder !== undefined) {
         return definition.placeholder;
@@ -2275,7 +2257,6 @@ export function argumentValueHint(definition: ArgumentDefinition, name?: string)
     }
 }
 
-/** Format an argument default as the suffix used in compact generated usage text. */
 export function formatArgumentDefault(definition: ArgumentDefinition): string {
     if (definition.default === undefined) {
         return "";

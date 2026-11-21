@@ -67,7 +67,6 @@ function resolveConfiguredGhostText(
     }
 }
 
-/** Resolve opt-in ghost text for an exact root command or subcommand invocation. */
 export function resolveGhostText(
     editorText: string,
     registry: TypedCommandRegistry,
@@ -159,7 +158,6 @@ function readEditorCursor(component: CursorAwareEditor): EditorCursor | undefine
     return { line: Number(line), col: Number(col) };
 }
 
-/** Insert styled ghost text after the rendered end cursor without changing editor content. */
 export function renderGhostTextOnEditorLines(
     lines: readonly string[],
     width: number,

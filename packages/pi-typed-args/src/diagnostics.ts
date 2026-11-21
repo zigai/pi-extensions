@@ -1,6 +1,5 @@
 import type { DefinitionDiagnostic } from "./types.ts";
 
-/** Input shape for creating a structured definition diagnostic. */
 export type DefinitionDiagnosticInput = {
     code: string;
     message: string;
@@ -8,7 +7,6 @@ export type DefinitionDiagnosticInput = {
     severity?: DefinitionDiagnostic["severity"];
 };
 
-/** Create a stable structured diagnostic for command or skill definition issues. */
 export function createDefinitionDiagnostic(input: DefinitionDiagnosticInput): DefinitionDiagnostic {
     return {
         code: input.code,
@@ -18,7 +16,6 @@ export function createDefinitionDiagnostic(input: DefinitionDiagnosticInput): De
     };
 }
 
-/** Return only human-readable messages from structured diagnostics for UI rendering. */
 export function diagnosticMessages(
     diagnostics: readonly Pick<DefinitionDiagnostic, "message">[],
 ): string[] {

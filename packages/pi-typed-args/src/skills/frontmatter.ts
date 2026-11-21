@@ -106,7 +106,6 @@ function parseFrontmatterFields(
     return { status: "ok", frontmatter };
 }
 
-/** Parse a `SKILL.md` document into frontmatter fields and trimmed Markdown body. */
 export function parseSkillMarkdown(content: string): ParseSkillMarkdownResult {
     const match = FRONTMATTER_PATTERN.exec(content);
     if (match === null) {

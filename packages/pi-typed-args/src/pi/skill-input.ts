@@ -22,7 +22,6 @@ type SkillParseResult = {
 
 type TypedSkillInputResult = { action: "handled" } | { action: "transform"; text: string };
 
-/** Notify when editor text targets a skill whose typed arguments could not be registered. */
 export function notifySkillDiagnosticsForText(
     text: string,
     ctx: ExtensionContext,
@@ -69,7 +68,6 @@ function parseSkillArguments(
     };
 }
 
-/** Render typed skill input or open prompts/notifications when required. */
 export async function renderTypedSkillInput(
     command: RegisteredTypedCommand,
     rawArgs: string,
@@ -130,7 +128,6 @@ export async function renderTypedSkillInput(
     });
 }
 
-/** Transform a typed skill slash-command input into the model-facing skill prompt. */
 export async function transformTypedSkillInput(
     text: string,
     ctx: ExtensionContext,

@@ -116,9 +116,7 @@ function highlightMarkdownCode(code: string, lang?: string): string[] {
     return highlightSyntaxCode(code, lang, { invalidate: activeMarkdownInvalidation });
 }
 
-/** Returns Markdown syntax patch counters for debug diagnostics. */
 export function markdownSyntaxPatchStats(
-    // SAFETY: The patch contract models the optional render method and symbol-owned state added to Markdown.prototype.
     prototype: MarkdownPrototype = Markdown.prototype,
 ): MarkdownSyntaxPatchStats {
     return {
@@ -134,10 +132,8 @@ export function markdownSyntaxPatchStats(
     };
 }
 
-/** Enables or disables the Markdown syntax prototype patch. */
 export function configureMarkdownSyntaxPatch(
     enabled: boolean,
-    // SAFETY: The patch contract models the optional render method and symbol-owned state added to Markdown.prototype.
     prototype: MarkdownPrototype = Markdown.prototype,
 ): void {
     const state = prototype[MARKDOWN_PATCH_STATE_KEY];

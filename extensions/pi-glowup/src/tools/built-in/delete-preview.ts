@@ -81,7 +81,6 @@ export async function captureTextFilePreimage(
     }
 }
 
-/** Captures a bounded readable text file before deletion without leaving the working directory. */
 export async function captureDeletedTextPreview(
     cwd: string,
     filePath: string,

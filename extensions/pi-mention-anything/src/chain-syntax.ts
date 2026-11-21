@@ -271,7 +271,6 @@ function queryThroughCursor(text: string, span: ChainSegmentSpan, cursor: number
     return decodeEscapes(text.slice(span.contentStart, through));
 }
 
-/** Finds the segment edited at an absolute cursor and the chain suffix that completion owns. */
 export function activeChainSegment(
     text: string,
     definitions: readonly ChainDefinition[],

@@ -212,7 +212,7 @@ it("includes an already finished task and does not collect eventual results on a
     const fixture = await blockingCommand();
     const second = commands.start(fixture.command, directory);
     const socket = await fixture.connection;
-    commands.output(second.id); // Reading a running task must not collect its eventual completion.
+    commands.output(second.id);
     socket.write("finish");
     const collected = await commands.wait();
     expect(collected.jobs).toMatchObject([{ job: { id: second.id }, output: "finished\n" }]);

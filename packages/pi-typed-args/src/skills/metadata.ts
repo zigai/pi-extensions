@@ -63,7 +63,6 @@ function fileReadErrorMessage(cause: unknown): string {
     return "failed to read typed arguments";
 }
 
-/** Read and validate typed skill metadata from a `SKILL.md` file. */
 export function readTypedSkillMetadataResult(
     filePath: string,
     options: ReadTypedSkillMetadataOptions = {},

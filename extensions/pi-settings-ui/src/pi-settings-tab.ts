@@ -242,6 +242,7 @@ export type PiSettingsPane = Component & {
 
     /** Searchable native controls, without current values or model/theme submenu choices. */
     readonly settingsEntries: () => readonly PiSettingEntry[];
+
     readonly handleInput: (data: string) => void;
     readonly leave: () => void;
     readonly scopeAvailable: (scope: PiSettingsScope) => boolean;
@@ -312,7 +313,6 @@ function moveCounterToSearchLine(lines: readonly string[], width: number): strin
     return rendered;
 }
 
-/** Pi's public settings selector with global and trusted-project persistence. */
 export class PiSettingsTab implements PiSettingsPane {
     private selector: SettingsSelectorComponent;
     private writeTail: Promise<void> = Promise.resolve();
@@ -337,7 +337,6 @@ export class PiSettingsTab implements PiSettingsPane {
 
     settingsEntries(): readonly PiSettingEntry[] {
         const supportsImages = getCapabilities().images !== null;
-
         return PI_SETTINGS_ENTRIES.filter(
             ({ id }) => supportsImages || !["show-images", "image-width-cells"].includes(id),
         );

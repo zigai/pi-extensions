@@ -247,9 +247,6 @@ function buildUiTweaksConfig(settings: UiTweaksSettings): UiTweaksConfig {
     };
 }
 
-/**
- * Resolves UI tweak settings from already-parsed extension config objects in precedence order.
- */
 export function resolveUiTweaksConfig(
     settingsSources: readonly UiTweaksSettingsSource[],
 ): LoadedUiTweaksConfig {
@@ -268,7 +265,6 @@ export function resolveUiTweaksConfig(
     };
 }
 
-/** Load UI tweak settings from global and trusted-project extension settings. */
 export function loadUiTweaksSettings(cwd: string, projectTrusted: boolean): LoadedUiTweaksConfig {
     const settings = loadPiExtensionSettings(
         uiTweaksSettingsDefinition,
@@ -296,7 +292,6 @@ export function loadUiTweaksSettings(cwd: string, projectTrusted: boolean): Load
     }
 
     const loaded = resolveUiTweaksConfig(settingsSources);
-
     return {
         config: loaded.config,
         errors: [...settings.diagnostics.map((diagnostic) => diagnostic.message), ...loaded.errors],

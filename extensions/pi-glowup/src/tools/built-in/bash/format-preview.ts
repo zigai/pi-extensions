@@ -78,7 +78,6 @@ export function rememberRawScriptPreview(
     sink.set(toolCallId, script);
 }
 
-/** Formats and stores a script preview after the final bash command is known. */
 export async function formatAndStoreScriptPreview(
     options: FormatScriptPreviewOptions,
 ): Promise<boolean> {

@@ -30,8 +30,6 @@ type WebRunAction = {
 };
 
 export type WebRunPhase = "pending" | "running" | "complete";
-
-/** URL of a page Codex assigned this id to earlier in the session. */
 export type WebRunPageUrl = (refId: string) => string | undefined;
 
 type PageName = (ref: string) => string;

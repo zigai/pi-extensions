@@ -186,7 +186,6 @@ function hasPath(document: JsonObject, path: readonly string[]): boolean {
 
 function setPath(document: JsonObject, path: readonly string[], value: JsonValue): JsonObject {
     const [segment, ...remaining] = path;
-
     if (segment === undefined) return document;
     if (remaining.length === 0) return { ...document, [segment]: cloneJson(value) };
 
@@ -197,7 +196,6 @@ function setPath(document: JsonObject, path: readonly string[], value: JsonValue
 
 function removePath(document: JsonObject, path: readonly string[]): JsonObject {
     const [segment, ...remaining] = path;
-
     if (segment === undefined || !(segment in document)) return document;
 
     const next = { ...document };
@@ -265,7 +263,6 @@ function serializeDocument(document: JsonObject): string {
     return `${JSON.stringify(document, null, 2)}\n`;
 }
 
-/** Owns drafts, inheritance, schema validation, and save-request creation for the TUI. */
 export class SettingsEditorModel {
     private readonly extensions: ExtensionDraft[];
     private activeIndex = 0;

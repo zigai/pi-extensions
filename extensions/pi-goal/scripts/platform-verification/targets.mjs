@@ -1,5 +1,3 @@
-/** Target/suite runner for @zigai/pi-goal platform verification. */
-
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
@@ -46,7 +44,6 @@ function verificationModel(config) {
 function authEnvAllowList(config) {
   const raw = process.env.PLATFORM_VERIFICATION_AUTH_ENV;
   const names = raw ? raw.split(",") : (config.defaultAuthEnv ?? ["ZAI_API_KEY", "Z_AI_API_KEY"]);
-
   return names.map((name) => String(name).trim()).filter(Boolean);
 }
 

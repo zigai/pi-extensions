@@ -4,7 +4,6 @@ import { definePrevalidatedExtensionSettings } from "@zigai/pi-extension-setting
 import prevalidatedSettings from "./settings.prevalidated.ts";
 import settingsInput, { type ExtensionSettingsDocument, settingsSchema } from "./settings-input.ts";
 
-/** A resolved picker-model selection, parsed from the model setting. */
 export type PickerModelReference =
     | { readonly type: "current" }
     | { readonly type: "specific"; readonly provider: string; readonly id: string };
@@ -50,7 +49,6 @@ export function parsePickerModelReference(model: string): PickerModelReference |
     };
 }
 
-/** Render a parsed picker-model reference in its persisted setting form. */
 export function formatPickerModelReference(reference: PickerModelReference): string {
     return reference.type === "current" ? "current" : `${reference.provider}/${reference.id}`;
 }
@@ -60,10 +58,6 @@ export const extensionSettingsDefinition = definePrevalidatedExtensionSettings(
     prevalidatedSettings,
 );
 
-/**
- * Load resolved extension settings from Pi's global and trusted-project
- * settings layers, refreshing missing or stale generated schemas.
- */
 export function loadAutonameSessionSettings(
     ctx: PiSettingsContext,
 ): AutonameSessionSettingsLoadResult {

@@ -10,7 +10,6 @@ export const FLOOD_STOP_MS = 30_000;
 export const FLOOD_QUIET_MS = 3 * EVENT_REFILL_MS;
 
 export type EventStreamOptions = {
-    /** Receives one rate-limited event: the lines that arrived within one batch window. */
     readonly onEvent: (text: string) => void;
 
     /** Called once when output stays over the rate limit long enough to stop the source. */
@@ -70,7 +69,6 @@ export class EventStream {
         return this.delivered;
     }
 
-    /** Non-blank lines received so far, delivered or not. */
     get lineCount(): number {
         return this.lines;
     }
@@ -87,7 +85,6 @@ export class EventStream {
         for (const line of lines) this.add(line);
     }
 
-    /** Pushes one message as its own lines, ending any partial line before it. */
     pushMessage(message: string): void {
         this.push(`\n${message}\n`);
     }

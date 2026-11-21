@@ -3,7 +3,6 @@ export type TextRange = {
     readonly end: number;
 };
 
-/** Shrinks ranges past leading and trailing whitespace and drops whitespace-only ranges. */
 export function trimRangeWhitespace(text: string, ranges: readonly TextRange[]): TextRange[] {
     const trimmed: TextRange[] = [];
     for (const range of ranges) {

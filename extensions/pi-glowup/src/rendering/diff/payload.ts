@@ -143,7 +143,6 @@ export type DiffSnapshot = {
     readonly summaryReason?: PierreDiffSummary["reason"];
 };
 
-/** Builds compact, replayable Pierre diff details from bounded snapshots. */
 export function buildPierreDiffPayload(
     snapshot: DiffSnapshot,
     limits: DiffRenderLimits = DEFAULT_DIFF_RENDER_LIMITS,
@@ -194,7 +193,6 @@ export function buildPierreDiffPayload(
     }
 }
 
-/** Builds one replayable Pierre payload per file from a completed unified patch. */
 export function buildPierreDiffPayloadsFromPatch(
     patch: string,
     limits: DiffRenderLimits = DEFAULT_DIFF_RENDER_LIMITS,

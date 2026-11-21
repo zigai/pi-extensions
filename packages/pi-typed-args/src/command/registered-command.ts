@@ -34,14 +34,12 @@ function invalidCommandSpelling(value: string): boolean {
     return value.length === 0 || /[\s\p{Cc}]/u.test(value) || value.startsWith("-");
 }
 
-/** Create a startup-style error for invalid typed command definitions. */
 export function definitionError(name: string, diagnostics: readonly DefinitionDiagnostic[]): Error {
     return new Error(
         [`Invalid typed arguments for /${name}:`, ...diagnosticMessages(diagnostics)].join("\n"),
     );
 }
 
-/** Build registered metadata from the exact grammar already compiled for this definition. */
 export function registeredCommandFromCompiledDefinition<TDefinitions extends ArgumentDefinitions>(
     definition: Pick<
         TypedCommandDefinition<TDefinitions>,

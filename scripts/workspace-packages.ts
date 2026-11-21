@@ -83,6 +83,7 @@ export type WorkspacePackages = {
 
     /** Ordered exactly as the root's standard Pi entrypoints. */
     readonly defaultExtensions: readonly WorkspaceExtension[];
+
     readonly optionalExtensions: readonly WorkspaceExtension[];
     readonly collections: readonly WorkspacePackage[];
 };
@@ -231,7 +232,6 @@ export function collectionResources(
     };
 }
 
-/** Validates the generated collection resources against the authoritative default selection. */
 export function loadWorkspacePackages(root: string, verifyEntries = true): WorkspacePackages {
     const inventory = discoverWorkspacePackages(root, verifyEntries);
     for (const { manifest } of inventory.collections) {

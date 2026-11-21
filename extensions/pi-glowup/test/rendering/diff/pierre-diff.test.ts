@@ -25,7 +25,7 @@ import {
     loadHighlightedDiff,
 } from "../../../src/rendering/diff/highlight.ts";
 import { pairReplacementLines } from "../../../src/rendering/diff/layout.ts";
-import { getPierreAppearance, getPierrePalette } from "../../../src/rendering/diff/theme.ts";
+import { getPierrePalette } from "../../../src/rendering/diff/theme.ts";
 import type { UnifiedDiffRow } from "../../../src/rendering/diff/types.ts";
 import { configureRenderingAppearance } from "../../../src/rendering/theme.ts";
 import { stringParser } from "../../../src/json-scalar.ts";
@@ -315,7 +315,7 @@ describe("Pierre diff rendering", () => {
             name: "custom-light",
         });
 
-        expect(getPierreAppearance(misleadingTheme)).toBe("dark");
+        expect(getPierrePalette(misleadingTheme).appearance).toBe("dark");
     });
 
     it("omits sensitive source text from bounded diff summaries", () => {
@@ -872,7 +872,6 @@ describe("Pierre diff rendering", () => {
         expect(deletionAccess.accessCount()).toBeLessThan(20);
         expect(additionAccess.accessCount()).toBeLessThan(20);
 
-        // Verify one-sided addition-only paired diff
         const oneSidedAdditionAccess = createReadCountingArray(rawAdditions);
         const oneSidedMetadata = {
             ...payload.metadata,

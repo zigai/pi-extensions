@@ -43,7 +43,6 @@ export function sources(): string[] {
 
     updates.push("REWRITE\r", "REWRITE\r\n", "REWRITE\r\nnew", "", "final\n");
 
-    // Every UTF-16 boundary, including surrogate/ZWJ/combining and budget edges.
     for (const text of ["👩\u200d💻e\u0301🇦🇧\r\nend", `${"a".repeat(1998)}e\u0301👩\u200d💻!`]) {
         updates.push("");
 

@@ -235,7 +235,6 @@ describe("exploration groups", () => {
                 if (order === "event-first") store.observeRow(row, String(index), false);
                 else store.registerBoundary(String(index));
 
-                // Repainting retained rows is independent of pending-ID eviction.
                 store.observeRow(row, String(index), false);
             }
 

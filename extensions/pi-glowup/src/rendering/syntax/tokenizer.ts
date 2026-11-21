@@ -94,8 +94,6 @@ type TokenizeCancellation = {
     readonly signal?: AbortSignal;
     readonly retryWhenCapacityAvailable?: (() => void) | undefined;
     readonly isCapacityRetryNeeded?: (() => boolean) | undefined;
-
-    /** Explains an undefined result for diagnostics. */
     readonly onUnavailable?: TokenizeUnavailableListener | undefined;
 
     /** Reports actual queue admission and worker dispatch, never an intention. */

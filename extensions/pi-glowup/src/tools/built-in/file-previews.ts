@@ -6,7 +6,6 @@ export type EditPreview = {
     readonly removed: number;
 };
 
-/** Builds display-only edit preview metadata from Pi's built-in edit diff. */
 export function buildEditPreview(options: {
     readonly path: string;
     readonly diff: string;

@@ -305,7 +305,6 @@ async function withStore(
             }),
         );
 
-        // Resolve again after the test fixture changes the file.
         await store.resolvePath({ cwd, projectTrusted: false });
         const baseline = await store.load(filePath, fallbackMode);
         await run({ store, cwd, filePath, baseline });

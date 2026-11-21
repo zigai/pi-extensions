@@ -1,12 +1,10 @@
 import type { FileDiffMetadata } from "@pierre/diffs";
 
-/** Terminal appearance used for Pierre-highlighted diffs. */
 export type PierreAppearance = "dark" | "light";
 
 /** Replayable Pierre diff payload. Does not store original file snapshots or highlighted HAST. */
 export type PierreDiffPayload = PierreRenderableDiffPayload | PierreSummaryDiffPayload;
 
-/** Full replayable Pierre diff payload for bounded diffs. */
 export type PierreRenderableDiffPayload = {
     readonly version: 1;
     readonly kind: "renderable";
@@ -14,6 +12,7 @@ export type PierreRenderableDiffPayload = {
 
     /** Stable content-derived identity used by renderer and scheduler caches. */
     readonly modelKey: string;
+
     readonly metadata: FileDiffMetadata;
     readonly stats: PierreDiffStats;
 };
@@ -27,7 +26,6 @@ export type PierreSummaryDiffPayload = {
     readonly summary: PierreDiffSummary;
 };
 
-/** Summary values used for mutation call labels and guardrails. */
 export type PierreDiffStats = {
     readonly added: number;
     readonly removed: number;
@@ -35,14 +33,12 @@ export type PierreDiffStats = {
     readonly sizeBytes: number;
 };
 
-/** Reason a diff is summarized rather than rendered inline. */
 export type PierreDiffSummary = {
     readonly reason: "too-large" | "not-readable" | "metadata-invalid" | "metadata-too-large";
     readonly maxLines: number | null;
     readonly maxBytes: number | null;
 };
 
-/** Syntax colors for one diff line, compacted from Pierre's highlighted line tree. */
 export type HighlightedDiffLine = {
     /** Source text of the line, before terminal tab expansion. */
     readonly text: string;
@@ -52,6 +48,7 @@ export type HighlightedDiffLine = {
      * `(color + 1) * 2 + emphasized` and `color` indexes `colors` (`-1` is none).
      */
     readonly runs: string;
+
     readonly colors: readonly string[];
 };
 
@@ -61,10 +58,8 @@ export type HighlightedDiffCode = {
     readonly additionLines: ReadonlyArray<HighlightedDiffLine | undefined>;
 };
 
-/** Highlighted diff lines for both Pi light and dark themes. */
 export type HighlightedDiffSet = Record<PierreAppearance, HighlightedDiffCode>;
 
-/** Styled terminal text segment. */
 export type DiffSpan = {
     readonly text: string;
     readonly fg?: string;
@@ -76,7 +71,6 @@ export type DiffSpan = {
     readonly emphasized?: boolean;
 };
 
-/** Unified diff row ready for terminal rendering. */
 export type UnifiedDiffRow =
     | {
           readonly kind: "collapsed" | "metadata";
@@ -98,7 +92,6 @@ export type UnifiedDiffRow =
           readonly focusColumn?: number;
       };
 
-/** One side of a side-by-side diff row. */
 export type SplitDiffCell = {
     readonly lineType: "context" | "addition" | "deletion" | "empty";
     readonly lineNumber?: number;
@@ -108,7 +101,6 @@ export type SplitDiffCell = {
     readonly lineNumberFg: string;
 };
 
-/** Side-by-side diff row ready for terminal rendering. */
 export type SplitDiffRow =
     | {
           readonly kind: "collapsed" | "metadata";

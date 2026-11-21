@@ -117,7 +117,6 @@ const MCP_COMMAND_LABELS = new Map<string, string>([
     ["wait_for", "Browser Wait"],
 ]);
 
-/** Returns whether a tool name belongs to Chrome DevTools MCP. */
 export function hasChromeDevtoolsName(toolName: string): boolean {
     return CHROME_DEVTOOLS_PREFIX_PATTERN.test(toolName);
 }

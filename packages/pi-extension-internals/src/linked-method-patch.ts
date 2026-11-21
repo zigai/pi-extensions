@@ -12,13 +12,11 @@ export type LinkedMethod<Instance, Args extends unknown[], Result> = (
 ) => Result;
 
 export type LinkedMethodPatchHandle<Instance, Args extends unknown[], Result> = {
-    /** The method immediately below this patch when it was installed. */
     readonly predecessor: LinkedMethod<Instance, Args, Result>;
     readonly patched: LinkedMethod<Instance, Args, Result>;
     dispose(): void;
 };
 
-/** Uses the target as `this` when a method does not declare an explicit receiver. */
 type MethodInstance<Target, Method> = Method extends (
     this: infer Instance,
     ...args: infer _Args

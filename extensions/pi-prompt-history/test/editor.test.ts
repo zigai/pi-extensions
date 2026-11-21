@@ -209,7 +209,7 @@ test("prompt history keeps Pi's default editor shortcut hook non-recursive", () 
     assert.equal(editor instanceof CustomEditor, true);
     if (!(editor instanceof CustomEditor)) return;
 
-    // Pi 0.84.3 delegates custom-editor shortcuts to its default editor. Returning that same
+    // Pi delegates custom-editor shortcuts to its default editor. Returning that same
     // instance makes the delegate call itself for every key pressed during startup.
     editor.onExtensionShortcut ??= (data) => defaultEditor.onExtensionShortcut?.(data) ?? false;
     assert.doesNotThrow(() => editor.onExtensionShortcut?.("/"));

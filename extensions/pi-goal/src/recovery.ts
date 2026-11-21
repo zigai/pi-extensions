@@ -6,6 +6,7 @@ export const CONTEXT_OVERFLOW_SIGNATURE = "context_overflow";
 
 /** Host AgentSession performs one overflow compact-and-retry before giving up. */
 export const MAX_CONTEXT_COMPACTION_RETRIES = 1;
+
 export const HOST_OVERFLOW_RECOVERY_REASON = "recovering from context overflow";
 
 const RECOVERY_PENDING_ATTENTION_SUFFIX =
@@ -183,7 +184,6 @@ export function reasonFromRecoveryPendingAttention(
   return attention?.kind === "pending" ? attention.reason : null;
 }
 
-/** Paused goals use /goal resume guidance in footer attention copy. */
 export function recoveryAttentionMessage(reason: string): string {
   return recoveryPausedAttentionMessage(reason);
 }

@@ -36,7 +36,6 @@ function isThemePrototype(value: unknown): value is ThemePrototype {
     );
 }
 
-/** Installs or updates the neutral border-color patch. */
 export async function installNeutralBorderColorPatch(
     config: NeutralBorderColorConfig,
 ): Promise<NeutralBorderColorHandle> {

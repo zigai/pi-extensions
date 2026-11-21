@@ -526,9 +526,6 @@ function buildStatusBarResolvedConfig(settings: StatusBarSettings): LoadedStatus
     };
 }
 
-/**
- * Resolves status bar settings from already-parsed Pi settings objects in precedence order.
- */
 export function resolveStatusBarResolvedConfig(
     settingsSources: readonly StatusBarSettingsSource[],
 ): LoadedStatusBarConfig {
@@ -556,7 +553,6 @@ export function resolveStatusBarResolvedConfig(
     };
 }
 
-/** Load status-bar settings from global and trusted-project extension settings. */
 export function loadStatusBarSettings(cwd: string, projectTrusted: boolean): LoadedStatusBarConfig {
     const settings = loadPiExtensionSettings(
         statusBarSettingsDefinition,
@@ -586,7 +582,6 @@ export function loadStatusBarSettings(cwd: string, projectTrusted: boolean): Loa
     }
 
     const loaded = resolveStatusBarResolvedConfig(settingsSources);
-
     return {
         config: loaded.config,
         errors: [...settings.diagnostics.map((diagnostic) => diagnostic.message), ...loaded.errors],

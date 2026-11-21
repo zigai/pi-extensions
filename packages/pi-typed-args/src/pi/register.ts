@@ -30,7 +30,6 @@ import type {
 } from "./command-types.ts";
 import { recordTypedCommandRecentValues } from "./presets.ts";
 
-/** Notify Pi users about one or more typed-command issues. */
 export function notifyIssues(ctx: ExtensionContext, messages: string[]): void {
     if (messages.length === 0) {
         return;
@@ -39,7 +38,6 @@ export function notifyIssues(ctx: ExtensionContext, messages: string[]): void {
     ctx.ui.notify(messages.join("\n"), "error");
 }
 
-/** Return whether parse issues should notify directly instead of opening a form. */
 export function shouldNotifyInsteadOfOpeningForm(issues: readonly ParseIssue[]): boolean {
     return issues.some((issue) => issue.kind !== "missing-required");
 }

@@ -39,7 +39,6 @@ function formatRelative(date: Date, now: Date): string {
     return `${duration} ago`;
 }
 
-/** Format a timestamp in the system's local time zone. Invalid dates produce no label. */
 export function formatTimestamp(
     timestamp: TimestampValue,
     format: TimestampFormat = "auto",

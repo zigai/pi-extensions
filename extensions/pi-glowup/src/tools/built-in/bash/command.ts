@@ -424,7 +424,6 @@ function analyzeBashLayout(
     };
 }
 
-/** Reflows a complete Bash program while preserving quoted text and heredoc content. */
 export function reflowBashCommand(
     command: string,
     operatorPosition: ShellOperatorPosition = "trailing",
@@ -432,7 +431,6 @@ export function reflowBashCommand(
     return analyzeBashLayout(command, operatorPosition).reflowedCommand;
 }
 
-/** Identifies clean standalone language calls and a safe display-only Bash reflow. */
 export function analyzeBashCommand(
     command: string,
     operatorPosition: ShellOperatorPosition = "trailing",

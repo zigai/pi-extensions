@@ -28,10 +28,7 @@ export type SyntaxHighlightStore = {
 };
 
 export type SyntaxHighlightKey = {
-    /** Operation, language, theme, options, and source as one stable string. */
     readonly input: string;
-
-    /** Files whose path, size, and modification time are part of the key. */
     readonly files: readonly string[];
 };
 

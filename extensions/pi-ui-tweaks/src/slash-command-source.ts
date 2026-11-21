@@ -60,7 +60,6 @@ function warnSlashCommandSourcePatchUnavailable(reason?: string): void {
     );
 }
 
-/** Installs or updates the slash-command source-tag patch. */
 export function installSlashCommandSourcePatch(
     config: SlashCommandSourceConfig,
     target?: PrefixView | null,

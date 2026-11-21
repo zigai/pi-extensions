@@ -166,9 +166,6 @@ type AutocompletePositionPatchRecord = {
     readonly handle: AutocompletePositionHandle;
 };
 
-/**
- * Installs an idempotent patch that moves editor autocomplete rows above the input box.
- */
 export function installAutocompletePositionPatch(
     config: AutocompletePositionConfig,
     target: (PrototypeRenderView & PrototypeHandleInputView) | null = Editor.prototype,

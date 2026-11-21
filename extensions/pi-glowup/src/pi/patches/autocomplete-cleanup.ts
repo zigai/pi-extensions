@@ -46,7 +46,6 @@ function shouldForceCleanupRender(editor: RuntimeEditor): boolean {
     return isSlashAutocompleteClosing(editor) && editor.tui?.getClearOnShrink() === true;
 }
 
-/** Enables or disables the autocomplete cleanup prototype patch. */
 export function configureAutocompleteCleanupPatch(
     enabled: boolean,
     prototype: EditorPrototypeOwner = Editor.prototype,

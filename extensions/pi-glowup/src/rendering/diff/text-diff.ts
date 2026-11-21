@@ -57,7 +57,6 @@ export function parseDiffSections(diffText: string, fallbackPath?: string): Diff
     return sections;
 }
 
-/** Removes unchanged context rows while preserving changed-row coordinates and metadata. */
 export function changedOnlyDiffSections(sections: ReadonlyArray<DiffSection>): DiffSection[] {
     return sections.flatMap((section) => {
         const retainedIndices = section.lines.flatMap((line, index) => {
@@ -71,7 +70,6 @@ export function changedOnlyDiffSections(sections: ReadonlyArray<DiffSection>): D
         const lines = retainedIndices.map((index) => section.lines[index] ?? "");
         const lineCoordinates = section.lineCoordinates;
         const changedSection: DiffSection = { ...section, lines };
-
         return lineCoordinates === undefined
             ? [changedSection]
             : [

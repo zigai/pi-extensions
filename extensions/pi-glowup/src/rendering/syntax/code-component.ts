@@ -41,7 +41,6 @@ export function cachedCodeOutput(text: string, syntax: CodeOutputSyntax): string
     return cachedSyntaxCode(text, language, { cache: syntax.cache, invalidate: syntax.invalidate });
 }
 
-/** Schedules async loading for path/language hints so later sync renders can highlight them. */
 export function scheduleCodeOutputSyntaxLoad(
     syntax: CodeOutputSyntax | undefined,
     invalidate: (() => void) | undefined,

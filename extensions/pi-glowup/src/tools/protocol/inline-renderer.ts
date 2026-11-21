@@ -1,7 +1,6 @@
 import type { GlowupInline, GlowupTextNode } from "./nodes.ts";
 import type { GlowupRenderTheme } from "../../rendering/theme.ts";
 
-/** Keeps semantic inline styling consistent across compact and outline presentations. */
 export function renderInline(theme: GlowupRenderTheme, value: GlowupInline): string {
     if (!(value instanceof Object) || !("kind" in value)) return value;
 

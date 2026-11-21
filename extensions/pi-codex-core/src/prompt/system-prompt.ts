@@ -50,13 +50,11 @@ const PI_DEFAULT_PROMPT_STARTS = [
 
 const DEFAULT_PI_TOOLS: readonly string[] = ["read", "bash", "edit", "write"];
 
-/** Runtime values used to select and render the active model's Codex prompt. */
 export type CodexSystemPromptContext = {
     readonly modelId?: string | undefined;
     readonly clock?: Clock | undefined;
 };
 
-/** How an earlier extension's direct system-prompt change was handled. */
 export type CodexPromptInterop = "unchanged" | "preserved-append" | "unrecognized-replacement";
 
 type EarlierPromptChange = {
@@ -64,13 +62,11 @@ type EarlierPromptChange = {
     readonly appendedInstructions?: string | undefined;
 };
 
-/** Codex prompt output plus extension-chain interoperability diagnostics. */
 export type CodexSystemPromptBuildResult = {
     readonly prompt: string;
     readonly interop: CodexPromptInterop;
 };
 
-/** Builds either Pi's original prompt or the active GPT model's Pi-adapted Codex prompt. */
 export function buildCodexCoreSystemPrompt(
     basePrompt: string,
     config: CodexCoreConfig,
@@ -80,7 +76,6 @@ export function buildCodexCoreSystemPrompt(
     return buildCodexCoreSystemPromptResult(basePrompt, config, options, context).prompt;
 }
 
-/** Builds the prompt while reporting whether an earlier prompt extension could be merged. */
 export function buildCodexCoreSystemPromptResult(
     basePrompt: string,
     config: CodexCoreConfig,
@@ -103,7 +98,6 @@ export function buildCodexCoreSystemPromptResult(
         context.clock ?? defaultCodexRuntime.clock,
         earlierPrompt.appendedInstructions,
     );
-
     return {
         prompt: [codexPrompt, piContext].filter((section) => section.length > 0).join("\n\n"),
         interop: earlierPrompt.interop,

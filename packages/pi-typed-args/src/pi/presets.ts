@@ -157,7 +157,6 @@ function commandPresetKey(command: RegisteredTypedCommand): string {
     return command.name;
 }
 
-/** Load validated recent values and named presets for one command grammar. */
 export function loadTypedCommandPresets(
     context: TypedCommandPresetContext,
     command: RegisteredTypedCommand,

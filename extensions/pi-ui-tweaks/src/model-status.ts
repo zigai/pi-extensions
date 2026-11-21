@@ -9,6 +9,7 @@ const MODEL_STATUS_PATCH = Symbol.for("zigai.pi-ui-tweaks.model-status-patch");
 
 export type ModelStatusConfig = { readonly hideModelChangeStatus: boolean };
 export type ModelStatusHandle = { update(config: ModelStatusConfig): void; dispose(): void };
+
 type ShowStatus = (this: InteractiveModeStatusTarget, message: string) => void;
 
 type InteractiveModeStatusTarget = {
@@ -55,7 +56,6 @@ function inactiveModelStatusHandle(): ModelStatusHandle {
     return { update(): void {}, dispose(): void {} };
 }
 
-/** Installs or updates the model-change status patch. */
 export function installModelStatusPatch(
     config: ModelStatusConfig,
     target?: ShowStatusView | null,

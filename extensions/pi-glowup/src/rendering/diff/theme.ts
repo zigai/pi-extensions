@@ -10,7 +10,6 @@ import {
     type GlowupRenderTheme,
 } from "../theme.ts";
 
-/** Terminal color palette derived from Pi's active theme. */
 export type PierreTerminalPalette = {
     readonly appearance: PierreAppearance;
     readonly contextFg: string;
@@ -31,12 +30,6 @@ export type PierreTerminalPalette = {
     readonly dimUnchangedText: boolean;
 };
 
-/** Resolves the closest Pierre syntax-highlighting appearance for the active Pi theme. */
-export function getPierreAppearance(_theme: GlowupRenderTheme): PierreAppearance {
-    return SYNTAX_THEME_APPEARANCE satisfies PierreAppearance;
-}
-
-/** Resolves diff terminal styling from Pi theme tokens. */
 export function getPierrePalette(theme: GlowupRenderTheme): PierreTerminalPalette {
     const additionBackground =
         configuredDiffBackgroundAnsi("insert") ?? theme.getBgAnsi?.("toolSuccessBg") ?? "";
@@ -61,7 +54,7 @@ export function getPierrePalette(theme: GlowupRenderTheme): PierreTerminalPalett
             : deletionBackground;
 
     return {
-        appearance: getPierreAppearance(theme),
+        appearance: SYNTAX_THEME_APPEARANCE,
         contextFg: themeFgAnsi(theme, "toolDiffContext"),
         contextRowBg: "",
         additionFg: themeFgAnsi(theme, "toolDiffAdded"),

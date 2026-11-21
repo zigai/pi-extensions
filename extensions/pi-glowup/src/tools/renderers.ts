@@ -159,7 +159,6 @@ function toolDefinitionLabel(definition: ToolDefinitionView): string | undefined
     return label === undefined || label.length === 0 ? undefined : label;
 }
 
-/** Returns whether a tool definition carries a valid public Glowup adapter. */
 export function hasGlowupRenderingAdapter(toolDefinition: unknown): boolean {
     return toolDefinitionViewParser.parse(toolDefinition).adapter !== undefined;
 }
@@ -176,7 +175,6 @@ export function parsePreservedThirdPartyToolNames(value: string | undefined): st
         .filter((name) => name.length > 0);
 }
 
-/** Returns whether Glowup should leave a tool's original renderer untouched. */
 export function shouldPreserveThirdPartyToolRenderer(options: {
     readonly toolName: string;
     readonly toolDefinition: unknown;
@@ -204,7 +202,6 @@ export function shouldPreserveThirdPartyToolRenderer(options: {
     );
 }
 
-/** Creates the owner adapter, transitional renderer, or generic compatibility renderer. */
 export function createThirdPartyToolRenderer(
     toolName: string,
     options?: ThirdPartyToolRenderingOptions,

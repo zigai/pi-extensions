@@ -1,7 +1,8 @@
 import { decodeKittyPrintable, type Input } from "@earendil-works/pi-tui";
 import type { ArgumentDefinition } from "../types.ts";
 
-/** Return the current cursor offset from Pi TUI's input widget, falling back to end-of-value. */
+// Pi TUI's Input (1.6.0) keeps `cursor` private and has no public accessor or setter, so the form
+// reads and writes that field by name and falls back to end-of-value when it is missing.
 export function inputCursor(input: Input): number {
     const cursor: unknown = Reflect.get(input, "cursor");
     if (typeof cursor === "number") {
@@ -11,7 +12,6 @@ export function inputCursor(input: Input): number {
     return input.getValue().length;
 }
 
-/** Set Pi TUI's input cursor to a bounded offset. */
 export function setInputCursor(input: Input, cursor: number): void {
     const boundedCursor = Math.max(0, Math.min(cursor, input.getValue().length));
     Reflect.set(input, "cursor", boundedCursor);
@@ -95,7 +95,6 @@ export function filterNumberInputData(
     return accepted;
 }
 
-/** Restore a number input's previous value and cursor when a raw key event creates an invalid prefix. */
 export function restoreNumberInputIfInvalid(
     input: Input,
     definition: ArgumentDefinition,
@@ -110,7 +109,6 @@ export function restoreNumberInputIfInvalid(
     setInputCursor(input, previousCursor);
 }
 
-/** Set an input widget's value and move the cursor to the end. */
 export function setInputValueAtEnd(input: Input, value: string): void {
     input.setValue(value);
     setInputCursor(input, value.length);

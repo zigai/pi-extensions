@@ -23,7 +23,6 @@ type MatchedTokenIndexes = {
 const MAX_LCS_TOKENS = 256;
 const tokenPattern = /\s+|[\p{L}\p{N}_]+|[^\s\p{L}\p{N}_]+/gu;
 
-/** Finds the changed token spans in a paired deletion and addition line. */
 export function changedTextRanges(before: string, after: string): ChangedTextRanges {
     if (before === after) {
         return { before: [], after: [] };
@@ -45,7 +44,6 @@ export function changedTextRanges(before: string, after: string): ChangedTextRan
     };
 }
 
-/** Returns display columns for the first differing code point in a replacement. */
 export function replacementFocusColumns(before: string, after: string): ReplacementFocusColumns {
     if (before === after) {
         return { before: undefined, after: undefined };
@@ -65,7 +63,6 @@ export function replacementFocusColumns(before: string, after: string): Replacem
     return { before: column, after: column };
 }
 
-/** Adds background open/close sequences around selected source-text ranges. */
 export function applyBackgroundToTextRanges(
     styledText: string,
     ranges: readonly TextRange[],

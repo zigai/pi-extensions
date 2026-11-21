@@ -159,8 +159,6 @@ test("startStep timestamp measures full step duration for non-streaming or late-
     const tracker = new TurnTokenThroughputTracker();
 
     tracker.startStep(1_000);
-
-    // Late output delta right before step completion
     tracker.markOutput(4_990);
     tracker.finishStep(5_000, { output: 200 });
 

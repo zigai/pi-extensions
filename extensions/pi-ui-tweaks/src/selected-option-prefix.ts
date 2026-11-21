@@ -7,6 +7,7 @@ import {
 } from "@zigai/pi-extension-internals";
 
 export const DEFAULT_SELECTED_OPTION_PREFIX = "→ ";
+
 const PRIMARY_COLUMN_GAP = 2;
 const MIN_DESCRIPTION_WIDTH = 10;
 const SELECT_LIST_PATCH_KEY = Symbol.for(
@@ -123,9 +124,6 @@ function getUnselectedOptionPrefix(): string {
     return " ".repeat(Math.max(1, visibleWidth(currentSelectedOptionConfig.selectedOptionPrefix)));
 }
 
-/**
- * Installs an idempotent patch for Pi TUI's generic select list marker.
- */
 export function installSelectedOptionPrefixSelectListPatch(
     config: SelectedOptionPrefixConfig,
     target?: SelectListRenderView | null,
@@ -242,7 +240,6 @@ export function installSelectedOptionPrefixSelectListPatch(
     return handle;
 }
 
-/** Installs or updates the Theme.fg selected-arrow patch. */
 export async function installSelectedOptionPrefixThemePatch(
     config: SelectedOptionPrefixConfig,
 ): Promise<SelectedOptionPrefixHandle> {

@@ -5,7 +5,6 @@ type CommandPresentationStyle = "compact" | "contextual";
 
 const DEFAULT_PRESENTATION_STYLE: CommandPresentationStyle = "compact";
 
-/** Pi TUI theme colour roles accepted by pi-typed-args appearance settings. */
 export const PI_THEME_COLOR_NAMES = [
     "accent",
     "border",
@@ -54,10 +53,8 @@ export const PI_THEME_COLOR_NAMES = [
     "bashMode",
 ] as const;
 
-/** Supported Pi TUI theme colour role name. */
 export type PiThemeColorName = (typeof PI_THEME_COLOR_NAMES)[number];
 
-/** Colour slots used by the dense argument form. */
 export type FormAppearanceColorSlot =
     | "title"
     | "focusedLabel"
@@ -69,7 +66,6 @@ export type FormAppearanceColorSlot =
     | "editorBorder"
     | "selectedOption";
 
-/** Colour slots used by inline command help. */
 export type InlineHelpColorSlot =
     | "active"
     | "required"
@@ -78,7 +74,6 @@ export type InlineHelpColorSlot =
     | "metadata"
     | "issue";
 
-/** Inline helper group ordering. */
 export type InlineHelpOrder =
     | "active-required-available"
     | "active-available-required"
@@ -88,22 +83,12 @@ export type InlineHelpOrder =
     | "available-required-active"
     | "definition";
 
-/** Inline helper layout mode. */
 export type InlineHelpLayout = "compact";
-
-/** How fixed enum choices are presented in inline help. */
 export type InlineHelpChoiceDisplay = "contextual" | "inline";
-
-/** Dense-form argument description visibility mode. */
 export type FormDescriptionMode = "inline" | "focused" | "hidden";
-
-/** Dense-form footer instruction visibility mode. */
 export type FormInstructionMode = "full" | "short" | "hidden";
-
-/** Detailed help argument ordering. */
 export type DetailedHelpOrder = "definition" | "required-first";
 
-/** Metadata switches shared by inline and detailed help. */
 export type HelpMetadataSettings = {
     types?: boolean;
     defaults?: boolean;
@@ -113,7 +98,6 @@ export type HelpMetadataSettings = {
     enumValues?: boolean;
 };
 
-/** User-facing dense-form appearance settings from extension config. */
 export type FormAppearanceSettings = {
     colors?: Partial<Record<FormAppearanceColorSlot, PiThemeColorName>>;
     symbols?: TypedCommandFormSymbols & { focusedField?: string };
@@ -130,7 +114,6 @@ export type FormAppearanceSettings = {
     };
 };
 
-/** User-facing inline-helper appearance settings from extension config. */
 export type InlineHelpAppearanceSettings = {
     layout?: InlineHelpLayout;
     choiceDisplay?: InlineHelpChoiceDisplay;
@@ -148,13 +131,11 @@ export type InlineHelpAppearanceSettings = {
     };
 };
 
-/** User-facing detailed-help appearance settings from extension config. */
 export type DetailedHelpAppearanceSettings = {
     metadata?: HelpMetadataSettings;
     order?: DetailedHelpOrder;
 };
 
-/** User-facing appearance settings accepted at appearance. */
 export type PiTypedCommandsAppearanceSettings = {
     style?: CommandPresentationStyle;
     form?: FormAppearanceSettings;
@@ -162,12 +143,10 @@ export type PiTypedCommandsAppearanceSettings = {
     detailedHelp?: DetailedHelpAppearanceSettings;
 };
 
-/** Resolved dense-form symbols after applying appearance defaults. */
 export type ResolvedFormSymbols = Required<TypedCommandFormSymbols> & {
     focusedField: string;
 };
 
-/** Fully resolved dense-form appearance used by renderers. */
 export type ResolvedFormAppearance = {
     style: CommandPresentationStyle;
     colors: Record<FormAppearanceColorSlot, PiThemeColorName>;
@@ -186,10 +165,8 @@ export type ResolvedFormAppearance = {
     };
 };
 
-/** Fully resolved inline-helper metadata switches. */
 export type ResolvedHelpMetadata = Required<HelpMetadataSettings>;
 
-/** Fully resolved inline-helper appearance used by renderers. */
 export type ResolvedInlineHelpAppearance = {
     style: CommandPresentationStyle;
     layout: InlineHelpLayout;
@@ -208,7 +185,6 @@ export type ResolvedInlineHelpAppearance = {
     };
 };
 
-/** Fully resolved detailed-help appearance used by --help renderers. */
 export type ResolvedDetailedHelpAppearance = {
     style: CommandPresentationStyle;
     metadata: ResolvedHelpMetadata;
@@ -216,7 +192,6 @@ export type ResolvedDetailedHelpAppearance = {
     configured: boolean;
 };
 
-/** Fully resolved global pi-typed-args appearance. */
 export type ResolvedPiTypedCommandsAppearance = {
     form: ResolvedFormAppearance;
     inlineHelp: ResolvedInlineHelpAppearance;
@@ -278,7 +253,6 @@ const DEFAULT_DETAILED_METADATA: ResolvedHelpMetadata = {
     enumValues: true,
 };
 
-/** Default global appearance for command helpers, help, and forms. */
 export const DEFAULT_PI_TYPED_COMMANDS_APPEARANCE: ResolvedPiTypedCommandsAppearance = {
     form: {
         style: DEFAULT_PRESENTATION_STYLE,
@@ -514,7 +488,6 @@ function parseDetailedHelpAppearance(
     };
 }
 
-/** Resolve appearance from a configuration value already parsed at the persisted-config seam. */
 export function resolvePiTypedCommandsAppearance(
     input: PiTypedCommandsAppearanceConfig | undefined,
 ): ResolvedPiTypedCommandsAppearance {

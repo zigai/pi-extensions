@@ -80,21 +80,18 @@ function parseWithValidator<T>(
     }
 }
 
-/** Parse a Pi Toggles activation-ready event payload. */
 export function parseActivationReady(
     value: unknown,
 ): ActivationCoordinationParseResult<ActivationReady> {
     return parseWithValidator(value, activationReadyValidator);
 }
 
-/** Parse and refine an extension activation proposal payload. */
 export function parseExtensionActivationProposal(
     value: unknown,
 ): ActivationCoordinationParseResult<ExtensionActivationProposal> {
     return parseWithValidator(value, activationProposalValidator);
 }
 
-/** Parse a proposal acceptance or clear payload. */
 export function parseActivationProposalOwner(
     value: unknown,
 ): ActivationCoordinationParseResult<ActivationProposalOwner> {

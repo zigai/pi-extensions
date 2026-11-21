@@ -11,9 +11,9 @@ export type ResponsesInputItem = JsonObject;
 
 /** Provider-serialized Responses tool definition, retained without schema rewriting. */
 export type ResponsesTool = JsonObject;
+
 export type ProviderRequestLayout = "responses" | "responses-lite";
 
-/** Static, cache-shaping fields captured from a real provider request. */
 export type ProviderRequestTemplate = {
     readonly model: string;
     readonly layout: ProviderRequestLayout;

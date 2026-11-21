@@ -21,7 +21,6 @@ type TextSegment = {
     readonly fg?: string;
 };
 
-/** Enables or disables bracket-pair foreground overrides without changing syntax token colors. */
 export function configureBracketPairColoring(enabled: boolean): boolean {
     if (bracketPairColoringEnabled === enabled) {
         return false;
@@ -31,7 +30,6 @@ export function configureBracketPairColoring(enabled: boolean): boolean {
     return true;
 }
 
-/** Applies VS Code-like bracket pair colors to otherwise-neutral punctuation tokens. */
 export function colorBracketPairsInTokenRows(
     rows: ReadonlyArray<ReadonlyArray<ThemedToken>>,
     language?: string,
@@ -55,7 +53,6 @@ export function colorBracketPairsInTokenRows(
     );
 }
 
-/** Applies VS Code-like terminal syntax enhancements to already-flattened highlighted spans. */
 export function enhanceSyntaxSegments<TSegment extends TextSegment>(
     segments: ReadonlyArray<TSegment>,
     language?: string,
@@ -137,6 +134,7 @@ function splitPythonIdentifiers(
         if (!importLine && !attribute && imported.has(head)) {
             parts.push({ text: head, color: PYTHON_IMPORT_IDENTIFIER_COLOR });
             index = start + head.length;
+
             if (value === head) continue;
 
             parts.push({ text: "." });
@@ -191,6 +189,7 @@ function pythonImportedNames(lines: readonly string[]): ReadonlySet<string> {
 
         const code = list.replace(/#.*$/u, "");
         continued = (continued || code.includes("(")) && !code.includes(")");
+
         for (const item of code.replace(/[()\\]/gu, "").split(",")) {
             const binding = /^\s*([A-Za-z_][\w.]*)(?:\s+as\s+([A-Za-z_]\w*))?\s*$/u.exec(item);
             if (binding === null) continue;
@@ -200,6 +199,7 @@ function pythonImportedNames(lines: readonly string[]): ReadonlySet<string> {
     }
 
     names.delete("");
+
     return names;
 }
 

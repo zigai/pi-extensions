@@ -58,7 +58,6 @@ export function buildRemoteCompactionTransportMetadata(input: {
     };
 }
 
-/** Applies HTTP projections of the remote compaction v2 request metadata. */
 export function applyRemoteCompactionTransportHeaders(
     headers: Headers,
     metadata: RemoteCompactionTransportMetadata,

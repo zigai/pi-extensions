@@ -73,7 +73,6 @@ function refinementContext<TDefinitions extends ArgumentDefinitions>(
     return { provided };
 }
 
-/** Adapt grouped refinement callbacks to the parser's flat dotted-value representation. */
 export function maybeWrapGroupedRefinement<TDefinitions extends ArgumentDefinitions>(
     definitions: TDefinitions,
     refine: TypedCommandRefinement<TDefinitions> | undefined,
@@ -86,7 +85,6 @@ export function maybeWrapGroupedRefinement<TDefinitions extends ArgumentDefiniti
         refine(expandRefinementValues(args, definitions), refinementContext(definitions, context));
 }
 
-/** Adapt grouped command handlers to the parser's flat dotted-value representation. */
 export function maybeWrapGroupedHandler<TDefinitions extends ArgumentDefinitions>(
     definitions: TDefinitions,
     handler: TypedCommandHandler<TDefinitions>,

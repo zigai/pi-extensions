@@ -7,7 +7,6 @@ import { stringParser } from "./json-scalar.ts";
 /** Accepts any non-array object, so parse results can be memoized by identity. */
 export const objectValidator = Compile(Type.Unsafe<object>(Type.Object({})));
 
-/** Narrows an already validated JSON value without widening its fields. */
 export function isRecord(value: JsonValue | undefined): value is JsonObject {
     return jsonObjectParser.parse(value) !== undefined;
 }

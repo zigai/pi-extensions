@@ -116,7 +116,6 @@ function warnPreserveCompactionHistoryPatchUnavailable(reason?: string): void {
     );
 }
 
-/** Installs or updates the live-compaction transcript-preservation patch. */
 export function installPreserveCompactionHistoryPatch(
     config: PreserveCompactionHistoryConfig,
     target?: HandleEventView | null,

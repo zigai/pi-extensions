@@ -23,7 +23,6 @@ const PI_CORE_TOOL_LABELS = new Map<string, ToolLifecycleLabels>([
     ["ask_user_question", { static: "Ask User", active: "Asking User", completed: "Asked User" }],
 ]);
 
-/** Returns whether a tool name belongs to Pi core UI helpers. */
 export function isPiCoreTool(toolName: string): boolean {
     return PI_CORE_TOOL_LABELS.has(baseToolName(toolName));
 }

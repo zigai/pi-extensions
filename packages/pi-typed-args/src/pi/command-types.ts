@@ -10,7 +10,6 @@ import type {
     TypedParseResult,
 } from "../types.ts";
 
-/** Handler called after typed arguments have been parsed, defaulted, and validated. */
 export type TypedCommandHandler<TDefinitions extends ArgumentDefinitions> = (
     args: InferArguments<TDefinitions>,
     ctx: ExtensionCommandContext,
@@ -21,19 +20,16 @@ type MergeArgumentDefinitions<
     TLocal extends ArgumentDefinitions,
 > = TShared & TLocal;
 
-/** Dense-form title, or a callback that derives one from the active extension session. */
 export type TypedCommandFormTitle = string | ((ctx: ExtensionContext) => string);
 export type TypedCommandFormPolicy = "manual" | "missing" | "invalid" | "always";
 export type TypedCommandInlineHelp = "auto" | "hidden";
 
-/** Runtime context supplied when resolving opt-in inline ghost text. */
 export type TypedCommandGhostTextContext = {
     readonly ctx: ExtensionContext;
     readonly commandName: string;
     readonly subcommand?: string;
 };
 
-/** Static or synchronously resolved text rendered after an exact command invocation. */
 export type TypedCommandGhostText =
     | string
     | ((context: TypedCommandGhostTextContext) => string | undefined);
@@ -48,17 +44,11 @@ export type TypedCommandConfig<TDefinitions extends ArgumentDefinitions> = {
     /** Decide when command submission opens the form. Defaults to `missing`. */
     formPolicy?: TypedCommandFormPolicy;
 
-    /** Enable project-scoped recent values and named form presets. */
     formPresets?: boolean;
-
-    /** Control whether the compact live helper is rendered for this command. */
     inlineHelp?: TypedCommandInlineHelp;
-
-    /** Opt into dimmed, visual-only text after the exact command invocation. */
     ghostText?: TypedCommandGhostText;
 };
 
-/** One CLI-style subcommand with arguments and a colocated typed handler. */
 export type TypedSubcommandDefinition<
     TShared extends ArgumentDefinitions,
     TLocal extends ArgumentDefinitions,
@@ -76,7 +66,6 @@ export type TypedSubcommandDefinition<
     run: TypedCommandHandler<MergeArgumentDefinitions<TShared, TLocal>>;
 };
 
-/** Inferred map from each subcommand name to its local argument definitions. */
 export type TypedSubcommandDefinitions<_TShared extends ArgumentDefinitions = ArgumentDefinitions> =
     Readonly<Record<string, ArgumentDefinitions>>;
 
@@ -98,7 +87,6 @@ type SubcommandParseResult<
             : never
         : never;
 
-/** Parse result for either the root grammar or one selected subcommand grammar. */
 export type TypedCommandParseResult<
     TShared extends ArgumentDefinitions,
     TSubcommands extends TypedSubcommandDefinitions<TShared>,
@@ -108,7 +96,6 @@ export type TypedCommandParseResult<
           [TName in keyof TSubcommands]: SubcommandParseResult<TShared, TName, TSubcommands[TName]>;
       }[keyof TSubcommands];
 
-/** Serializable values for one selected subcommand. */
 export type SerializableSubcommandInvocation<
     TShared extends ArgumentDefinitions,
     TSubcommands extends TypedSubcommandDefinitions<TShared>,
@@ -131,6 +118,7 @@ export type TypedCommandDefinition<
 
     /** Root handler used when no subcommand token is present. */
     run?: TypedCommandHandler<TDefinitions>;
+
     subcommands?: TypedSubcommandsFor<TDefinitions, TSubcommands>;
 };
 
@@ -160,7 +148,6 @@ export type InvocationTarget<TDefinitions extends ArgumentDefinitions> =
           render(args: InferArguments<TDefinitions>, additionalInput?: string): string;
       };
 
-/** Pi-owned command metadata layered over the framework-independent command snapshot. */
 export type RegisteredTypedCommand<TDefinitions extends ArgumentDefinitions = ArgumentDefinitions> =
     CoreRegisteredTypedCommand<TDefinitions> & {
         readonly formTitle?: TypedCommandFormTitle;

@@ -15,7 +15,6 @@ import type {
 } from "../pi/command-types.ts";
 import { definitionError, normalizeRegisteredCommand } from "./registered-command.ts";
 
-/** Define a typed command once, preserving literal argument inference and exposing pure helpers. */
 export function defineTypedCommand<
     const TDefinitions extends ArgumentDefinitions,
     const TSubcommands extends TypedSubcommandDefinitions<TDefinitions>,

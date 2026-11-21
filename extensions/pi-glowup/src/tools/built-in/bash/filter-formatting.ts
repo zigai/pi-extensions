@@ -12,7 +12,6 @@ export type FilterFormatterRun<R extends FilterRunResult> = (
     input: string,
 ) => Promise<R>;
 
-/** Why a program is kept as submitted without running the formatter. */
 export type FilterSkipReason =
     | "empty"
     | "fits-width"
@@ -125,8 +124,6 @@ function normalizedRows(output: string): string[] {
         .map((row) => row.replace(/[\t ]+$/u, ""))
         .filter((row) => row.length > 0);
 }
-
-// ---------------------------------------------------------------- awk
 
 type AwkToken = {
     readonly kind: "string" | "regex" | "comment" | "number" | "name" | "op";
@@ -532,8 +529,6 @@ async function formatAwk<R extends FilterRunResult>(
     return { kind: "formatted", output: result, run: completed };
 }
 
-// ----------------------------------------------------------------- jq
-
 function jqStringEnd(source: string, start: number): number | undefined {
     let index = start + 1;
     while (index < source.length) {
@@ -629,7 +624,6 @@ function indentation(row: string): number {
     return /^ */u.exec(row)?.[0].length ?? 0;
 }
 
-/** Re-collapses objects and arrays jqfmt exploded when their one-row form fits. */
 function collapseJqBrackets(
     rows: readonly string[],
     masked: Masked,
@@ -775,7 +769,6 @@ export function filterProgramSkipReason(
     return filterProgramSafetyReason(code, kind);
 }
 
-/** The width-independent part of `filterProgramSkipReason`. */
 export function filterProgramSafetyReason(
     code: string,
     kind: FilterFormatterProfile["kind"],

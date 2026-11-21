@@ -1,5 +1,5 @@
 // Deterministic queue audit: build isolated instrumented bundles, never swap source or dist.
-// node --import tsx benchmark/extraction-queue.ts /tmp/pi-glowup-round3/baseline
+// node --import tsx benchmark/extraction-queue.ts <baseline-checkout>
 import { execFileSync } from "node:child_process";
 import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";

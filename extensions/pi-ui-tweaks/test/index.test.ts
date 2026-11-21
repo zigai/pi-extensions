@@ -361,7 +361,7 @@ test("session_start installs the startup diagnostic filter before host resource 
     assert.ok(shutdown);
     const context = { ...headlessContext(), hasUI: true };
     try {
-        // Pi 1.5 bindCurrentSessionExtensions awaits bindExtensions/session_start
+        // Pi bindCurrentSessionExtensions awaits bindExtensions/session_start
         // before calling showLoadedResources, so this is the presentation boundary.
         await start(sessionStart, context);
         assert.equal(Object.hasOwn(InteractiveMode.prototype, marker), true);

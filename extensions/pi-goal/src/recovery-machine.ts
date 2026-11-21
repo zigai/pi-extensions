@@ -210,7 +210,6 @@ export function planRecoveryForSilentContextOverflow(
   return incrementOverflowCompactionAttempts(state);
 }
 
-/** True when another overflow in this recovery cycle would exceed the compaction cap. */
 export function isRepeatOverflowCompactionDue(state: GoalRecoveryMachineState): boolean {
   return state.counters.compactionAttempts >= MAX_CONTEXT_COMPACTION_RETRIES;
 }

@@ -346,7 +346,6 @@ function unitsFor(
             return;
         }
 
-        // Function expressions, methods, and arrow functions may be nested in declarations.
         for (const block of blocksWithin(node)) visit(block);
     }
 

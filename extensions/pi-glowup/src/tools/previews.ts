@@ -290,13 +290,11 @@ export function previewCompactArgs(args: unknown): string | undefined {
     return previewPartialArgs(jsonValueParser.parse(args));
 }
 
-/** Returns a bounded structured argument preview for expanded views. */
 export function previewArgs(args: unknown, fallback?: string): string | undefined {
     const jsonVal = jsonValueParser.parse(args);
     return fallback ?? previewValue(jsonVal);
 }
 
-/** Returns a compact argument preview appropriate for the current execution phase. */
 export function previewArgsForContext(
     args: unknown,
     context: ThirdPartyToolRenderContext,
@@ -310,7 +308,6 @@ export function previewArgsForContext(
     return previewArgs(jsonVal, fallback);
 }
 
-/** Extracts all text content blocks from a tool result. */
 export function textOutput(result: ThirdPartyToolResult): string | undefined {
     const content = result.content;
     if (!Array.isArray(content)) {
@@ -353,7 +350,6 @@ function compactDetailsPreview(value: JsonObject): string | undefined {
         : truncateGraphemeText(parts.join(" • "), MAX_PREVIEW_CHARACTERS);
 }
 
-/** Extracts structured details preview for tool result. */
 export function detailsOutput(result: ThirdPartyToolResult): string | undefined {
     const details = result.details;
     if (details === undefined || details === null) {

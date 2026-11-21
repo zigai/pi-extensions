@@ -34,7 +34,6 @@ function createDefaultEditor(
     return new CustomEditor(tui, theme, keybindings);
 }
 
-/** Installs an editor preloaded with prompts from the current session branch. */
 export function applyPromptHistoryEditor(
     ctx: PromptHistoryEditorContext,
 ): EditorEnhancerHandle<EditorArgs, EditorLike> {

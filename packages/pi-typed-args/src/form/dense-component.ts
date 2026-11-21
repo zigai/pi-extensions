@@ -49,7 +49,6 @@ type TextEditorTheme = {
     selectList: SelectListTheme;
 };
 
-/** Result returned from the dense form component when it is submitted or cancelled. */
 export type FormResult = {
     confirmed: boolean;
     state: FormState;
@@ -354,7 +353,6 @@ function resolveComponentSymbols(
     };
 }
 
-/** Dense TUI component for editing all typed-command arguments in one form. */
 export class ArgumentFormComponent implements Component, Focusable {
     private selectedIndex = 0;
     private readonly input = new Input();

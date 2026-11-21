@@ -660,7 +660,6 @@ class StreamingWritePreviewComponent implements Component {
     }
 }
 
-/** Renders a built-in write call with a bounded preview of the content being written. */
 export function renderWriteCallPreview(
     args: WriteCallArgs,
     theme: GlowupRenderTheme,

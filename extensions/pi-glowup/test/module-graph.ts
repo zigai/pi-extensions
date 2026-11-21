@@ -4,7 +4,6 @@ import ts from "typescript";
 
 export type ModuleEdge = { readonly from: string; readonly to: string };
 
-/** Follow runtime and type imports using TypeScript's source resolution. */
 export function readModuleGraph(entries: readonly string[]) {
     const visited = new Set<string>();
     const edges: ModuleEdge[] = [];

@@ -190,7 +190,6 @@ export default mentionProjectSettingsDefinition;
 
 export type MentionProjectSettingsContext = Pick<ExtensionContext, "cwd" | "isProjectTrusted">;
 
-/** Load validated project-mention settings with safe diagnostics. */
 export function loadMentionProjectSettingsResult(ctx: MentionProjectSettingsContext) {
     const loaded = loadPiExtensionSettings(
         mentionProjectSettingsDefinition,
@@ -229,7 +228,6 @@ export function loadMentionProjectSettingsResult(ctx: MentionProjectSettingsCont
     return { settings, diagnostics: loaded.diagnostics };
 }
 
-/** Load validated global and trusted-project project-mention settings. */
 export function loadMentionProjectSettings(
     ctx: MentionProjectSettingsContext,
 ): MentionProjectSettings {

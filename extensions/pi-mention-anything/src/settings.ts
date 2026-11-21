@@ -30,7 +30,6 @@ function copyMention(mention: ConfiguredMentionInput): ConfiguredMention {
     });
 }
 
-/** Load validated global and trusted-project mention settings. */
 export function loadMentionAnythingSettings(
     ctx: MentionAnythingSettingsContext,
 ): MentionAnythingSettings {

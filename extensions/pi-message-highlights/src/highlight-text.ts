@@ -675,9 +675,7 @@ export function highlightMessageLines(lines: readonly string[], styles: Highligh
 
     return lines.map((line, index) => {
         const ranges = lineRanges[index] ?? [];
-
         ranges.sort((left, right) => left.start - right.start);
-
         return highlightMessageLineRanges(line, ranges);
     });
 }
@@ -690,7 +688,6 @@ export function getStylePrefix(styleFn: (text: string) => string): string {
     return styled.slice(0, sentinelIndex);
 }
 
-/** Color OSC 8 web-link labels, carrying hyperlink state across rendered lines. */
 export function highlightWebLinkLabelLines(lines: readonly string[], style: string): string[] {
     if (!style) return [...lines];
 

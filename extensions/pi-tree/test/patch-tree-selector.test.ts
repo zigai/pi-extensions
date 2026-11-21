@@ -550,7 +550,6 @@ test("registered session lifecycle patches and exercises the installed Pi tree s
         children: [],
     };
 
-    // Simulate Pi's normal theme setup so its own selector constructor can render.
     const restoreTheme = await initializePiTheme();
     onTestFinished(restoreTheme);
     const activeTheme = fakeTheme();

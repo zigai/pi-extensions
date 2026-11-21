@@ -19,12 +19,10 @@ type FileSnapshot = {
     readonly skippedReason?: "too-large" | "not-readable";
 };
 
-/** In-flight snapshot for edit tool execution. */
 export type EditSnapshotState = {
     readonly finish: () => Promise<DiffSnapshot>;
 };
 
-/** Resolves a tool path against a tool execution working directory. */
 function resolveToolPath(cwd: string, relativeOrAbsolutePath: string): string {
     return path.isAbsolute(relativeOrAbsolutePath)
         ? relativeOrAbsolutePath

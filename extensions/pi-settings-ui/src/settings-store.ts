@@ -166,7 +166,6 @@ async function loadSettingsLayer(
     };
 }
 
-/** Build the standard global and trusted-project paths used by Pi extension settings. */
 export function createPiSettingsLocation(cwd: string): SettingsLocation {
     const settingsDirectory = join(getAgentDir(), EXTENSION_SETTINGS_DIRECTORY);
     const projectSettingsDirectory = join(cwd, CONFIG_DIR_NAME, EXTENSION_SETTINGS_DIRECTORY);
@@ -369,7 +368,6 @@ async function saveSettingsLayer(
     });
 }
 
-/** Persist validated layer documents with schema and config conflict detection. */
 export async function saveSettingsLayers(
     requests: readonly SaveSettingsLayerRequest[],
 ): Promise<readonly SaveSettingsLayerOutcome[]> {

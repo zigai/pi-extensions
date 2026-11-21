@@ -58,7 +58,6 @@ function evaluateFormBoolean(
     return option === true;
 }
 
-/** Sequential prompt-based argument form used outside TUI mode. */
 export class SequentialArgumentForm<TDefinitions extends ArgumentDefinitions> {
     private readonly command: RegisteredTypedCommand<TDefinitions>;
     private readonly parsed: ParsedCommandArguments;

@@ -119,9 +119,7 @@ export class ModeController {
                 theme.getFgAnsi(color);
 
                 return (text: string) => theme.fg(color, text);
-            } catch {
-                // Fall through to the configured fallback border color.
-            }
+            } catch {}
         }
 
         if (!this.useThinkingBorderColors) {

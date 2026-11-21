@@ -191,13 +191,12 @@ function removedChild(): WeakRef<Text> {
         0,
         0,
     );
-
     contentContainer.addChild(child);
     target.render(100);
     contentContainer.clear();
 
-    // SDK mouseLayout retains the last layout until another render. Update only
-    // host layout, not the assistant/cache frame, to isolate extension retention.
+    // Render only the host layout, not the assistant/cache frame, so the
+    // measurement isolates retention by the extension.
     contentContainer.render(100);
 
     return new WeakRef(child);

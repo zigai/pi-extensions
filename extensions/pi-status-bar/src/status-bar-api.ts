@@ -8,41 +8,25 @@ export type StatusBarStateName = "active" | "idle";
 export type StatusBarSide = "right";
 
 export type StatusBarSpinnerConfig = {
-    /** Frames used instead of Pi's current loader frames while active. */
     readonly frames?: readonly string[];
     readonly intervalMs?: number;
 };
 
 export type StatusBarTimerConfig = {
-    /** Whether the active elapsed timer is visible. */
     readonly visible?: boolean;
-
-    /** Whether the active elapsed timer is paused. */
     readonly paused?: boolean;
 };
 
 export type StatusBarActiveConfig = {
-    /** Text used instead of Pi's active loader message. */
     readonly text?: string;
-
-    /** Active spinner override. */
     readonly spinner?: StatusBarSpinnerConfig;
-
-    /** Active timer override. */
     readonly timer?: StatusBarTimerConfig;
 };
 
 export type StatusBarIdleConfig = {
-    /** Text used instead of the default post-run summary. */
     readonly text?: string;
-
-    /** Whether the idle status bar widget is visible. */
     readonly visible?: boolean;
-
-    /** Whether to append the default last-run summary after custom idle text. */
     readonly showLastRunSummary?: boolean;
-
-    /** Whether to include model token throughput in the last-run summary. */
     readonly showTokensPerSecond?: boolean;
 };
 
@@ -61,22 +45,11 @@ export type StatusBarHandle = {
     /** Replace active spinner frames and speed. Empty frames clear the frame override. */
     setSpinner(spinner: StatusBarSpinnerConfig): void;
 
-    /** Pause the active elapsed timer. */
     pauseTimer(): void;
-
-    /** Resume the active elapsed timer. */
     resumeTimer(): void;
-
-    /** Reset the active elapsed timer baseline. */
     resetTimer(): void;
-
-    /** Hide the active elapsed timer. */
     hideTimer(): void;
-
-    /** Show the active elapsed timer. */
     showTimer(): void;
-
-    /** Clear this handle's status-bar override while keeping the handle alive. */
     clear(): void;
 
     /** Remove this status-bar override. Stale handles become inert after disposal. */
@@ -84,7 +57,6 @@ export type StatusBarHandle = {
 };
 
 export type StatusBarSegmentRegistration = {
-    /** Namespaced custom segment id, for example `my-extension.status`. */
     readonly id: string;
 
     /** Lifecycle states where the segment should render. Defaults to both states. */
@@ -99,10 +71,7 @@ export type StatusBarSegmentRegistration = {
     /** Lower values render first. Defaults to 100. */
     readonly priority?: number;
 
-    /** Render the segment dimmed. */
     readonly dimmed?: boolean;
-
-    /** Render the segment italic. */
     readonly italic?: boolean;
 };
 
@@ -110,7 +79,6 @@ export type StatusBarSegmentHandle = {
     /** Replace this segment's visible text. Empty text hides the segment. */
     setText(text: string): void;
 
-    /** Hide this segment while keeping its registration. */
     clear(): void;
 
     /** Remove this segment registration. Stale handles become inert after disposal. */
@@ -414,7 +382,6 @@ function getOwnedOverride(
     return state.override;
 }
 
-/** Configure the coherent Pi status bar across active and idle lifecycle states. */
 export function configureStatusBar(config: StatusBarConfig): StatusBarHandle {
     const state = getStatusBarState();
     const owner = Symbol("status-bar-override");
@@ -527,7 +494,6 @@ export function configureStatusBar(config: StatusBarConfig): StatusBarHandle {
     };
 }
 
-/** Set config-backed status-bar defaults. Intended for pi-status-bar internals. */
 export function setStatusBarBaseConfig(config: StatusBarConfig): void {
     const state = getStatusBarState();
     if (!applyStatusBarConfig(state.base, config)) return;
@@ -535,7 +501,6 @@ export function setStatusBarBaseConfig(config: StatusBarConfig): void {
     emitStatusBarUpdates(state);
 }
 
-/** Register a scriptable status-bar segment for active, idle, or both states. */
 export function registerStatusBarSegment(
     registration: StatusBarSegmentRegistration,
 ): StatusBarSegmentHandle {
@@ -615,7 +580,6 @@ export function registerStatusBarSegment(
     };
 }
 
-/** Subscribe to status-bar changes. Intended for pi-status-bar internals. */
 export function subscribeStatusBarUpdates(listener: () => void): () => void {
     const state = getStatusBarState();
     state.listeners.add(listener);
@@ -671,7 +635,6 @@ export function getStatusBarSnapshot(): StatusBarSnapshot {
     };
 }
 
-/** Clear global status-bar state. Intended for tests. */
 export function resetStatusBarStateForTests(): void {
     delete statusBarGlobal[STATUS_BAR_STATE];
 }

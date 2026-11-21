@@ -51,7 +51,6 @@ export function compatBuiltInToolName(toolName: string): BuiltInToolName | undef
     }
 }
 
-/** Returns a canonical built-in renderer family for native and compatible tool names. */
 export function canonicalBuiltInToolName(toolName: string): BuiltInToolName | undefined {
     const nativeName = nativeBuiltInToolName(toolName);
     if (nativeName !== undefined) {

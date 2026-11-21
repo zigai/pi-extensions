@@ -4,7 +4,6 @@ const RESET = "\u001b[0m";
 const NATIVE_ROWS = ["▀▀█ ", "█▀ █"];
 const ENLARGED_ROWS = ["██████  ", "    ██  ", "████  ██", "██    ██"];
 
-/** Double each native pixel in both axes, retaining its original foreground/background ANSI. */
 export function enlargeStartupLogo(native: readonly string[]): string[] | undefined {
     // The early-startup and reload bridges can already return enlarged rows. Never scale twice.
     if (

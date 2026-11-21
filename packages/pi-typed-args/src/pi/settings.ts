@@ -25,7 +25,6 @@ const EXTENSION_ID = "pi-typed-args";
 const CONFIG_BASENAME = "config.json";
 const CONFIG_SCHEMA_BASENAME = "config.schema.json";
 
-/** Stable file roles used in safe configuration diagnostics. */
 export type PiTypedCommandsConfigFileRole = "global-config" | "project-config" | "global-schema";
 
 /** Safe, structured configuration diagnostic that never includes file contents or raw causes. */
@@ -42,7 +41,6 @@ export type PiTypedCommandsConfigDiagnostic = {
     readonly message: string;
 };
 
-/** Outcome of loading one user-owned configuration source. */
 export type PiTypedCommandsConfigSourceOutcome =
     | {
           readonly status: "absent" | "skipped-untrusted";
@@ -59,7 +57,6 @@ export type PiTypedCommandsConfigSourceOutcome =
           readonly diagnostic: PiTypedCommandsConfigDiagnostic;
       };
 
-/** Outcome of creating or refreshing one extension-owned global file. */
 export type PiTypedCommandsConfigWriteOutcome =
     | {
           readonly status: "created" | "refreshed" | "unchanged";
@@ -71,7 +68,6 @@ export type PiTypedCommandsConfigWriteOutcome =
           readonly diagnostic: PiTypedCommandsConfigDiagnostic;
       };
 
-/** Typed configuration snapshot resolved once at the Pi composition seam. */
 export type ResolvedPiTypedCommandsConfigSnapshot = {
     readonly settings: {
         readonly helperPlacement: WidgetPlacement;
@@ -84,7 +80,6 @@ export type ResolvedPiTypedCommandsConfigSnapshot = {
     readonly diagnostics: readonly PiTypedCommandsConfigDiagnostic[];
 };
 
-/** Narrow session boundary values needed to resolve project configuration. */
 export type PiTypedCommandsSettingsContext = {
     readonly cwd: string;
     readonly projectTrusted: boolean;
@@ -386,7 +381,6 @@ function diagnosticFromWrite(
     return undefined;
 }
 
-/** Load, classify, merge, and resolve global/project configuration once. */
 export function resolvePiTypedCommandsConfigSnapshot(
     context: PiTypedCommandsSettingsContext,
 ): ResolvedPiTypedCommandsConfigSnapshot {
@@ -437,7 +431,6 @@ export function resolvePiTypedCommandsConfigSnapshot(
     };
 }
 
-/** Resolved UX settings for typed-command Pi integrations. */
 export type ResolvedTypedCommandUxOptions = {
     helperPlacement: WidgetPlacement;
     formTrigger: TypedCommandFormTrigger;
@@ -445,7 +438,6 @@ export type ResolvedTypedCommandUxOptions = {
     diagnostics: readonly PiTypedCommandsConfigDiagnostic[];
 };
 
-/** Resolve typed-command UX options from explicit options and one session config snapshot. */
 export function resolveTypedCommandUxOptions(
     options: TypedCommandUxOptions = {},
     snapshot?: ResolvedPiTypedCommandsConfigSnapshot,

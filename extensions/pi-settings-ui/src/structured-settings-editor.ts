@@ -399,7 +399,6 @@ function appendNodeContent(
     }
 }
 
-/** Lower one structured field value into navigable TUI rows. */
 export function buildStructuredRows(
     node: SettingsValueNode,
     value: JsonValue | undefined,
@@ -437,7 +436,6 @@ export function setStructuredValueAtPath(
     child: JsonValue,
 ): JsonValue {
     const [segment, ...remaining] = path;
-
     if (segment === undefined) return structuredClone(child);
 
     if (isPathIndex(segment)) {

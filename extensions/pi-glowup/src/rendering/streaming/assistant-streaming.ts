@@ -34,7 +34,6 @@ type ComponentState = {
     presented: Presentation | undefined;
 };
 
-// What Pi last received: the raw message, its streaming flag, and each displayed text.
 type Presentation = {
     readonly raw: AssistantMessage;
     readonly streaming: boolean;
@@ -68,7 +67,7 @@ function samePresentation(previous: Presentation | undefined, next: Presentation
 }
 
 /**
- * Patches the exported host component before its Markdown constructor trims text.
+ * Patches the exported host component before its updateContent trims text.
  * Only display clones reach Pi; clone-triggered invalidations always restart from
  * the retained raw message and preserve the host's omitted streaming flag.
  */

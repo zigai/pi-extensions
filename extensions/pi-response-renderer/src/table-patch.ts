@@ -238,7 +238,7 @@ function createTablePatch(host: TableHost, settings: TableStyle) {
                 // Markdown cache; a repaint request here would render again forever.
                 const clearCache = () => host.invalidate.call(this);
 
-                // Pi 1.5's setText clears the outer cache, not invalidate().
+                // Pi's setText clears the outer cache, not invalidate().
                 // Boundary metadata belongs to the source, and reused table blocks
                 // must be rendered again when rebuilding that metadata.
                 if (Value.Check(sourceSchema, this)) {

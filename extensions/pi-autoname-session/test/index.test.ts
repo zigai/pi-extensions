@@ -84,7 +84,6 @@ type TestUi = {
     notify(message: string, severity: "info" | "warning" | "error"): void;
 };
 
-/** The subset of ExtensionContext the extension reads. */
 type TestContext = {
     ui: TestUi;
     hasUI: boolean;
@@ -823,8 +822,6 @@ describe("extension orchestration", () => {
             const deferred = createDeferred<AssistantMessage>();
             harness.faux.setResponses([async () => deferred.promise]);
             const settled = harness.settled();
-
-            // The user renames while the picker request is in flight.
             harness.rename("user chosen name");
             deferred.resolve(fauxAssistantMessage("model picked name"));
             await settled;
@@ -1086,7 +1083,6 @@ describe("extension orchestration", () => {
                 }),
             );
 
-            // A named session whose stored state carries a large old-branch baseline.
             harness.session.appendMessage({
                 role: "user",
                 content: "Old branch work",
@@ -1101,7 +1097,6 @@ describe("extension orchestration", () => {
             harness.session.appendSessionInfo("Manual name");
             await harness.startSession();
 
-            // Navigate to the session root: the extension rebases onto the new branch.
             const oldLeafId = harness.session.getLeafId();
             harness.session.resetLeaf();
             await harness.navigateTree(harness.session.getLeafId(), oldLeafId);
@@ -1139,7 +1134,6 @@ describe("extension orchestration", () => {
                 baselineAtMs: 0,
             });
 
-            // Navigate away: the stored state is no longer on the active branch.
             harness.session.resetLeaf();
             appendUserMessage(harness.session, "New branch work", 2);
             await harness.startSession();
@@ -1147,7 +1141,6 @@ describe("extension orchestration", () => {
             harness.faux.setResponses([fauxAssistantMessage("New branch name")]);
             await harness.settled();
 
-            // The abandoned-branch state must not suppress initial naming.
             expect(harness.faux.state.callCount).toBe(1);
             expect(harness.pi.sessionName).toBe("New branch name");
         } finally {
@@ -1294,11 +1287,9 @@ describe("extension orchestration", () => {
             expect(harness.faux.state.callCount).toBe(0);
             expect(allDiagnostics(harness)).toContain("no available authentication");
 
-            // No fresh activity: bounded retry policy suppresses an immediate retry.
             await harness.settled();
             expect(harness.faux.state.callCount).toBe(0);
 
-            // Authentication becomes available without a model-select event.
             harness.registry.setAuth({ ok: true, apiKey: "key" });
             appendUserMessage(harness.session, "More work", 2);
             harness.faux.setResponses([fauxAssistantMessage("Fixed name")]);
@@ -1350,12 +1341,10 @@ describe("extension orchestration", () => {
                 `picker model "${modelReference}" is not available`,
             );
 
-            // More activity: still blocked.
             appendUserMessage(harness.session, "More work", 2);
             await harness.settled();
             expect(harness.faux.state.callCount).toBe(0);
 
-            // The model becomes resolvable and the user switches models.
             harness.registry.setModelAvailable(harness.model);
             await harness.modelSelect();
             harness.faux.setResponses([fauxAssistantMessage("Ghost name")]);
@@ -1381,11 +1370,9 @@ describe("extension orchestration", () => {
             expect(harness.pi.sessionName).toBeUndefined();
             expect(allDiagnostics(harness)).toContain("unusable name");
 
-            // No fresh activity: no retry.
             await harness.settled();
             expect(harness.faux.state.callCount).toBe(1);
 
-            // Fresh activity re-reaches the trigger: the retry succeeds.
             appendUserMessage(harness.session, "More details", 2);
             harness.faux.setResponses([fauxAssistantMessage("Fix parser tests")]);
             await harness.settled();
@@ -1439,7 +1426,6 @@ describe("extension orchestration", () => {
             expect(allDiagnostics(harness)).toContain("could not complete its request");
             expect(allDiagnostics(harness)).not.toContain("SECRET-PATH");
 
-            // No fresh activity: no immediate retry.
             await harness.settled();
             expect(harness.faux.state.callCount).toBe(1);
         } finally {
@@ -1470,11 +1456,9 @@ describe("extension orchestration", () => {
             expect(harness.pi.sessionName).toBeUndefined();
             expect(allDiagnostics(harness)).toContain("timed out");
 
-            // No fresh activity: no retry.
             await harness.settled();
             expect(harness.faux.state.callCount).toBe(1);
 
-            // Fresh activity: the retry succeeds.
             appendUserMessage(harness.session, "More work", 2);
             harness.faux.setResponses([fauxAssistantMessage("Timely name")]);
             await harness.settled();

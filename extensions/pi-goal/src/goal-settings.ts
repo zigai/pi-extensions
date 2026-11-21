@@ -215,7 +215,6 @@ function resolvePromptPath(config: LoadedConfig | undefined): string | null {
   return isAbsolute(expanded) ? expanded : resolve(dirname(config.configPath), expanded);
 }
 
-/** Parse global and trusted-project settings into the runtime configuration. */
 export function loadGoalSettings(
   ctx: GoalSettingsContext,
   agentDir: string = getAgentDir(),

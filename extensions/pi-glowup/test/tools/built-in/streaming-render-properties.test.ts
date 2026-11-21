@@ -102,7 +102,6 @@ test("keeps append-truncate-rewrite write previews cache-equivalent across width
                 const truncatedContent = sourceLines.slice(0, scenario.truncateAt).join("\n");
                 checkUpdate(truncatedContent);
 
-                // Keep the changed row visible in both head and moving-tail viewports.
                 const longSuffix = `\n// ${"x".repeat(40)}\nexport const tail = true;\n`;
                 const prefixA = `export const head = 'AAAA_${scenario.rewrittenSuffix}';`;
                 const prefixB = `export const head = 'BBBB_${scenario.rewrittenSuffix}';`;

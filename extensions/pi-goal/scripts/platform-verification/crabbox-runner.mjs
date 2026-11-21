@@ -1,5 +1,3 @@
-/** Thin Crabbox CLI wrapper for cross-platform verification tests. */
-
 import { spawn } from "node:child_process";
 import { repositoryRoot } from "./workspace-packages.mjs";
 

@@ -39,6 +39,7 @@ export type CodexCompactionReasoning = string;
 
 /** Config value that means Codex API requests should use the active Codex model. */
 export const CODEX_CURRENT_MODEL_SELECTION = "current";
+
 export const CODEX_TOOL_SCOPES: readonly CodexToolScope[] = ["codex", "all"];
 export const CODEX_APPLY_PATCH_MODES: readonly CodexApplyPatchMode[] = ["off", "openai", "all"];
 export const CODEX_WEB_SEARCH_MODES: readonly CodexWebSearchMode[] = ["cached", "indexed", "live"];
@@ -64,6 +65,7 @@ export const CODEX_CORE_EXTENSION_ID = "pi-codex-core";
 export const CODEX_CORE_CONFIG_BASENAME = "config.json";
 export const CODEX_CORE_CONFIG_SCHEMA_BASENAME = "config.schema.json";
 export const CODEX_CORE_CONFIG_SCHEMA_REFERENCE = `./${CODEX_CORE_CONFIG_SCHEMA_BASENAME}`;
+
 const StringSchema = JsonStringDecoder;
 const NodeErrorSchema = compileSchema(Type.Object({ code: Type.Optional(Type.String()) }));
 const ConfigReadOptionsSchema = compileSchema(
@@ -255,7 +257,6 @@ export class CodexConfigStartupError extends Error {
     }
 }
 
-/** Read startup configuration and surface safe diagnostics as startup defects. */
 export function readCodexCoreStartupConfig(
     options: string | CodexCoreConfigReadOptions = {},
 ): CodexCoreConfig {
@@ -266,7 +267,6 @@ export function readCodexCoreStartupConfig(
     return result.config;
 }
 
-/** Resolves `current` or missing model selections to the active Codex request model. */
 export function resolveCodexRequestModel(
     configuredModel: string | undefined,
     currentModel: string | undefined,
@@ -286,7 +286,6 @@ export function resolveCodexRequestModel(
     return activeModel;
 }
 
-/** Formats model selections for user-facing Pi settings/status text. */
 export function formatCodexModelSelection(configuredModel: string | undefined): string {
     const configuredText = configuredModel?.trim();
     const configured =

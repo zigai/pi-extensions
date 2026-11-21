@@ -343,7 +343,6 @@ const initialShellHighlightState: ShellHighlightState = {
     subcommandSeen: false,
 };
 
-// Every color a highlighted shell line can contain.
 const SHELL_LINE_COLORS: readonly ThemeColor[] = [
     "dim",
     "syntaxFunction",
@@ -1033,6 +1032,7 @@ function createScriptCallComponent(
         let promptPrefix = `${renderShellPrompt(theme)} `;
         if (options.label !== undefined)
             promptPrefix = `${theme.bold(options.label)} ${promptPrefix}`;
+
         let annotation = promptDuration(theme, state, options.durationMs);
         const background = options.background === true;
 

@@ -23,7 +23,6 @@ function createSchemaValidator<TValue>(
     };
 }
 
-/** Creates a runtime validator backed by TypeBox's schema compiler. */
 export function compileSchema<const T extends TSchema>(schema: T): SchemaValidator<Static<T>> {
     const validator = Compile(schema);
 
@@ -35,7 +34,6 @@ export function compileSchema<const T extends TSchema>(schema: T): SchemaValidat
     });
 }
 
-/** Parses a boundary value with a compiled TypeBox validator. */
 export function parseWithSchema<TValue>(
     validator: SchemaValidator<TValue>,
     value: unknown,
@@ -46,5 +44,4 @@ export function parseWithSchema<TValue>(
 /** Shared scalar decoder for host APIs whose declarations expose an imprecise value type. */
 export const StringDecoder = compileSchema(Type.String());
 
-/** Shared decoder for Node failures that carry a filesystem-style error code. */
 export const NodeErrorCodeDecoder = compileSchema(Type.Object({ code: Type.String() }));

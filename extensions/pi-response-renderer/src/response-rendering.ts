@@ -218,7 +218,7 @@ async function patchMarkdownFences(owner: symbol): Promise<MarkdownFencesPatchRe
             },
     );
 
-    // Pi 1.5 reuses Markdown instances and calls setText even when only the
+    // Pi reuses Markdown instances and calls setText even when only the
     // streaming transform context changes. Keep the plain-thinking clone fresh.
     patch.markdownSetTextPatch = installLinkedMethodPatch(
         Markdown.prototype,

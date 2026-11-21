@@ -15,7 +15,6 @@ type RegistrationRecord = {
     readonly command: RegisteredTypedCommand;
 };
 
-/** Narrow registry subscription consumed by live Pi UI sessions. */
 export type TypedCommandSubscription = {
     onChanged(listener: TypedCommandRegistryListener): () => void;
 };
@@ -207,7 +206,6 @@ export class TypedCommandRegistry implements TypedCommandLookup, TypedCommandSub
     }
 }
 
-/** Create an isolated command registry for an application composition root or test. */
 export function createTypedCommandRegistry(): TypedCommandRegistry {
     return new TypedCommandRegistry();
 }

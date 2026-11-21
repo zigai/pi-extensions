@@ -398,7 +398,6 @@ describe("syntax highlighter lifecycle", () => {
                     highlightSyntaxCode(source, "python", { invalidate });
                     capacity.abort();
 
-                    // Deliver the retry while its owner's accepted request still occupies a slot.
                     await Promise.resolve();
 
                     return replacement;

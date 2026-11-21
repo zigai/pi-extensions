@@ -115,7 +115,7 @@ test("Codex raw streams price concurrent requests by their final payload, withou
         assert.equal(regular.stopReason, "stop", regular.errorMessage);
         assert.equal(prioritized.stopReason, "stop", prioritized.errorMessage);
 
-        // Pi 1.5 additionally reports totalFromProvider; this test owns tier pricing.
+        // Pi additionally reports totalFromProvider; this test owns tier pricing.
         assert.partialDeepStrictEqual(regular.usage.cost, {
             input: 1,
             output: 0.1,

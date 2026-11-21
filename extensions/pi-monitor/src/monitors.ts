@@ -124,7 +124,6 @@ export type MonitorSnapshot = StaticDecode<typeof monitorSchema>;
 export type MonitorSource = StaticDecode<typeof sourceSchema>;
 export type StopResult = StaticDecode<typeof stopOutputSchema>;
 
-/** One message for the agent: an event, or the notice that ends a monitor. */
 export type MonitorNotification = {
     readonly monitor: MonitorSnapshot;
     readonly kind: "event" | "end";
@@ -154,8 +153,6 @@ export type MonitorsOptions = {
     readonly operations: BashOperations;
     readonly directory: string;
     readonly onNotification: (notification: MonitorNotification) => void;
-
-    /** Called whenever a monitor starts or ends, for status displays. */
     readonly onChange: () => void;
 };
 
@@ -415,7 +412,6 @@ export class Monitors {
         if (!this.closed) this.onChange();
     }
 
-    /** Ends a running monitor from its own deadline or rate limit and notifies the agent. */
     private end(monitor: Monitor, state: "expired" | "flooded", notice: string): void {
         if (monitor.state !== "running") return;
 
@@ -432,7 +428,6 @@ export class Monitors {
         monitor.controller.abort();
     }
 
-    /** Ends a monitor whose source finished on its own. */
     private settle(monitor: Monitor, state: "ended" | "failed", summary: string): void {
         if (monitor.state !== "running") return;
 

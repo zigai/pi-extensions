@@ -70,7 +70,6 @@ function inactiveAutocompleteScrollInfoHandle(): AutocompleteScrollInfoHandle {
     return { update(): void {}, dispose(): void {} };
 }
 
-/** Installs or updates the autocomplete scroll/count-footer patch. */
 export function installAutocompleteScrollInfoPatch(
     config: AutocompleteScrollInfoConfig,
     target: RenderView | null = SelectList.prototype,

@@ -167,7 +167,6 @@ it("invalidates cached script rows when a capacity retry adopts another consumer
     await initializeSyntaxHighlighting({}, { preloadLanguages: ["python"] });
     const source = "values = [1, 2, 3]\nprint(sum(values))";
 
-    // The other consumer wins the shared cache while this renderer waits for capacity.
     const other = highlightSyntaxCodeAsync(source, "python");
 
     for (let index = 0; index < 98; index += 1)
@@ -183,7 +182,6 @@ it("invalidates cached script rows when a capacity retry adopts another consumer
         (invalidate) => {
             observeSyntaxHighlightSource(source, invalidate);
 
-            // One owner may have separate full-source and visible-run requests.
             highlightSyntaxCode('print("retired_run")', "python", {
                 invalidate,
                 signal: superseded.signal,

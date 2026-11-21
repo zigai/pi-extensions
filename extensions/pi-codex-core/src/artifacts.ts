@@ -4,7 +4,6 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 const ARTIFACT_ROOT_DIR = "pi-codex-core";
 
-/** Root containing extension-managed artifacts that tools may safely reopen. */
 export function resolveCodexCoreArtifactRoot(agentDir?: string): string {
     return join(agentDir ?? getAgentDir(), ARTIFACT_ROOT_DIR);
 }

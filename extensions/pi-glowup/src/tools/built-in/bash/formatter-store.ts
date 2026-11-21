@@ -15,7 +15,6 @@ export type FormatterOutputStore = {
 };
 
 export type FormatterOutputKey = {
-    /** Profile settings, language, width, and source as one stable string. */
     readonly input: string;
 
     /** The program the profile runs; its file identity is part of the key. */
@@ -120,7 +119,6 @@ export function createFormatterOutputStore(
             }),
         );
         const present = entries.filter((entry) => entry !== undefined);
-
         present.sort((left, right) => left.modified - right.modified);
 
         for (const entry of present.slice(0, present.length - PRUNED_STORED_OUTPUTS)) {

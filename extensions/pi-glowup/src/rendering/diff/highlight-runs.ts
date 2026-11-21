@@ -51,6 +51,7 @@ export type PackedDiffHighlight = {
 export type DiffHighlightOutput = {
     /** Undefined when even the plain-text grammar failed. */
     readonly highlight: PackedDiffHighlight | undefined;
+
     readonly failures: readonly string[];
 };
 
@@ -76,7 +77,6 @@ type PackState = {
     appearanceSpecific: boolean;
 };
 
-/** Highlights diff metadata with Pierre and keeps only per-line text and style runs. */
 export async function renderPackedDiffHighlight(
     highlighter: HighlighterGeneric<string, string>,
     metadata: FileDiffMetadata,

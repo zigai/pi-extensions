@@ -4,7 +4,6 @@ type InstallThinkingLevelStatusPatch = (
     options: ThinkingLevelStatusPatchOptions,
 ) => Promise<() => void>;
 
-/** Owns one thinking-status patch activation and its cleanup for the current Pi session. */
 export class ThinkingStatusPatchSession {
     private generation = 0;
     private activation: Promise<void> | undefined;

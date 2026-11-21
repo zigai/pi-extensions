@@ -45,7 +45,6 @@ export function emptyHighlightedDiffSet(): HighlightedDiffSet {
     };
 }
 
-/** Lazily highlights Pierre diff metadata for terminal themes. */
 export async function loadHighlightedDiff(metadata: FileDiffMetadata): Promise<HighlightedDiffSet> {
     return (await loadHighlightedDiffResult(metadata)).value;
 }
@@ -107,7 +106,6 @@ async function loadHighlightedDiffUncached(
     return { value: { dark, light }, failed: false };
 }
 
-/** Turns a highlighted diff line into terminal spans with the row's emphasis styling. */
 export function flattenHighlightedLine(
     line: HighlightedDiffLine | undefined,
     emphasisBg: string,
@@ -195,7 +193,6 @@ export function flattenHighlightedLine(
         : [];
 }
 
-/** Normalizes a Pierre metadata line for terminal display. */
 export function cleanDiffLine(line: string | undefined): string {
     return expandTerminalTabs(cleanLastNewline(line ?? "").replace(/\r$/, ""), 4, 0).text;
 }

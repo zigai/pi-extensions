@@ -128,7 +128,6 @@ export const PRELOADED_SYNTAX_LANGUAGES = [
     "json",
 ] as const satisfies ReadonlyArray<BundledLanguage>;
 
-/** Normalizes a Markdown/tool language hint to a Shiki bundled language when known. */
 export function normalizeSyntaxLanguage(
     language: string | undefined | null,
 ): SyntaxLanguage | "text" | undefined {
@@ -147,7 +146,6 @@ export function normalizeSyntaxLanguage(
     return isBundledSyntaxLanguage(normalized) ? normalized : undefined;
 }
 
-/** Infers a Shiki language from a file path or basename. */
 export function syntaxLanguageFromPath(
     filePath: string | undefined,
 ): SyntaxLanguage | "text" | undefined {
@@ -164,7 +162,6 @@ export function syntaxLanguageFromPath(
     return normalizeSyntaxLanguage(EXTENSION_LANGUAGES.get(path.extname(basename)));
 }
 
-/** Infers a Shiki language from a common script-interpreter shebang. */
 export function syntaxLanguageFromShebang(content: string | undefined): SyntaxLanguage | undefined {
     if (content === undefined || !content.startsWith("#!")) {
         return undefined;
@@ -237,7 +234,6 @@ export function syntaxLanguageFromFile(
     return syntaxLanguageFromPath(filePath) ?? syntaxLanguageFromShebang(content);
 }
 
-/** Returns true when Shiki can load the language name or alias. */
 export function isBundledSyntaxLanguage(language: string): language is BundledLanguage {
     return BUNDLED_SYNTAX_LANGUAGE_NAMES.has(language);
 }
@@ -246,7 +242,6 @@ function isCustomSyntaxLanguage(language: string): language is CustomSyntaxLangu
     return CUSTOM_SYNTAX_LANGUAGES.has(language);
 }
 
-/** Returns true when Shiki can load the language, bundled or vendored. */
 export function isLoadableSyntaxLanguage(language: string): language is SyntaxLanguage {
     return isBundledSyntaxLanguage(language) || isCustomSyntaxLanguage(language);
 }

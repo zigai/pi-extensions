@@ -33,12 +33,8 @@ import type {
 
 export { quoteSerializedValue };
 
-/** Token produced from a raw typed-argument string. */
 export type Token = {
-    /** Parsed token value with surrounding quotes removed and supported escapes resolved. */
     readonly value: string;
-
-    /** Exact source slice that produced the token. */
     readonly raw: string;
 
     /** Inclusive UTF-16 offset in the input. */
@@ -47,23 +43,15 @@ export type Token = {
     /** Exclusive UTF-16 offset in the input. */
     readonly end: number;
 
-    /** Quote character used anywhere in the token, when present. */
     readonly quote?: "'" | '"';
-
-    /** Whether at least one escape sequence was consumed. */
     readonly escaped: boolean;
 };
 
-/** Token stream produced from a raw typed-argument string. */
 export type TokenizeResult = {
-    /** Parsed tokens with quotes removed and escapes resolved. */
     readonly tokens: readonly string[];
-
-    /** Whether the input ended before a quoted string was closed. */
     readonly unterminatedQuote: boolean;
 };
 
-/** Lossless tokenization result used by completions and diagnostics that need source spans. */
 export type LexResult = {
     readonly tokens: readonly Token[];
     readonly unterminatedQuote: boolean;
@@ -130,7 +118,6 @@ function isOutsideEscapeTarget(char: string): boolean {
     return /\s/.test(char) || char === "\\" || char === '"' || char === "'" || char === ",";
 }
 
-/** Lex typed-command arguments while preserving raw token spans and quote metadata. */
 export function lexTypedArgumentString(input: string): LexResult {
     const tokens: Token[] = [];
     let current = "";
@@ -252,7 +239,6 @@ export function lexTypedArgumentString(input: string): LexResult {
 /** Tokenize typed-command arguments using the same quote and escape rules as the parser. */
 export function tokenizeTypedArgumentString(input: string): TokenizeResult {
     const result = lexTypedArgumentString(input);
-
     return {
         tokens: result.tokens.map((token) => token.value),
         unterminatedQuote: result.unterminatedQuote,
@@ -913,7 +899,6 @@ function subcommandRouteIssue<TCommand extends CoreRegisteredTypedCommand>(
     return parsed;
 }
 
-/** Resolve a CLI-style subcommand and parse against only the selected grammar branch. */
 export function parseTypedCommandInvocation<TCommand extends CoreRegisteredTypedCommand>(
     command: TCommand,
     rawArgs: string,
@@ -1053,7 +1038,6 @@ function typedSources<TDefinitions extends ArgumentDefinitions>(
     return typed;
 }
 
-/** Convert parser details using the exact compiled grammar that produced them. */
 export function toTypedParseResult<TDefinitions extends ArgumentDefinitions>(
     grammar: CompiledCommand<TDefinitions>,
     parsed: ParsedCommandArguments,
@@ -1089,7 +1073,6 @@ export function toTypedParseResult<TDefinitions extends ArgumentDefinitions>(
     };
 }
 
-/** Return whether a parsed command result contains at least one issue of the given kinds. */
 export function hasIssuesOfKind(
     parsed: ParsedCommandArguments,
     kinds: ParseIssue["kind"][],

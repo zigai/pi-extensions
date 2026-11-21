@@ -47,7 +47,6 @@ const nodeErrorParser = {
     },
 };
 
-/** Complete generated settings document used by the README and test fixtures. */
 export const DEFAULT_GLOWUP_CONFIG_JSON = {
     $schema: `./schemas/${GLOWUP_CONFIG_SCHEMA_BASENAME}`,
     ...extensionSettingsDefinition.defaultSettings,
@@ -153,7 +152,6 @@ function configSchemaErrorSummary(input: JsonValue): string {
     return messages.join("; ") || "invalid settings shape";
 }
 
-/** Create default in-memory configuration without reading or modifying any files. */
 export function createDefaultGlowupConfig(reportWarning?: ConfigWarningReporter): GlowupConfig {
     return normalizeGlowupConfig(
         Value.Decode(settingsSchema, extensionSettingsDefinition.defaultSettings),
@@ -161,7 +159,6 @@ export function createDefaultGlowupConfig(reportWarning?: ConfigWarningReporter)
     );
 }
 
-/** Parse a partial settings object with the definition's defaults. */
 export function parseGlowupConfig(
     input: unknown,
     options: {

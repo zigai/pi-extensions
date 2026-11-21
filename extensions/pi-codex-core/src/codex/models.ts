@@ -8,7 +8,6 @@ export type CodexModelRequestProfile = {
     readonly multiAgentReasoningEffort?: string | undefined;
 };
 
-/** Current text models surfaced by the Codex settings UI, newest first. */
 export const CODEX_TEXT_MODEL_CHOICES = [
     "gpt-6.1-sol",
     "gpt-6-astra",

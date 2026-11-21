@@ -28,10 +28,8 @@ import {
     type SlashCommandInfo,
 } from "@earendil-works/pi-coding-agent";
 
-/** Package display name used in user-visible extension messages. */
 export const extensionName = "Pi Enhanced Skills";
 
-/** Generated npm package name. */
 export const packageName = "pi-enhanced-skills";
 
 const INLINE_COMMAND_PATTERN = /(^|[ \t])!`([^`\r\n]+)`/gm;
@@ -216,7 +214,6 @@ type TextBlockLike = {
     readonly text: string;
 };
 
-/** Register enhanced cross-harness skill behavior. */
 export default function extension(pi: SkillExtensionAPI, options?: ExtensionOptions): void {
     const skillUsageStore =
         options?.skillUsageStore ?? createJsonlSkillUsageStore(defaultSkillUsageLogPath());

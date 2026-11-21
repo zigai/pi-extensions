@@ -43,7 +43,6 @@ function hasMethods(value: unknown): value is Target {
     );
 }
 
-// Also validate Pi's private model shape before use.
 function selectedModel(target: Target): { provider: string; id: string; raw: unknown } | undefined {
     if (!Array.isArray(target.filteredModels) || typeof target.selectedIndex !== "number")
         return undefined;

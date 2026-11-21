@@ -10,7 +10,6 @@ export type TypedCommandRoute<TCommand extends CoreRegisteredTypedCommand> = {
     readonly status: "root" | "subcommand" | "missing" | "unknown";
 };
 
-/** Resolve the first argument token against a command's CLI-style subcommands. */
 export function resolveTypedCommandRoute<TCommand extends CoreRegisteredTypedCommand>(
     command: TCommand,
     rawArgs: string,
@@ -51,7 +50,6 @@ export function resolveTypedCommandRoute<TCommand extends CoreRegisteredTypedCom
     return { root: command, command, rawArgs, status: "missing" };
 }
 
-/** Return a subcommand by canonical name or alias. */
 export function findTypedSubcommand(
     command: CoreRegisteredTypedCommand,
     spelling: string,

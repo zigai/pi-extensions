@@ -217,7 +217,6 @@ let demandInitialization:
 
 export type SyntaxHighlighterFactory = CreateHighlighterFactory<string, string>;
 
-/** Creates the shared owner of bundled and externally registered language/theme names. */
 export const createSyntaxHighlighter: SyntaxHighlighterFactory = async (options) => {
     const { createBundledHighlighter, bundledLanguages, bundledThemes, createOnigurumaEngine } =
         await import("shiki");
@@ -256,7 +255,7 @@ async function initializeSyntaxHighlightingOnDemand(): Promise<SyntaxState> {
     return initializeSyntaxHighlighting(demandInitialization?.env, demandInitialization?.options);
 }
 
-/** Initializes the central Shiki highlighter once during extension startup. */
+/** Initializes the central Shiki highlighter once; later calls share the first result. */
 export async function initializeSyntaxHighlighting(
     env: NodeJS.ProcessEnv = process.env,
     options: SyntaxInitializationOptions = {},
@@ -354,7 +353,6 @@ async function refreshSyntaxHighlightingOnce(
     return replaceSyntaxHighlighting(Promise.resolve(source), options);
 }
 
-/** Returns true when syntax highlighting is available for synchronous render calls. */
 export function isSyntaxHighlightingReady(): boolean {
     return syntaxState?.status === "ready";
 }
@@ -375,7 +373,6 @@ export function configureSyntaxBracketPairColoring(enabled: boolean): void {
     syntaxRenderingVersion += 1;
 }
 
-/** Subscribes to central highlighter state changes for render-cache invalidation. */
 export function onSyntaxHighlightingStateChange(listener: SyntaxStateListener): () => void {
     syntaxStateListeners.add(listener);
 
@@ -1361,7 +1358,6 @@ function clearSyntaxColors(reason = "cache-clear", preserveReady = false): void 
     highlightedCodeCacheBytes = 0;
 }
 
-/** Returns bounded syntax-highlight cache usage for tests and diagnostics. */
 export function syntaxHighlightCacheStats(): SyntaxHighlightCacheStats {
     return {
         entries: highlightedCodeCache.size,
@@ -1369,7 +1365,6 @@ export function syntaxHighlightCacheStats(): SyntaxHighlightCacheStats {
     };
 }
 
-/** Returns syntax highlighter diagnostics for debug logging. */
 export function syntaxHighlighterDiagnostics(): SyntaxHighlighterDiagnostics {
     const state = syntaxState;
     const diagnostics = syntaxPreloadDiagnostics;
@@ -1418,7 +1413,6 @@ export function syntaxHighlighterDiagnostics(): SyntaxHighlighterDiagnostics {
     return result;
 }
 
-/** Disposes the central highlighter and resets syntax state for reloads or shutdown. */
 export async function disposeSyntaxHighlighting(): Promise<void> {
     resetSyntaxHighlightCache("shutdown");
     languageLoads.clear();

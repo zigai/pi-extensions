@@ -8,7 +8,6 @@ import type {
     ParseIssue,
 } from "../types.ts";
 
-/** Mutable value map owned by an argument form while the user edits fields. */
 export type FormState = Record<string, ArgumentValue>;
 
 /** One rendered form field paired with validation messages already rewritten for form labels. */
@@ -19,14 +18,12 @@ export type FormField = {
     section?: string;
 };
 
-/** Framework-independent form model shared by dense TUI and tests. */
 export type HeadlessFormModel = {
     state: FormState;
     fields: FormField[];
     initialSelection: number;
 };
 
-/** Rewrite parser issue text from CLI flag wording to form field wording when possible. */
 export function formatFormIssueMessage(issue: ParseIssue): string {
     if (issue.name === undefined) {
         return issue.message;
@@ -51,12 +48,10 @@ export function issuesByName(parsed: ParsedCommandArguments): Map<string, string
     return issues;
 }
 
-/** Return the argument names that currently have field-level parse or validation issues. */
 export function issueNames(parsed: ParsedCommandArguments): Set<string> {
     return new Set(issuesByName(parsed).keys());
 }
 
-/** Decide whether a field should be shown in missing-only mode. */
 export function shouldPromptArgument(
     name: string,
     definition: ArgumentDefinition,
@@ -78,7 +73,6 @@ export function shouldPromptArgument(
     return false;
 }
 
-/** Build initial form state, ordered fields, and first selected field from parser output. */
 export function createHeadlessFormModel(
     definitions: FlatArgumentDefinitions,
     parsed: ParsedCommandArguments,

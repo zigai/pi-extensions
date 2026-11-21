@@ -3,7 +3,6 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { loadReleasePackages, type ReleasePackage } from "./publish-workspace.ts";
 
-/** Resolves scoped or unscoped package tags against actual independent workspace versions. */
 export function selectReleasePackage(
     packages: readonly ReleasePackage[],
     tag: string,

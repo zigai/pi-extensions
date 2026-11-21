@@ -39,10 +39,8 @@ export const GLOWUP_RENDERING_VERSION = 3 as const;
 /** Explicit request to keep a tool's own Pi renderer. Omission means automatic selection. */
 export type GlowupRenderingPreference = "preserve";
 
-/** Execution phase used by declarative Glowup renderers. */
 export type GlowupExecutionPhase = "pending" | "running" | "complete";
 
-/** Context available while rendering a tool call. */
 export type GlowupCallContext = {
     readonly toolName: string;
     readonly toolCallId: string;
@@ -57,20 +55,17 @@ export type GlowupCallContext = {
     readonly hasResult?: boolean;
 };
 
-/** Context available while rendering a tool result. */
 export type GlowupResultContext<Args = unknown> = GlowupCallContext & {
     /** Original call arguments, parsed by the adapter when it provides a parser. */
     readonly args: Args;
 };
 
-/** Minimal result shape used by the generic renderer. */
 export type GlowupToolResult = {
     readonly content?: unknown;
     readonly details?: unknown;
     readonly structuredContent?: unknown;
 };
 
-/** Parses a serialized runtime value into an adapter-owned value. */
 export type GlowupParser<Value> = (value: JsonValue) => Value | undefined;
 
 type GlowupRendererBase<Args> = {
@@ -132,13 +127,11 @@ type GlowupCallAndResultRenderer<Args, Result> = GlowupRendererBase<Args> &
         ) => GlowupNode | undefined;
     };
 
-/** Public rendering adapter implemented by a tool owner. */
 export type GlowupRenderer<Args = unknown, Result = GlowupToolResult> =
     | GlowupCallRenderer<Args>
     | GlowupResultRenderer<Args, Result>
     | GlowupCallAndResultRenderer<Args, Result>;
 
-/** Rendering property accepted on a Pi tool definition. */
 export type GlowupRendering<Args = unknown, Result = GlowupToolResult> =
     | GlowupRenderingPreference
     | GlowupRenderer<Args, Result>;
@@ -152,7 +145,6 @@ export function defineGlowupRenderer<
     return renderer;
 }
 
-/** Tool definition carrying passive Glowup rendering metadata. */
 export type ToolWithGlowupRendering<
     Definition extends object,
     Args = unknown,
@@ -161,7 +153,6 @@ export type ToolWithGlowupRendering<
     readonly glowupRendering: GlowupRendering<Args, Result>;
 };
 
-/** Attaches Glowup rendering metadata while preserving the complete tool-definition type. */
 export function withGlowupRendering<
     Definition extends object,
     Args = unknown,

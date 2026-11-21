@@ -16,7 +16,6 @@ function detailedHelpOptions(
     return undefined;
 }
 
-/** Notify the user with generated detailed help using resolved Pi appearance settings. */
 export function notifyDetailedHelp<TCommand extends RegisteredTypedCommand>(
     ctx: ExtensionContext,
     command: TCommand,

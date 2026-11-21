@@ -6,6 +6,7 @@ import {
 } from "./presentation-config.ts";
 
 export const PI_TYPED_COMMANDS_CONFIG_SCHEMA_REFERENCE = "./config.schema.json";
+
 const JSON_SCHEMA_DRAFT_URI = "https://json-schema.org/draft/2020-12/schema";
 const PI_TYPED_COMMANDS_CONFIG_SCHEMA_ID =
     "https://raw.githubusercontent.com/zigai/pi-tweaks/master/packages/pi-typed-args/config.schema.json";
@@ -239,11 +240,9 @@ export const PiTypedCommandsConfigSchema = Type.Object(
     { additionalProperties: true },
 );
 
-/** Parsed extension configuration after TypeBox has checked the JSON boundary value. */
 export type PiTypedCommandsConfig = Static<typeof PiTypedCommandsConfigSchema>;
 export type PiTypedCommandsAppearanceConfig = NonNullable<PiTypedCommandsConfig["appearance"]>;
 
-/** JSON Schema document published for persisted pi-typed-args configuration. */
 export type PiTypedCommandsConfigJsonSchema = typeof PiTypedCommandsConfigSchema & {
     readonly $schema: typeof JSON_SCHEMA_DRAFT_URI;
     readonly $id: typeof PI_TYPED_COMMANDS_CONFIG_SCHEMA_ID;

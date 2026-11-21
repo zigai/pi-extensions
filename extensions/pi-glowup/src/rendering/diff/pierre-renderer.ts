@@ -434,8 +434,6 @@ export type PierreDiffRenderContext = {
 export type PierreDiffRenderOptions = {
     readonly expanded: boolean;
     readonly mutationSettings?: MutationSettings;
-
-    /** Preserve apply_patch's previous behavior of showing every row when expanded. */
     readonly expandedRows?: "viewport" | "full";
 };
 
@@ -487,7 +485,6 @@ function addOneWhenDefined(value: number | undefined): number | undefined {
     return value === undefined ? undefined : value + 1;
 }
 
-/** Returns whether the configured width/content policy permits a split diff. */
 export function shouldRenderSideBySideDiff(
     width: number,
     metadata: PierreRenderableDiffPayload["metadata"],
@@ -496,7 +493,6 @@ export function shouldRenderSideBySideDiff(
     return shouldRenderSideBySide(width, metadata, layout, configuredDiffLineNumberStyle());
 }
 
-/** Renders a replayable Pierre diff payload with lazy syntax highlighting. */
 export function renderPierreDiff(
     payload: PierreDiffPayload,
     theme: GlowupRenderTheme,
@@ -527,7 +523,6 @@ export function renderPierreDiff(
     return component;
 }
 
-/** Reads a Pierre payload from result details when present and safe to render. */
 export function getPierreDiffPayloadFromDetails(
     details: unknown,
     limits?: DiffRenderLimits,
@@ -547,7 +542,6 @@ export type PierreDiffHighlightStats = {
     readonly queueRunning: boolean;
 };
 
-/** Returns bounded lazy-diff scheduler stats for diagnostics. */
 export function pierreDiffHighlightStats(): PierreDiffHighlightStats {
     const stats = diffHighlightScheduler.stats();
     return {

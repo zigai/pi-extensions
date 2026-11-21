@@ -14,7 +14,6 @@ type DiffRowBuildOptions = {
 
 type UnifiedLineRow = Extract<UnifiedDiffRow, { readonly kind: "line" }>;
 
-/** Builds unified Pierre rows from metadata and optional highlighted lines. */
 export function buildUnifiedDiffRows(
     metadata: FileDiffMetadata,
     highlighted: HighlightedDiffCode,
@@ -216,7 +215,6 @@ export function buildUnifiedDiffRows(
     return trimEdgeCollapsedRows(rows);
 }
 
-/** Builds side-by-side Pierre rows from metadata and optional highlighted lines. */
 export function buildSplitDiffRows(
     metadata: FileDiffMetadata,
     highlighted: HighlightedDiffCode,

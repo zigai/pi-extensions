@@ -61,7 +61,6 @@ export function parseWebRunSources(rawOutput: string): WebRunSource[] {
             continue;
         }
 
-        // Compact entries use a numbered title followed by an explicit URL line.
         if (/^\d+\.\s+/u.test(line) && /^\s*URL:\s*https?:\/\//u.test(lines[index + 1] ?? "")) {
             flush();
             title = cleanText(line.replace(/^\d+\.\s+/u, ""));
@@ -186,7 +185,6 @@ function readableExcerpt(
 
         const available = MAX_EXCERPT_CHARS - chars;
         if (line.length > available) {
-            // End an oversized line at a word boundary, not in the middle of a raw page.
             paragraph.push(line.slice(0, available).replace(/\s+\S*$/u, "") + "…");
             omitted = true;
             break;
@@ -202,7 +200,6 @@ function readableExcerpt(
     return { paragraphs, omitted };
 }
 
-/** A result section produced by a click, or by an open that addressed an earlier page. */
 export type WebRunReferenceSection = {
     readonly command: "click" | "open";
     readonly refId: string;

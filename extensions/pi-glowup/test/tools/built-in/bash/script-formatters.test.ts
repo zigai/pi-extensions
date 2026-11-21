@@ -337,7 +337,6 @@ describe("script formatter settings", () => {
             expect.objectContaining({ language: "ruby", outcome: "no-profile" }),
         ]);
 
-        // stderr goes only to the private log, never to user-facing warnings.
         expect(warnings.join("\n")).not.toContain("formatter detail");
 
         configureRenderDiagnostics(undefined);
@@ -800,7 +799,7 @@ describe("script formatter settings", () => {
             expect(existsSync(marker)).toBe(true);
             expect(getScriptFormatterWorkload()).toEqual({ active: 1, queued: 0 });
             const pid = Number(readFileSync(marker, "utf8"));
-            process.kill(pid, 0); // Fallback happened while the real child still existed.
+            process.kill(pid, 0);
             await vi.waitUntil(() => getScriptFormatterWorkload().active === 0);
             expect(() => process.kill(pid, 0)).toThrow("ESRCH");
             expect(warnings).toHaveLength(1);
@@ -835,7 +834,6 @@ describe("script formatter settings", () => {
         for (const code of ["one", "two", "three", "four"]) {
             const invocation = { label: "Python", language: "python", code };
 
-            // Both misses happen before the first await and share one formatter job.
             const results = await Promise.all([
                 formatScriptInvocation(invocation, formatter),
                 formatScriptInvocation(invocation, formatter),
@@ -1137,7 +1135,6 @@ process.stdout.write(out + "\n");
 
         expect([commented, defined]).toEqual([undefined, undefined]);
 
-        // jqfmt drops definitions, so the program is never handed to it.
         expect(fake.calls()).toEqual([]);
     });
 

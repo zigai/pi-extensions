@@ -15,10 +15,8 @@ import type {
     CoreRegisteredTypedCommand,
 } from "./types.ts";
 
-/** Style category for one segment of a typed command usage line. */
 export type CommandUsagePartKind = "label" | "command" | "positional" | "flag" | "detail" | "muted";
 
-/** One renderable segment of a typed command usage line. */
 export type CommandUsagePart = {
     kind: CommandUsagePartKind;
     text: string;
@@ -28,7 +26,6 @@ type UsageFormatOptions = {
     showTypes?: boolean;
 };
 
-/** Metadata switches for detailed help output. */
 export type DetailedHelpMetadataOptions = {
     types?: boolean;
     defaults?: boolean;
@@ -38,7 +35,6 @@ export type DetailedHelpMetadataOptions = {
     enumValues?: boolean;
 };
 
-/** Options for generated detailed help output. */
 export type DetailedHelpFormatOptions = {
     style?: "compact" | "contextual";
     metadata?: DetailedHelpMetadataOptions;
@@ -144,7 +140,6 @@ function formatArgumentUsage(
     return `[${text}]`;
 }
 
-/** Format a compact usage string such as `/deploy env [--ref=main]`. */
 export function formatCommandUsage<TDefinitions extends ArgumentDefinitions>(
     command: CoreRegisteredTypedCommand<TDefinitions>,
     options: UsageFormatOptions = {},
@@ -174,7 +169,6 @@ export function formatCommandUsage<TDefinitions extends ArgumentDefinitions>(
     return `/${commandName} ${parts.join(" ")}`;
 }
 
-/** Format the one-line editor helper text shown below the Pi editor. */
 export function formatHelperLine<TDefinitions extends ArgumentDefinitions>(
     command: CoreRegisteredTypedCommand<TDefinitions>,
     options: UsageFormatOptions = {},
@@ -182,7 +176,6 @@ export function formatHelperLine<TDefinitions extends ArgumentDefinitions>(
     return `usage: ${formatCommandUsage(command, options)}`;
 }
 
-/** Format the editor helper as styled text segments for TUI rendering. */
 export function formatHelperLineParts<TDefinitions extends ArgumentDefinitions>(
     command: CoreRegisteredTypedCommand<TDefinitions>,
     options: UsageFormatOptions = {},
@@ -314,7 +307,6 @@ function detailedDefault(definition: ArgumentDefinition): string {
     return "";
 }
 
-/** Format detailed multi-line help for a registered typed command. */
 export function formatDetailedHelp<TDefinitions extends ArgumentDefinitions>(
     command: CoreRegisteredTypedCommand<TDefinitions>,
     options?: DetailedHelpFormatOptions,
@@ -421,7 +413,6 @@ export function formatDetailedHelp<TDefinitions extends ArgumentDefinitions>(
     return lines.join("\n");
 }
 
-/** Format issue messages as a bullet list for Pi notifications. */
 export function formatIssues(messages: string[]): string {
     return messages.map((message) => `• ${message}`).join("\n");
 }

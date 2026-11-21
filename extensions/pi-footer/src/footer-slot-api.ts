@@ -15,9 +15,7 @@ const FOOTER_SLOT_STATE = Symbol.for("zigai.pi-footer.slot-state.v1");
 const CUSTOM_SLOT_ID_REGEX = new RegExp(FOOTER_CUSTOM_SLOT_ID_PATTERN);
 const HEX_COLOR_REGEX = /^#[0-9a-fA-F]{6}$/;
 
-/** Registration details for a custom pi-footer slot. */
 export type FooterSlotRegistration = {
-    /** Namespaced custom slot id, for example `my-extension.status`. */
     readonly id: string;
 
     /** Side used when the user has not placed or hidden this slot in config. */
@@ -30,12 +28,10 @@ export type FooterSlotRegistration = {
     readonly colors?: SegmentColors;
 };
 
-/** Mutable handle returned by `registerFooterSlot`. */
 export type FooterSlotHandle = {
     /** Replace this slot's visible text. Empty or whitespace-only text hides the slot. */
     setText(text: string): void;
 
-    /** Hide this slot while keeping its registration and default placement. */
     clear(): void;
 
     /** Remove this slot registration. Stale handles become inert after disposal. */
@@ -143,7 +139,6 @@ function emitFooterSlotUpdates(state: FooterSlotState): void {
     }
 }
 
-/** Register or replace a custom footer slot for other extensions to update. */
 export function registerFooterSlot(registration: FooterSlotRegistration): FooterSlotHandle {
     const state = getFooterSlotState();
     const id = parseFooterCustomSlotId(registration.id);
@@ -218,7 +213,6 @@ export function registerFooterSlot(registration: FooterSlotRegistration): Footer
     };
 }
 
-/** Subscribe to custom footer slot changes. Intended for pi-footer internals. */
 export function subscribeFooterSlotUpdates(listener: () => void): () => void {
     const state = getFooterSlotState();
     state.listeners.add(listener);
@@ -228,7 +222,6 @@ export function subscribeFooterSlotUpdates(listener: () => void): () => void {
     };
 }
 
-/** Return visible custom footer slots. Intended for pi-footer internals. */
 export function getFooterSlotSnapshots(): FooterSlotSnapshot[] {
     const snapshots: FooterSlotSnapshot[] = [];
     for (const slot of getFooterSlotState().slots.values()) {

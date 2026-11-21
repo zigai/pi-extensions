@@ -17,14 +17,8 @@ import type { CompletionCapabilities } from "../completions.ts";
 export type OpenArgumentFormOptions = {
     readonly appearance: ResolvedPiTypedCommandsAppearance;
     readonly signal?: AbortSignal;
-
-    /** Title already adapted from any Pi-specific form-title callback. */
     readonly title?: string;
-
-    /** Runtime capabilities used by completion-backed form controls. */
     readonly completionCapabilities?: CompletionCapabilities;
-
-    /** Receives the exact submit input after a dense TUI form closes successfully. */
     readonly onTuiSubmitInput?: (data: string) => void;
 };
 

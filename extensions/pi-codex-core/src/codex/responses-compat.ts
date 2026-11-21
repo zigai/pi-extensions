@@ -13,7 +13,6 @@ export const CODEX_RESPONSES_LITE_HEADER = "x-openai-internal-codex-responses-li
 export const CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY =
     "ws_request_header_x_openai_internal_codex_responses_lite";
 
-/** Rewrites a supported Codex Responses payload to the Responses Lite wire layout. */
 export function rewriteCodexResponsesPayload(
     payload: unknown,
     sessionId: string,
@@ -83,7 +82,6 @@ export function applyFastMode(
     return { ...request, service_tier: "priority" };
 }
 
-/** Removes the visible reasoning summary request while preserving hidden reasoning controls. */
 export function omitReasoningSummary(
     payload: unknown,
     expectedModelId?: string,

@@ -1,5 +1,3 @@
-/** Artifact helpers for platform verification suites. */
-
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { relative, resolve } from "node:path";
 import { Type } from "typebox";

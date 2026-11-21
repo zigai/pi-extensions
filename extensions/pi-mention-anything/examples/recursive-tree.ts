@@ -5,7 +5,6 @@ import {
     type Candidate,
 } from "@zigai/pi-mention-anything/api";
 
-/** A synthetic recursive tree: every branch can be selected or explored another level. */
 export default function (pi: ExtensionAPI): void {
     registerMention(pi, {
         id: "tree",

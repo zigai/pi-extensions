@@ -38,7 +38,6 @@ function normalizeNumber(value: number): number {
     return Number(value.toPrecision(15));
 }
 
-/** Move a numeric settings value by its schema step while respecting its bounds. */
 export function stepSettingsNumber(
     control: NumberControl,
     current: number | undefined,
@@ -55,7 +54,6 @@ export function stepSettingsNumber(
     return normalizeNumber(value);
 }
 
-/** Render the compact bounded-number bar used by slider controls. */
 export function formatSliderValue(control: NumberControl, value: number): string {
     const bounds = numberBounds(control);
     if (bounds.minimum === undefined || bounds.maximum === undefined) return String(value);
@@ -67,7 +65,6 @@ export function formatSliderValue(control: NumberControl, value: number): string
     return `${value} [${"█".repeat(filled)}${"░".repeat(segmentCount - filled)}]`;
 }
 
-/** Render a true-color terminal swatch for a CSS-style hexadecimal color. */
 export function colorSwatch(value: string): string | undefined {
     const short = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/iu.exec(value);
     const full = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})(?:[0-9a-f]{2})?$/iu.exec(value);
@@ -115,7 +112,6 @@ function pathDirectory(input: string, cwd: string) {
     return { displayDirectory, entryPrefix, resolvedDirectory };
 }
 
-/** Complete a path relative to the active Pi working directory. */
 export function completeSettingsPath(input: string, cwd: string): PathCompletionOutcome {
     if (input === "~") return { _tag: "PathCompleted", value: "~/" };
 

@@ -11,7 +11,6 @@ const MIN_DIFF_SHADE_DISTANCE = 28;
 const DIFF_SHADE_BLEND_STEP = 0.04;
 const MAX_DIFF_SHADE_BLEND = 0.4;
 
-/** Returns a stronger semantic background while retaining the base row tint. */
 export function strongerDiffBackgroundAnsi(
     rowBackgroundAnsi: string,
     semanticForegroundAnsi: string,

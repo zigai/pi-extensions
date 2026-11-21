@@ -290,7 +290,6 @@ function renderScriptInvocation(
     });
 }
 
-/** Renders a standalone interpreter call or a losslessly reflowed Bash command as a `$` prompt. */
 export function renderBashCommandCall(
     theme: GlowupRenderTheme,
     command: string,

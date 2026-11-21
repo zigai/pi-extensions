@@ -55,7 +55,6 @@ const noRequiredDefaultConflict = {
     },
 };
 
-/** YAML `ui` object accepted by typed skill argument frontmatter. */
 export const SkillArgumentUiYamlSchema = Type.Object(
     {
         widget: Type.Optional(Type.Enum(SKILL_WIDGET_VALUES)),
@@ -90,7 +89,6 @@ const nonEmptyStringArraySchema = Type.Array(Type.String({ minLength: 1 }), {
 
 const enumOptionDescriptionsSchema = Type.Record(Type.String(), Type.String({ minLength: 1 }));
 
-/** YAML DTO for a `type: string` skill argument. */
 export const StringSkillArgumentYamlSchema = Type.Object(
     {
         type: Type.Literal("string"),
@@ -108,7 +106,6 @@ export const StringSkillArgumentYamlSchema = Type.Object(
     { additionalProperties: false, allOf: [noRequiredDefaultConflict] },
 );
 
-/** YAML DTO for a `type: number` skill argument. */
 export const NumberSkillArgumentYamlSchema = Type.Object(
     {
         type: Type.Literal("number"),
@@ -125,7 +122,6 @@ export const NumberSkillArgumentYamlSchema = Type.Object(
     { additionalProperties: false, allOf: [noRequiredDefaultConflict] },
 );
 
-/** YAML DTO for a `type: boolean` skill argument. */
 export const BooleanSkillArgumentYamlSchema = Type.Object(
     {
         type: Type.Literal("boolean"),
@@ -137,7 +133,6 @@ export const BooleanSkillArgumentYamlSchema = Type.Object(
     { additionalProperties: false, allOf: [noRequiredDefaultConflict] },
 );
 
-/** YAML DTO for a `type: enum` skill argument. */
 export const EnumSkillArgumentYamlSchema = Type.Object(
     {
         type: Type.Literal("enum"),
@@ -151,7 +146,6 @@ export const EnumSkillArgumentYamlSchema = Type.Object(
     { additionalProperties: false, allOf: [noRequiredDefaultConflict] },
 );
 
-/** YAML DTO for a `type: multi_enum` or `type: multi-enum` skill argument. */
 export const MultiEnumSkillArgumentYamlSchema = Type.Object(
     {
         type: Type.Enum(["multi_enum", "multi-enum"] as const),
@@ -164,7 +158,6 @@ export const MultiEnumSkillArgumentYamlSchema = Type.Object(
     { additionalProperties: false, allOf: [noRequiredDefaultConflict] },
 );
 
-/** YAML DTO for a repeatable freeform string list. */
 export const StringListSkillArgumentYamlSchema = Type.Object(
     {
         type: Type.Enum(["string_list", "string-list"] as const),
@@ -176,7 +169,6 @@ export const StringListSkillArgumentYamlSchema = Type.Object(
     { additionalProperties: false, allOf: [noRequiredDefaultConflict] },
 );
 
-/** YAML DTO for repeatable `key=value` entries. */
 export const KeyValueSkillArgumentYamlSchema = Type.Object(
     {
         type: Type.Enum(["key_value", "key-value"] as const),
@@ -189,7 +181,6 @@ export const KeyValueSkillArgumentYamlSchema = Type.Object(
     { additionalProperties: false, allOf: [noRequiredDefaultConflict] },
 );
 
-/** YAML DTO for one concrete typed skill argument. */
 export const SkillArgumentYamlSchema = Type.Union([
     StringSkillArgumentYamlSchema,
     NumberSkillArgumentYamlSchema,
@@ -200,7 +191,6 @@ export const SkillArgumentYamlSchema = Type.Union([
     KeyValueSkillArgumentYamlSchema,
 ]);
 
-/** YAML frontmatter fields consumed by typed skill support. */
 export const SkillFrontmatterYamlSchema = Type.Object(
     {
         name: Type.Optional(Type.String()),
@@ -219,7 +209,6 @@ export const SkillFrontmatterYamlSchema = Type.Object(
     { additionalProperties: true },
 );
 
-/** Recursive top-level YAML `arguments` map schema used for the published JSON Schema. */
 export const SkillArgumentsYamlSchema = Type.Object(
     {},
     {
@@ -287,7 +276,6 @@ export type KeyValueSkillArgumentYaml = Static<typeof KeyValueSkillArgumentYamlS
 export type SkillArgumentYaml = Static<typeof SkillArgumentYamlSchema>;
 export type SkillFrontmatterYaml = Static<typeof SkillFrontmatterYamlSchema>;
 
-/** Return the JSON Schema published at `pi-typed-args/schema`. */
 export function skillArgumentsJsonSchema(): typeof SkillArgumentsYamlSchema {
     return SkillArgumentsYamlSchema;
 }

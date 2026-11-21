@@ -161,7 +161,6 @@ function safelyRender(render: () => GlowupNode | undefined): GlowupNode | undefi
     }
 }
 
-/** Creates a Pi renderer from a validated public Glowup adapter. */
 export function createProtocolRenderer(
     adapter: UnknownGlowupRenderer,
     fallback: ThirdPartyToolRenderer,
@@ -364,7 +363,6 @@ function parseRenderingAdapter(
     }
 }
 
-/** Extracts a public adapter from an unknown tool definition. */
 export function glowupRenderingAdapter(
     toolDefinition: unknown,
     propertyName = "glowupRendering",

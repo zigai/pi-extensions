@@ -2350,7 +2350,6 @@ describe("tool execution patches", () => {
         configureBuiltInToolRendererPatch(false, undefined, prototype);
         expect(toolRendererPatchStats(prototype).completedLineCacheBytes).toBe(0);
 
-        // Verify recency-specific least-recently-used eviction order (A/B -> touch A -> C evicts B)
         const lruProto = createPrototype();
         configureCompletedLineCache({ maxBytes: 8 * 1024 * 1024, maxEntries: 2 });
         let renderCountA = 0;
@@ -2412,16 +2411,16 @@ describe("tool execution patches", () => {
         expect(renderCountA).toBe(1);
         expect(renderCountB).toBe(1);
 
-        compA.render(80); // Hit on A -> moves A to MRU
+        compA.render(80);
         expect(renderCountA).toBe(1);
 
-        compC.render(80); // Inserts C -> evicts B (LRU)
+        compC.render(80);
         expect(renderCountC).toBe(1);
 
-        compA.render(80); // Hit on A
+        compA.render(80);
         expect(renderCountA).toBe(1);
 
-        compB.render(80); // Miss on B -> re-renders
+        compB.render(80);
         expect(renderCountB).toBe(2);
 
         configureBuiltInToolRendererPatch(false, undefined, lruProto);

@@ -197,9 +197,7 @@ function observedSuccessfulReadTool(sessionJsonl, expectedPath, expectedContent)
           if (readCall.arguments.path === expectedPath) {
             readCallIds.add(readCall.id);
           }
-        } catch {
-          // Ignore non-read content blocks in assistant messages.
-        }
+        } catch {}
       }
       continue;
     } catch {
@@ -214,9 +212,7 @@ function observedSuccessfulReadTool(sessionJsonl, expectedPath, expectedContent)
       ) {
         successfulReadResult = true;
       }
-    } catch {
-      // Ignore unrelated session messages.
-    }
+    } catch {}
   }
 
   return successfulReadResult;

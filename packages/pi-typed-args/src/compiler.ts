@@ -301,7 +301,6 @@ class ImmutableReadonlyMap<TKey, TValue> implements ReadonlyMap<TKey, TValue> {
     }
 }
 
-/** Build immutable parser/completion metadata for an already accepted argument definition map. */
 export function compileTypedCommandGrammar<const TDefinitions extends ArgumentDefinitions>(
     definition: CoreCommandDefinition<TDefinitions>,
 ): CompiledCommand<TDefinitions> {
@@ -331,7 +330,6 @@ export function compileTypedCommandGrammar<const TDefinitions extends ArgumentDe
     });
 }
 
-/** Compile and validate a command definition into immutable parser/completion metadata. */
 export function compileTypedCommandDefinition<const TDefinitions extends ArgumentDefinitions>(
     definition: CoreCommandDefinition<TDefinitions>,
 ): CompileResult<TDefinitions> {

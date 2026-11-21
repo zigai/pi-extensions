@@ -31,7 +31,6 @@ function isInstalledRegistry(value: unknown): value is InstalledRegistryView {
     );
 }
 
-/** Reads and validates the portion of the installed protocol exercised by these tests. */
 function installedRegistry(ui: EditorUi): InstalledRegistryView {
     const registry: unknown = Object.getOwnPropertyDescriptor(ui, EDITOR_ENHANCER_REGISTRY)?.value;
     if (!isInstalledRegistry(registry)) {

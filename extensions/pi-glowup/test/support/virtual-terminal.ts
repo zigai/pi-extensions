@@ -55,7 +55,6 @@ function countExactOccurrences(text: string, search: string): number {
     return count;
 }
 
-/** Pi terminal adapter backed by xterm's VT parser and interpreted screen buffer. */
 export class VirtualTerminal implements Terminal {
     private readonly terminal: HeadlessTerminal;
     private inputHandler: ((data: string) => void) | undefined;
@@ -346,7 +345,6 @@ export class VirtualTerminal implements Terminal {
 
         const matchingRows =
             matches.length === 0 ? "none" : matches.map((row) => row.index).join(", ");
-
         throw new Error(
             `expected exactly one terminal row ${description}; found ${matches.length} (rows: ${matchingRows})\nScreen:\n${this.screenText()}`,
         );

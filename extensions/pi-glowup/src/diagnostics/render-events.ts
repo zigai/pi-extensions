@@ -38,6 +38,7 @@ export type ScriptFormatDiagnostics = {
      * this call formats part of; recorded as `segmentHash`. Absent while the source streams.
      */
     readonly segmentCode?: string;
+
     readonly recordSegment?: (segment: ScriptSegmentDiagnostic) => void;
 };
 
@@ -144,7 +145,6 @@ function errorStack(cause: unknown): string | undefined {
     return cause.stack.slice(0, MAX_STACK_CHARS);
 }
 
-/** Converts an extracted segment into log fields. */
 export function scriptSegmentFields(segment: ScriptSegmentDiagnostic): DebugLogFields {
     let displayHash: string | undefined;
     if (segment.displayCode !== undefined && segment.displayCode !== segment.code)

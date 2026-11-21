@@ -127,7 +127,6 @@ async function completePathItems(query: string, cwd: string): Promise<TypedCompl
     );
 }
 
-/** Compose completion decisions with Pi/Node filesystem, cancellation, and registry adapters. */
 export function createPiCompletionCapabilities(
     cwd: string,
     commands: TypedCommandLookup,
@@ -163,7 +162,6 @@ function toAutocompleteSuggestions(decision: CompletionDecision): AutocompleteSu
     };
 }
 
-/** Pi command-hook projection for library-owned completion results. */
 export async function getTypedArgumentCompletions<TDefinitions extends ArgumentDefinitions>(
     command: RegisteredTypedCommand<TDefinitions>,
     argumentPrefix: string,
@@ -177,7 +175,6 @@ export async function getTypedArgumentCompletions<TDefinitions extends ArgumentD
     return items.map(toAutocompleteItem);
 }
 
-/** Pi editor projection for library-owned completion decisions. */
 export async function getTypedAutocompleteSuggestions(
     lines: string[],
     cursorLine: number,

@@ -1,6 +1,5 @@
 import { matchesKey } from "@earendil-works/pi-tui";
 
-/** Match extension-configured identifiers with Pi's own runtime key grammar. */
 export function matchesRuntimeKey(data: string, keyId: string): boolean {
     // Pi parses identifiers case-insensitively and rejects malformed modifiers.
     // KeyId in keys.d.ts is an autocomplete convenience, not the runtime grammar.

@@ -10,7 +10,6 @@ export class Redacted<T> {
         this.#value = value;
     }
 
-    /** Wrap a sensitive value at a boundary. */
     static of<T>(value: T): Redacted<T> {
         return new Redacted(value);
     }

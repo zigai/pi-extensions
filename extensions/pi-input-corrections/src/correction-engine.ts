@@ -5,6 +5,7 @@ export type { CorrectionRule, InputCorrectionsSettings } from "./policy-input.ts
 // Bounds apply to intermediate output too; never truncate a user's prompt.
 export const MAX_INPUT_LENGTH = 65_536;
 export const MAX_REGEX_INPUT_LENGTH = 2048;
+
 const MAX_OUTPUT_LENGTH = 131_072;
 
 export type CorrectionEngine = {
@@ -57,7 +58,6 @@ function protectedRanges(text: string): Range[] {
         ranges.push({ start: match.index, end: match.index + match[0].length });
     }
 
-    // Protect path-like tokens (including relative paths and ordinary filenames).
     for (const match of text.matchAll(
         /(?:^|[\s("'`])((?:[a-z]:[\\/]|~?[\\/]|\.{1,2}[\\/]|[\w@.-]+[\\/])[^\s<>"`]+|[\w@.-]+\.[a-z][a-z\d_-]*|\.[\w.-]+)(?=$|[\s).,:!?"'`])/giu,
     )) {

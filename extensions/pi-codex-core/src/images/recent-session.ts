@@ -21,10 +21,6 @@ type RecentImageRef =
     | { readonly kind: "inline"; readonly content: ImageContent }
     | { readonly kind: "artifact"; readonly path: string };
 
-/**
- * Extracts the most recent inline and imagegen artifact images from the active
- * session branch, returning them in chronological order.
- */
 export async function recentImageContents(
     ctx: ExtensionContext,
     count: number,

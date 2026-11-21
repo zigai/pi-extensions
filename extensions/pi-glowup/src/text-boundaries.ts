@@ -55,7 +55,6 @@ function visibleControl(codeUnit: number): string {
     return `‹${codeUnit.toString(16).toUpperCase().padStart(2, "0")}›`;
 }
 
-/** Neutralizes terminal controls while preserving SGR style sequences produced by renderers. */
 export function neutralizeTerminalControls(text: string): string {
     let output = "";
     let runStart = 0;
@@ -85,7 +84,6 @@ export type ExpandedTerminalTabs = {
     readonly finalDisplayColumn: number;
 };
 
-/** Expands tabs to terminal tab stops while preserving ANSI sequences and wide-character columns. */
 export function expandTerminalTabs(
     text: string,
     tabWidth = 4,
@@ -153,7 +151,6 @@ export function* graphemes(text: string): Generator<string> {
     }
 }
 
-/** Truncates to a UTF-8 byte budget without dividing grapheme clusters. */
 export function truncateUtf8ByGrapheme(text: string, maxBytes: number): string {
     const budget = normalizedBudget(maxBytes);
     let byteLength = 0;
@@ -171,7 +168,6 @@ export function truncateUtf8ByGrapheme(text: string, maxBytes: number): string {
     return text.slice(0, endIndex);
 }
 
-/** Returns the longest complete-grapheme prefix within a UTF-16 length budget. */
 export function takeGraphemePrefix(text: string, maxCharacters: number): string {
     const budget = normalizedBudget(maxCharacters);
     const source = completeUnicodePrefix(text);
@@ -189,7 +185,6 @@ export function takeGraphemePrefix(text: string, maxCharacters: number): string 
     return source.slice(0, end);
 }
 
-/** Returns the longest complete-grapheme suffix within a UTF-16 length budget. */
 export function takeGraphemeSuffix(text: string, maxCharacters: number): string {
     const budget = normalizedBudget(maxCharacters);
     const source = completeUnicodePrefix(text);
@@ -214,7 +209,6 @@ export function takeGraphemeSuffix(text: string, maxCharacters: number): string 
     return source.slice(start);
 }
 
-/** Adds an omission suffix while retaining only complete grapheme clusters. */
 export function appendGraphemeEllipsis(
     text: string,
     maxCharacters: number,
@@ -229,7 +223,6 @@ export function appendGraphemeEllipsis(
     return `${takeGraphemePrefix(text, budget - boundedEllipsis.length)}${boundedEllipsis}`;
 }
 
-/** Truncates text only when needed and never cuts a grapheme cluster. */
 export function truncateGraphemeText(text: string, maxCharacters: number, ellipsis = "…"): string {
     const budget = normalizedBudget(maxCharacters);
     const source = completeUnicodePrefix(text);

@@ -86,7 +86,6 @@ type PasteEditorInternals = {
     onChange?: (text: string) => void;
 };
 
-/** Minimal editor surface needed to expand collapsed paste markers. */
 export type PasteCollapseEditor = {
     getCursor(): { line: number; col: number };
     getText(): string;
@@ -318,7 +317,6 @@ function findRepeatedPasteMarker(
 
 function hasPasteMarker(editor: PasteEditorInternals, pasteId: number): boolean {
     const markerRegex = PASTE_MARKER_FOR_ID(pasteId);
-
     return editor.state.lines.some((line) => markerRegex.test(line));
 }
 
@@ -392,9 +390,6 @@ function handlePasteWithUiTweaks(editor: PasteEditorInternals, pastedText: strin
     editor.insertTextAtCursorInternal(filteredText);
 }
 
-/**
- * Expands the collapsed paste marker currently under the editor cursor.
- */
 export function expandPasteMarkerAtCursor(editor: PasteCollapseEditor): boolean {
     if (!isPasteEditorInternals(editor)) return false;
 
@@ -473,7 +468,6 @@ function installPasteCollapsePatchOnPrototype(
     return handle;
 }
 
-/** Installs or updates paste collapsing on Pi editor prototypes. */
 export function installPasteCollapsePatch(
     settings: PasteCollapseSettings,
     prototype?: InstallHost,
@@ -548,7 +542,6 @@ type MarkedPasteUi = PasteCollapseEditorContext["ui"] & {
     [PASTE_COLLAPSE_ENHANCER_MARKER]?: PasteEnhancerRecord;
 };
 
-/** Installs or updates the paste-marker expansion editor enhancer. */
 export function installPasteCollapseEditor(
     ctx: PasteCollapseEditorContext,
     settings: PasteCollapseSettings,

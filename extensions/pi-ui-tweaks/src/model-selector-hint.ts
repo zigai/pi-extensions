@@ -71,7 +71,6 @@ function isModelProviderHintText(
     );
 }
 
-/** Installs or updates the model-selector hint patch. */
 export function installModelSelectorHintPatch(
     config: ModelSelectorHintConfig,
     target: AddChildView | null = ModelSelectorComponent.prototype,

@@ -8,7 +8,6 @@ import {
 } from "./editor-invocation.ts";
 import { activeChoiceContext, commandArgumentEntries } from "./helper.ts";
 
-/** Result of attempting to handle Tab as typed-command completion. */
 export type TabCompletionResult = { handled: false } | { handled: true; editorText?: string };
 
 type FlagCompletionCandidate = {
@@ -148,7 +147,6 @@ function fixedChoiceCompletionOnTab(
     return { handled: true, editorText: `${completedLine}${rest}` };
 }
 
-/** Complete a partial fixed choice or named flag in editor text when Tab is pressed. */
 export function completeTypedCommandOnTab(
     editorText: string,
     commands: PiTypedCommandLookup,

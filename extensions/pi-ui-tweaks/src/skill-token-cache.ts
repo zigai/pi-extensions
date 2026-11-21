@@ -114,9 +114,7 @@ export class SkillTokenCache {
         } finally {
             try {
                 unlinkSync(temporary);
-            } catch {
-                /* Renamed or never created. */
-            }
+            } catch {}
         }
     }
 }

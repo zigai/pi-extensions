@@ -270,7 +270,7 @@ test("missing typed catalog targets reject installation without marking or chang
 });
 
 test("complete legacy base catalogs remain filtered without adding typed APIs", async () => {
-    // Structural boundary mirrors the installed 0.85.1 prototypes (also exercised
+    // Structural boundary mirrors the Pi 0.85.1 prototypes (also exercised
     // by legacy-host.test.ts using that host's own extension loader).
     let policy = settings;
     const runtime = {

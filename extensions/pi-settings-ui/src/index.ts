@@ -83,7 +83,6 @@ async function openSettingsEditor(pi: ExtensionAPI, ctx: ExtensionContext): Prom
     await piSettings?.flush();
 }
 
-/** Register the Pi Settings UI extension. */
 export default function extension(pi: ExtensionAPI): void {
     let restoreEditor: (() => void) | undefined;
 

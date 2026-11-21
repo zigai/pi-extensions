@@ -144,7 +144,6 @@ export function mutationPayloads(
     });
     const byPath = payloadsByPath(payloads);
     const consumed = new Set<PierreDiffPayload>();
-
     return node.files.map((file) => consumePayload(byPath, consumed, file));
 }
 
@@ -268,7 +267,6 @@ export type ProtocolMutationRenderOptions = {
     readonly mutationSettings?: MutationSettings;
 };
 
-/** Renders a decoded mutation node through Glowup's configured mutation engine. */
 export function renderProtocolMutation(
     node: GlowupMutationNode,
     theme: GlowupRenderTheme,

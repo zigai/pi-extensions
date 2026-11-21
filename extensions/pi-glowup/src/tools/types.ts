@@ -10,7 +10,6 @@ import type {
     GlowupToolResult,
 } from "./protocol/contract.ts";
 
-/** Programmatic matching policy for preserving original Pi renderers. */
 export type ToolNameMatcher =
     | { readonly kind: "pattern"; readonly pattern: RegExp }
     | { readonly kind: "predicate"; readonly matches: (toolName: string) => boolean };
@@ -33,10 +32,8 @@ export type ThirdPartyToolRenderContext = Omit<GlowupCallContext, "toolName" | "
     readonly result?: ThirdPartyToolResult | undefined;
 };
 
-/** Internal result shape used by the generic renderer. */
 export type ThirdPartyToolResult = GlowupToolResult;
 
-/** Pi-facing renderer produced by the private Glowup rendering engine. */
 export type ThirdPartyToolRenderer = {
     readonly codeSource?: (
         args: JsonValue | undefined,
@@ -68,7 +65,6 @@ export type ThirdPartyToolRendererPlugin = {
     ) => ThirdPartyToolRenderer;
 };
 
-/** Policy for third-party and generic compatibility rendering. */
 export type ThirdPartyToolRenderingOptions = {
     readonly enabled?: boolean;
     readonly isStreamingCall?: (toolCallId: string) => boolean;
@@ -78,6 +74,7 @@ export type ThirdPartyToolRenderingOptions = {
 
     /** Programmatic policies, evaluated after exact-name preservation. */
     readonly preserveMatchers?: ReadonlyArray<ToolNameMatcher>;
+
     readonly renderers?: ReadonlyArray<ThirdPartyToolRendererPlugin>;
     readonly labelMode?: ToolLabelMode;
     readonly mutationSettings?: MutationSettings;
@@ -102,7 +99,6 @@ export type ThirdPartyToolRenderingOptions = {
     };
 };
 
-/** Builds a public-compatible execution context for internal renderers. */
 export function executionPhase(context: {
     readonly executionStarted: boolean;
     readonly argsComplete: boolean;

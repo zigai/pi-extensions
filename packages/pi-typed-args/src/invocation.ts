@@ -8,7 +8,6 @@ export type ParsedSlashCommandText = {
     trailingBody: string;
 };
 
-/** Decide whether parser/validation issues should notify directly or open the argument form. */
 export function decideArgumentIssueAction(issues: readonly ParseIssue[]): ArgumentIssueAction {
     if (issues.length === 0) {
         return "ok";
@@ -59,7 +58,6 @@ export function parseSlashCommandText(text: string): ParsedSlashCommandText | un
     };
 }
 
-/** Combine parser leftovers and body text into the typed-skill additional-input payload. */
 export function combineSkillAdditionalInput(
     parsedAdditionalInput: string,
     trailingBody: string,

@@ -17,7 +17,6 @@ export type SourceRuntime = {
     readonly history: SelectionHistory;
 };
 
-/** Compose one provider's discovery, ranking, persistence and expansion behavior. */
 export function createSourceRuntime(
     ctx: ExtensionContext,
     registration: MentionRegistration,

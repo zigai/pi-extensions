@@ -1,13 +1,10 @@
-/** Fetch-compatible function used by Codex network adapters. */
 export type CodexFetch = typeof fetch;
 
-/** Clock seam for deterministic time-sensitive service behavior. */
 export type Clock = {
     readonly nowMs: () => number;
     readonly nowDate: () => Date;
 };
 
-/** ID generator seam for retry-safe and deterministic request/window IDs. */
 export type IdGenerator = {
     readonly randomUUID: () => string;
 };
@@ -16,12 +13,10 @@ export type ScheduledTask = {
     readonly cancel: () => void;
 };
 
-/** Scheduler seam for delayed work owned by the Pi session runtime. */
 export type Scheduler = {
     readonly set: (delayMs: number, task: () => void) => ScheduledTask;
 };
 
-/** Wait with caller-owned cancellation and cleanup, including synchronous schedulers. */
 export async function waitWithScheduler(
     scheduler: Scheduler,
     delayMs: number,
@@ -82,7 +77,6 @@ export async function waitWithScheduler(
     });
 }
 
-/** Runtime services used by boundary adapters and workflow shell code. */
 export type CodexRuntime = {
     readonly fetch: CodexFetch;
     readonly clock: Clock;

@@ -32,7 +32,6 @@ export type ApplyPatchErrorKind =
     | "cancelled"
     | "io";
 
-/** Expected apply_patch parse or application failure. */
 export class ApplyPatchError extends Error {
     readonly kind: ApplyPatchErrorKind;
     readonly lineNumber: number | undefined;
@@ -179,7 +178,6 @@ type PatchFileMetadata = {
     isSymbolicLink(): boolean;
 };
 
-/** Filesystem boundary used by apply_patch execution. */
 export type ApplyPatchFileSystem = {
     readFile(path: string): Promise<string>;
     writeFile(path: string, contents: string): Promise<void>;
@@ -247,7 +245,6 @@ type CommittedPatchChange = {
     readonly change: AppliedPatchFileChange;
 };
 
-/** Incremental parser for Codex's apply_patch patch language. */
 export class StreamingPatchParser {
     private lineBuffer = "";
     private mode: StreamingParserMode = { type: "notStarted" };
@@ -534,7 +531,6 @@ export class StreamingPatchParser {
     }
 }
 
-/** Parses a Codex apply_patch document into executable hunks or a typed parse failure. */
 export function parseApplyPatch(patchText: string): BetterResult<ApplyPatchArgs, ApplyPatchError> {
     try {
         const originalLines = trimmedLines(patchText);
@@ -555,7 +551,6 @@ export function parseApplyPatch(patchText: string): BetterResult<ApplyPatchArgs,
     }
 }
 
-/** Applies a patch document, returning expected parse and execution failures as values. */
 export async function applyPatchText(
     patchText: string,
     cwd: string,
@@ -569,7 +564,6 @@ export async function applyPatchText(
     });
 }
 
-/** Applies parsed hunks, returning expected execution failures as values. */
 export async function applyPatchHunks(
     hunks: readonly ApplyPatchHunk[],
     cwd: string,
@@ -626,7 +620,6 @@ async function applyPatchHunksOrThrow(
     return buildApplyPatchResult(committed);
 }
 
-/** Formats an apply_patch failure as model-visible tool output text. */
 export function formatApplyPatchError(error: ApplyPatchError): string {
     if (error instanceof ApplyPatchExecutionError) {
         const failure = formatApplyPatchFailure(error.cause);
@@ -669,7 +662,6 @@ function formatCommittedPatchSummary(affected: ApplyPatchAffectedPaths): string 
     );
 }
 
-/** Returns the native Codex success summary for affected paths. */
 export function formatApplyPatchSummary(affected: ApplyPatchAffectedPaths): string {
     const lines = ["Success. Updated the following files:"];
     for (const filePath of affected.added) lines.push(`A ${filePath}`);
@@ -1173,7 +1165,6 @@ function deriveNewContentsFromChunks(
         chunks,
     );
     const newLines = applyReplacements(sourceLines, replacements, preferredEnding);
-
     return newLines.map((line) => line.text + (line.ending ?? preferredEnding)).join("");
 }
 

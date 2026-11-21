@@ -37,17 +37,13 @@ import {
     type ResolvedInlineHelpAppearance,
 } from "./presentation-config.ts";
 
-/** Widget key used for the typed-command live helper. */
 export const WIDGET_KEY = "pi-typed-args.helper";
-
-/** Default placement for the typed-command live helper. */
 export const DEFAULT_HELPER_PLACEMENT: WidgetPlacement = "aboveEditor";
 
 export type HelperRenderState = {
     submittedInvalidEditorText?: string | undefined;
 };
 
-/** Return a command's arguments in the order used by helper rendering. */
 export function commandArgumentEntries(
     command: RegisteredTypedCommand,
 ): Array<[string, ArgumentDefinition]> {
@@ -1057,7 +1053,6 @@ function renderCompactInlineHelper(
     return rendered;
 }
 
-/** Render the inline typed-command helper as TUI lines for the current editor invocation. */
 export function renderInlineHelper(
     invocation: EditorTypedCommandInvocation,
     width: number,
@@ -1182,7 +1177,6 @@ export function setCommandDescriptionWidget(
     );
 }
 
-/** Set or clear the Pi helper widget for one extension context. */
 export function setHelperWidget(
     ctx: ExtensionContext,
     invocation: EditorTypedCommandInvocation | undefined,

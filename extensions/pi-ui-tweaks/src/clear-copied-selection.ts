@@ -42,7 +42,6 @@ const selectionScreenRuntime = {
     },
 };
 
-/** Clears the fullscreen selection highlight once copy-on-select has copied it. */
 export function installClearCopiedSelectionPatch(
     config: ClearCopiedSelectionConfig,
     target: SelectionScreenPrototype | null = selectionScreenRuntime.parse(TuiAltScreen.prototype),

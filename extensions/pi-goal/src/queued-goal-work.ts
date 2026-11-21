@@ -59,7 +59,6 @@ interface QueuedGoalRewriteResult<TMessage extends QueuedGoalContextInput> {
   changed: boolean;
 }
 
-/** Single typed bridge from concrete queued-goal rewrites back onto provider-context messages. */
 function mergeProviderContextMessage<TMessage extends QueuedGoalContextInput>(
   original: TMessage,
   rewritten: RewrittenQueuedGoalWorkMessage,

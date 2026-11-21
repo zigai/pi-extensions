@@ -87,7 +87,6 @@ function segments(line: string): string[] | undefined {
 
 function isDelimiter(line: string): boolean {
     const cells = segments(line);
-
     return cells?.every((cell) => /^:?-{3,}:?$/.test(cell)) === true;
 }
 
@@ -132,7 +131,6 @@ function containsTable(body: string, quoted: boolean): boolean {
     return false;
 }
 
-/** Remove only closed Markdown fences containing a table; leave source otherwise intact. */
 export function unwrapTableFences(source: string): string {
     if (!source.includes("```") && !source.includes("~~~")) return source;
 

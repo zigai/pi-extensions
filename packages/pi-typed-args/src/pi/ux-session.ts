@@ -329,7 +329,6 @@ function reportDetachedError(ctx: ExtensionContext, error: unknown): void {
     }
 }
 
-/** Session-scoped Pi UX bridge for helper widgets, autocomplete, and Tab-to-form behavior. */
 export class TypedCommandUxSession {
     private cleanup: Array<() => void> = [];
     private diagnosticsBinding: ReturnType<typeof bindExtensionDiagnostics> | undefined;
@@ -440,12 +439,10 @@ export class TypedCommandUxSession {
         }
     }
 
-    /** Deterministically wait for the currently owned form task, if one exists. */
     async waitForFormCompletion(): Promise<void> {
         await this.formTask?.completion;
     }
 
-    /** Return the one settings snapshot resolved for the active session. */
     get resolvedOptions(): ResolvedTypedCommandUxOptions {
         return this.options;
     }

@@ -10,6 +10,7 @@ const MAX_FIRST_USER_CONTEXT_CHARACTERS = 2_000;
 const MAX_WORKSPACE_CONTEXT_CHARACTERS = 2_000;
 const MAX_CHANGED_AREAS = 20;
 const NAMING_STATE_VERSION = 1;
+
 export const AUTONAME_STATE_ENTRY_TYPE = "pi-autoname-session.state";
 
 /**
@@ -110,14 +111,12 @@ export type PromptVariables = {
     readonly reason: NamingPhase;
 };
 
-/** Input for creating a naming state from already trusted, measured pieces. */
 export type SessionNamingStateInput = {
     readonly initialNameSet: boolean;
     readonly baseline: SessionMetrics;
     readonly baselineAtMs: number;
 };
 
-/** Create a naming state from already trusted, measured pieces. */
 export function createSessionNamingState(input: SessionNamingStateInput): SessionNamingState {
     return {
         version: NAMING_STATE_VERSION,
@@ -132,7 +131,6 @@ export function createSessionNamingState(input: SessionNamingStateInput): Sessio
     };
 }
 
-/** Classify and parse one persisted naming-state entry. */
 export function parseStoredSessionNamingState(value: unknown): StoredSessionNamingStateResult {
     try {
         const candidate = storedSessionNamingStateParser.parse(value);
@@ -201,11 +199,6 @@ export function hasReachedTrigger(
     return currentValue - baselineValue >= threshold;
 }
 
-/**
- * Count session activity from branch entries: user messages, assistant turns,
- * assistant tool calls, and assistant token usage. Non-message entries are
- * ignored.
- */
 export function measureSession(entries: readonly SessionEntry[]): SessionMetrics {
     const metrics = {
         messages: 0,
@@ -228,7 +221,6 @@ export function measureSession(entries: readonly SessionEntry[]): SessionMetrics
                 metrics.toolCalls += entry.message.content.filter(
                     (block) => block.type === "toolCall",
                 ).length;
-
                 const usage = entry.message.usage;
 
                 // Session files are persisted boundary data: the framework
@@ -253,10 +245,6 @@ export function measureSession(entries: readonly SessionEntry[]): SessionMetrics
     return metrics;
 }
 
-/**
- * Decide whether a naming attempt is due for the given state and metrics.
- * Returns undefined when no trigger is reached.
- */
 export function getNamingRequest(
     settings: ExtensionSettings,
     state: SessionNamingState,
@@ -296,7 +284,6 @@ export function getNamingRequest(
     return undefined;
 }
 
-/** Mark the session as named, resetting the baseline to the current metrics. */
 export function markSessionNamingComplete(
     metrics: SessionMetrics,
     nowMs: number,
@@ -394,12 +381,6 @@ function stringifyPromptValue(value: ToolCall["arguments"]): string {
     }
 }
 
-/**
- * Normalize picker output into a session name: take the first non-empty
- * line, strip Markdown heading markers and a leading "session name:" label,
- * remove surrounding quotes, collapse whitespace, and enforce length
- * constraints. Returns undefined when no usable name remains.
- */
 export function normalizeSessionName(
     rawName: string,
     minLength: number,
@@ -471,7 +452,6 @@ export function isOpaqueNamingPrompt(prompt: string): boolean {
     }
 
     const words = normalized.toLowerCase().match(/[\p{L}\p{N}_+-]+/gu) ?? [];
-
     return (
         words.length > 0 &&
         words.length <= 5 &&
@@ -663,7 +643,6 @@ export function buildConversationContext(
             options.pendingPrompt ??
             sections.find((section) => section.role === "USER")?.text ??
             "";
-
         return truncateInitialUserMessage(firstUserMessage);
     }
 

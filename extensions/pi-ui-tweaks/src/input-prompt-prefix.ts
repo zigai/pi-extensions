@@ -7,6 +7,7 @@ import {
 } from "@zigai/pi-extension-internals";
 
 export const DEFAULT_INPUT_PROMPT_PREFIX = "> ";
+
 const INPUT_PROMPT_PATCH_KEY = Symbol.for("zigai.pi-ui-tweaks.input-prompt-prefix-patch");
 const graphemeSegmenter = new Intl.Segmenter();
 
@@ -85,7 +86,6 @@ type InputPromptPrefixPatchRecord = {
     readonly handle: InputPromptPrefixHandle;
 };
 
-/** Installs or updates the single-line input prompt patch. */
 export function installInputPromptPrefixPatch(
     config: InputPromptPrefixConfig,
     target: InputRenderView = Input.prototype,

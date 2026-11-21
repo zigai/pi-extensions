@@ -232,7 +232,6 @@ describe("Glowup tool-rendering protocol", () => {
 
         expect(decoded).toEqual(stack([text("first")]));
 
-        // Test summary rows and inline styling object isolation
         const mutableInline = {
             kind: "text" as const,
             text: "mutable label",
@@ -256,7 +255,6 @@ describe("Glowup tool-rendering protocol", () => {
             ]),
         );
 
-        // Test mutation file and line collection isolation
         const mutableLine = { kind: "addition" as const, text: "add line" };
         const lines: GlowupMutationLine[] = [mutableLine];
         const files: GlowupMutationFile[] = [{ path: "a.ts", lines, added: 1, removed: 0 }];

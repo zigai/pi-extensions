@@ -1,11 +1,3 @@
-/**
- * Pi Branch
- *
- * Adds `/branch` to fork the current Pi session into one or more parallel
- * Pi processes in tmux/Ghostty. Each child session starts from the current
- * committed branch state and can run in its own git worktree.
- */
-
 import {
     CONFIG_DIR_NAME,
     getAgentDir,
@@ -87,6 +79,7 @@ const GHOSTTY_WINDOW_SCRIPT = `on run argv
 end run`;
 
 type LaunchMode = "windows" | "panes" | "pane-window";
+
 export type ForkLayout = "separate" | "current-tab" | "new-tab";
 
 type LaunchTarget =

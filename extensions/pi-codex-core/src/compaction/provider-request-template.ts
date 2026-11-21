@@ -115,7 +115,6 @@ const ProviderRequestTemplateDecoder = {
     },
 };
 
-/** Return a captured template only when both model and wire layout still match. */
 export function getProviderRequestTemplate(
     sessionId: string,
     model: string,
@@ -130,7 +129,6 @@ export function getProviderRequestTemplate(
         : undefined;
 }
 
-/** Invalidate captured request state after session, model, or configuration changes. */
 export function clearProviderRequestTemplate(sessionId: string): void {
     templatesBySessionId.delete(sessionId);
 }

@@ -642,7 +642,6 @@ function wrapInset(text: string, width: number): string[] {
     );
 }
 
-/** Full-screen, tabbed editor for all discovered extension settings schemas. */
 export class SettingsEditorComponent implements Component, Focusable {
     private activeTabIndex = 0;
     private activeScopeValue: "global" | "project" = "global";
@@ -933,19 +932,16 @@ export class SettingsEditorComponent implements Component, Focusable {
 
         if (this.search !== undefined) {
             lines.push(border(this.options.theme, safeWidth), ...this.search.render(safeWidth));
-
             return lines.map((line) => truncateToWidth(line, safeWidth, ""));
         }
 
         if (this.tabPicker !== undefined) {
             lines.push(...this.renderTabPicker(safeWidth));
-
             return lines.map((line) => truncateToWidth(line, safeWidth, ""));
         }
 
         if (this.valuePicker !== undefined) {
             lines.push(...this.renderValuePicker(safeWidth));
-
             return lines.map((line) => truncateToWidth(line, safeWidth, ""));
         }
 
@@ -2747,7 +2743,6 @@ export class SettingsEditorComponent implements Component, Focusable {
             const changed = outcomes.filter(
                 (outcome) => outcome._tag === "SavedLayer" && outcome.changed,
             ).length;
-
             this.statusMessage =
                 changed === 0
                     ? "Settings were already up to date."

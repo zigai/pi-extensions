@@ -568,7 +568,6 @@ function installFullscreenAnchorInputToBottomPatch(
     return handle;
 }
 
-/** Installs or updates the main-screen and fullscreen anchor patches. */
 export function installAnchorInputToBottomPatch(
     config: AnchorInputToBottomConfig,
     prototype?: PatchableTuiPrototype,

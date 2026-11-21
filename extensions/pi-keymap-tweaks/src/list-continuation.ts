@@ -62,7 +62,6 @@ function renumberFollowingItems(
         }
 
         const [prefix, indent = "", digits = "", delimiter = "", spacing = ""] = match;
-
         if (indent.length > ordered.indent.length) continue;
         if (indent !== ordered.indent || delimiter !== ordered.delimiter) return;
         if (Number.parseInt(digits, 10) >= expected) return;
@@ -186,7 +185,6 @@ function hasAddNewLine(value: unknown): value is AddNewLineHost {
     );
 }
 
-/** Continues Markdown-style list items when the editor inserts a newline. */
 export function installListContinuation(enabled: boolean): ListContinuationHandle {
     const prototype: unknown = Editor.prototype;
     if (!hasAddNewLine(prototype)) return { update(): void {}, dispose(): void {} };

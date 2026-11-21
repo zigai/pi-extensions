@@ -33,7 +33,6 @@ function resolveFormTitle<TDefinitions extends ArgumentDefinitions>(
     return command.name.replace(" ", " › ");
 }
 
-/** Open the dense TUI argument form for a parsed typed command. */
 export async function openDenseArgumentForm<TDefinitions extends ArgumentDefinitions>(
     command: RegisteredTypedCommand<TDefinitions>,
     parsed: ParsedCommandArguments,

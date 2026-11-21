@@ -25,13 +25,12 @@ export const DEFAULT_MUTATION_SETTINGS: MutationSettings = {
     },
 };
 
-/** Previous completed-mutation behavior for renderers invoked without extension configuration. */
+/** Completed-mutation settings for renderers invoked without extension configuration. */
 export const PREVIEW_MUTATION_SETTINGS: MutationSettings = {
     ...DEFAULT_MUTATION_SETTINGS,
     defaultView: "preview",
 };
 
-/** Returns whether a completed mutation should render every available row. */
 export function showsFullMutation(settings: MutationSettings, expanded: boolean): boolean {
     return expanded || settings.defaultView === "full";
 }

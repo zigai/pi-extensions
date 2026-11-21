@@ -5,9 +5,6 @@ import { installLinkedRenderPatch } from "@zigai/pi-extension-internals";
 import { installMessageHighlightPatch } from "../src/message-highlight-patch.ts";
 import { DEFAULT_MESSAGE_HIGHLIGHTS_CONFIG } from "../src/settings.ts";
 
-// Failure cases: unchanged redraws redo matching; mutable input/output arrays poison reuse;
-// width, streaming, style or Markdown-source changes reuse stale output; temporary assistant
-// child patches lose their caches; disposal leaks a prior policy into a fresh installation.
 test("unchanged redraws reuse highlighting without skipping upstream rendering", () => {
     const render = vi.fn((_width: number) => ["Read src/main.ts https://example.com"]);
     const userPrototype = { render };

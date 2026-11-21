@@ -41,7 +41,6 @@ export type LoadedSyntaxTheme = {
     readonly registration: ThemeRegistration;
 };
 
-/** Parses syntax-rendering environment configuration at extension startup. */
 export function loadSyntaxConfig(env: NodeJS.ProcessEnv = process.env): SyntaxConfig {
     if ((env[SYNTAX_ENV] ?? "").trim().toLowerCase() === SYNTAX_OFF_VALUE) {
         return { enabled: false, reason: `${SYNTAX_ENV}=off` };
@@ -59,7 +58,6 @@ export function loadSyntaxConfig(env: NodeJS.ProcessEnv = process.env): SyntaxCo
     };
 }
 
-/** Loads and parses a VS Code/TextMate theme JSON file for Shiki. */
 export async function loadSyntaxTheme(
     config: SyntaxConfig,
 ): Promise<LoadedSyntaxTheme | undefined> {

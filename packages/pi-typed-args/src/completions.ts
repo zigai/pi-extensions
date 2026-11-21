@@ -384,7 +384,6 @@ async function pathCompletionItems(
     }
 }
 
-/** Resolve one form field's value suggestions through the same providers used by the editor. */
 export async function getTypedFormValueCompletions(
     definition: ArgumentDefinition,
     query: string,
@@ -862,7 +861,6 @@ function projectCommandHookItems(
     const contextOffset = argumentPrefix.length - context.argsBeforeCursor.length;
     const replacementOffset = context.argsBeforeCursor.length - decision.prefix.length;
     const retainedPrefix = argumentPrefix.slice(0, contextOffset + replacementOffset);
-
     return decision.items.map((item) => ({ ...item, value: `${retainedPrefix}${item.value}` }));
 }
 
@@ -1070,7 +1068,6 @@ export function getTypedAutocompleteSuggestions(
     return decision;
 }
 
-/** Resolve editor completion decisions, including async providers and path lookup. */
 export async function getTypedAutocompleteSuggestionsAsync(
     lines: string[],
     cursorLine: number,

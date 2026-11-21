@@ -87,7 +87,7 @@ const request = () => ({
 function deferred() {
     let resolve = (): void => {};
 
-    // Promise.withResolvers is unavailable under the repository's ES2023 library target.
+    // Promise.withResolvers is unavailable under the repository's ES2022 library target.
     const promise = new Promise<void>((done) => {
         resolve = done;
     });

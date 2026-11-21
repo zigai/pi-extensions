@@ -289,8 +289,6 @@ test("cached routes follow resetLeaf and newSession on the same SDK manager", ()
     assert.equal(getFooterRoute(counted.context), undefined);
     assert.equal(getFooterRoute(counted.context), undefined);
     assert.equal(counted.projections(), 2);
-
-    // Both revisions have a null leaf; only the session ID changes here.
     const oldSessionId = session.getSessionId();
     session.newSession();
     assert.notEqual(session.getSessionId(), oldSessionId);

@@ -56,7 +56,6 @@ let toolCallIndicator: ToolCallIndicator = {
     bold: true,
 };
 
-/** Applies user-configured semantic colors used by all renderer families. */
 export function configureRenderingAppearance(appearance: RenderingAppearance): void {
     renderingAppearance = { ...appearance };
     renderingAppearanceVersion += 1;
@@ -67,7 +66,6 @@ export function configuredRenderingAppearanceVersion(): number {
     return renderingAppearanceVersion;
 }
 
-/** Applies user-configured tool-call indicator text used by all renderer families. */
 export function configureToolCallIndicator(indicator: ToolCallIndicator): void {
     toolCallIndicator = { ...indicator };
 }
@@ -79,7 +77,6 @@ function trueColorOpen(hex: string, background: boolean): string {
         : ansiStyles.color.ansi16m(red, green, blue);
 }
 
-/** Returns a configured semantic diff background ANSI opener when overridden. */
 export function configuredDiffBackgroundAnsi(kind: "insert" | "delete"): string | undefined {
     const color =
         kind === "insert"
@@ -88,7 +85,6 @@ export function configuredDiffBackgroundAnsi(kind: "insert" | "delete"): string 
     return color === null ? undefined : trueColorOpen(color, true);
 }
 
-/** Returns a configured semantic intraline background ANSI opener when overridden. */
 export function configuredDiffContentBackgroundAnsi(kind: "insert" | "delete"): string | undefined {
     const color =
         kind === "insert"
@@ -97,27 +93,22 @@ export function configuredDiffContentBackgroundAnsi(kind: "insert" | "delete"): 
     return color === null ? undefined : trueColorOpen(color, true);
 }
 
-/** Returns the configured placement strategy for semantic diff backgrounds. */
 export function configuredDiffBackgroundStyle(): DiffBackgroundStyle {
     return renderingAppearance.diffBackgroundStyle;
 }
 
-/** Returns the configured compact unified line-number gutter style. */
 export function configuredDiffLineNumberStyle(): DiffLineNumberStyle {
     return renderingAppearance.diffLineNumberStyle;
 }
 
-/** Returns how replacement rows are ordered when a diff uses one column. */
 export function configuredNarrowDiffLayout(): NarrowDiffLayout {
     return renderingAppearance.narrowDiffLayout;
 }
 
-/** Returns how side-by-side eligibility responds to terminal width and content. */
 export function configuredSideBySideLayout(): SideBySideLayout {
     return renderingAppearance.sideBySideLayout;
 }
 
-/** Returns whether unchanged text in changed diff rows should be dimmed. */
 export function configuredDimUnchangedDiffText(): boolean {
     return renderingAppearance.dimUnchangedDiffText;
 }

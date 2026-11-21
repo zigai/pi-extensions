@@ -298,7 +298,6 @@ function createThinkingBlockSpacingWrapper(
     };
 }
 
-/** Enables or disables the assistant separator prototype patches. */
 export function configureAssistantSeparatorPatch(
     enabled: boolean,
     prototype: AssistantPrototypeOwner = AssistantMessageComponent.prototype,

@@ -94,7 +94,6 @@ async function resolvePiEntrypointModuleUrls(): Promise<string[]> {
     return [...new Set(moduleUrls)];
 }
 
-/** Resolves a path relative to the running Pi coding-agent distribution. */
 async function resolvePiInternalModuleUrl(relativePath: string): Promise<string> {
     const codingAgentDirectory = resolve(await resolveRunningPiPackageDirectory(), "dist");
 

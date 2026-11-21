@@ -44,7 +44,6 @@ export type SettingsValidationIssue = {
     /** JSON Pointer to the invalid setting, or `/` for the document root. */
     readonly path: string;
 
-    /** TypeBox validation message for this issue. */
     readonly message: string;
 };
 
@@ -55,22 +54,17 @@ export type SettingsValidationIssue = {
  * settings values, making them suitable for display through Pi's UI.
  */
 export type SettingsDiagnostic = {
-    /** Stable category intended for programmatic handling. */
     readonly code: SettingsDiagnosticCode;
 
     /** All current diagnostics are errors; the field allows direct use with `ctx.ui.notify`. */
     readonly severity: "error";
 
-    /** The settings layer or editor-schema operation that failed. */
     readonly scope: SettingsScope | "schema";
-
-    /** Absolute path of the affected settings or schema file. */
     readonly path: string;
 
     /** User-facing summary that does not include settings values. */
     readonly message: string;
 
-    /** JSON Pointer paths and validator messages when schema validation failed. */
     readonly issues?: readonly SettingsValidationIssue[];
 };
 
@@ -78,7 +72,6 @@ export type ParsedSettingsLayer = {
     /** Encoded JSON settings after editor-only metadata is removed. */
     readonly settings: JsonObject | undefined;
 
-    /** Editor schema reference from the file, when present and valid. */
     readonly schemaReference: string | undefined;
     readonly diagnostics: readonly SettingsDiagnostic[];
 };

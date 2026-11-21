@@ -160,12 +160,11 @@ function snapshot(job: Command): CommandSnapshot {
 export type BackgroundCommandsOptions = {
     readonly operations: BashOperations;
     readonly directory: string;
-
-    /** Called whenever a job ends, for status displays. */
     readonly onChange: (job: CommandSnapshot) => void;
 
     /** Called once for a job that ended without anything collecting its result. */
     readonly onResult: (result: CommandOutput) => void;
+
     readonly now?: () => number;
 };
 

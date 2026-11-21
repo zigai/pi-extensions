@@ -94,30 +94,15 @@ export class InvalidSettingsDefinition extends Error {
  */
 export type ExtensionSettingsDefinition<Schema extends TObject = TObject> = {
     readonly [definitionMarker]: true;
-
-    /** The stable identifier used in settings and schema filenames. */
     readonly id: string;
-
-    /** The display name used in generated schema and README content. */
     readonly title: string;
-
-    /** The summary used in generated schema and README content. */
     readonly description: string;
-
-    /** The absolute URI written to the generated JSON Schema `$id` field. */
     readonly schemaId: string;
-
-    /** A validated, recursively frozen clone of the supplied TypeBox schema. */
     readonly schema: Schema;
-
-    /** The schema defaults as recursively frozen JSON data, before TypeBox decoding. */
     readonly defaultSettings: JsonObject;
-
-    /** An optional validated example settings layer rendered in generated documentation. */
     readonly exampleSettings: JsonObject | undefined;
 };
 
-/** Deeply optional object properties with replacement arrays, matching settings-layer merging. */
 type SettingsLayerValue<Value> = Value extends readonly unknown[]
     ? Value
     : Value extends object
@@ -139,11 +124,6 @@ export type ExtensionSettingsLayer<Schema extends TObject> = SettingsLayerValue<
     StaticEncode<Schema>
 >;
 
-/**
- * Input accepted by {@link defineExtensionSettings}.
- *
- * @template Schema The TypeBox object schema that determines the returned settings type.
- */
 export type ExtensionSettingsDefinitionInput<Schema extends TObject> = {
     /**
      * Stable identity used in settings filenames.
@@ -154,10 +134,7 @@ export type ExtensionSettingsDefinitionInput<Schema extends TObject> = {
      */
     readonly id: string;
 
-    /** Non-blank display name for generated documentation and JSON Schema metadata. */
     readonly title: string;
-
-    /** Non-blank summary for generated documentation and JSON Schema metadata. */
     readonly description: string;
 
     /**

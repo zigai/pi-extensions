@@ -4,7 +4,6 @@ export type DiffTextStats = {
     readonly lineCount: number;
 };
 
-/** Counts additions, deletions, and physical lines in a bounded unified diff string. */
 export function diffTextStats(diffText: string): DiffTextStats {
     if (diffText.length === 0) {
         return { added: 0, removed: 0, lineCount: 0 };

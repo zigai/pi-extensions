@@ -3,7 +3,6 @@ import { resizeImage, type ExtensionContext } from "@earendil-works/pi-coding-ag
 import type { LoadedImage } from "./file-artifacts.ts";
 import { imageDimensionsFromBytes, type ImageDimensions } from "./metadata.ts";
 
-/** Image detail policy accepted by current Codex image prompts. */
 export type ImageDetail = "high" | "original";
 
 type CodexPromptImageResizeLimits = {
@@ -23,10 +22,6 @@ const CODEX_ORIGINAL_DETAIL_LIMITS: CodexPromptImageResizeLimits = {
     maxPatches: 10_000,
 };
 
-/**
- * Converts a loaded image into Codex prompt content, resizing it when required
- * by the selected detail policy.
- */
 export async function prepareCodexPromptImageContent(
     image: LoadedImage,
     detail: ImageDetail = "high",
@@ -52,9 +47,6 @@ export async function prepareCodexPromptImageContent(
     return { type: "image", data: resized.data, mimeType: resized.mimeType };
 }
 
-/**
- * Computes dimensions that satisfy Codex's maximum dimension and patch budget.
- */
 export function codexPromptImageTargetDimensions(
     width: number,
     height: number,
@@ -91,12 +83,10 @@ export function codexPromptImageTargetDimensions(
     };
 }
 
-/** Converts image content to a base64 data URL. */
 export function imageContentToDataUrl(content: ImageContent): string {
     return `data:${content.mimeType};base64,${content.data}`;
 }
 
-/** Reports whether the active model accepts image input. */
 export function modelSupportsImages(model: ExtensionContext["model"]): boolean {
     return Array.isArray(model?.input) && model.input.includes("image");
 }

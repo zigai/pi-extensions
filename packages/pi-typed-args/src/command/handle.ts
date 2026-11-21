@@ -6,7 +6,6 @@ import type {
     TypedSubcommandDefinitions,
 } from "../pi/command-types.ts";
 
-/** Create the disposable handle returned from typed command registration. */
 export function createCommandHandle<
     TDefinitions extends ArgumentDefinitions,
     TSubcommands extends TypedSubcommandDefinitions<TDefinitions>,

@@ -194,7 +194,6 @@ export function registerUiTweaksLifecycle(
     });
 }
 
-/** Installs small configurable Pi UI tweaks. */
 export default function uiTweaksExtension(pi: ExtensionAPI): void {
     const startup = installCompactStartupBootstrap(loadUiTweaksSettings);
 

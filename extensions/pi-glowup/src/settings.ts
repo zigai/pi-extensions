@@ -18,7 +18,6 @@ export const extensionSettingsDefinition: ExtensionSettingsDefinition<
     prevalidatedExtensionSettingsArtifact,
 );
 
-/** Load resolved settings from Pi's global file and trusted project override. */
 export function loadGlowupSettings(context: PiSettingsContext) {
     return loadPiExtensionSettings(extensionSettingsDefinition, context, {
         bundledSchema: {

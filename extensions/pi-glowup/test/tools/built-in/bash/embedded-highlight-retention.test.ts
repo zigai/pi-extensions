@@ -103,7 +103,6 @@ it.each([
         await initializeSyntaxHighlighting({}, { preloadLanguages: ["python"] });
         const { render, feature, invalidate } = harness();
 
-        // Session-history pattern: a shell prelude followed by a Python heredoc.
         try {
             render(source);
             await feature.settled();

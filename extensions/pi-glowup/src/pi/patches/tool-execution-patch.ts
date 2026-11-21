@@ -675,7 +675,6 @@ function trimRendererCache(
     }
 }
 
-/** Enables, updates, or disables render-only Glowup renderers for built-in tool names. */
 export function configureBuiltInToolRendererPatch(
     enabled: boolean,
     options?: BuiltInToolRendererOptions,
@@ -927,7 +926,6 @@ export type ToolRendererPatchStats = {
     readonly completedLineCacheMisses: number;
 };
 
-/** Returns renderer patch state sizes for memory diagnostics. */
 export function toolRendererPatchStats(
     prototypeOwner: ToolExecutionPrototypeOwner = ToolExecutionComponent.prototype,
 ): ToolRendererPatchStats {
@@ -1013,7 +1011,6 @@ function restoreBuiltInRendererPatch(
     delete prototype[BUILT_IN_RENDERER_PATCH_STATE_KEY];
 }
 
-/** Enables, updates, or disables Glowup fallback renderers for non-native tools. */
 export function configureThirdPartyToolRendererPatch(
     enabled: boolean,
     options?: ThirdPartyToolRenderingOptions,

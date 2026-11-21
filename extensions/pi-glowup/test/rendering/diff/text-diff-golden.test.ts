@@ -13,7 +13,7 @@ import { createPlainTheme } from "../../support/plain-theme.ts";
 import { renderGlowupDiff } from "../../../src/rendering/diff/text-renderer.ts";
 import type { DiffLineCoordinates } from "../../../src/rendering/diff/text-diff.ts";
 
-// Pi 1.5 closes styled-word ANSI codes before wrapping whitespace. At width 20,
+// Pi closes styled-word ANSI codes before wrapping whitespace. At width 20,
 // this removes one stray space before wrapped file statistics; syntax and diff
 // cell colors stay intact. The corpus intentionally records that upstream fix.
 it("preserves exact plain and syntax-highlighted diff frames through layouts and resizing", async () => {

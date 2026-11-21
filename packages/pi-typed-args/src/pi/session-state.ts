@@ -29,7 +29,6 @@ function isKeyValueArgumentValue(value: ArgumentValue): value is Readonly<Record
     return value !== undefined && typeof value === "object" && !Array.isArray(value);
 }
 
-/** Register the active session callback for submitted invalid command editor text. */
 export function registerSubmittedInvalidCommandHandler(
     ctx: ExtensionContext,
     options: ResolvedTypedCommandUxOptions,
@@ -47,7 +46,6 @@ export function registerSubmittedInvalidCommandHandler(
     };
 }
 
-/** Mark submitted invalid command text in the active UX session, when one owns the context. */
 export function markSubmittedInvalidCommand(ctx: ExtensionContext, editorText: string): boolean {
     const state = typedCommandSessions.get(ctx);
     if (state === undefined) {
@@ -59,7 +57,6 @@ export function markSubmittedInvalidCommand(ctx: ExtensionContext, editorText: s
     return true;
 }
 
-/** Return the settings snapshot passed into the active session for this context. */
 export function getTypedCommandSessionOptions(
     ctx: ExtensionContext,
 ): ResolvedTypedCommandUxOptions | undefined {

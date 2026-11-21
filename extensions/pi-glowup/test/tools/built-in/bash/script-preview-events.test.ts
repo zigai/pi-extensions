@@ -682,6 +682,7 @@ describe("script preview events", () => {
                 isCurrent: () => true,
                 invalidate: context.invalidate,
             });
+
             expect(render()).toBe("$ echo first;\n  echo second;\n  echo third");
         } finally {
             bash.clear();
@@ -840,7 +841,6 @@ describe("script preview events", () => {
                 },
             });
 
-            // Rendering resolves embedded programs first; a later render reports the width.
             await vi.waitUntil(() => {
                 for (const call of calls) render(call);
 
@@ -1283,7 +1283,6 @@ describe("script render diagnostics", () => {
             outcome: "formatted",
         });
 
-        // The displayed heredoc includes the newline before its delimiter.
         expect(eventsNamed(events, "syntax_highlight")).toContainEqual(
             expect.objectContaining({
                 language: "python",
@@ -1404,11 +1403,9 @@ describe("script render diagnostics", () => {
             outcome: "formatted",
         });
 
-        // The program starts its row, so the displayed text is exactly the formatter output.
         expect(jqSegment.displayHash).toBe(jqFormat?.outputHash);
         expect(formats.filter((event) => event.codeHash === awkSegment.codeHash)).toEqual([]);
 
-        // The formatted preview may publish after the first render; highlighting follows it.
         await vi.waitUntil(async () => {
             render();
             await settleSyntaxHighlights();

@@ -59,7 +59,6 @@ export type BuiltInToolRenderContext = Omit<SdkToolRenderContext, "args" | "stat
 export type ToolCallArguments = PiToolRenderContext["args"];
 
 export type BuiltInToolRendererOptions = {
-    /** Whether arguments for this call are still arriving in the current assistant message. */
     readonly isStreamingCall?: (toolCallId: string) => boolean;
 
     /** Called before selection, including incomplete, preserved, and generic fallback rows. */

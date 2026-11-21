@@ -417,7 +417,6 @@ it("routes lower wrapped thinking clicks at the reserved content width", async (
             expect(body(row.render(width), label)).toEqual(body(collapsed.render(30)));
 
             if (!completed) {
-                // Reopen via the real handler so completion gets the same test.
                 expect(row.handleMouse({ ...click, y: 1, screenY: 1 })).toMatchObject({
                     handled: true,
                     target: { width: 30 },

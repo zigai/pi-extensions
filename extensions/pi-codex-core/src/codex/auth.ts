@@ -150,7 +150,6 @@ function resolveActiveCompatibleToolModel(ctx: ExtensionContext): CodexResult<Ru
     );
 }
 
-/** Resolve the active OpenAI Codex responses provider and prepared response headers. */
 export async function resolveActiveCodexResponsesProvider(
     ctx: ExtensionContext,
 ): Promise<CodexResult<CodexResponsesProvider | undefined>> {

@@ -148,7 +148,6 @@ function placeOnLine(
     return { lines: result, hit: { x: start, y: index, width: labelWidth, renderWidth: width } };
 }
 
-/** Add a label to the first message line without changing the number of lines. */
 export function renderTimestamp(
     lines: string[],
     width: number,
@@ -163,7 +162,6 @@ export function renderTimestamp(
     return placeOnLine(lines, index, width, label, style);
 }
 
-/** Put the label right of the last message line, or on a new line below it when the line is full. */
 export function renderTimestampAtEnd(
     lines: string[],
     width: number,
@@ -191,7 +189,6 @@ export function renderTimestampAtEnd(
     };
 }
 
-/** Add a blank line and then a line holding the label and its details below the message. */
 export function renderTimestampBelow(
     lines: string[],
     width: number,

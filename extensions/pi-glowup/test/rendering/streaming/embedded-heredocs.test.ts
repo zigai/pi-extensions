@@ -39,7 +39,6 @@ function setup(shellProfile = true) {
             if (!profiles.has(input.language)) return undefined;
 
             if (input.language === "python")
-                // The real Tuff path is covered by the isolated Termtrace fixture.
                 // This printer makes language dispatch and literal masking observable
                 // without requiring a globally installed Python formatter in CI.
                 return input.code
@@ -600,7 +599,6 @@ it("formats awk and jq programs in place without touching option values", async 
         ].join("\n"),
     );
 
-    // The display is still one valid command with the same option values.
     expect(programWords(display).slice(0, 1)).toEqual(["a | b"]);
     expect(programWords(display)).toContain(":");
     expect(

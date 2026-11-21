@@ -60,7 +60,6 @@ export type TokenizerOperationOptions = {
     readonly signal?: AbortSignal | undefined;
 };
 
-/** Application-owned Codex tokenizer resource with a warm worker and exact lazy fallback. */
 export class CodexTokenizer {
     private workerState: TokenizerWorkerState | undefined;
     private nextRequestId = 1;
@@ -73,12 +72,10 @@ export class CodexTokenizer {
         } = {},
     ) {}
 
-    /** Start initializing the tokenizer off the main thread without awaiting it. */
     warm(): void {
         this.warmupPromise ??= this.ensureWorkerState().ready.catch(() => undefined);
     }
 
-    /** Terminate this tokenizer's worker and reject only this resource's pending requests. */
     async shutdown(): Promise<void> {
         const state = this.workerState;
         this.workerState = undefined;

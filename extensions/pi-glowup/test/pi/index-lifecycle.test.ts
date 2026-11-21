@@ -472,7 +472,6 @@ describe("extension lifecycle", () => {
         expect(format?.fields).toMatchObject({
             toolCallId: "call-1",
             stage: "block",
-            // The quiet session already stored this output for the next session.
             outcome: "cached",
         });
     });
