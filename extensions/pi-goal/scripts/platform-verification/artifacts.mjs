@@ -109,13 +109,17 @@ export function scanArtifactTextFiles(dir, secretValues = []) {
 
       if (!entry.isFile()) continue;
       if (!/\.(?:txt|json|jsonl|md|log|ps1|mjs|js)$/i.test(entry.name)) continue;
+
+      let text;
       try {
-        const text = readFileSync(path, "utf8");
-        for (const violation of scanForSecrets(text, secretValues))
-          findings.push({ file: relative(dir, path), violation });
-      } catch {
-        // Ignore unreadable or non-text files.
+        text = readFileSync(path, "utf8");
+      } catch (error) {
+        if (error instanceof Error && "code" in error && error.code === "ENOENT") continue;
+        throw error;
       }
+
+      for (const violation of scanForSecrets(text, secretValues))
+        findings.push({ file: relative(dir, path), violation });
     }
   }
 

@@ -1,4 +1,5 @@
-import { readFile, realpath, stat } from "node:fs/promises";
+import { constants, type Stats } from "node:fs";
+import { open, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import type { DiffSection } from "../../rendering/diff/text-diff.ts";
 
@@ -30,6 +31,45 @@ function leavesDirectory(directory: string, filePath: string): boolean {
     );
 }
 
+async function isOpenedWithin(
+    directory: string,
+    filePath: string,
+    opened: Stats,
+): Promise<boolean> {
+    const canonicalPath = await realpath(filePath);
+    if (leavesDirectory(await realpath(directory), canonicalPath)) {
+        return false;
+    }
+
+    const current = await stat(canonicalPath);
+    return current.dev === opened.dev && current.ino === opened.ino;
+}
+
+async function readCheckedFile(
+    cwd: string,
+    filePath: string,
+    maxBytes: number | null,
+    options: TextFilePreimageOptions,
+): Promise<Buffer | undefined> {
+    // Non-blocking open keeps a FIFO from waiting for a writer before the file check.
+    const file = await open(filePath, constants.O_RDONLY | constants.O_NONBLOCK);
+
+    try {
+        const stats = await file.stat();
+        if (!stats.isFile() || (maxBytes !== null && stats.size > maxBytes)) {
+            return undefined;
+        }
+
+        if (options.allowOutsideCwd !== true && !(await isOpenedWithin(cwd, filePath, stats))) {
+            return undefined;
+        }
+
+        return await file.readFile();
+    } finally {
+        await file.close();
+    }
+}
+
 /** Captures text after a size check; default paths must resolve within cwd. */
 export async function captureTextFilePreimage(
     cwd: string,
@@ -44,27 +84,8 @@ export async function captureTextFilePreimage(
     }
 
     try {
-        let readablePath = resolvedPath;
-
-        if (options.allowOutsideCwd !== true) {
-            const canonicalCwd = await realpath(resolvedCwd);
-            const canonicalPath = await realpath(resolvedPath);
-            if (leavesDirectory(canonicalCwd, canonicalPath)) {
-                return undefined;
-            }
-
-            // Follow the validated target, not the original symlink. This does not
-            // provide an atomic sandbox against concurrent ancestor replacement.
-            readablePath = canonicalPath;
-        }
-
-        const stats = await stat(readablePath);
-        if (!stats.isFile() || (maxBytes !== null && stats.size > maxBytes)) {
-            return undefined;
-        }
-
-        const data = await readFile(readablePath);
-        if (data.includes(0)) {
+        const data = await readCheckedFile(resolvedCwd, resolvedPath, maxBytes, options);
+        if (data === undefined || data.includes(0)) {
             return undefined;
         }
 
