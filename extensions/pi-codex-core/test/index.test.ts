@@ -16,6 +16,7 @@ import {
     type BuildSystemPromptOptions,
     type ExtensionAPI,
     type ExtensionContext,
+    type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import { registerSystemPromptPreparation } from "@zigai/pi-extension-internals/prompt-preparation";
 import { buildSystemPrompt } from "./pi-system-prompt.ts";
@@ -30,6 +31,7 @@ import {
     TEST_THEME,
     makeExtensionHarness,
     makeExtensionContext,
+    makeRenderContext,
     shutdownExtensionHarnesses,
     testDouble,
 } from "./helpers.ts";
@@ -83,6 +85,46 @@ test("fixture cleanup cancels pending compaction before disposing its session", 
     await shutdownExtensionHarnesses();
     assert.equal(signal.aborted, true);
     assert.deepEqual(await compaction, { cancel: true });
+});
+
+test("web_run names pages from a resumed session and forgets them in the next session", async () => {
+    const harness = makeExtensionHarness();
+    extension(harness.api);
+    const earlierResult = testDouble<SessionEntry>({
+        type: "message",
+        id: "entry-1",
+        parentId: null,
+        timestamp: "2026-01-01T00:00:00.000Z",
+        message: {
+            role: "toolResult",
+            toolCallId: "call-1",
+            toolName: "web_run",
+            content: [
+                {
+                    type: "text",
+                    text: "Guide (https://example.org/guide)\n【turn4view0】 [wordlim: 200] Total lines: 1\nL0: Install",
+                },
+            ],
+            isError: false,
+            timestamp: 0,
+        },
+    });
+    const tool = harness.tools.get("web_run");
+    assert.ok(tool?.renderCall);
+    const args = { find: [{ ref_id: "turn4view0", pattern: "install" }] };
+    const renderFind = () =>
+        tool.renderCall?.(args, TEST_THEME, makeRenderContext(args)).render(200).join("\n").trim();
+
+    const resumed = testDouble<ExtensionContext>(
+        makeExtensionContext("/workspace", false, undefined, { entries: [earlierResult] }),
+    );
+    await harness.startSession(resumed);
+    assert.equal(renderFind(), 'Searched for "install" in https://example.org/guide');
+    await harness.shutdownSession("new", resumed);
+    await harness.startSession(
+        testDouble<ExtensionContext>(makeExtensionContext("/workspace", false)),
+    );
+    assert.equal(renderFind(), 'Searched for "install" in an earlier page');
 });
 
 test("exports extension metadata", () => {

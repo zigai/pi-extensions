@@ -230,7 +230,7 @@ test("web_run renders one semantic action line per request without result or opt
             '• Searched the web for "third query"',
             "• Opened https://example.org/docs?version=2",
             "• Followed link 12 on an earlier page",
-            '• Searched for "render result" in turn0view0',
+            '• Searched for "render result" in an earlier page',
         ].join("\n"),
     );
     assert.doesNotMatch(rendered, /sources|recency|domains|length|lineno|42/u);

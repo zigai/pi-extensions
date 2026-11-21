@@ -14,12 +14,17 @@ import {
     webRunLabels,
     webRunReferenceRows,
     webRunResultLines,
+    type WebRunPageUrl,
     type WebRunReferenceRow,
 } from "./rendering.ts";
 
-function renderWebRunCall(args: GlowupWireRecord, context: GlowupWireCallContext) {
+function renderWebRunCall(
+    args: GlowupWireRecord,
+    context: GlowupWireCallContext,
+    pageUrl: WebRunPageUrl,
+) {
     const resultSucceeded = context.hasResult === true && !context.isError;
-    const actions = webRunCallActions(args, resultSucceeded).map((action) =>
+    const actions = webRunCallActions(args, resultSucceeded, pageUrl).map((action) =>
         call(webRunLabels(action.labels, context.phase, context.isError), {
             body: text({
                 kind: "text",
@@ -53,36 +58,40 @@ function renderReferenceRow(row: WebRunReferenceRow) {
     );
 }
 
-export const webRunGlowupRendering = {
-    version: 3,
-    parseArgs: parseGlowupWireArgs,
-    parseResult: parseGlowupWireResult,
-    renderCall: renderWebRunCall,
-    renderResult(result, context) {
-        // Let Glowup's error fallback retain the failure text, even when collapsed.
-        if (context.isError) return undefined;
+export function createWebRunGlowupRendering(pageUrl: WebRunPageUrl) {
+    return {
+        version: 3,
+        parseArgs: parseGlowupWireArgs,
+        parseResult: parseGlowupWireResult,
+        renderCall: (args, context) => renderWebRunCall(args, context, pageUrl),
+        renderResult(result, context) {
+            // Let Glowup's error fallback retain the failure text, even when collapsed.
+            if (context.isError) return undefined;
 
-        const rawOutput = glowupWireTextOutput(result) ?? "";
-        const references = webRunReferenceRows(context.args, rawOutput).map(renderReferenceRow);
+            const rawOutput = glowupWireTextOutput(result) ?? "";
+            const references = webRunReferenceRows(context.args, rawOutput, pageUrl).map(
+                renderReferenceRow,
+            );
 
-        // Undefined means fallback, not hidden: successful collapsed results are explicitly empty.
-        if (!context.expanded) return references.length === 0 ? empty() : stack(references);
+            // Undefined means fallback, not hidden: successful collapsed results are explicitly empty.
+            if (!context.expanded) return references.length === 0 ? empty() : stack(references);
 
-        return stack([
-            ...references,
-            ...webRunResultLines(rawOutput).map((line) =>
-                text({
-                    kind: "text",
-                    text: line.text,
-                    bold: line.kind === "title",
-                    tone:
-                        line.kind === "url"
-                            ? "url"
-                            : line.kind === "omission"
-                              ? "muted"
-                              : "default",
-                }),
-            ),
-        ]);
-    },
-} satisfies GlowupRenderer<GlowupWireRecord, GlowupWireToolResult>;
+            return stack([
+                ...references,
+                ...webRunResultLines(rawOutput).map((line) =>
+                    text({
+                        kind: "text",
+                        text: line.text,
+                        bold: line.kind === "title",
+                        tone:
+                            line.kind === "url"
+                                ? "url"
+                                : line.kind === "omission"
+                                  ? "muted"
+                                  : "default",
+                    }),
+                ),
+            ]);
+        },
+    } satisfies GlowupRenderer<GlowupWireRecord, GlowupWireToolResult>;
+}

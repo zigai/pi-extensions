@@ -13,7 +13,9 @@ import {
     type ExtensionContext,
     type ExtensionToolContext,
     type SessionCompactFailedEvent,
+    type SessionEntry,
     type Theme,
+    type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { normalizeBuildSystemPromptOptions } from "./pi-system-prompt.ts";
 import { JsonObjectDecoder, JsonStringDecoder } from "../src/compaction/responses-input.ts";
@@ -96,6 +98,7 @@ type ExtensionHarness = {
     readonly api: ExtensionAPI;
     readonly events: EventBus;
     readonly activeTools: readonly string[];
+    readonly tools: ReadonlyMap<string, ToolDefinition>;
 
     readonly appendedEntries: readonly {
         readonly customType: string;
@@ -165,6 +168,7 @@ export async function shutdownExtensionHarnesses(): Promise<void> {
 
 export function makeExtensionHarness(initialActiveTools: readonly string[] = []): ExtensionHarness {
     let activeTools: string[] = [...initialActiveTools];
+    const tools = new Map<string, ToolDefinition>();
     const events = createEventBus();
     const appendedEntries: Array<{ readonly customType: string; readonly data: JsonValue }> = [];
     const sentUserMessages: JsonValue[] = [];
@@ -179,7 +183,9 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
     const pendingCompactions = new Set<AbortController>();
     const api = {
         events,
-        registerTool() {},
+        registerTool(tool: ToolDefinition) {
+            tools.set(tool.name, tool);
+        },
         registerCommand() {},
         registerMessageRenderer(type: string, renderer: MessageRenderer) {
             messageRenderers.set(type, renderer);
@@ -225,6 +231,7 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
         get activeTools() {
             return activeTools;
         },
+        tools,
         appendedEntries,
         sentUserMessages,
         async startSession(ctx: ExtensionContext): Promise<void> {
@@ -415,11 +422,12 @@ export function makeExtensionContext(
     cwd: string,
     trusted: boolean,
     model: TestExtensionModel = DEFAULT_TEST_EXTENSION_MODEL,
-    options: { readonly agentActive?: boolean } = {},
+    options: { readonly agentActive?: boolean; readonly entries?: readonly SessionEntry[] } = {},
 ): ExtensionToolContext {
     const sessionManager = {
         getSessionId: () => "extension-session",
         getBranch: () => [],
+        getEntries: () => [...(options.entries ?? [])],
     };
 
     const ctx = options.agentActive

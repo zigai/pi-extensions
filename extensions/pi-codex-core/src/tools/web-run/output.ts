@@ -216,8 +216,9 @@ const ReferenceSourceSchema = compileSchema(
 );
 
 const REFERENCE_SOURCE = /Source: (click|open)\((\{[^}]*\})\)/u;
-const FAILED_FETCH = /Failed to fetch (https?:\/\/\S+?):? (.+)/u;
-const INACCESSIBLE_URL = /URL (https?:\/\/\S+) is (not accessible via this tool)/u;
+
+export const FAILED_FETCH = /Failed to fetch (https?:\/\/\S+?):? (.+)/u;
+export const INACCESSIBLE_URL = /URL (https?:\/\/\S+) is (not accessible via this tool)/u;
 
 /** Codex names each section's command in a Source line; the header or failure line names the page. */
 export function parseWebRunReferenceSections(rawOutput: string): WebRunReferenceSection[] {

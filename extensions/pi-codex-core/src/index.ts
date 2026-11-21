@@ -34,7 +34,8 @@ import { registerCodexSettingsHost } from "./settings/integration.ts";
 import { registerApplyPatchTool } from "./tools/apply-patch/tool.ts";
 import { registerImagegenTool } from "./tools/imagegen.ts";
 import { registerViewImageTool } from "./tools/view-image/tool.ts";
-import { registerWebRunTool } from "./tools/web-run/tool.ts";
+import { WebRunPageIndex } from "./tools/web-run/pages.ts";
+import { registerWebRunTool, webRunSessionOutputs } from "./tools/web-run/tool.ts";
 import {
     OptionalTogglesActivation,
     prepareTogglesPrompt,
@@ -92,6 +93,7 @@ export default function extension(pi: ExtensionAPI): void {
 
     const responsesLitePolicy = new ResponsesLiteRequestPolicy();
     const tokenizer = new CodexTokenizer();
+    const webRunPages = new WebRunPageIndex();
     const recovery = new CodexRecoveryCoordinator({ getConfig: () => config });
     const togglesActivation = new OptionalTogglesActivation(pi.events, packageName);
     const warnedPromptConflictSessions = new Set<string>();
@@ -120,7 +122,7 @@ export default function extension(pi: ExtensionAPI): void {
         syncToolActivation(ctx);
     };
 
-    registerWebRunTool(pi, { getConfig, tokenizer });
+    registerWebRunTool(pi, { getConfig, tokenizer, pages: webRunPages });
     registerImagegenTool(pi, { getConfig });
     registerViewImageTool(pi, { getConfig });
     registerApplyPatchTool(pi);
@@ -134,6 +136,7 @@ export default function extension(pi: ExtensionAPI): void {
         responsesLitePolicy.clearSession(sessionId);
         clearProviderRequestTemplate(sessionId);
         warnedPromptConflictSessions.delete(sessionId);
+        webRunPages.reset(webRunSessionOutputs(ctx.sessionManager.getEntries()));
         config = ctx.isProjectTrusted()
             ? readCodexCoreStartupConfig({ cwd: ctx.cwd })
             : readCodexCoreStartupConfig();
@@ -411,6 +414,7 @@ export default function extension(pi: ExtensionAPI): void {
         }
 
         recovery.stop();
+        webRunPages.reset([]);
         requestTierWrapper?.dispose();
         requestTierWrapper = undefined;
 

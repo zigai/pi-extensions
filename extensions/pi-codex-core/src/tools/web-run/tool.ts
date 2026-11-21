@@ -20,6 +20,7 @@ import {
     withFileMutationQueue,
     type ExtensionAPI,
     type ExtensionContext,
+    type SessionEntry,
     type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 
@@ -52,7 +53,8 @@ import {
     webRunResultLines,
     type WebRunPhase,
 } from "./rendering.ts";
-import { webRunGlowupRendering } from "./glowup-rendering.ts";
+import { createWebRunGlowupRendering } from "./glowup-rendering.ts";
+import { WebRunPageIndex } from "./pages.ts";
 
 export const WEB_RUN_TOOL_NAME = "web_run";
 
@@ -180,6 +182,14 @@ const WebRunParametersValidator = compile(WEB_RUN_PARAMETERS);
 const TextContentBlockSchema = compileSchema(
     Type.Object({ type: Type.Literal("text"), text: Type.String() }),
 );
+const WebRunResultMessageSchema = compileSchema(
+    Type.Object({
+        role: Type.Literal("toolResult"),
+        toolName: Type.Literal(WEB_RUN_TOOL_NAME),
+        content: Type.Array(Type.Unknown()),
+    }),
+);
+
 const SearchOutputSchema = compileSchema(
     Type.Object({
         output: Type.String(),
@@ -211,18 +221,41 @@ type WebRunOptions = {
     readonly runtime?: CodexRuntime | undefined;
     readonly tokenizer?: CodexTokenizer | undefined;
     readonly agentDir?: string | undefined;
+    readonly pages?: WebRunPageIndex | undefined;
 };
 
 export function registerWebRunTool(pi: ExtensionAPI, options: WebRunOptions): void {
     pi.registerTool(createWebRunTool(options));
 }
 
+/** Text of every web_run result in the session, including other branches and compacted history. */
+export function webRunSessionOutputs(entries: readonly SessionEntry[]): string[] {
+    return entries.flatMap((entry) => {
+        if (entry.type !== "message") return [];
+
+        const message = WebRunResultMessageSchema.decode(entry.message);
+        if (message === undefined) return [];
+
+        return [
+            message.content
+                .flatMap((item) => {
+                    const block = TextContentBlockSchema.decode(item);
+                    return block === undefined ? [] : [block.text];
+                })
+                .join("\n"),
+        ];
+    });
+}
+
 export function createWebRunTool(options: WebRunOptions): ToolDefinition<
     typeof WEB_RUN_PARAMETERS,
     WebRunDetails
 > & {
-    readonly glowupRendering: typeof webRunGlowupRendering;
+    readonly glowupRendering: ReturnType<typeof createWebRunGlowupRendering>;
 } {
+    const pages = options.pages ?? new WebRunPageIndex();
+    const pageUrl = (refId: string) => pages.url(refId);
+
     return {
         name: WEB_RUN_TOOL_NAME,
         label: "Web Search",
@@ -232,7 +265,7 @@ export function createWebRunTool(options: WebRunOptions): ToolDefinition<
             "Use web_run when the user asks for current, external, or source-backed information; cite sources from returned URLs in the final answer.",
             "Use web_run open/click/find with returned ref ids instead of repeating broad searches when drilling into a result.",
         ],
-        glowupRendering: webRunGlowupRendering,
+        glowupRendering: createWebRunGlowupRendering(pageUrl),
         parameters: WEB_RUN_PARAMETERS,
         prepareArguments: prepareWebRunArguments,
         renderCall(args, theme, context) {
@@ -242,7 +275,11 @@ export function createWebRunTool(options: WebRunOptions): ToolDefinition<
                   ? "running"
                   : "pending";
             const resultSucceeded = !context.isPartial && !context.isError;
-            const actions = webRunCallActions(parseGlowupWireArgs(args) ?? {}, resultSucceeded);
+            const actions = webRunCallActions(
+                parseGlowupWireArgs(args) ?? {},
+                resultSucceeded,
+                pageUrl,
+            );
             if (actions.length === 0 && resultSucceeded) return new Text("", 0, 0);
 
             const lines =
@@ -282,6 +319,7 @@ export function createWebRunTool(options: WebRunOptions): ToolDefinition<
             const references = webRunReferenceRows(
                 parseGlowupWireArgs(context.args) ?? {},
                 rawOutput,
+                pageUrl,
             ).map(
                 (row) =>
                     theme.fg(
@@ -320,6 +358,8 @@ export function createWebRunTool(options: WebRunOptions): ToolDefinition<
                 );
                 if (response.isErr()) throw codexFailureToError(response.error);
 
+                pages.record(response.value.output);
+
                 const output = await prepareWebRunOutput(
                     response.value.output,
                     toolCallId,
@@ -356,6 +396,7 @@ const prepareWebRunArguments = ((args): WebRunParams => {
     if (!parsed.ok) throw new Error("Invalid web_run arguments.");
 
     splitSearchRequest(parsed.value);
+
     return parsed.value;
 }) satisfies NonNullable<ToolDefinition["prepareArguments"]>;
 
@@ -589,7 +630,6 @@ async function prepareWebRunOutput(
     const sourceCount = parseWebRunSources(output).filter(
         (source) => source.url !== undefined,
     ).length;
-
     return { fullOutputPath, sourceCount };
 }
 

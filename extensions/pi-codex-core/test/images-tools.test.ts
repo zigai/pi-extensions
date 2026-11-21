@@ -588,7 +588,7 @@ test("native web_run renders separate lifecycle actions and visible errors witho
             'Searched the web for "second query"',
             'Searched the web for "third query"',
             "Opened https://example.org/docs",
-            'Searched for "render result" in turn0view0',
+            'Searched for "render result" in an earlier page',
         ].join("\n"),
     );
     assert.equal(
@@ -926,6 +926,73 @@ test("saves web_run raw output outside workspace", async () => {
         await assert.rejects(readFile(join(cwd, ".pi", "codex-core-web-run", "call_1.txt")), {
             code: "ENOENT",
         });
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("web_run names pages from earlier calls by their URL", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-web-pages-"));
+
+    const outputs = [
+        [
+            "Guide (https://example.org/guide)",
+            '\u{e200}cite\u{e202}turn0view0\u{e201} [wordlim: 200] Source: open({"ref_id":"https://example.org/guide","lineno":null}); Total lines: 2',
+            "L0: See 【turn9view9】 for details.",
+            "--------------------------------------------------------------------------------",
+            "Internal Error ()",
+            '\u{e200}cite\u{e202}turn0view1\u{e201} [wordlim: 200] Source: open({"ref_id":"https://example.org/gone","lineno":null}); ',
+            "Failed to fetch https://example.org/gone: (404) Not Found",
+        ].join("\n"),
+        "Search results (https://example.org/search)\n【turn1search0】 [wordlim: 200] Crawled: today;",
+    ];
+
+    let call = 0;
+    const runtime = makeTestRuntime(async () => {
+        const output = outputs[call] ?? "";
+        call += 1;
+        return new Response(JSON.stringify({ output }), { status: 200 });
+    });
+
+    try {
+        const tool = createWebRunTool({
+            getConfig: () => DEFAULT_CODEX_CORE_CONFIG,
+            runtime,
+            agentDir: join(root, "agent"),
+        });
+        assert.ok(tool.renderCall);
+        const ctx = makeWebRunContext(join(root, "workspace"));
+        await tool.execute(
+            "call/1",
+            { open: [{ ref_id: "https://example.org/guide" }] },
+            undefined,
+            undefined,
+            ctx,
+        );
+        await tool.execute("call/2", { search_query: [{ q: "guide" }] }, undefined, undefined, ctx);
+
+        const args = {
+            find: [
+                { ref_id: "turn0view0", pattern: "install" },
+                { ref_id: "turn9view9", pattern: "unknown" },
+            ],
+            open: [{ ref_id: "turn1search0" }, { ref_id: "turn5search2" }],
+            click: [{ ref_id: "turn0view1", id: 3 }],
+            screenshot: [{ ref_id: "turn0view0", pageno: 2 }],
+        };
+        assert.equal(
+            renderUnpadded(
+                tool.renderCall(args, TEST_THEME, { ...makeRenderContext(args), isPartial: true }),
+            ),
+            [
+                "Opening https://example.org/search",
+                "Opening an earlier search result",
+                "Following link 3 on https://example.org/gone",
+                'Searching for "install" in https://example.org/guide',
+                'Searching for "unknown" in an earlier page',
+                "Capturing page 2 of https://example.org/guide",
+            ].join("\n"),
+        );
     } finally {
         await rm(root, { recursive: true, force: true });
     }
