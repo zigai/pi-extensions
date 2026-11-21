@@ -85,6 +85,7 @@ function operatorIndex(
 
 class BashLayoutCollector {
     readonly #breakpoints = new Map<number, number>();
+    readonly #shortChainBreakpoints = new Set<number>();
     readonly #heredocs: Redirect[] = [];
     readonly #source: string;
     readonly #operatorPosition: ShellOperatorPosition;
@@ -112,8 +113,10 @@ class BashLayoutCollector {
         );
     }
 
-    addOperator(index: number, operator: string, indent: number): void {
-        this.add(this.#operatorPosition === "trailing" ? index + operator.length : index, indent);
+    addOperator(index: number, operator: string, indent: number): number {
+        const breakpoint = this.#operatorPosition === "trailing" ? index + operator.length : index;
+        this.add(breakpoint, indent);
+        return breakpoint;
     }
 
     get structurallyComplex(): boolean {
@@ -180,6 +183,34 @@ class BashLayoutCollector {
         if (closingIndex !== undefined) this.add(closingIndex, indent);
     }
 
+    walkGroup(
+        node: { readonly body: CompoundList; readonly end: number; readonly pos: number },
+        indent: number,
+        depth: number,
+        closer: string,
+    ): void {
+        const before = new Set(this.#breakpoints.keys());
+
+        this.walkCompoundList(node.body, indent + 1, depth + 1);
+
+        const inner = [...this.#breakpoints.keys()].filter((index) => !before.has(index));
+        const inline =
+            node.body.commands.length === 1 &&
+            !this.#source.slice(node.pos, node.end).includes("\n") &&
+            inner.every((index) => this.#shortChainBreakpoints.has(index));
+        if (inline) {
+            for (const index of inner) this.#breakpoints.delete(index);
+
+            return;
+        }
+
+        this.#structurallyComplex = true;
+        this.add(node.body.pos, indent + 1);
+
+        const closingIndex = this.#source.lastIndexOf(closer, node.end - 1);
+        if (closingIndex >= node.body.end) this.add(closingIndex, indent);
+    }
+
     walkNode(node: Node, indent: number, depth: number): void {
         if (depth > MAX_LAYOUT_DEPTH) return;
 
@@ -197,9 +228,8 @@ class BashLayoutCollector {
                 return;
             case "AndOr": {
                 const hasStepBoundary = node.operators.includes("&&");
-                if (node.commands.length >= 3 && hasStepBoundary) {
-                    this.#structurallyComplex = true;
-                }
+                const longChain = node.commands.length >= 3 && hasStepBoundary;
+                if (longChain) this.#structurallyComplex = true;
 
                 for (const [index, command] of node.commands.entries()) {
                     if (index > 0) {
@@ -213,7 +243,8 @@ class BashLayoutCollector {
                                 operator,
                             );
                             if (boundary !== undefined) {
-                                this.addOperator(boundary, operator, indent);
+                                const breakpoint = this.addOperator(boundary, operator, indent);
+                                if (!longChain) this.#shortChainBreakpoints.add(breakpoint);
                             }
                         }
                     }
@@ -271,24 +302,12 @@ class BashLayoutCollector {
                 this.#structurallyComplex = true;
                 this.walkNode(node.body, indent, depth + 1);
                 return;
-            case "BraceGroup": {
-                this.#structurallyComplex = true;
-                this.add(node.body.pos, indent + 1);
-                this.walkCompoundList(node.body, indent + 1, depth + 1);
-
-                const closingIndex = this.#source.lastIndexOf("}", node.end - 1);
-                if (closingIndex >= node.body.end) this.add(closingIndex, indent);
+            case "BraceGroup":
+                this.walkGroup(node, indent, depth, "}");
                 return;
-            }
-            case "Subshell": {
-                this.#structurallyComplex = true;
-                this.add(node.body.pos, indent + 1);
-                this.walkCompoundList(node.body, indent + 1, depth + 1);
-
-                const closingIndex = this.#source.lastIndexOf(")", node.end - 1);
-                if (closingIndex >= node.body.end) this.add(closingIndex, indent);
+            case "Subshell":
+                this.walkGroup(node, indent, depth, ")");
                 return;
-            }
             case "CompoundList":
                 this.walkCompoundList(node, indent, depth + 1);
                 return;

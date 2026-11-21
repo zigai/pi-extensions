@@ -193,12 +193,12 @@ describe("bash command analysis", () => {
             [`if check; then`, `  one &&`, `  two;`, `else`, `  three;`, `fi`].join("\n"),
         );
 
-        expect(reflowBashCommand(`f() { one && two; }`)).toBe(
-            [`f() {`, `  one &&`, `  two;`, `}`].join("\n"),
+        expect(reflowBashCommand(`f() { one; two; }`)).toBe(
+            [`f() {`, `  one;`, `  two;`, `}`].join("\n"),
         );
 
-        expect(reflowBashCommand(`(one && two) || three`)).toBe(
-            [`(`, `  one &&`, `  two`, `) || three`].join("\n"),
+        expect(reflowBashCommand(`(one && two && three) || four`)).toBe(
+            [`(`, `  one &&`, `  two &&`, `  three`, `) || four`].join("\n"),
         );
 
         expect(reflowBashCommand(`case "$x" in a) one && two;; b) three;& esac`)).toBe(
@@ -206,6 +206,17 @@ describe("bash command analysis", () => {
                 "\n",
             ),
         );
+    });
+
+    it("keeps one-line groups around one short statement inline", () => {
+        expect(
+            reflowBashCommand(`cd /srv && (job one > a.log 2>/dev/null &) ; (job two &) ; wait`),
+        ).toBe(
+            [`cd /srv &&`, `(job one > a.log 2>/dev/null &) ;`, `(job two &) ;`, `wait`].join("\n"),
+        );
+
+        expect(reflowBashCommand(`(cd lib && make) || { echo failed; } >&2`)).toBeUndefined();
+        expect(reflowBashCommand(`f() { echo hi; }`)).toBeUndefined();
     });
 
     it("does not mistake quoted compound keywords for shell grammar", () => {
