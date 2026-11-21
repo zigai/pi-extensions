@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { setImmediate as waitForImmediate } from "node:timers/promises";
-import { test } from "vitest";
+import { test, vi } from "vitest";
 
 type SelectedItemForTest = object;
 
@@ -14,44 +14,15 @@ type AutocompletePositionPatchTarget = {
     paddingX?: number;
     tui?: { requestRender(force?: boolean): void };
 };
-type ImportedAutocompletePositionModule = {
-    installAutocompletePositionPatch(
-        config: {
-            readonly autocompleteAboveInput: boolean;
-            readonly restoreContentAfterAutocompleteClose: boolean;
-        },
-        target?: AutocompletePositionPatchTarget,
-    ): object;
-};
-
-type ImportedAutocompletePositionModuleView = {
-    readonly installAutocompletePositionPatch?: unknown;
-};
-
-function isImportedAutocompletePositionModule(
-    value: unknown,
-): value is ImportedAutocompletePositionModule {
-    if ((typeof value !== "object" && typeof value !== "function") || value === null) return false;
-
-    // SAFETY: The module view exposes only the installer export validated by this predicate.
-    const view = value as ImportedAutocompletePositionModuleView;
-    return typeof view.installAutocompletePositionPatch === "function";
-}
-
 type AutocompletePositionModule = {
     installAutocompletePositionPatch(prototype?: AutocompletePositionPatchTarget): void;
     updateAutocompleteAboveInput(enabled: boolean): void;
     updateRestoreContentAfterAutocompleteClose(enabled: boolean): void;
 };
 
-async function importAutocompletePositionModule(
-    instance: string,
-): Promise<AutocompletePositionModule> {
-    const moduleUrl = new URL(`../src/autocomplete-position.ts?${instance}`, import.meta.url);
-    const module: unknown = await import(/* @vite-ignore */ moduleUrl.href);
-    if (!isImportedAutocompletePositionModule(module)) {
-        throw new Error("Expected installAutocompletePositionPatch export");
-    }
+async function importAutocompletePositionModule(): Promise<AutocompletePositionModule> {
+    vi.resetModules();
+    const module = await import("../src/autocomplete-position.ts");
 
     let autocompleteAboveInput = true;
     let restoreContentAfterAutocompleteClose = true;
@@ -97,8 +68,8 @@ function autocompleteTarget(
 }
 
 test("autocomplete position patch reads config state updated by a reloaded module", async () => {
-    const firstModule = await importAutocompletePositionModule("first-runtime");
-    const secondModule = await importAutocompletePositionModule("second-runtime");
+    const firstModule = await importAutocompletePositionModule();
+    const secondModule = await importAutocompletePositionModule();
     const prototype: AutocompletePositionPatchTarget = {
         render() {
             return ["input", "suggestion"];
@@ -128,7 +99,7 @@ test("autocomplete position patch reads config state updated by a reloaded modul
 });
 
 test("autocomplete position patch defers forced redraw after above-input autocomplete closes", async () => {
-    const autocompletePosition = await importAutocompletePositionModule("close-redraw");
+    const autocompletePosition = await importAutocompletePositionModule();
     const requestedForces: Array<boolean | undefined> = [];
     const prototype: AutocompletePositionPatchTarget = {
         render(this: AutocompletePositionPatchTarget) {
@@ -174,7 +145,7 @@ test("autocomplete position patch defers forced redraw after above-input autocom
 });
 
 test("autocomplete position patch does not force redraw after Tab completion", async () => {
-    const autocompletePosition = await importAutocompletePositionModule("tab-completion-redraw");
+    const autocompletePosition = await importAutocompletePositionModule();
     const requestedForces: Array<boolean | undefined> = [];
     const prototype: AutocompletePositionPatchTarget = {
         render(this: AutocompletePositionPatchTarget) {
@@ -225,7 +196,7 @@ test("autocomplete position patch does not force redraw after Tab completion", a
 });
 
 test("autocomplete position patch redraws when above-input rendering is disabled", async () => {
-    const autocompletePosition = await importAutocompletePositionModule("disable-redraw");
+    const autocompletePosition = await importAutocompletePositionModule();
     const requestedForces: Array<boolean | undefined> = [];
     const prototype: AutocompletePositionPatchTarget = {
         render() {
@@ -256,7 +227,7 @@ test("autocomplete position patch redraws when above-input rendering is disabled
 });
 
 test("autocomplete position patch redraws after a failed slash confirmation", async () => {
-    const autocompletePosition = await importAutocompletePositionModule("failed-confirm-redraw");
+    const autocompletePosition = await importAutocompletePositionModule();
     const requestedForces: Array<boolean | undefined> = [];
     const prototype: AutocompletePositionPatchTarget = {
         render(this: AutocompletePositionPatchTarget) {

@@ -239,16 +239,11 @@ function createSessionOwner(generation: number): SessionOwner {
 }
 
 export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
-    // SAFETY: The symbol property is extension-private metadata on the concrete
-    // ExtensionAPI object. It does not alter Pi's public API or handler semantics.
-    const guardedPi = pi as Pick<ExtensionAPI, "on"> & {
-        [key: symbol]: boolean | undefined;
-    };
-    if (guardedPi[EXTENSION_LOADED_KEY] === true) {
+    if (Object.getOwnPropertyDescriptor(pi, EXTENSION_LOADED_KEY)?.value === true) {
         return;
     }
 
-    guardedPi[EXTENSION_LOADED_KEY] = true;
+    Reflect.set(pi, EXTENSION_LOADED_KEY, true);
 
     let session: SessionLifecycle = { phase: "registered", owner: createSessionOwner(0) };
 
@@ -970,7 +965,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
 
         if (session !== stopping) return;
 
-        guardedPi[EXTENSION_LOADED_KEY] = false;
+        Reflect.set(pi, EXTENSION_LOADED_KEY, false);
         session = { phase: "stopped", generation, owner };
     }
 

@@ -5,6 +5,8 @@ import {
     installLinkedMethodPatch,
     reportExtensionDiagnostic,
 } from "@zigai/pi-extension-internals";
+import { Type } from "typebox";
+import { Value } from "typebox/value";
 import { openRouterRoute, openRouterSchedule } from "./openrouter-peak.ts";
 import { eligiblePeakRule } from "./peak-rule-eligibility.ts";
 import { peakCountdown } from "./model-peak-schedule.ts";
@@ -30,45 +32,45 @@ type Target = {
     [PATCH]?: Handle;
 };
 
-// Pi's private prototype is an unstable runtime boundary.
-// oxlint-disable antislop/no-runtime-typeof -- Check host methods before patching.
+const targetMethodsSchema = Type.Object({
+    updateList: Type.Function([], Type.Unknown()),
+    dispose: Type.Function([], Type.Unknown()),
+});
+
+const selectionSchema = Type.Object({
+    filteredModels: Type.Array(Type.Unknown()),
+    selectedIndex: Type.Number(),
+});
+
+const selectedItemSchema = Type.Object({
+    model: Type.Object({ provider: Type.String(), id: Type.String() }),
+});
+
+const renderableSchema = Type.Object({
+    render: Type.Function([Type.Number()], Type.Unknown()),
+});
+
+const linesSchema = Type.Array(Type.String());
+
 function hasMethods(value: unknown): value is Target {
-    return (
-        typeof value === "object" &&
-        value !== null &&
-        "updateList" in value &&
-        typeof value.updateList === "function" &&
-        "dispose" in value &&
-        typeof value.dispose === "function"
-    );
+    return Value.Check(targetMethodsSchema, value);
 }
 
 function selectedModel(target: Target): { provider: string; id: string; raw: unknown } | undefined {
-    if (!Array.isArray(target.filteredModels) || typeof target.selectedIndex !== "number")
-        return undefined;
+    if (!Value.Check(selectionSchema, target)) return undefined;
 
-    const item: unknown = target.filteredModels[target.selectedIndex];
-    if (typeof item !== "object" || item === null || !("model" in item)) return undefined;
+    const item = target.filteredModels[target.selectedIndex];
+    if (!Value.Check(selectedItemSchema, item)) return undefined;
 
     const model = item.model;
-    if (
-        typeof model !== "object" ||
-        model === null ||
-        !("provider" in model) ||
-        typeof model.provider !== "string" ||
-        !("id" in model) ||
-        typeof model.id !== "string"
-    )
-        return undefined;
-
     let id = model.id;
-    if (PHYSICAL_MODEL_ID in model && typeof model[PHYSICAL_MODEL_ID] === "string")
-        id = model[PHYSICAL_MODEL_ID];
+    if (PHYSICAL_MODEL_ID in model) {
+        const physicalId = model[PHYSICAL_MODEL_ID];
+        if (Value.Check(Type.String(), physicalId)) id = physicalId;
+    }
 
     return { provider: model.provider, id, raw: model };
 }
-
-// oxlint-enable antislop/no-runtime-typeof
 
 function selectedRule(target: Target, config: Config): PeakRule | undefined {
     const model = selectedModel(target);
@@ -218,34 +220,24 @@ export function installModelSelectorPeakPatch(
                 const models = this.filteredModels;
                 const selected = this.selectedIndex;
                 const children = this.listContainer.children;
-                // Private Pi row and renderer shapes must be validated at this boundary.
-                // oxlint-disable antislop/no-runtime-typeof
+
                 if (
                     value !== undefined &&
                     theme !== undefined &&
                     Array.isArray(models) &&
-                    typeof selected === "number" &&
+                    Value.Check(Type.Number(), selected) &&
                     selected >= 0 &&
                     selected < models.length &&
                     Array.isArray(children)
                 ) {
                     const start = Math.max(0, Math.min(selected - 5, models.length - 10));
                     const child: unknown = children[selected - start];
-                    if (
-                        typeof child === "object" &&
-                        child !== null &&
-                        "render" in child &&
-                        typeof child.render === "function"
-                    ) {
+                    if (Value.Check(renderableSchema, child)) {
                         const render = child.render;
 
                         child.render = function (width: number): string[] {
                             const result: unknown = render.call(this, width);
-                            if (
-                                !Array.isArray(result) ||
-                                !result.every((line) => typeof line === "string")
-                            )
-                                return [];
+                            if (!Value.Check(linesSchema, result)) return [];
 
                             const lines: string[] = [...result];
                             const first = lines[0];
@@ -263,7 +255,6 @@ export function installModelSelectorPeakPatch(
                     }
                 }
 
-                // oxlint-enable antislop/no-runtime-typeof
                 const delay = 60_000 - (Date.now() % 60_000);
                 const timer = setTimeout(() => {
                     timers.delete(this);

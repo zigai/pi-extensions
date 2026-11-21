@@ -94,17 +94,12 @@ globalThis.WeakRef = new Proxy(originalWeakRef, {
 
 themeSamples = 0;
 
-/* oxlint-disable antislop/no-object-parameters, antislop/no-unknown-parameters -- Instrument the exact Reflect.set API; forward values untouched, never parse or invoke them. */
-Reflect.set = (
-    target: object,
-    property: PropertyKey,
-    value: unknown,
-    receiver: object = target,
-) => {
-    if (property === "render") renderPatchInstalls += 1;
-    return originalSet(target, property, value, receiver);
-};
-/* oxlint-enable antislop/no-object-parameters, antislop/no-unknown-parameters */
+Reflect.set = new Proxy(originalSet, {
+    apply(target, _thisArg, args: Parameters<typeof Reflect.set>) {
+        if (args[1] === "render") renderPatchInstalls += 1;
+        return target(...args);
+    },
+});
 
 try {
     for (let index = 0; index < 20; index += 1) probe.render(100);

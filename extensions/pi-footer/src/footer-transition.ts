@@ -78,8 +78,7 @@ function isPatchableInteractiveModePrototype(
 }
 
 function getTransitionState(): FooterTransitionState {
-    // SAFETY: globalThis is the ambient global; FooterTransitionGlobal only adds an optional namespaced transition key.
-    const globalState = globalThis as FooterTransitionGlobal;
+    const globalState: FooterTransitionGlobal = globalThis;
     let state = globalState[TRANSITION_STATE_KEY];
     if (state === undefined) {
         state = { liveInstallGeneration: 0 };

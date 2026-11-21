@@ -189,9 +189,5 @@ function errorMessage(cause: unknown): string {
 }
 
 function hasNodeErrorCode(cause: unknown, code: string): boolean {
-    if (!(cause instanceof Error)) return false;
-
-    // SAFETY: cause is proven to be an Error instance above; inspect optional Node.js code property.
-    const errorWithCode = cause as Error & { code?: unknown };
-    return errorWithCode.code === code;
+    return cause instanceof Error && "code" in cause && cause.code === code;
 }

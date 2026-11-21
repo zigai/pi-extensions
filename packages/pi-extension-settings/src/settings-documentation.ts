@@ -351,7 +351,6 @@ export function renderReadmeSettingsSection(
     options: RenderReadmeOptions = {},
 ): string {
     const schema = createAuthoredSettingsSchema(definition.schema);
-    /* v8 ignore next -- validated settings definitions always have an object properties map */
     if (!isJsonObject(schema.properties)) {
         throw new TypeError("Generated settings schema does not contain properties.");
     }

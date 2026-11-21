@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Type } from "typebox";
 import { test, vi } from "vitest";
 
 import {
@@ -12,6 +13,7 @@ import {
 import type { Candidate } from "../src/source-contract.ts";
 
 const cwd = process.cwd();
+const unknownResponse = { schema: Type.Unknown(), invalidMessage: "invalid response" };
 
 function nodeCommand(script: string, maxOutputBytes?: number) {
     return {
@@ -30,6 +32,7 @@ process.stdin.on("end", () => process.stdout.write(JSON.stringify({ bytes: Buffe
     const result = await executeJsonCommand(
         nodeCommand(script),
         undefined,
+        unknownResponse,
         new AbortController().signal,
     );
     assert.deepEqual(result, { bytes: 0 });
@@ -133,6 +136,7 @@ test("stdout and stderr share a strict output bound", async () => {
         executeJsonCommand(
             nodeCommand(`process.stdout.write("x".repeat(65));`, 64),
             undefined,
+            unknownResponse,
             new AbortController().signal,
         ),
         /maxOutputBytes/,
@@ -141,6 +145,7 @@ test("stdout and stderr share a strict output bound", async () => {
         executeJsonCommand(
             nodeCommand(`process.stderr.write("x".repeat(65));`, 64),
             undefined,
+            unknownResponse,
             new AbortController().signal,
         ),
         /maxOutputBytes/,
@@ -154,7 +159,19 @@ test("timeouts terminate commands and expose no stderr content", async () => {
         timeoutMs: 25,
     };
     await assert.rejects(
-        executeJsonCommand(options, { secret: "not-for-errors" }, new AbortController().signal),
+        executeJsonCommand(
+            options,
+            {
+                version: 1,
+                method: "resolve",
+                sourceId: "secret",
+                cwd,
+                trusted: false,
+                segments: ["not-for-errors"],
+            },
+            unknownResponse,
+            new AbortController().signal,
+        ),
         /^Error: command timed out$/,
     );
 });
@@ -168,6 +185,7 @@ test("child process start errors do not expose command paths or arguments", asyn
                 cwd,
             },
             undefined,
+            unknownResponse,
             new AbortController().signal,
         ),
         /^Error: command could not be started$/,
@@ -191,6 +209,7 @@ setInterval(() => {}, 1000);`;
             timeoutMs: 2_000,
         },
         undefined,
+        unknownResponse,
         signal.signal,
     );
     let grandchildPid = 0;
@@ -239,19 +258,9 @@ test("invalid protocol envelopes and nonzero exits reject safely", async () => {
         executeJsonCommand(
             nodeCommand(`process.stderr.write("secret"); process.exit(7);`),
             undefined,
+            unknownResponse,
             new AbortController().signal,
         ),
         /^Error: command failed$/,
-    );
-});
-
-test("unsupported top-level JSON requests reject before spawning", async () => {
-    await assert.rejects(
-        executeJsonCommand(
-            nodeCommand("process.exit(99)"),
-            Symbol("private request"),
-            new AbortController().signal,
-        ),
-        /^Error: command request must be JSON serializable$/,
     );
 });

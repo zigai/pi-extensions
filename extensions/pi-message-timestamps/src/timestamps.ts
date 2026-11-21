@@ -15,6 +15,14 @@ import {
 } from "./render.ts";
 import type { MessageTimestampsSettings } from "./settings.ts";
 
+type TimestampsContext = {
+    readonly sessionManager: Pick<ExtensionContext["sessionManager"], "getBranch" | "getSessionId">;
+
+    readonly ui: Pick<ExtensionContext["ui"], "notify"> & {
+        readonly theme: Pick<ExtensionContext["ui"]["theme"], "fg" | "bg">;
+    };
+};
+
 const componentSchema = Type.Object({
     render: Type.Function([Type.Number()], Type.Array(Type.String())),
     handleMouse: Type.Optional(Type.Function([Type.Unknown()], Type.Unknown())),
@@ -111,7 +119,7 @@ export class Timestamps {
     private warned = false;
 
     constructor(
-        private readonly ctx: ExtensionContext,
+        private readonly ctx: TimestampsContext,
         settings: MessageTimestampsSettings,
     ) {
         this.format = settings.format;

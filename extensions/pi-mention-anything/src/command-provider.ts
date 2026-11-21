@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { Type } from "typebox";
+import { Type, type StaticParse, type TSchema } from "typebox";
 import { Value } from "typebox/value";
 
 import {
@@ -15,6 +15,7 @@ export const COMMAND_PROVIDER_PROTOCOL_VERSION = 1 as const;
 
 const DEFAULT_MAX_OUTPUT_BYTES = 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 5_000;
+const INVALID_PROTOCOL_RESPONSE = "command returned an invalid protocol v1 response";
 
 export type CommandProcessOptions = {
     readonly command: string;
@@ -22,6 +23,11 @@ export type CommandProcessOptions = {
     readonly cwd: string;
     readonly timeoutMs?: number;
     readonly maxOutputBytes?: number;
+};
+
+export type JsonCommandResponse<Schema extends TSchema> = {
+    readonly schema: Schema;
+    readonly invalidMessage: string;
 };
 
 export type CommandProviderOptions = CommandProcessOptions & {
@@ -113,29 +119,16 @@ function killProcessTree(child: ReturnType<typeof spawn>): void {
  * Executes a JSON-producing command without a shell. An undefined request closes stdin without
  * writing bytes, which is the explicit adapter for commands that only return a JSON array.
  */
-/* oxlint-disable antislop/no-unknown-returns, typescript/no-redundant-type-constituents -- The requested low-level JSON adapter intentionally leaves parsing to its caller. */
-export async function executeJsonCommand(
+export async function executeJsonCommand<const Schema extends TSchema>(
     options: CommandProcessOptions,
-    request: unknown | undefined,
+    request: CommandRequestV1 | undefined,
+    response: JsonCommandResponse<Schema>,
     signal: AbortSignal,
-): Promise<unknown> {
+): Promise<StaticParse<Schema>> {
     validateProcessOptions(options);
     signal.throwIfAborted();
     let input: string | undefined;
-    if (request !== undefined) {
-        try {
-            // JSON.stringify returns undefined for unsupported top-level values.
-            const stringify: (...args: Parameters<typeof JSON.stringify>) => string | undefined =
-                JSON.stringify;
-            input = stringify(request);
-        } catch {
-            return Promise.reject(new Error("command request must be JSON serializable"));
-        }
-
-        if (input === undefined) {
-            return Promise.reject(new Error("command request must be JSON serializable"));
-        }
-    }
+    if (request !== undefined) input = JSON.stringify(request);
 
     const child = spawn(options.command, [...options.args], {
         cwd: options.cwd,
@@ -144,7 +137,7 @@ export async function executeJsonCommand(
         stdio: ["pipe", "pipe", "pipe"],
     });
 
-    return new Promise<unknown>((resolve, reject) => {
+    return new Promise<StaticParse<Schema>>((resolve, reject) => {
         const stdout: Buffer[] = [];
         const maxOutputBytes = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
         let outputBytes = 0;
@@ -219,10 +212,18 @@ export async function executeJsonCommand(
                 return;
             }
 
+            let value: unknown;
             try {
-                resolve(JSON.parse(Buffer.concat(stdout).toString("utf8")));
+                value = JSON.parse(Buffer.concat(stdout).toString("utf8"));
             } catch {
                 reject(new Error("command stdout must contain one JSON value"));
+                return;
+            }
+
+            try {
+                resolve(Value.Parse(response.schema, value));
+            } catch {
+                reject(new Error(response.invalidMessage));
             }
         });
 
@@ -230,7 +231,6 @@ export async function executeJsonCommand(
         else child.stdin.end(`${input}\n`);
     });
 }
-/* oxlint-enable antislop/no-unknown-returns, typescript/no-redundant-type-constituents */
 
 export function createCommandProvider(options: CommandProviderOptions): Provider {
     validateProcessOptions(options);
@@ -264,12 +264,16 @@ export function createCommandProvider(options: CommandProviderOptions): Provider
                 };
             }
 
-            const response = await executeJsonCommand(options, commandRequest, request.signal);
-            try {
-                return Value.Parse(commandDiscoveryResponseSchema, response).result;
-            } catch {
-                throw new Error("command returned an invalid protocol v1 response");
-            }
+            const response = await executeJsonCommand(
+                options,
+                commandRequest,
+                {
+                    schema: commandDiscoveryResponseSchema,
+                    invalidMessage: INVALID_PROTOCOL_RESPONSE,
+                },
+                request.signal,
+            );
+            return response.result;
         },
         async resolve(request) {
             const commandRequest: CommandResolveRequestV1 = {
@@ -280,12 +284,13 @@ export function createCommandProvider(options: CommandProviderOptions): Provider
                 trusted: request.trusted,
                 segments: request.segments,
             };
-            const response = await executeJsonCommand(options, commandRequest, request.signal);
-            try {
-                return Value.Parse(commandResolveResponseSchema, response).result;
-            } catch {
-                throw new Error("command returned an invalid protocol v1 response");
-            }
+            const response = await executeJsonCommand(
+                options,
+                commandRequest,
+                { schema: commandResolveResponseSchema, invalidMessage: INVALID_PROTOCOL_RESPONSE },
+                request.signal,
+            );
+            return response.result;
         },
     };
 }

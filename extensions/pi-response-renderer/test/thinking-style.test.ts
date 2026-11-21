@@ -1,4 +1,3 @@
-/* oxlint-disable no-control-regex -- Assertions inspect terminal SGR styling. */
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
     AssistantMessageComponent,
@@ -12,6 +11,25 @@ import {
     configureMarkdownSyntaxPatch,
     markdownSyntaxPatchStats,
 } from "../../pi-glowup/src/pi/patches/markdown-syntax.ts";
+
+const CSI = "\u001b[";
+
+function foregroundCodes(text: string): Set<string> {
+    const codes = new Set<string>();
+    for (const part of text.split(CSI).slice(1)) {
+        const code = part.slice(0, part.indexOf("m"));
+        if (/^(?:38;[\d;]+|3[0-7]|9[0-7])$/.test(code)) codes.add(code);
+    }
+
+    return codes;
+}
+
+function hasBoldBefore(text: string, needle: string): boolean {
+    return text.split("\n").some((line) => {
+        const bold = line.indexOf(`${CSI}1m`);
+        return bold !== -1 && line.includes(needle, bold);
+    });
+}
 
 initTheme("dark", false);
 
@@ -55,9 +73,8 @@ test("thinking uses one foreground, bold inline code, and no syntax highlighting
             expect(plain).toContain("inline_code()");
             expect(plain).toContain("import os");
             expect(plain).not.toContain("```");
-            const foregrounds = new Set(raw.match(/\x1b\[(?:38;[\d;]+|3[0-7]|9[0-7])m/g));
-            expect(foregrounds.size).toBe(1);
-            expect(raw).toMatch(/\x1b\[1m[^\n]*inline_code\(\)/);
+            expect(foregroundCodes(raw).size).toBe(1);
+            expect(hasBoldBefore(raw, "inline_code()")).toBe(true);
             expect(raw).not.toContain("\x1b[3m");
             expect(component.render(width).join("\n")).toBe(raw);
         }
@@ -94,7 +111,7 @@ for (const order of ["response-first", "glowup-first"] as const) {
             const output = component.render(80).join("\n");
             expect(output).toContain("import os");
             expect(markdownSyntaxPatchStats().renderInjections).toBe(before);
-            expect(new Set(output.match(/\x1b\[(?:38;[\d;]+|3[0-7]|9[0-7])m/g)).size).toBe(1);
+            expect(foregroundCodes(output).size).toBe(1);
         } finally {
             if (order === "response-first") {
                 configureMarkdownSyntaxPatch(false);

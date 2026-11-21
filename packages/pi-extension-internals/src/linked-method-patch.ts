@@ -312,16 +312,26 @@ type KeyedPatchRecord<Policy, Instance, Args extends unknown[], Result> = {
     readonly handle: KeyedLinkedMethodPatchHandle<Policy, Instance, Args, Result>;
 };
 
-// oxlint-disable-next-line antislop/no-object-parameters -- Protocol handles are structural objects from another bundle copy.
-function hasOwnFunctionProperty(target: object, key: PropertyKey): boolean {
-    return typeof getOwnDataDescriptor(target, key)?.value === "function";
-}
+const KEYED_PATCH_HANDLE_METHODS = ["predecessor", "patched", "update", "dispose"] as const;
 
-/* oxlint-disable antislop/no-object-parameters -- This parses a protocol record created by another bundle copy. */
-function readKeyedPatchHandle<Policy, Instance, Args extends unknown[], Result>(
-    record: object,
-    methodKey: PropertyKey,
-): KeyedLinkedMethodPatchHandle<Policy, Instance, Args, Result> {
+function readInstalledKeyedPatchHandle<
+    Target extends object,
+    Policy,
+    Instance,
+    Args extends unknown[],
+    Result,
+>(
+    target: Target,
+    marker: symbol,
+    methodKey: keyof Target,
+): KeyedLinkedMethodPatchHandle<Policy, Instance, Args, Result> | undefined {
+    const record = getOwnDataDescriptor(target, marker)?.value;
+    if (record === undefined) return undefined;
+
+    if (!isNonNullObject(record)) {
+        throw new TypeError("Incompatible keyed method patch record");
+    }
+
     const version = getOwnDataDescriptor(record, KEYED_PATCH_PROTOCOL)?.value;
     if (version !== KEYED_PATCH_PROTOCOL_VERSION) {
         let versionLabel = `invalid-${Object.prototype.toString.call(version).slice(8, -1).toLowerCase()}`;
@@ -336,10 +346,9 @@ function readKeyedPatchHandle<Policy, Instance, Args extends unknown[], Result>(
     const handle = getOwnDataDescriptor(record, "handle")?.value;
     if (
         !isNonNullObject(handle) ||
-        !hasOwnFunctionProperty(handle, "predecessor") ||
-        !hasOwnFunctionProperty(handle, "patched") ||
-        !hasOwnFunctionProperty(handle, "update") ||
-        !hasOwnFunctionProperty(handle, "dispose")
+        KEYED_PATCH_HANDLE_METHODS.some(
+            (method) => typeof getOwnDataDescriptor(handle, method)?.value !== "function",
+        )
     ) {
         throw new TypeError("Incompatible keyed method patch handle");
     }
@@ -347,7 +356,6 @@ function readKeyedPatchHandle<Policy, Instance, Args extends unknown[], Result>(
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: Protocol version, method key and every callable handle member are validated; the globally keyed installer owns the policy/signature relationship that TypeScript cannot recover from descriptors.
     return handle as KeyedLinkedMethodPatchHandle<Policy, Instance, Args, Result>;
 }
-/* oxlint-enable antislop/no-object-parameters */
 
 /**
  * Installs or updates one globally keyed linked method patch.
@@ -382,16 +390,14 @@ export function installKeyedLinkedMethodPatch<
     type Args = MethodArgs<Target[Key]>;
     type Result = MethodResult<Target[Key]>;
 
-    const installedRecord = getOwnDataDescriptor(target, marker)?.value;
-    if (installedRecord !== undefined) {
-        if (!isNonNullObject(installedRecord)) {
-            throw new TypeError("Incompatible keyed method patch record");
-        }
-
-        const handle = readKeyedPatchHandle<Policy, Instance, Args, Result>(installedRecord, key);
-        handle.update(initialPolicy);
-
-        return handle;
+    const installedHandle = readInstalledKeyedPatchHandle<Target, Policy, Instance, Args, Result>(
+        target,
+        marker,
+        key,
+    );
+    if (installedHandle !== undefined) {
+        installedHandle.update(initialPolicy);
+        return installedHandle;
     }
 
     let currentPolicy = initialPolicy;

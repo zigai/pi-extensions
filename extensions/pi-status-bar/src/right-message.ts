@@ -9,9 +9,7 @@ type RightMessageState = typeof globalThis & {
     [RIGHT_MESSAGES_CONFIG_KEY]?: RightMessagesConfig;
 };
 
-// SAFETY: This intersection only adds one optional symbol-keyed slot to the
-// existing global object and does not change its runtime representation.
-const rightMessageState = globalThis as RightMessageState;
+const rightMessageState: RightMessageState = globalThis;
 
 type SelectedRightMessage = {
     readonly elapsedMs: number;

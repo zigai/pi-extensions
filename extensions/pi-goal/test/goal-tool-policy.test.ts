@@ -8,7 +8,11 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { createGoalToolPolicyController } from "../src/goal-tool-policy.ts";
 import { createThreadGoal } from "../src/state.ts";
-import { createRuntimeHarness, sessionShutdownEvent } from "./support/runtime-harness.ts";
+import {
+  createRuntimeHarness,
+  sessionShutdownEvent,
+  testToolInfo,
+} from "./support/runtime-harness.ts";
 
 function createHarness(availableNames: readonly string[], activeNames: readonly string[]) {
   const available = new Set(availableNames);
@@ -16,11 +20,7 @@ function createHarness(availableNames: readonly string[], activeNames: readonly 
   const changes: string[][] = [];
   const host = {
     getActiveTools: () => [...active],
-    getAllTools: () => {
-      // SAFETY: goal-tool policy consumes only ToolInfo.name; these policy fixtures provide that
-      // exact field and never execute or render the omitted tool metadata.
-      return [...available].map((name) => ({ name })) as ReturnType<ExtensionAPI["getAllTools"]>;
-    },
+    getAllTools: () => [...available].map(testToolInfo),
     setActiveTools(names: string[]) {
       active = [...names];
       changes.push([...names]);

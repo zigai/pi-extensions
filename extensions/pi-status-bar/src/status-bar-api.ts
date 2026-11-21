@@ -151,9 +151,7 @@ type StatusBarGlobal = typeof globalThis & {
     [STATUS_BAR_STATE]?: StatusBarState;
 };
 
-// SAFETY: This intersection only adds one optional symbol-keyed slot to the
-// existing global object and does not change its runtime representation.
-const statusBarGlobal = globalThis as StatusBarGlobal;
+const statusBarGlobal: StatusBarGlobal = globalThis;
 
 function getStatusBarState(): StatusBarState {
     let state = statusBarGlobal[STATUS_BAR_STATE];

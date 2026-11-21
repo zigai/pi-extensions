@@ -1,5 +1,4 @@
 import { Type } from "typebox";
-import { Value } from "typebox/value";
 import { createCommandProvider, executeJsonCommand } from "./command-provider.ts";
 import { createListProvider } from "./list-provider.ts";
 import {
@@ -57,10 +56,15 @@ export function createConfiguredProvider(mention: ConfiguredMention, cwd: string
         return createCommandProvider({ ...options, filtering: source.filtering ?? "provider" });
 
     return createListProvider(async (request) => {
-        const raw = await executeJsonCommand(options, undefined, request.signal);
-        if (!Value.Check(itemsSchema, raw))
-            throw new Error("Mention array command returned invalid candidates.");
-
-        return children(raw, request);
+        const items = await executeJsonCommand(
+            options,
+            undefined,
+            {
+                schema: itemsSchema,
+                invalidMessage: "Mention array command returned invalid candidates.",
+            },
+            request.signal,
+        );
+        return children(items, request);
     });
 }

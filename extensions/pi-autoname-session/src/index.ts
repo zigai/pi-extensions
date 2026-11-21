@@ -6,7 +6,18 @@ import type {
     SimpleStreamOptions,
     TextContent,
 } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
+import type {
+    AgentSettledEvent,
+    BeforeAgentStartEvent,
+    ExtensionAPI,
+    ExtensionContext,
+    ModelSelectEvent,
+    SessionEntry,
+    SessionInfoChangedEvent,
+    SessionShutdownEvent,
+    SessionStartEvent,
+    SessionTreeEvent,
+} from "@earendil-works/pi-coding-agent";
 import { preparePickerPayload } from "./picker-request.ts";
 import {
     formatPickerModelReference,
@@ -33,6 +44,33 @@ import {
     type StoredSessionNamingStateResult,
 } from "./session-naming.ts";
 
+type NamingContext = Pick<
+    ExtensionContext,
+    "cwd" | "hasUI" | "model" | "sessionManager" | "isProjectTrusted"
+> & {
+    readonly ui: Pick<ExtensionContext["ui"], "notify">;
+    readonly modelRegistry: Pick<ExtensionContext["modelRegistry"], "find" | "getApiKeyAndHeaders">;
+};
+
+type NamingEventHandlers = {
+    readonly session_start: (event: SessionStartEvent, ctx: NamingContext) => void;
+    readonly session_info_changed: (event: SessionInfoChangedEvent, ctx: NamingContext) => void;
+    readonly session_tree: (event: SessionTreeEvent, ctx: NamingContext) => void;
+    readonly model_select: (event: ModelSelectEvent, ctx: NamingContext) => void;
+    readonly before_agent_start: (event: BeforeAgentStartEvent, ctx: NamingContext) => void;
+    readonly agent_settled: (event: AgentSettledEvent, ctx: NamingContext) => Promise<void>;
+    readonly session_shutdown: (event: SessionShutdownEvent, ctx: NamingContext) => Promise<void>;
+};
+
+type NamingExtensionAPI = Pick<ExtensionAPI, "setSessionName" | "getSessionName" | "exec"> & {
+    appendEntry(customType: string, data: SessionNamingState): void;
+
+    on<TEvent extends keyof NamingEventHandlers>(
+        event: TEvent,
+        handler: NamingEventHandlers[TEvent],
+    ): void;
+};
+
 type PickSessionNameOutcome =
     | { readonly type: "picked"; readonly name: string }
     | { readonly type: "cancelled" }
@@ -55,7 +93,7 @@ type PickSessionNameOptions = {
     readonly phase: NamingPhase;
     readonly entries: readonly SessionEntry[];
     readonly pendingPrompt: string | undefined;
-    readonly ctx: ExtensionContext;
+    readonly ctx: NamingContext;
     readonly signal: AbortSignal;
     readonly repositoryContext: string;
 };
@@ -82,7 +120,7 @@ type RestoredNamingState = {
 
 function resolvePickerModel(
     reference: PickerModelReference,
-    ctx: ExtensionContext,
+    ctx: NamingContext,
 ): Model<Api> | undefined {
     if (reference.type === "current") {
         if (ctx.model === undefined) {
@@ -176,7 +214,7 @@ function restoreNamingState(
  * post-cancellation rejection cannot become unhandled.
  */
 async function resolveAuthentication(
-    ctx: ExtensionContext,
+    ctx: NamingContext,
     model: Model<Api>,
     signal: AbortSignal,
 ): Promise<AuthenticationResolution> {
@@ -249,7 +287,7 @@ function hasCompleteSimple(value: unknown): value is ModelRuntimeComplete {
 }
 
 async function completePickerModel(
-    ctx: ExtensionContext,
+    ctx: NamingContext,
     model: Model<Api>,
     prompt: string,
     streamOptions: SimpleStreamOptions,
@@ -410,7 +448,7 @@ async function pickSessionName(options: PickSessionNameOptions): Promise<PickSes
     }
 }
 
-export default function extension(pi: ExtensionAPI): void {
+export default function extension(pi: NamingExtensionAPI): void {
     let settings: ExtensionSettings | undefined;
     let namingState: SessionNamingState | undefined;
     let sessionGeneration = 0;
@@ -527,7 +565,7 @@ export default function extension(pi: ExtensionAPI): void {
     });
 
     const maybeNameSession = async (
-        ctx: ExtensionContext,
+        ctx: NamingContext,
         checkpoint: NamingCheckpoint,
     ): Promise<void> => {
         if (
@@ -696,7 +734,7 @@ export default function extension(pi: ExtensionAPI): void {
         }
     };
 
-    const startBackgroundNaming = (ctx: ExtensionContext, checkpoint: NamingCheckpoint): void => {
+    const startBackgroundNaming = (ctx: NamingContext, checkpoint: NamingCheckpoint): void => {
         const taskGeneration = sessionGeneration;
         const task = maybeNameSession(ctx, checkpoint);
         backgroundNamingTasks.add(task);

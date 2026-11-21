@@ -12,7 +12,6 @@ import type {
 } from "@earendil-works/pi-ai";
 import {
     SessionManager,
-    type ExtensionAPI,
     type ExtensionEvent,
     type SessionStartEvent,
     type SessionShutdownEvent,
@@ -108,7 +107,14 @@ type TestEvent = Extract<
     }
 >;
 
-type Handler = (event: TestEvent, ctx: TestContext) => void | Promise<void>;
+type TestEventByType = { [TType in TestEvent["type"]]: Extract<TestEvent, { type: TType }> };
+
+type TestHandlers = {
+    [TType in TestEvent["type"]]?: (
+        event: TestEventByType[TType],
+        ctx: TestContext,
+    ) => void | Promise<void>;
+};
 
 /**
  * Recording stand-in for the ExtensionAPI. Mirrors the real pi surface the
@@ -117,7 +123,7 @@ type Handler = (event: TestEvent, ctx: TestContext) => void | Promise<void>;
  * matching Pi's fire-and-forget event dispatch interval.
  */
 class FakePi {
-    readonly handlers = new Map<string, Handler>();
+    readonly handlers: TestHandlers = {};
     readonly appended: { customType: string; data: SessionNamingState }[] = [];
     readonly notified: { message: string; severity: "info" | "warning" | "error" }[] = [];
 
@@ -131,8 +137,11 @@ class FakePi {
     gitStatus = "## main\n";
     private readonly pendingEvents: TestEvent[] = [];
 
-    on(event: string, handler: Handler): void {
-        this.handlers.set(event, handler);
+    on<TType extends TestEvent["type"]>(
+        event: TType,
+        handler: NonNullable<TestHandlers[TType]>,
+    ): void {
+        this.handlers[event] = handler;
     }
 
     appendEntry(customType: string, data: SessionNamingState): void {
@@ -162,17 +171,34 @@ class FakePi {
         command: string,
         args: string[],
         options?: { readonly cwd?: string },
-    ): Promise<{ stdout: string; stderr: string; code: number; killed: boolean }> {
+    ): Promise<{
+        stdout: string;
+        stderr: string;
+        code: number;
+        killed: boolean;
+        truncated: boolean;
+    }> {
         this.execCalls.push({ command, args, cwd: options?.cwd });
-        return Promise.resolve({ stdout: this.gitStatus, stderr: "", code: 0, killed: false });
+        return Promise.resolve({
+            stdout: this.gitStatus,
+            stderr: "",
+            code: 0,
+            killed: false,
+            truncated: false,
+        });
     }
 
     async emit(event: TestEvent, ctx: TestContext): Promise<void> {
         this.lastCtx = ctx;
-        const handler = this.handlers.get(event.type);
-        if (handler !== undefined) {
-            await handler(event, ctx);
-        }
+        await this.dispatch(event.type, event, ctx);
+    }
+
+    private async dispatch<TType extends TestEvent["type"]>(
+        type: TType,
+        event: TestEventByType[TType],
+        ctx: TestContext,
+    ): Promise<void> {
+        await this.handlers[type]?.(event, ctx);
     }
 
     async flushEvents(): Promise<void> {
@@ -206,12 +232,6 @@ class Harness {
         process.env.PI_CODING_AGENT_DIR = agentDir;
         const faux = registerFauxProvider({ api: FAUX_API, provider: FAUX_PROVIDER });
 
-        // The extension only reads this subset of ExtensionAPI; the harness
-        // implements exactly those members (on, appendEntry, setSessionName,
-        // getSessionName, and exec), which is why the full interface is asserted away.
-        // SAFETY: extension() registers handlers and reads session state
-        // exclusively through these members, so the narrower fake is
-        // behaviorally complete for every path under test.
         const pi = new FakePi();
         const model = faux.getModel();
         const registry = new FakeModelRegistry(model);
@@ -230,8 +250,7 @@ class Harness {
             isProjectTrusted: () => false,
         };
 
-        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: the harness implements the on, appendEntry, setSessionName, getSessionName, and exec operations read by the extension factory, and these tests exercise every registered event through that adapter; TypeScript cannot express a callable subset of ExtensionAPI where on retains its event-specific callback types.
-        extension(pi as ExtensionAPI & FakePi);
+        extension(pi);
         const harness = new Harness(agentDir, faux, model, registry, pi, ctx, previousAgentDir);
         pi.lastCtx = ctx;
         return harness;

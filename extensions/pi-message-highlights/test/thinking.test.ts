@@ -1,4 +1,3 @@
-/* oxlint-disable no-control-regex -- Assertions inspect terminal SGR styling. */
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
     AssistantMessageComponent,
@@ -12,6 +11,25 @@ import {
 } from "../src/message-highlight-patch.ts";
 import { DEFAULT_MESSAGE_HIGHLIGHTS_CONFIG } from "../src/settings.ts";
 import { installResponseRendering } from "../../pi-response-renderer/src/response-rendering.ts";
+
+const CSI = "\u001b[";
+
+function foregroundCodes(text: string): Set<string> {
+    const codes = new Set<string>();
+    for (const part of text.split(CSI).slice(1)) {
+        const code = part.slice(0, part.indexOf("m"));
+        if (/^(?:38;[\d;]+|3[0-7]|9[0-7])$/.test(code)) codes.add(code);
+    }
+
+    return codes;
+}
+
+function hasBoldBefore(text: string, needle: string): boolean {
+    return text.split("\n").some((line) => {
+        const bold = line.indexOf(`${CSI}1m`);
+        return bold !== -1 && line.includes(needle, bold);
+    });
+}
 
 initTheme("dark", false);
 
@@ -87,10 +105,9 @@ for (const order of ["response-first", "highlights-first"] as const) {
                     expect(boundary).toBeGreaterThan(0);
                     const thinking = raw.slice(0, boundary);
                     const answer = raw.slice(boundary);
-                    const colors = new Set(thinking.match(/\x1b\[(?:38;[\d;]+|3[0-7]|9[0-7])m/g));
-                    expect(colors.size).toBe(1);
-                    expect(thinking).toMatch(/\x1b\[1m[^\n]*inline_code\(\)/);
-                    expect(thinking).toMatch(/\x1b\[1m[^\n]*src\/main.py/);
+                    expect(foregroundCodes(thinking).size).toBe(1);
+                    expect(hasBoldBefore(thinking, "inline_code()")).toBe(true);
+                    expect(hasBoldBefore(thinking, "src/main.py")).toBe(true);
                     expect(thinking).toContain("\u001b[1mhttps://example.com/docs");
                     expect(thinking).not.toContain("\u001b[31m");
                     expect(answer).toContain("\u001b[31m");

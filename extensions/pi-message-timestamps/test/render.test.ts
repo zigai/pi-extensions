@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import * as sdk from "@earendil-works/pi-coding-agent";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
     Container,
     Text,
@@ -223,15 +222,16 @@ describe("session timestamp interaction", () => {
             writable: true,
             value() {},
         });
-        // SAFETY: This fixture supplies the only context members used by this controller.
-        // oxlint-disable-next-line typescript/no-unsafe-type-assertion, antislop/no-chained-type-assertions -- The fixture intentionally implements only the exercised host boundary.
-        const ctx = { sessionManager, ui: { notify() {} } } as unknown as ExtensionContext;
-        Object.defineProperty(ctx.ui, "theme", {
-            value: {
-                bg: (_name: string, text: string) => text,
-                fg: (_name: string, text: string) => dim(text),
+        const ctx = {
+            sessionManager,
+            ui: {
+                notify() {},
+                theme: {
+                    bg: (_name: string, text: string) => text,
+                    fg: (_name: string, text: string) => dim(text),
+                },
             },
-        });
+        };
         const controller = new Timestamps(ctx, {
             enabled: true,
             format: "auto",

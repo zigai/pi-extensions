@@ -1,9 +1,12 @@
-/* oxlint-disable typescript/no-unsafe-type-assertion -- Installed private Pi modules and partial host fixture are checked at their use sites with documented SAFETY invariants. */
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import type { ExtensionContext, SessionStartEvent } from "@earendil-works/pi-coding-agent";
+import {
+    initTheme,
+    type ExtensionContext,
+    type SessionStartEvent,
+} from "@earendil-works/pi-coding-agent";
 import {
     Editor,
     Markdown,
@@ -13,8 +16,6 @@ import {
     type MarkdownTheme,
     type Terminal,
 } from "@earendil-works/pi-tui";
-import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
     installMessageHighlightPatch,
@@ -34,21 +35,7 @@ const PI_THEME_KEYS = [
     Symbol.for("@mariozechner/pi-coding-agent:theme"),
 ] as const;
 
-/** Declared shape of the unexported Pi theme module surface used by these tests. */
-type ThemeRuntimeModule = {
-    initTheme?: unknown;
-    stopThemeWatcher?: unknown;
-};
-
-function restoreThemeSnapshot(
-    themeModule: ThemeRuntimeModule,
-    snapshots: readonly ThemeSnapshot[],
-): void {
-    const stopThemeWatcher = themeModule.stopThemeWatcher;
-    if (typeof stopThemeWatcher === "function") {
-        stopThemeWatcher.call(themeModule);
-    }
-
+function restoreThemeSnapshot(snapshots: readonly ThemeSnapshot[]): void {
     for (const snapshot of snapshots) {
         if (snapshot.descriptor !== undefined) {
             Object.defineProperty(globalThis, snapshot.key, snapshot.descriptor);
@@ -79,34 +66,20 @@ function suspendPiTheme(): () => void {
     };
 }
 
-async function initializePiTheme(): Promise<() => void> {
-    const codingAgentEntry = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
-    const themeUrl = pathToFileURL(
-        join(dirname(codingAgentEntry), "modes/interactive/theme/theme.js"),
-    ).href;
-
-    // Pi's theme module is an internal runtime file with no public package export.
-    // SAFETY: The dynamic import yields a namespace object; initTheme is verified callable
-    // below before it is invoked, and every other member stays untouched.
-    const themeModule = (await import(themeUrl)) as ThemeRuntimeModule;
-    const initTheme = themeModule.initTheme;
-    if (typeof initTheme !== "function") {
-        assert.fail("missing initTheme");
-    }
-
+function initializePiTheme(): () => void {
     const snapshots: ThemeSnapshot[] = PI_THEME_KEYS.map((key) => ({
         key,
         descriptor: Object.getOwnPropertyDescriptor(globalThis, key),
     }));
     try {
-        initTheme.call(themeModule, undefined, false);
+        initTheme(undefined, false);
     } catch (cause) {
-        restoreThemeSnapshot(themeModule, snapshots);
+        restoreThemeSnapshot(snapshots);
         throw cause;
     }
 
     return (): void => {
-        restoreThemeSnapshot(themeModule, snapshots);
+        restoreThemeSnapshot(snapshots);
     };
 }
 
@@ -242,7 +215,7 @@ test("message render wrappers restore cleanly across reload cycles", async () =>
                     }),
                 );
                 highlightsLifecycle.shutdownHandlers.push(() => patch.dispose());
-                restoreInitializedTheme ??= await initializePiTheme();
+                restoreInitializedTheme ??= initializePiTheme();
 
                 const message = {
                     role: "assistant",

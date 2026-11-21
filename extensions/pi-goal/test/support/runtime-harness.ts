@@ -1,22 +1,25 @@
 import assert from "node:assert/strict";
 import { vi } from "vitest";
-import { Type } from "typebox";
+import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 
-import { createEventBus } from "@earendil-works/pi-coding-agent";
-import type {
-  BeforeAgentStartEvent,
-  BeforeAgentStartUserEvent,
-  BeforeAgentStartCustomEvent,
-  BeforeAgentStartEventResult,
-  ExtensionAPI,
-  ExtensionCommandContext,
-  ExtensionContext,
-  ExtensionToolContext,
+import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
+import {
+  createEventBus,
+  ModelRegistry,
+  ModelRuntime,
+  type BeforeAgentStartEvent,
+  type BeforeAgentStartUserEvent,
+  type BeforeAgentStartCustomEvent,
+  type BeforeAgentStartEventResult,
+  type ExtensionAPI,
+  type ExtensionCommandContext,
+  type ExtensionContext,
+  type ExtensionToolContext,
+  type ToolInfo,
 } from "@earendil-works/pi-coding-agent";
 
 import goalExtension, { __testHooks } from "../../src/index.ts";
-import type { GoalToolResponse } from "../../src/format.ts";
 import type { CreateGoalArgs, GetGoalArgs, UpdateGoalArgs } from "../../src/glowup-rendering.ts";
 import { isContextOverflowError } from "../../src/recovery.ts";
 import { isGoalCustomEntry, reconstructGoal } from "../../src/state.ts";
@@ -40,10 +43,45 @@ interface HarnessContextEventResult {
 type HarnessEventResult = HarnessContextEventResult | BeforeAgentStartEventResult | void;
 type HarnessGoalToolInput = GetGoalArgs | CreateGoalArgs | UpdateGoalArgs;
 
-interface HarnessGoalToolResult {
-  content: Array<{ type: "text"; text: string }>;
-  details: GoalToolResponse & { error: string | null };
-}
+const harnessGoalToolResultSchema = Type.Object({
+  content: Type.Array(Type.Object({ type: Type.Literal("text"), text: Type.String() })),
+  details: Type.Object({
+    goal: Type.Union([
+      Type.Object({
+        goalId: Type.String(),
+        objective: Type.String(),
+        status: Type.Union([
+          Type.Literal("active"),
+          Type.Literal("paused"),
+          Type.Literal("blocked"),
+          Type.Literal("timeLimited"),
+          Type.Literal("complete"),
+        ]),
+        minimumActiveSeconds: Type.Union([Type.Number(), Type.Null()]),
+        maximumActiveSeconds: Type.Union([Type.Number(), Type.Null()]),
+        tokensUsed: Type.Number(),
+        timeUsedSeconds: Type.Number(),
+        createdAt: Type.Number(),
+        updatedAt: Type.Number(),
+      }),
+      Type.Null(),
+    ]),
+    minimumTimeRemainingSeconds: Type.Union([Type.Number(), Type.Null()]),
+    maximumTimeRemainingSeconds: Type.Union([Type.Number(), Type.Null()]),
+    completionUsageReport: Type.Union([Type.String(), Type.Null()]),
+    error: Type.Union([Type.String(), Type.Null()]),
+  }),
+});
+
+type HarnessGoalToolResult = Static<typeof harnessGoalToolResultSchema>;
+
+const modelRegistry = new ModelRegistry(
+  await ModelRuntime.create({
+    credentials: new InMemoryCredentialStore(),
+    modelsPath: null,
+    refreshOnCreate: false,
+  }),
+);
 
 type EventHandler = (
   event: HarnessEvent,
@@ -68,13 +106,28 @@ function unsupportedHarnessMethod(name: string): never {
 }
 
 function contextWindowModel(contextWindow: number): ExtensionContext["model"] {
-  // SAFETY: goal runtime reads only model.contextWindow; this fixture supplies that exact SDK
-  // field, while provider execution and the remaining Model capabilities are never invoked.
   return {
     id: "test-model",
+    name: "Test model",
+    api: "test",
     provider: "test",
+    baseUrl: "http://localhost",
+    input: ["text"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    reasoning: false,
     contextWindow,
-  } as ExtensionContext["model"];
+    maxTokens: contextWindow,
+  };
+}
+
+export function testToolInfo(name: string): ToolInfo {
+  return {
+    name,
+    description: `${name} test tool`,
+    parameters: Type.Object({}),
+    exposure: "direct",
+    sourceInfo: { path: "/tmp", source: "test", scope: "temporary", origin: "top-level" },
+  };
 }
 
 export interface SentMessage {
@@ -258,14 +311,7 @@ export function createRuntimeHarness(
     events: createEventBus(),
     exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false, truncated: false }),
     getActiveTools: () => [...activeToolNames],
-    getAllTools: () => {
-      // SAFETY: goal-tool policy consumes only ToolInfo.name; each fixture supplies that field,
-      // and no test or extension path reads omitted execution/render metadata from this list.
-      return [...availableToolNames].map((name) => ({
-        name,
-        description: `${name} test tool`,
-      })) as ReturnType<ExtensionAPI["getAllTools"]>;
-    },
+    getAllTools: () => [...availableToolNames].map(testToolInfo),
     getCommands: () => [],
     getFlag: () => undefined,
     getSettings() {
@@ -323,17 +369,15 @@ export function createRuntimeHarness(
 
         // SAFETY: this harness loads only pi-codex-goal, and runTool callers pair each registered
         // goal-tool name with input derived from that tool's exported schema.
+        const goalParams = params as Parameters<typeof tool.execute>[1];
         const result = await tool.execute(
           "tool-call",
-          params as Parameters<typeof tool.execute>[1],
+          goalParams,
           undefined,
           undefined,
           toolContext,
         );
-
-        // SAFETY: all three goal tools return textResult, whose details are the shared
-        // GoalToolResponse plus its concrete null error field.
-        return result as HarnessGoalToolResult;
+        return Value.Parse(harnessGoalToolResultSchema, result);
       });
     },
     sendMessage(message, options) {
@@ -471,9 +515,7 @@ export function createRuntimeHarness(
     isProjectTrusted: () => options.projectTrusted ?? true,
     mode: "tui",
     model: undefined,
-    // SAFETY: pi-codex-goal never reads modelRegistry; model discovery is outside this harness,
-    // and the field exists only to satisfy the host-owned ExtensionCommandContext contract.
-    modelRegistry: {} as ExtensionCommandContext["modelRegistry"],
+    modelRegistry,
     navigateTree: async () => ({ cancelled: false }),
     newSession: async () => ({ cancelled: false }),
     reload: async () => {},
