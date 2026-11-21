@@ -37,11 +37,8 @@ export type Token = {
     readonly value: string;
     readonly raw: string;
 
-    /** Inclusive UTF-16 offset in the input. */
-    readonly start: number;
-
-    /** Exclusive UTF-16 offset in the input. */
-    readonly end: number;
+    readonly startUtf16Offset: number;
+    readonly endUtf16Offset: number;
 
     readonly quote?: "'" | '"';
     readonly escaped: boolean;
@@ -148,8 +145,8 @@ export function lexTypedArgumentString(input: string): LexResult {
         let token: Token = {
             value: current,
             raw: input.slice(tokenStart, end),
-            start: tokenStart,
-            end,
+            startUtf16Offset: tokenStart,
+            endUtf16Offset: end,
             escaped,
         };
         if (tokenQuote !== undefined) {

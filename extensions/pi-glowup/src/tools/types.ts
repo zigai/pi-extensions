@@ -54,7 +54,6 @@ export type ThirdPartyToolRenderer = {
     ) => Component;
 };
 
-/** Registry entry for a transitional renderer that has not moved to its owning package yet. */
 export type ThirdPartyToolRendererPlugin = {
     readonly name: string;
     readonly matches: (toolName: string) => boolean;

@@ -883,7 +883,7 @@ function selectedSubcommandContext(context: CommandLineContext): CommandLineCont
         return context;
     }
 
-    const argsBeforeCursor = context.argsBeforeCursor.slice(first.end).trimStart();
+    const argsBeforeCursor = context.argsBeforeCursor.slice(first.endUtf16Offset).trimStart();
     const tokens = lexTypedArgumentString(argsBeforeCursor).tokens;
     const last = tokens[tokens.length - 1];
     const trailingSpace = endsWithWhitespace(argsBeforeCursor);

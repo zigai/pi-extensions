@@ -161,10 +161,7 @@ export type BackgroundCommandsOptions = {
     readonly operations: BashOperations;
     readonly directory: string;
     readonly onChange: (job: CommandSnapshot) => void;
-
-    /** Called once for a job that ended without anything collecting its result. */
-    readonly onResult: (result: CommandOutput) => void;
-
+    readonly onUncollectedResult: (result: CommandOutput) => void;
     readonly now?: () => number;
 };
 
@@ -179,7 +176,7 @@ export class BackgroundCommands {
     private readonly operations: BashOperations;
     private readonly directory: string;
     private readonly onChange: (job: CommandSnapshot) => void;
-    private readonly onResult: (result: CommandOutput) => void;
+    private readonly onUncollectedResult: (result: CommandOutput) => void;
     private readonly now: () => number;
     private closed = false;
 
@@ -187,7 +184,7 @@ export class BackgroundCommands {
         this.operations = options.operations;
         this.directory = options.directory;
         this.onChange = options.onChange;
-        this.onResult = options.onResult;
+        this.onUncollectedResult = options.onUncollectedResult;
         this.now = options.now ?? Date.now;
     }
 
@@ -478,7 +475,7 @@ export class BackgroundCommands {
         }
 
         try {
-            this.onResult(result);
+            this.onUncollectedResult(result);
         } catch {
             console.error("Background command finished, but its result could not be delivered.");
         }

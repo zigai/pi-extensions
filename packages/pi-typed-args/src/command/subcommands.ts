@@ -26,7 +26,7 @@ export function resolveTypedCommandRoute<TCommand extends CoreRegisteredTypedCom
                 return {
                     root: command,
                     command: subcommand,
-                    rawArgs: rawArgs.slice(first.end).trimStart(),
+                    rawArgs: rawArgs.slice(first.endUtf16Offset).trimStart(),
                     subcommand: name,
                     token: first.value,
                     status: "subcommand",

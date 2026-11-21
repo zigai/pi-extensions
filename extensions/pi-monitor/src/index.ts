@@ -132,7 +132,7 @@ export default function monitorExtension(pi: ExtensionAPI): void {
                         display: true,
                         details,
                     },
-                    { triggerTurn: notification.wake },
+                    { triggerTurn: notification.triggerTurn },
                 );
             },
         });

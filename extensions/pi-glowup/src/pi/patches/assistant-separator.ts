@@ -27,8 +27,7 @@ type AssistantContent = {
 type AssistantMessageLike = Pick<AssistantMessage, "content">;
 type AssistantContentKind = "text" | "thinking";
 
-// "answer" marks Pi's spacer between the reasoning and the final answer text.
-type AssistantAddChildCall = AssistantContentKind | "answer" | "other";
+type AssistantAddChildCall = AssistantContentKind | "answer-spacer" | "other";
 
 type AssistantRenderInstance = {
     readonly [ASSISTANT_SEPARATOR_RENDER_KEY]?: boolean;
@@ -156,7 +155,8 @@ function assistantAddChildCalls(message: AssistantMessageLike): AssistantAddChil
                 calls.push("thinking");
 
                 const next = nextVisible[index];
-                if (next === "text" && isFinalAnswer && !hasVisibleText) calls.push("answer");
+                if (next === "text" && isFinalAnswer && !hasVisibleText)
+                    calls.push("answer-spacer");
                 else if (next !== undefined) calls.push("other");
             }
         } else if (kinds[index] === "text") {
@@ -281,7 +281,7 @@ function createThinkingBlockSpacingWrapper(
                 addChildBeforePatch(new Spacer(1));
             }
 
-            if (call === "answer") addChildBeforePatch(answerSeparator());
+            if (call === "answer-spacer") addChildBeforePatch(answerSeparator());
 
             addChildBeforePatch(component);
 

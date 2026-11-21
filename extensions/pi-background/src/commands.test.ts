@@ -36,7 +36,7 @@ beforeEach(async () => {
                 notifications.push(job);
                 resolve(job);
             },
-            onResult: (result) => {
+            onUncollectedResult: (result) => {
                 deliveries.push(result);
                 resolveDelivery(result);
             },

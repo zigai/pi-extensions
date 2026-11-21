@@ -135,7 +135,7 @@ export default function backgroundExtension(pi: ExtensionAPI): void {
 
                 refresh();
             },
-            onResult: (result) => {
+            onUncollectedResult: (result) => {
                 if (active?.owner !== owner) return;
 
                 pi.sendMessage(

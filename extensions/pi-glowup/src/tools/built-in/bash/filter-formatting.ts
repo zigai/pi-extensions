@@ -34,8 +34,7 @@ export type FilterLayout = {
     /** Columns available to every program row, measured from the row's base indentation. */
     readonly width: number;
 
-    /** Columns already used before the program's first row, such as `jq -r '`. */
-    readonly firstLineOffset: number;
+    readonly firstLinePrefixColumns: number;
 };
 
 const DEFAULT_COMMANDS = { awk: ["gawk"], jq: ["jqfmt"] } as const;
@@ -61,7 +60,7 @@ function rowsWidth(code: string, layout: FilterLayout): number {
     let width = 0;
     for (const [index, row] of rows.entries()) {
         let used = visibleWidth(row);
-        if (index === 0) used += layout.firstLineOffset;
+        if (index === 0) used += layout.firstLinePrefixColumns;
 
         // The closing quote follows the final row.
         if (index === rows.length - 1) used += 1;
@@ -451,7 +450,7 @@ function collapseAwkBlocks(
                 originals: presentOriginals(joined, masked),
             });
             let used = visibleWidth(plain ?? joined);
-            if (index === 0) used += layout.firstLineOffset;
+            if (index === 0) used += layout.firstLinePrefixColumns;
             if (end === result.length - 1) used += 1;
             if (used > layout.width) continue;
 
@@ -659,7 +658,7 @@ function collapseJqBrackets(
                 originals: presentOriginals(joined, masked),
             });
             let used = visibleWidth(plain ?? joined);
-            if (index === 0) used += layout.firstLineOffset;
+            if (index === 0) used += layout.firstLinePrefixColumns;
             if (end === result.length - 1) used += 1;
             if (used > layout.width) continue;
 
@@ -685,10 +684,11 @@ function jqLayoutFits(rows: readonly string[], masked: Masked, layout: FilterLay
         (row) => unmask(row, { ...masked, originals: presentOriginals(row, masked) }) ?? row,
     );
     const [first = "", ...rest] = plain;
-    const restFits = filterProgramFits(rest.join("\n"), { ...layout, firstLineOffset: 0 });
+    const restFits = filterProgramFits(rest.join("\n"), { ...layout, firstLinePrefixColumns: 0 });
     if (rest.length > 0 && !restFits) return false;
 
-    const firstUsed = visibleWidth(first) + layout.firstLineOffset + Number(rest.length === 0);
+    const firstUsed =
+        visibleWidth(first) + layout.firstLinePrefixColumns + Number(rest.length === 0);
     return firstUsed <= layout.width || !/[{[]/u.test(rows[0] ?? "");
 }
 

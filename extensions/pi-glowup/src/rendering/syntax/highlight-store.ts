@@ -168,7 +168,7 @@ export function createSyntaxHighlightStore(
         if (writes % WRITES_BETWEEN_PRUNES === 0) await prune();
     };
 
-    const touch = async (path: string): Promise<void> => {
+    const markRecentlyUsed = async (path: string): Promise<void> => {
         const now = new Date();
         try {
             await utimes(path, now, now);
@@ -185,8 +185,7 @@ export function createSyntaxHighlightStore(
 
                 const value = await readFile(path, "utf8");
 
-                // Pruning removes the least recently used entries first.
-                void touch(path).catch(report);
+                void markRecentlyUsed(path).catch(report);
 
                 return value;
             } catch (cause: unknown) {

@@ -159,8 +159,8 @@ function namedChoiceContext(
                 command,
                 name,
                 lastToken.value.slice(equalsIndex + 1),
-                lastToken.start + equalsIndex + 1,
-                lastToken.end,
+                lastToken.startUtf16Offset + equalsIndex + 1,
+                lastToken.endUtf16Offset,
             );
         }
 
@@ -193,7 +193,13 @@ function namedChoiceContext(
         return undefined;
     }
 
-    return choiceContextForName(command, name, lastToken.value, lastToken.start, lastToken.end);
+    return choiceContextForName(
+        command,
+        name,
+        lastToken.value,
+        lastToken.startUtf16Offset,
+        lastToken.endUtf16Offset,
+    );
 }
 
 function flagConsumesHelperValue(definition: ArgumentDefinition): boolean {
@@ -314,8 +320,8 @@ function positionalChoiceContext(
     if (!endsWithWhitespace) {
         const currentToken = tokens[tokens.length - 1];
         if (currentToken !== undefined) {
-            replacementStart = currentToken.start;
-            replacementEnd = currentToken.end;
+            replacementStart = currentToken.startUtf16Offset;
+            replacementEnd = currentToken.endUtf16Offset;
         }
     }
 

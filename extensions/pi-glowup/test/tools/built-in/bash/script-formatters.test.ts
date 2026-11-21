@@ -1037,7 +1037,7 @@ process.stdout.write(out + "\n");
                 language: "awk",
                 code: awkProgram,
                 targetWidth: width,
-                firstLineOffset: 10,
+                firstLinePrefixColumns: 10,
             },
             {},
         );
@@ -1101,7 +1101,13 @@ process.stdout.write(out + "\n");
         async (targetWidth, calls, rows) => {
             using fake = setup();
             const formatted = await fake.formatter(
-                { label: "jq", language: "jq", code: jqProgram, targetWidth, firstLineOffset: 8 },
+                {
+                    label: "jq",
+                    language: "jq",
+                    code: jqProgram,
+                    targetWidth,
+                    firstLinePrefixColumns: 8,
+                },
                 {},
             );
 

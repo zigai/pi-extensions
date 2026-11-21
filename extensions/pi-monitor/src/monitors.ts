@@ -129,9 +129,7 @@ export type MonitorNotification = {
     readonly kind: "event" | "end";
     readonly summary: string;
     readonly text: string;
-
-    /** False when the message should join the context without starting a turn. */
-    readonly wake: boolean;
+    readonly triggerTurn: boolean;
 };
 
 type Monitor = {
@@ -341,7 +339,7 @@ export class Monitors {
                     kind: "end",
                     summary: `Monitor "${monitor.description}" was stopped by the user`,
                     text: pending,
-                    wake: false,
+                    triggerTurn: false,
                 });
             }
 
@@ -388,7 +386,7 @@ export class Monitors {
             kind: "event",
             summary: `Monitor event: "${monitor.description}"`,
             text,
-            wake: true,
+            triggerTurn: true,
         });
     }
 
@@ -422,7 +420,7 @@ export class Monitors {
             kind: "end",
             summary: notice,
             text: pending,
-            wake: true,
+            triggerTurn: true,
         });
 
         monitor.controller.abort();
@@ -434,7 +432,7 @@ export class Monitors {
         const pending = monitor.events.drain();
 
         this.finish(monitor, state);
-        this.emit(monitor, { kind: "end", summary, text: pending, wake: true });
+        this.emit(monitor, { kind: "end", summary, text: pending, triggerTurn: true });
     }
 
     private async runCommand(

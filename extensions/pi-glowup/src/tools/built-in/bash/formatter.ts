@@ -31,9 +31,7 @@ export type ScriptBlockFormatterInput = {
     readonly language: string;
     readonly code: string;
     readonly targetWidth?: number;
-
-    /** Columns before the first row, for programs embedded after a command prefix. */
-    readonly firstLineOffset?: number;
+    readonly firstLinePrefixColumns?: number;
 };
 
 export type ScriptBlockFormatterOptions = {
@@ -341,7 +339,7 @@ function formatterOutputKey(
             profile,
             input.language,
             width ?? null,
-            input.firstLineOffset ?? 0,
+            input.firstLinePrefixColumns ?? 0,
             input.code,
         ]),
     };
@@ -428,7 +426,7 @@ export function createCommandScriptFormatter(
             .update("\0")
             .update(keyWidth === undefined ? "" : String(keyWidth))
             .update("\0")
-            .update(String(input.firstLineOffset ?? 0))
+            .update(String(input.firstLinePrefixColumns ?? 0))
             .update("\0")
             .update(input.code)
             .digest("hex");
@@ -462,7 +460,10 @@ export function createCommandScriptFormatter(
             const result = await formatFilterProgram(
                 input.code,
                 command,
-                { width: targetWidth ?? 88, firstLineOffset: input.firstLineOffset ?? 0 },
+                {
+                    width: targetWidth ?? 88,
+                    firstLinePrefixColumns: input.firstLinePrefixColumns ?? 0,
+                },
                 async (args, stdin): Promise<FormatterRun> => {
                     const slot = await acquireFormatterSlot(effectiveOptions);
                     if (slot === undefined) {
@@ -663,7 +664,7 @@ export function createCommandScriptFormatter(
         const key = JSON.stringify([
             input.language,
             keyWidth,
-            input.firstLineOffset ?? 0,
+            input.firstLinePrefixColumns ?? 0,
             input.code,
         ]);
         let work = pending.get(key);

@@ -119,7 +119,7 @@ export async function formatEmbeddedPrograms(
         const width = input.targetWidth ?? options.targetWidth ?? 88;
         const layout = {
             width: Math.max(1, width - visibleWidth(base)),
-            firstLineOffset: visibleWidth(
+            firstLinePrefixColumns: visibleWidth(
                 parentSource.slice(rowStart + base.length, program.localStart + 1),
             ),
         };
@@ -179,7 +179,7 @@ export async function formatEmbeddedPrograms(
                         language: program.language,
                         code: current,
                         targetWidth: layout.width,
-                        firstLineOffset: layout.firstLineOffset,
+                        firstLinePrefixColumns: layout.firstLinePrefixColumns,
                     },
                     {
                         ...options,

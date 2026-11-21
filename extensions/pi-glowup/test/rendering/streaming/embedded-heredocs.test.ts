@@ -602,24 +602,24 @@ it("formats awk and jq programs in place without touching option values", async 
     expect(programWords(display).slice(0, 1)).toEqual(["a | b"]);
     expect(programWords(display)).toContain(":");
     expect(
-        inputs.map(({ language, code, targetWidth, firstLineOffset }) => ({
+        inputs.map(({ language, code, targetWidth, firstLinePrefixColumns }) => ({
             language,
             code,
             targetWidth,
-            firstLineOffset,
+            firstLinePrefixColumns,
         })),
     ).toEqual([
         {
             language: "jq",
             code: ".items[] | select(.tags | index($tag)) | .name",
             targetWidth: 38,
-            firstLineOffset: 25,
+            firstLinePrefixColumns: 25,
         },
         {
             language: "awk",
             code: "{ total += $3; count++ } END { print total / count }",
             targetWidth: 40,
-            firstLineOffset: 12,
+            firstLinePrefixColumns: 12,
         },
     ]);
 });

@@ -27,8 +27,8 @@ import type {
     ToolNameMatcher,
 } from "./types.ts";
 
-// Transitional compatibility renderers remain here until each owning package ships a protocol
-// adapter. Tool-owned adapters take precedence, so families can migrate independently.
+// Pi and third-party packages own these tools and ship no protocol adapter. An adapter on the
+// tool definition takes precedence over these renderers.
 const toolDefinitionViewSchema = Type.Object(
     {
         label: Type.Optional(Type.String()),
@@ -79,7 +79,7 @@ const toolDefinitionViewParser = {
     },
 };
 
-const TRANSITIONAL_RENDERER_PLUGINS: ReadonlyArray<ThirdPartyToolRendererPlugin> = [
+const FALLBACK_RENDERER_PLUGINS: ReadonlyArray<ThirdPartyToolRendererPlugin> = [
     {
         name: "codemode",
         matches: (toolName) => toolName === "codemode",
@@ -124,7 +124,7 @@ const TRANSITIONAL_RENDERER_PLUGINS: ReadonlyArray<ThirdPartyToolRendererPlugin>
 function rendererPlugins(
     options: ThirdPartyToolRenderingOptions | undefined,
 ): ReadonlyArray<ThirdPartyToolRendererPlugin> {
-    return [...(options?.renderers ?? []), ...TRANSITIONAL_RENDERER_PLUGINS];
+    return [...(options?.renderers ?? []), ...FALLBACK_RENDERER_PLUGINS];
 }
 
 /** Returns whether Glowup has a renderer for a tool that has not migrated to an owner adapter. */
