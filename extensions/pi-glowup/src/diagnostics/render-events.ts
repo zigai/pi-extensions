@@ -57,11 +57,7 @@ export function onRenderDiagnosticsReset(listener: () => void): void {
 
 /** Enables render diagnostics while debugLog is enabled; undefined disables them. */
 export function configureRenderDiagnostics(next: RenderDiagnosticSink | undefined): void {
-    if (next === undefined) resetRenderDiagnostics();
-    else if (next !== sink) {
-        // Close lifecycle observations, preserving legacy deduplication on sink replacement.
-        for (const listener of resetListeners) listener();
-    }
+    if (next !== sink) resetRenderDiagnostics();
 
     sink = next;
 }

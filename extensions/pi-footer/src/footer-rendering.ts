@@ -245,29 +245,26 @@ function buildFooterItems(
     items.set("path", {
         key: "path",
         text: pathText,
-        colors: { bg: "", fg: "" },
     });
     items.set("provider", {
         key: "provider",
         text: providerLabel,
-        colors: { bg: "", fg: "" },
     });
     items.set("model", {
         key: "model",
         text: modelLabel,
-        colors: { bg: "", fg: "" },
     });
+
     let thinkingText = thinkingLevel;
     if (thinkingStyle === "squares") thinkingText = thinkingDisplay(thinkingLevel);
+
     items.set("thinking", {
         key: "thinking",
         text: thinkingText,
-        colors: { bg: "", fg: "" },
     });
     items.set("context", {
         key: "context",
         text: contextText,
-        colors: { bg: "", fg: "" },
     });
 
     if (branch !== null && branch.length > 0) {
@@ -280,7 +277,6 @@ function buildFooterItems(
         items.set("branch", {
             key: "branch",
             text: branchText,
-            colors: { bg: "", fg: "" },
         });
     }
 
@@ -289,7 +285,6 @@ function buildFooterItems(
         items.set("cost", {
             key: "cost",
             text: `$${apiSessionCost.toFixed(2)}`,
-            colors: { bg: "", fg: "" },
         });
     }
 
@@ -297,7 +292,6 @@ function buildFooterItems(
         items.set("mcp", {
             key: "mcp",
             text: mcpText,
-            colors: { bg: "", fg: "" },
         });
     }
 
@@ -305,7 +299,6 @@ function buildFooterItems(
         items.set(slot.id, {
             key: slot.id,
             text: slot.text,
-            colors: slot.colors,
         });
     }
 

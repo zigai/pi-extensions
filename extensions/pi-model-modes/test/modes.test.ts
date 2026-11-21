@@ -115,18 +115,6 @@ test("computeModesPatch records additions, deletions, removals, and current mode
     });
 });
 
-test("legacy default models are diagnostic only and removed by an explicit save", () => {
-    const base = baseModesFile();
-    base.defaultModel = { provider: "legacy", modelId: "old", thinkingLevel: "low" };
-    const next = cloneModesFile(base);
-    assert.deepEqual(computeModesPatch(base, next, false), { defaultModel: null });
-    assert.deepEqual(next.defaultModel, base.defaultModel);
-    applyModesPatch(next, { defaultModel: null });
-    assert.equal(next.defaultModel, undefined);
-    const withoutLegacy = baseModesFile();
-    assert.equal(computeModesPatch(withoutLegacy, base, false), null);
-});
-
 test("computeModesPatch can omit current mode so runtime-only switches are not written", () => {
     const base = baseModesFile();
     const next = baseModesFile();

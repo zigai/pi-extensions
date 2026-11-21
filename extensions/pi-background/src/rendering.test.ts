@@ -1,9 +1,5 @@
 import { expect, it } from "vitest";
-import { Value } from "typebox/value";
-import { commandSchema } from "./commands.ts";
 import {
-    renderJobResult,
-    renderOutputResult,
     parseResultDetails,
     renderResultMessage,
     renderStartCall,
@@ -46,63 +42,6 @@ it("shows command state and requested output without internal job metadata", () 
     expect(rendered).toContain("one test failed");
     expect(rendered).not.toContain("internal-job-id");
     expect(rendered).not.toContain("/private");
-});
-
-it("restores job results saved before kinds and deadlines without weakening the current output contract", () => {
-    const legacyJob = {
-        id: job.id,
-        command: job.command,
-        cwd: job.cwd,
-        outputPath: job.outputPath,
-        state: job.state,
-        exitCode: job.exitCode,
-        error: job.error,
-    };
-    const result = { content: [], details: legacyJob };
-
-    for (const renderer of [startRendering, statusRendering, stopRendering]) {
-        expect(renderer.parseResult(result)).toEqual({
-            kind: "available",
-            job: { ...legacyJob, kind: "task" },
-            output: "",
-            truncated: false,
-        });
-    }
-
-    const rendered = renderJobResult(result).render(120).join("\n");
-    expect(rendered).toContain("task · npm test · exit 7");
-    expect(Value.Check(commandSchema, legacyJob)).toBe(false);
-    expect(Value.Check(commandSchema, job)).toBe(true);
-});
-
-it("restores pre-kind status output in both renderers without changing saved details", () => {
-    const { kind: _kind, ...legacyJob } = job;
-    const result = {
-        content: [],
-        details: { job: legacyJob, output: "one test failed", truncated: true },
-    };
-    const original = structuredClone(result);
-    const parsed = statusRendering.parseResult(result);
-    expect(parsed).toEqual({
-        kind: "available",
-        job,
-        output: "one test failed",
-        truncated: true,
-    });
-
-    const glowup = JSON.stringify(statusRendering.renderResult(parsed));
-    const fallback = renderOutputResult(result, { expanded: true, isPartial: false })
-        .render(120)
-        .join("\n");
-
-    for (const rendered of [glowup, fallback]) {
-        expect(rendered).toContain("task · npm test · exit 7");
-        expect(rendered).toContain("one test failed");
-        expect(rendered).toContain("Earlier output omitted");
-        expect(rendered).not.toContain("unavailable");
-    }
-
-    expect(result).toEqual(original);
 });
 
 it.each(["unknown", null, 7])(

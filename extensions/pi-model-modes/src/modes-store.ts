@@ -17,12 +17,10 @@ import {
     parseModeColor,
     orderedModeNames,
     modeSpec,
-    type DefaultModelSpec,
     type ModesFile,
     type ModeSpec,
 } from "./modes.ts";
 import {
-    defaultThinkingLevelSchema,
     loadModelModesSettings,
     modelModesSettingsDefinition,
     modeThinkingLevelSchema,
@@ -39,21 +37,11 @@ const ModeSpecJsonSchema = Type.Object(
     { additionalProperties: false },
 );
 
-const DefaultModelJsonSchema = Type.Object(
-    {
-        provider: Type.String({ minLength: 1 }),
-        modelId: Type.String({ minLength: 1 }),
-        thinkingLevel: Type.Optional(defaultThinkingLevelSchema),
-    },
-    { additionalProperties: false },
-);
-
 const ModesFileJsonSchema = Type.Object(
     {
         $schema: Type.Optional(Type.String()),
         version: Type.Optional(Type.Number()),
         currentMode: Type.Optional(Type.String()),
-        defaultModel: Type.Optional(DefaultModelJsonSchema),
         modeUseThinkingBorderColors: Type.Optional(Type.Boolean()),
         modeShowThinkingLevelStatus: Type.Optional(Type.Boolean()),
         shortcuts: Type.Optional(
@@ -72,7 +60,6 @@ const ModesFileJsonSchema = Type.Object(
 );
 
 type ModeSpecJson = Static<typeof ModeSpecJsonSchema>;
-type DefaultModelJson = Static<typeof DefaultModelJsonSchema>;
 type ModesFileJson = Static<typeof ModesFileJsonSchema>;
 
 type NodeErrorWithCode = Error & {
@@ -134,21 +121,6 @@ function sanitizeModeSpec(spec: ModeSpecJson | undefined): ModeSpec {
     if (spec.provider !== undefined) sanitized.provider = spec.provider;
     if (spec.modelId !== undefined) sanitized.modelId = spec.modelId;
     if (spec.color !== undefined) sanitized.color = parseModeColor(spec.color);
-
-    return sanitized;
-}
-
-function sanitizeDefaultModelSpec(
-    spec: DefaultModelJson | undefined,
-): DefaultModelSpec | undefined {
-    if (spec === undefined) return undefined;
-
-    const sanitized: DefaultModelSpec = {
-        provider: spec.provider,
-        modelId: spec.modelId,
-    };
-    const thinkingLevel = normalizeThinkingLevel(spec.thinkingLevel);
-    if (thinkingLevel !== undefined) sanitized.thinkingLevel = thinkingLevel;
 
     return sanitized;
 }
@@ -222,8 +194,6 @@ function modesFromConfig(parsed: ModesFileJson, fallbackMode: ModeSpec): ModesFi
         hasConfiguredModes: orderedModeNames(modes).length > 0,
         modes,
     };
-    const defaultModel = sanitizeDefaultModelSpec(parsed.defaultModel);
-    if (defaultModel !== undefined) file.defaultModel = defaultModel;
     ensureDefaultModeEntries(file, fallbackMode);
 
     return file;
@@ -372,20 +342,19 @@ export class ModesStore {
             {
                 scope,
                 update: (config) => {
+                    if (patch === null) return config;
+
                     let latest = modesFromConfig(modesFileJsonDecoder.parse(config), fallbackMode);
                     if (scope === "project") {
                         latest = modesFromSettings(this.loadSettings(context), fallbackMode);
                     }
 
-                    if (patch === null && latest.defaultModel === undefined) return config;
-                    if (patch !== null) applyModesPatch(latest, patch);
-                    delete latest.defaultModel;
+                    applyModesPatch(latest, patch);
                     ensureDefaultModeEntries(latest, fallbackMode);
                     config.version = latest.version;
                     config.currentMode = latest.currentMode;
-                    delete config.defaultModel;
 
-                    if (scope === "project" && patch !== null) {
+                    if (scope === "project") {
                         const localConfig = modesFileJsonDecoder.parse(config);
                         const local = localConfig.modes ?? {};
 

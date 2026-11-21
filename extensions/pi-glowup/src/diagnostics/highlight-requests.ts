@@ -11,9 +11,8 @@ import {
 } from "./render-events.ts";
 
 /**
- * Optional v1 observations: epoch-scoped IDs and a total sequence, independent of
- * legacy hash deduplication. Completion/adoption means colors are available, not
- * that a native frame was presented. A reset ends observations, not backend work.
+ * Optional v1 observations: epoch-scoped IDs and a total sequence. Completion/adoption
+ * means colors are available, not that a native frame was presented. A reset ends observations, not backend work.
  */
 type RequestState =
     | "requested"

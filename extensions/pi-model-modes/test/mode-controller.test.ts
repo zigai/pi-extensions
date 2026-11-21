@@ -128,7 +128,6 @@ test.each(["mode", "default"] as const)(
                 JSON.stringify({
                     currentMode: "review",
                     modes: { review: spec },
-                    defaultModel: spec,
                 }),
             );
             const loaded = await discoverAndLoadExtensions([], root, agentDir);

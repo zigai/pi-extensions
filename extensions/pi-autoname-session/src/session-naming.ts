@@ -42,18 +42,8 @@ const sessionNamingStateSchema = Type.Object(
     { additionalProperties: false },
 );
 
-const legacySessionNamingStateSchema = Type.Object(
-    {
-        initialNameSet: Type.Boolean(),
-        baseline: sessionMetricsSchema,
-        baselineAtMs: Type.Number({ minimum: 0 }),
-    },
-    { additionalProperties: false },
-);
-
 const storedSessionNamingStateCandidateSchema = Type.Union([
     sessionNamingStateSchema,
-    legacySessionNamingStateSchema,
     Type.Object({ version: Type.Number() }),
 ]);
 
@@ -134,23 +124,12 @@ export function createSessionNamingState(input: SessionNamingStateInput): Sessio
 export function parseStoredSessionNamingState(value: unknown): StoredSessionNamingStateResult {
     try {
         const candidate = storedSessionNamingStateParser.parse(value);
-        if ("version" in candidate) {
-            if (candidate.version !== NAMING_STATE_VERSION) {
-                return { type: "unsupportedVersion" };
-            }
+        if (candidate.version !== NAMING_STATE_VERSION) {
+            return { type: "unsupportedVersion" };
+        }
 
-            if (!Value.Check(sessionNamingStateSchema, candidate)) {
-                return { type: "invalid" };
-            }
-
-            return {
-                type: "found",
-                state: createSessionNamingState({
-                    initialNameSet: candidate.initialNameSet,
-                    baseline: candidate.baseline,
-                    baselineAtMs: candidate.baselineAtMs,
-                }),
-            };
+        if (!Value.Check(sessionNamingStateSchema, candidate)) {
+            return { type: "invalid" };
         }
 
         return {
@@ -164,17 +143,6 @@ export function parseStoredSessionNamingState(value: unknown): StoredSessionNami
     } catch {
         return { type: "invalid" };
     }
-}
-
-/**
- * Parse persisted naming state read from a session entry.
- *
- * Unversioned state written by releases before state versioning is migrated
- * to version 1. Invalid and unsupported future state return undefined.
- */
-export function parseSessionNamingState(value: unknown): SessionNamingState | undefined {
-    const result = parseStoredSessionNamingState(value);
-    return result.type === "found" ? result.state : undefined;
 }
 
 /**

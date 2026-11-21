@@ -3,17 +3,10 @@ import {
     type FooterCustomSlotId,
     type FooterSide,
     type FooterSlotSnapshot,
-    type SegmentColors,
 } from "./footer-model.ts";
-
-const CUSTOM_SLOT_COLORS = {
-    bg: "",
-    fg: "",
-} as const;
 
 const FOOTER_SLOT_STATE = Symbol.for("zigai.pi-footer.slot-state.v1");
 const CUSTOM_SLOT_ID_REGEX = new RegExp(FOOTER_CUSTOM_SLOT_ID_PATTERN);
-const HEX_COLOR_REGEX = /^#[0-9a-fA-F]{6}$/;
 
 export type FooterSlotRegistration = {
     readonly id: string;
@@ -23,9 +16,6 @@ export type FooterSlotRegistration = {
 
     /** Initial visible text. Empty or whitespace-only text hides the slot. */
     readonly text?: string;
-
-    /** Optional colors preserved for compatibility with block footer variants. */
-    readonly colors?: SegmentColors;
 };
 
 export type FooterSlotHandle = {
@@ -41,7 +31,6 @@ export type FooterSlotHandle = {
 type MutableFooterSlot = {
     readonly id: FooterCustomSlotId;
     readonly owner: symbol;
-    colors: SegmentColors;
     defaultSide?: FooterSide;
     text?: string;
 };
@@ -87,22 +76,6 @@ function parseFooterSide(value: string | undefined): FooterSide | undefined {
     throw new Error(`[pi-footer] Custom footer slot defaultSide must be "left" or "right".`);
 }
 
-function parseHexColor(value: string, label: string): string {
-    if (HEX_COLOR_REGEX.test(value)) return value;
-    throw new Error(`[pi-footer] Custom footer slot ${label} must be a #RRGGBB hex color.`);
-}
-
-function parseSegmentColors(colors: SegmentColors | undefined): SegmentColors {
-    if (colors === undefined) {
-        return { ...CUSTOM_SLOT_COLORS };
-    }
-
-    return {
-        bg: parseHexColor(colors.bg, "colors.bg"),
-        fg: parseHexColor(colors.fg, "colors.fg"),
-    };
-}
-
 function sanitizeSlotText(text: string): string {
     return text
         .replace(/[\r\n\t]/g, " ")
@@ -146,7 +119,6 @@ export function registerFooterSlot(registration: FooterSlotRegistration): Footer
     const slot: MutableFooterSlot = {
         id,
         owner,
-        colors: parseSegmentColors(registration.colors),
     };
 
     const defaultSide = parseFooterSide(registration.defaultSide);
@@ -230,7 +202,6 @@ export function getFooterSlotSnapshots(): FooterSlotSnapshot[] {
         const snapshot: FooterSlotSnapshot = {
             id: slot.id,
             text: slot.text,
-            colors: { ...slot.colors },
         };
         if (slot.defaultSide !== undefined) {
             snapshots.push({ ...snapshot, defaultSide: slot.defaultSide });

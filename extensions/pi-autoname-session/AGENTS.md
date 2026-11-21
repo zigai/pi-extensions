@@ -42,7 +42,7 @@ The check validates generated settings, formatting, lint, strict TypeScript, and
 
 ## Naming and model boundaries
 
-- Persisted custom-entry data is untrusted. Validate it with TypeBox, preserve the explicit state version, accept the intentional legacy shape, and distinguish invalid data from unsupported future versions.
+- Persisted custom-entry data is untrusted. Validate it with TypeBox, require the explicit state version, and distinguish invalid data from unsupported future versions.
 - Count and context rules must remain deterministic across reload, branch navigation, compaction summaries, missing legacy usage, and circular or non-JSON tool arguments.
 - Preserve prompt-context limits. Truncation must bound model input while retaining useful head and tail context; repository guidance contents must not be copied into picker prompts.
 - Resolve picker models through `ctx.modelRegistry`, including provider auth, headers, environment, and credential-free providers. Do not infer credentials directly from environment variables.

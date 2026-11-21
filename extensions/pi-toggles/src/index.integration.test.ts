@@ -1100,7 +1100,6 @@ describe("Pi Toggles extension runtime", () => {
                 await writeFile(
                     join(agentDir, "extension-settings", "pi-model-modes.json"),
                     JSON.stringify({
-                        defaultModel: { provider: "synthetic", modelId: "first" },
                         modes: { default: { provider: "synthetic", modelId: "first" } },
                     }),
                 );

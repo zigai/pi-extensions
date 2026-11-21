@@ -106,9 +106,6 @@ async function updateSettingsObject(
             scope: "global",
             update: (settings) => {
                 update(settings);
-
-                // Explicit configuration writes retire the ignored startup override.
-                delete settings.defaultModel;
                 return settings;
             },
         },

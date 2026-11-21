@@ -5,40 +5,6 @@ export const DEFAULT_COMPLETION_SUFFIX = " ";
 export const INCLUDE_NON_GIT_FLAG = "mention-project-include-non-git";
 export const INCLUDE_DOT_FOLDERS_FLAG = "mention-project-include-dot-folders";
 
-// Keep pre-extension-settings installs working without moving or overwriting user config.
-export const LEGACY_SETTINGS_FILE = "settings.json";
-
-export const legacyMentionProjectSettingsSchema = Type.Object(
-    {
-        mentionProjectTrigger: Type.Optional(Type.Unknown()),
-        mentionProjectRoots: Type.Optional(Type.Unknown()),
-        mentionProjectGitReposOnly: Type.Optional(Type.Unknown()),
-        mentionProjectIncludeDotFolders: Type.Optional(Type.Unknown()),
-        mentionProjectCompletionSuffix: Type.Optional(Type.Unknown()),
-    },
-    { additionalProperties: true },
-);
-
-export const legacyTriggerSchema = Type.String({
-    minLength: 1,
-    pattern: "^[^/\\s]+$",
-});
-
-export const legacyRootsSchema = Type.Union([
-    Type.String({ minLength: 1 }),
-    Type.Array(Type.String({ minLength: 1 })),
-]);
-export const legacyBooleanSchema = Type.Boolean();
-export const legacyCompletionSuffixSchema = Type.String();
-
-export type LegacyMentionProjectSettings = {
-    readonly mentionProjectTrigger?: unknown;
-    readonly mentionProjectRoots?: unknown;
-    readonly mentionProjectGitReposOnly?: unknown;
-    readonly mentionProjectIncludeDotFolders?: unknown;
-    readonly mentionProjectCompletionSuffix?: unknown;
-};
-
 export const initialSuggestionStrategySchema = Type.Union(
     [
         Type.Literal("frecency"),

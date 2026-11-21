@@ -7,7 +7,7 @@ import type {
 import { Text, type Component } from "@earendil-works/pi-tui";
 import { call, empty, output, stack, text, type GlowupRenderer } from "@zigai/pi-glowup/protocol";
 import { type Static } from "@earendil-works/pi-schema";
-import { Type, type StaticDecode } from "typebox";
+import { Type } from "typebox";
 import { Compile } from "typebox/compile";
 import { Value } from "typebox/value";
 import {
@@ -20,55 +20,23 @@ import {
     waitArgsSchema,
     waitValidator,
     waitOutputSchema,
-    type CommandSnapshot,
+    type CommandOutput,
 } from "./commands.ts";
 import { commandLabel, commandStatus, plainOutput } from "./presentation.ts";
 
 type StartArgs = Static<typeof startArgsSchema>;
 type JobArgs = Static<typeof jobArgsSchema>;
 type WaitArgs = Static<typeof waitArgsSchema>;
-type WaitResult = { kind: "available"; jobs: SavedOutput[] } | { kind: "unavailable" };
+type WaitResult = { kind: "available"; jobs: CommandOutput[] } | { kind: "unavailable" };
 type RenderTheme = Pick<Theme, "fg" | "bold">;
 
-// Saved sessions from before task/service support have no kind, and ones from before
-// task deadlines have no timing fields. Only the rendering boundary accepts those
-// shapes; new tool results still use commandSchema.
-const savedCommandSchema = Type.Object(
-    {
-        ...commandSchema.properties,
-        kind: Type.Optional(commandSchema.properties.kind),
-        startedAt: Type.Optional(commandSchema.properties.startedAt),
-        endedAt: Type.Optional(commandSchema.properties.endedAt),
-        lastOutputAt: Type.Optional(commandSchema.properties.lastOutputAt),
-        timeoutSeconds: Type.Optional(commandSchema.properties.timeoutSeconds),
-    },
-    { additionalProperties: false },
-);
-const savedOutputSchema = Type.Object(
-    { ...outputSchema.properties, job: savedCommandSchema },
-    { additionalProperties: false },
-);
+export type Result = ({ kind: "available" } & CommandOutput) | { kind: "unavailable" };
 
-type SavedJob = Omit<StaticDecode<typeof savedCommandSchema>, "kind"> & {
-    kind: CommandSnapshot["kind"];
-};
-
-type SavedOutput = { job: SavedJob; output: string; truncated: boolean };
-
-export type Result = ({ kind: "available" } & SavedOutput) | { kind: "unavailable" };
-
-const jobResultSchema = Type.Object({ details: savedCommandSchema });
-const outputResultSchema = Type.Object({ details: savedOutputSchema });
-const savedOutputValidator = Compile(savedOutputSchema);
+const jobResultSchema = Type.Object({ details: commandSchema });
+const outputResultSchema = Type.Object({ details: outputSchema });
+const outputValidator = Compile(outputSchema);
 const resultValidator = Compile(Type.Union([jobResultSchema, outputResultSchema]));
-const waitResultValidator = Compile(
-    Type.Object({
-        details: Type.Object(
-            { ...waitOutputSchema.properties, jobs: Type.Array(savedOutputSchema) },
-            { additionalProperties: false },
-        ),
-    }),
-);
+const waitResultValidator = Compile(Type.Object({ details: waitOutputSchema }));
 
 const parseWait: GlowupRenderer<WaitArgs>["parseArgs"] = (value) => {
     const parsed = waitValidator.validate(value);
@@ -78,15 +46,7 @@ const parseWait: GlowupRenderer<WaitArgs>["parseArgs"] = (value) => {
 
 function parseWaitResult(value: unknown): WaitResult {
     try {
-        const parsed = waitResultValidator.Parse(value);
-
-        return {
-            kind: "available",
-            jobs: parsed.details.jobs.map((result) => ({
-                ...result,
-                job: { ...result.job, kind: result.job.kind ?? "task" },
-            })),
-        };
+        return { kind: "available", jobs: waitResultValidator.Parse(value).details.jobs };
     } catch {
         return { kind: "unavailable" };
     }
@@ -107,18 +67,13 @@ const parseJob: GlowupRenderer<JobArgs>["parseArgs"] = (value) => {
 function parseResult(value: unknown): Result {
     try {
         const parsed = resultValidator.Parse(value);
-        if (Value.Check(savedOutputSchema, parsed.details)) {
-            return {
-                kind: "available",
-                job: { ...parsed.details.job, kind: parsed.details.job.kind ?? "task" },
-                output: parsed.details.output,
-                truncated: parsed.details.truncated,
-            };
+        if (Value.Check(outputSchema, parsed.details)) {
+            return { kind: "available", ...parsed.details };
         }
 
         return {
             kind: "available",
-            job: { ...parsed.details, kind: parsed.details.kind ?? "task" },
+            job: parsed.details,
             output: "",
             truncated: false,
         };
@@ -177,12 +132,7 @@ function outputLines(result: Result, expanded: boolean): string[] {
 
 export function parseResultDetails(details: unknown): Result {
     try {
-        const parsed = savedOutputValidator.Parse(details);
-        return {
-            kind: "available",
-            ...parsed,
-            job: { ...parsed.job, kind: parsed.job.kind ?? "task" },
-        };
+        return { kind: "available", ...outputValidator.Parse(details) };
     } catch {
         return { kind: "unavailable" };
     }

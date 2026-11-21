@@ -24,9 +24,7 @@ The first mode is marked **(startup)** in the picker. To change startup selectio
 
 With no configured modes, Pi retains its normal model selection. If the first mode's model is unavailable or lacks credentials, Pi retains its selection and the extension warns instead of silently choosing another mode. Unset model/thinking fields retain their existing meaning: do not change that part of the selection.
 
-### Legacy startup setting
-
-`defaultModel` is accepted for compatibility but no longer controls startup. The first configured cycle mode wins even when `currentMode` or the legacy default points elsewhere. A differing legacy default produces an informational notice once per extension instance. Loading does not rewrite your existing settings; explicitly saving mode configuration removes the deprecated field. Trusted-project settings merge mode fields with global settings. Mode names explicitly declared in the project lead the effective cycle in project order; remaining inherited modes follow in global order. Startup and cycling use that same effective order.
+The first configured cycle mode wins even when `currentMode` points elsewhere. Trusted-project settings merge mode fields with global settings, and mode names declared in the project lead the effective cycle in project order, followed by the remaining inherited modes in global order. Startup and cycling use that same effective order.
 
 Mode picker pins are independent UI settings and are not changed automatically.
 
@@ -35,19 +33,16 @@ Mode picker pins are independent UI settings and are not changed automatically.
 
 Global settings are stored in `~/.pi/agent/extension-settings/pi-model-modes.json`.
 
-| Option                        | Type                                                                  | Default     | Description                                                                                                                           |
-| ----------------------------- | --------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `version`                     | number                                                                | `1`         | Settings format version.                                                                                                              |
-| `currentMode`                 | string                                                                | `"default"` | Currently selected mode ID.                                                                                                           |
-| `defaultModel.provider`       | string                                                                | —           | Legacy startup model provider; ignored. The first cycle mode is used instead.                                                         |
-| `defaultModel.modelId`        | string                                                                | —           | Legacy startup model ID; ignored. The first cycle mode is used instead.                                                               |
-| `defaultModel.thinkingLevel`  | `off` \| `minimal` \| `low` \| `medium` \| `high` \| `xhigh` \| `max` | —           | Pi thinking level for the default model, clamped to that model's capabilities.                                                        |
-| `modeUseThinkingBorderColors` | boolean                                                               | `false`     | Use thinking-level colors instead of mode colors for borders.                                                                         |
-| `modeShowThinkingLevelStatus` | boolean                                                               | `false`     | Show thinking level alongside mode status.                                                                                            |
-| `shortcuts.forward`           | string                                                                | —           | Shortcut for cycling modes forward.                                                                                                   |
-| `shortcuts.backward`          | string                                                                | —           | Shortcut for cycling modes backward.                                                                                                  |
-| `deletedModes`                | string[]                                                              | —           | Global mode names hidden by this project configuration.                                                                               |
-| `modes`                       | Record<string, [ModelMode](#settings-type-ModelMode)>                 | `{}`        | Named model modes in cycle order. The first configured mode is used on fresh startup and /new; resumed sessions keep their selection. |
+| Option                        | Type                                                  | Default     | Description                                                                                                                           |
+| ----------------------------- | ----------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `version`                     | number                                                | `1`         | Settings format version.                                                                                                              |
+| `currentMode`                 | string                                                | `"default"` | Currently selected mode ID.                                                                                                           |
+| `modeUseThinkingBorderColors` | boolean                                               | `false`     | Use thinking-level colors instead of mode colors for borders.                                                                         |
+| `modeShowThinkingLevelStatus` | boolean                                               | `false`     | Show thinking level alongside mode status.                                                                                            |
+| `shortcuts.forward`           | string                                                | none        | Shortcut for cycling modes forward.                                                                                                   |
+| `shortcuts.backward`          | string                                                | none        | Shortcut for cycling modes backward.                                                                                                  |
+| `deletedModes`                | string[]                                              | none        | Global mode names hidden by this project configuration.                                                                               |
+| `modes`                       | Record<string, [ModelMode](#settings-type-ModelMode)> | `{}`        | Named model modes in cycle order. The first configured mode is used on fresh startup and /new; resumed sessions keep their selection. |
 
 ### Defaults
 

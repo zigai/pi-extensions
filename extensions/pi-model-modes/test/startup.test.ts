@@ -18,13 +18,12 @@ import { ModePicker } from "../src/mode-picker.ts";
 import { ModesStore } from "../src/modes-store.ts";
 import type { ModesFile, ModeSpec } from "../src/modes.ts";
 
-type StartupConfig = Partial<Pick<ModesFile, "currentMode" | "defaultModel" | "modes">>;
+type StartupConfig = Partial<Pick<ModesFile, "currentMode" | "modes">>;
 
 const first: ModeSpec = { provider: "synthetic", modelId: "first", thinkingLevel: "high" };
 const second: ModeSpec = { provider: "synthetic", modelId: "second", thinkingLevel: "low" };
 const configured = {
     currentMode: "second",
-    defaultModel: { provider: "synthetic", modelId: "legacy", thinkingLevel: "off" },
     modes: { first, second },
 } satisfies StartupConfig;
 
@@ -150,7 +149,7 @@ async function withFixture(
 }
 
 test.each(["startup", "new"] as const)(
-    "%s selects the first configured model and thinking, ignoring legacy defaults/currentMode",
+    "%s selects the first configured model and thinking, ignoring currentMode",
     async (reason) => {
         await withFixture(configured, async (f) => {
             f.sessions.appendModelChange("synthetic", "existing");
@@ -205,7 +204,7 @@ test.each(["missing file", "missing modes", "empty modes"])(
     "%s leaves the active model and thinking untouched",
     async (kind) => {
         let config: StartupConfig | undefined;
-        if (kind === "missing modes") config = { defaultModel: configured.defaultModel };
+        if (kind === "missing modes") config = { currentMode: configured.currentMode };
         if (kind === "empty modes") config = { ...configured, modes: {} };
 
         await withFixture(config, async (f) => {
@@ -304,7 +303,6 @@ test("moving a mode first persists order without changing this session; new uses
         await f.controller.moveModeToFirst(f.ctx, "second");
         const saved = await new ModesStore().load(f.configPath, {}, { throwOnInvalid: true });
         assert.deepEqual(Object.keys(saved.modes), ["second", "first"]);
-        assert.equal("defaultModel" in saved, false);
         assert.deepEqual(Object.keys(f.controller.modes.modes), ["second", "first"]);
         assert.equal(f.controller.currentMode, "first");
         assert.equal(f.ctx.model?.id, "first");
@@ -335,7 +333,7 @@ test("forward and backward cycling wrap in the persisted startup order", async (
     });
 });
 
-test("picker labels startup mode, moves another mode first, and omits legacy default UI", async () => {
+test("picker labels startup mode, moves another mode first, and omits default-model actions", async () => {
     await withFixture(configured, async (f) => {
         f.choices.push(
             "Configure modes…",

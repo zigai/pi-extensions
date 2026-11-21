@@ -390,24 +390,27 @@ it("distinguishes unsupported labels by hash without recording their contents", 
     expect(JSON.stringify(events)).not.toContain("invented-first-label");
 });
 
-it("preserves legacy deduplication on sink replacement and clears it on explicit reset or disable", () => {
-    const legacy = (): void =>
+it("deduplicates within a sink and clears deduplication on sink replacement, reset or disable", () => {
+    const repeated = (): void =>
         recordRenderEvent(
-            "legacy-example",
+            "repeated-example",
             () => ({ count: 1 }),
             () => "same",
         );
-    legacy();
+    const recorded = () => events.filter(({ event }) => event === "repeated-example");
+    repeated();
+    repeated();
+    expect(recorded()).toHaveLength(1);
     configureRenderDiagnostics((event, fields) => sink(event, fields));
-    legacy();
-    expect(events.filter(({ event }) => event === "legacy-example")).toHaveLength(1);
+    repeated();
+    expect(recorded()).toHaveLength(2);
     resetRenderDiagnostics();
-    legacy();
-    expect(events.filter(({ event }) => event === "legacy-example")).toHaveLength(2);
+    repeated();
+    expect(recorded()).toHaveLength(3);
     configureRenderDiagnostics(undefined);
     configureRenderDiagnostics(sink);
-    legacy();
-    expect(events.filter(({ event }) => event === "legacy-example")).toHaveLength(3);
+    repeated();
+    expect(recorded()).toHaveLength(4);
 });
 
 it("emits no lifecycle checkpoints when no syntax request was observed", () => {

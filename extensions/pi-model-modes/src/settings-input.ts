@@ -58,11 +58,6 @@ export const modeThinkingLevelSchema = Type.Enum(ALL_THINKING_LEVELS, {
     description: "Pi thinking level for this mode, clamped to the selected model's capabilities.",
 });
 
-export const defaultThinkingLevelSchema = Type.Enum(ALL_THINKING_LEVELS, {
-    "x-control": "select",
-    description: "Pi thinking level for the default model, clamped to that model's capabilities.",
-});
-
 export const modeSpecSchema = Type.Object(
     {
         provider: Type.Optional(Type.String()),
@@ -82,27 +77,6 @@ export const modeSpecSchema = Type.Object(
         ),
     },
     { additionalProperties: false, title: "ModelMode" },
-);
-
-export const defaultModelSchema = Type.Object(
-    {
-        provider: Type.String({
-            minLength: 1,
-            description:
-                "Legacy startup model provider; ignored. The first cycle mode is used instead.",
-        }),
-        modelId: Type.String({
-            minLength: 1,
-            description: "Legacy startup model ID; ignored. The first cycle mode is used instead.",
-        }),
-        thinkingLevel: Type.Optional(defaultThinkingLevelSchema),
-    },
-    {
-        additionalProperties: false,
-        deprecated: true,
-        description:
-            "Deprecated and ignored. Fresh sessions use the first configured cycle mode. Removed on explicit mode saves.",
-    },
 );
 
 export const modeShortcutsSchema = Type.Object(
@@ -130,7 +104,6 @@ export const extensionSettingsInput = {
                 default: "default",
                 description: "Currently selected mode ID.",
             }),
-            defaultModel: Type.Optional(defaultModelSchema),
             [USE_THINKING_BORDER_COLORS_SETTINGS_KEY]: Type.Boolean({
                 default: false,
                 description: "Use thinking-level colors instead of mode colors for borders.",

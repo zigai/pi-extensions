@@ -9,7 +9,7 @@ import {
     isOpaqueNamingPrompt,
     measureSession,
     normalizeSessionName,
-    parseSessionNamingState,
+    parseStoredSessionNamingState,
     renderNamingPrompt,
 } from "../src/session-naming.ts";
 
@@ -248,28 +248,21 @@ describe("session naming", () => {
             baselineAtMs: 100,
         });
 
-        expect(parseSessionNamingState(state)).toEqual(state);
-        expect(
-            parseSessionNamingState({ ...state, baseline: { messages: "one" } }),
-        ).toBeUndefined();
-
-        expect(parseSessionNamingState({ ...state, version: 2 })).toBeUndefined();
-    });
-
-    it("migrates legacy unversioned state and owns a copy of its baseline", () => {
-        const baseline = { messages: 1, turns: 2, toolCalls: 3, tokens: 4 };
-        const state = parseSessionNamingState({
-            initialNameSet: true,
-            baseline,
-            baselineAtMs: 100,
+        expect(parseStoredSessionNamingState(state)).toEqual({ type: "found", state });
+        expect(parseStoredSessionNamingState({ ...state, baseline: { messages: "one" } })).toEqual({
+            type: "invalid",
         });
 
-        baseline.messages = 99;
-        expect(state).toEqual({
-            version: 1,
-            initialNameSet: true,
-            baseline: { messages: 1, turns: 2, toolCalls: 3, tokens: 4 },
-            baselineAtMs: 100,
+        expect(
+            parseStoredSessionNamingState({
+                initialNameSet: true,
+                baseline: state.baseline,
+                baselineAtMs: 100,
+            }),
+        ).toEqual({ type: "invalid" });
+
+        expect(parseStoredSessionNamingState({ ...state, version: 2 })).toEqual({
+            type: "unsupportedVersion",
         });
     });
 

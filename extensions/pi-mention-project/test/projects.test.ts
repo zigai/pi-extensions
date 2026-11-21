@@ -75,21 +75,18 @@ test("listProjectDirectories lists only direct child git directories and ignores
     }
 });
 
-test.each([
-    ["extension-settings/pi-mention-project.json", "roots"],
-    ["settings.json", "mentionProjectRoots"],
-])("listProjectDirectories preserves trailing spaces in roots from %s", async (file, key) => {
+test("listProjectDirectories preserves trailing spaces in configured roots", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "pi-mention-project-root-space-"));
     try {
         const root = path.join(dir, "projects ");
         const intended = path.join(root, "intended");
         const sibling = path.join(dir, "projects", "unrelated");
         const agentDir = path.join(dir, "agent");
-        const configPath = path.join(agentDir, file);
+        const configPath = path.join(agentDir, "extension-settings", "pi-mention-project.json");
         await markGitRepo(intended);
         await markGitRepo(sibling);
         await mkdir(path.dirname(configPath), { recursive: true });
-        await writeFile(configPath, JSON.stringify({ [key]: [root] }));
+        await writeFile(configPath, JSON.stringify({ roots: [root] }));
         vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
         const configured = loadMentionProjectSettings({ cwd: dir, isProjectTrusted: () => false });
 

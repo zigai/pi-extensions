@@ -21,11 +21,9 @@ const globalSchemaPath = path.join(
     "schemas",
     "pi-mention-project.schema.json",
 );
-const legacyGlobalSettingsPath = path.join(agentDir, "settings.json");
 
 beforeEach(async () => {
     await rm(path.join(agentDir, "extension-settings"), { recursive: true, force: true });
-    await rm(legacyGlobalSettingsPath, { force: true });
 });
 
 afterAll(async () => {
@@ -97,67 +95,6 @@ test("loadMentionProjectSettings uses defaults and scaffolds global config", asy
         });
         assert.equal(await readFile(globalConfigPath, "utf8"), customConfig);
         assert.match(await readFile(globalSchemaPath, "utf8"), /Pi Mention Project settings/);
-    } finally {
-        await rm(cwd, { recursive: true, force: true });
-    }
-});
-
-test("loadMentionProjectSettings preserves legacy project mention settings", async () => {
-    const cwd = await mkdtemp(path.join(tmpdir(), "pi-mention-project-settings-cwd-"));
-    try {
-        await writeJson(legacyGlobalSettingsPath, {
-            mentionProjectTrigger: "@@",
-            mentionProjectRoots: ["~/Projects"],
-            mentionProjectGitReposOnly: false,
-            mentionProjectIncludeDotFolders: true,
-            mentionProjectCompletionSuffix: "\n",
-        });
-        await writeJson(path.join(cwd, ".pi", "settings.json"), {
-            mentionProjectTrigger: "%%",
-            mentionProjectRoots: ["./local-projects"],
-            mentionProjectGitReposOnly: true,
-            mentionProjectIncludeDotFolders: false,
-            mentionProjectCompletionSuffix: "",
-        });
-
-        assert.deepEqual(loadMentionProjectSettings(context(cwd, true)), {
-            trigger: "%%",
-            roots: ["./local-projects"],
-            gitReposOnly: true,
-            includeDotFolders: false,
-            completionSuffix: "",
-            initialSuggestions: { strategy: "frecency", pinned: [] },
-        });
-        assert.deepEqual(loadMentionProjectSettings(context(cwd, false)), {
-            trigger: "@@",
-            roots: ["~/Projects"],
-            gitReposOnly: false,
-            includeDotFolders: true,
-            completionSuffix: "\n",
-            initialSuggestions: { strategy: "frecency", pinned: [] },
-        });
-    } finally {
-        await rm(cwd, { recursive: true, force: true });
-    }
-});
-
-test("new extension roots override legacy project mention roots", async () => {
-    const cwd = await mkdtemp(path.join(tmpdir(), "pi-mention-project-settings-cwd-"));
-    try {
-        await writeJson(legacyGlobalSettingsPath, {
-            mentionProjectTrigger: "@",
-            mentionProjectRoots: ["~/Projects"],
-        });
-        await writeJson(globalConfigPath, { roots: ["./new-projects"] });
-
-        assert.deepEqual(loadMentionProjectSettings(context(cwd, true)), {
-            trigger: "@",
-            roots: ["./new-projects"],
-            gitReposOnly: true,
-            includeDotFolders: false,
-            completionSuffix: " ",
-            initialSuggestions: { strategy: "frecency", pinned: [] },
-        });
     } finally {
         await rm(cwd, { recursive: true, force: true });
     }

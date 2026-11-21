@@ -16,7 +16,6 @@ export type FooterKey =
 export type FooterCustomSlotId = `${string}.${string}`;
 export type FooterSlotId = FooterKey | FooterCustomSlotId;
 export type Rgb = [number, number, number];
-export type SegmentColors = { bg: string; fg: string };
 export type ContextUsage = ReturnType<ExtensionContext["getContextUsage"]>;
 
 export type FooterLayout = {
@@ -68,13 +67,11 @@ export type FooterData = {
 export type FooterItem = {
     key: FooterSlotId;
     text: string;
-    colors: SegmentColors;
 };
 
 export type FooterSlotSnapshot = {
     readonly id: FooterCustomSlotId;
     readonly text: string;
-    readonly colors: SegmentColors;
     readonly defaultSide?: FooterSide;
 };
 

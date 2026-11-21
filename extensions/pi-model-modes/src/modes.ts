@@ -21,12 +21,6 @@ export type ModeSpec = {
     color?: ThemeColor;
 };
 
-export type DefaultModelSpec = {
-    provider: string;
-    modelId: string;
-    thinkingLevel?: ThinkingLevel;
-};
-
 export type ModesFile = {
     version: 1;
     currentMode: ModeName;
@@ -34,8 +28,6 @@ export type ModesFile = {
     /** False when modes were generated from the active model rather than configured. */
     hasConfiguredModes?: boolean;
 
-    /** Legacy value retained for diagnostics only; explicit saves remove it. */
-    defaultModel?: DefaultModelSpec;
     modes: Record<ModeName, ModeSpec>;
 };
 
@@ -48,7 +40,6 @@ export type ModeSpecPatch = {
 
 export type ModesPatch = {
     currentMode?: ModeName;
-    defaultModel?: null;
     modeOrder?: readonly ModeName[];
     expectedModeOrder?: readonly ModeName[];
     modes?: Record<ModeName, ModeSpecPatch | null>;
@@ -112,16 +103,6 @@ export function cloneModeSpec(spec: ModeSpec): ModeSpec {
     return cloned;
 }
 
-export function cloneDefaultModelSpec(spec: DefaultModelSpec): DefaultModelSpec {
-    const cloned: DefaultModelSpec = {
-        provider: spec.provider,
-        modelId: spec.modelId,
-    };
-    if (spec.thinkingLevel !== undefined) cloned.thinkingLevel = spec.thinkingLevel;
-
-    return cloned;
-}
-
 export function cloneModesFile(file: ModesFile): ModesFile {
     const modes: Record<string, ModeSpec> = {};
     for (const [name, spec] of Object.entries(file.modes)) {
@@ -135,10 +116,6 @@ export function cloneModesFile(file: ModesFile): ModesFile {
     };
     if (file.hasConfiguredModes !== undefined) {
         cloned.hasConfiguredModes = file.hasConfiguredModes;
-    }
-
-    if (file.defaultModel !== undefined) {
-        cloned.defaultModel = cloneDefaultModelSpec(file.defaultModel);
     }
 
     return cloned;
@@ -163,8 +140,6 @@ export function computeModesPatch(
     if (includeCurrentMode && base.currentMode !== next.currentMode) {
         patch.currentMode = next.currentMode;
     }
-
-    if (base.defaultModel !== undefined) patch.defaultModel = null;
 
     const beforeOrder = Object.keys(base.modes);
     const afterOrder = Object.keys(next.modes);
@@ -219,7 +194,6 @@ export function computeModesPatch(
     if (
         patch.modes === undefined &&
         patch.currentMode === undefined &&
-        patch.defaultModel === undefined &&
         patch.modeOrder === undefined
     ) {
         return null;
@@ -243,8 +217,6 @@ export function applyModesPatch(target: ModesFile, patch: ModesPatch): void {
     if (patch.currentMode !== undefined) {
         target.currentMode = patch.currentMode;
     }
-
-    if (patch.defaultModel !== undefined) delete target.defaultModel;
 
     for (const [mode, specPatch] of Object.entries(patch.modes ?? {})) {
         if (specPatch === null) {

@@ -266,7 +266,6 @@ async function readModesDocument(filePath: string) {
         Type.Object(
             {
                 modes: Type.Record(Type.String(), Type.Unknown()),
-                defaultModel: Type.Optional(Type.Unknown()),
                 hasConfiguredModes: Type.Optional(Type.Boolean()),
                 modeShowThinkingLevelStatus: Type.Optional(Type.Boolean()),
             },
@@ -376,33 +375,9 @@ test("ModesStore non-order edits preserve latest order and unrelated fields", as
     });
 });
 
-test("ModesStore explicit no-op save removes legacy defaultModel", async () => {
-    await withStore(async ({ store, cwd, filePath, baseline }) => {
-        const config = {
-            defaultModel: { provider: "legacy", modelId: "old", thinkingLevel: "low" },
-            modes: baseline.modes,
-        };
-        await writeFile(filePath, JSON.stringify(config));
-        await store.resolvePath({ cwd, projectTrusted: false });
-        const loaded = await store.load(filePath, fallbackMode);
-        assert.deepEqual(loaded.defaultModel, config.defaultModel);
-        assert.equal(loaded.hasConfiguredModes, true);
-        const saved = await store.saveChanges(
-            filePath,
-            loaded,
-            cloneModesFile(loaded),
-            fallbackMode,
-        );
-        assert.ok(saved);
-        assert.equal(saved.data.defaultModel, undefined);
-        assert.equal((await readModesDocument(filePath)).defaultModel, undefined);
-        assert.deepEqual(Object.keys(saved.data.modes), ["first", "second"]);
-    });
-});
-
 test("ModesStore leaves invalid settings untouched on load and save", async () => {
     await withStore(async ({ store, cwd, filePath, baseline }) => {
-        const invalid = '{"modes":{"first":{"modelId":42}},"defaultModel":{"provider":"legacy"}}';
+        const invalid = '{"modes":{"first":{"modelId":42}}}';
         await writeFile(filePath, invalid);
         await store.resolvePath({ cwd, projectTrusted: false });
         const loaded = await store.load(filePath, fallbackMode);
