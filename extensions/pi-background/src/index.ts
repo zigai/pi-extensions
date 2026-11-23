@@ -31,6 +31,7 @@ import {
     plainOutput,
     runningShellStatus,
 } from "./presentation.ts";
+import { jobOutcomes, RESULT_MESSAGE_TYPE } from "./job-outcomes.ts";
 import { LogViewer } from "./log-viewer.ts";
 import {
     renderJobResult,
@@ -38,6 +39,7 @@ import {
     parseResultDetails,
     renderResultMessage,
     renderStartCall,
+    renderStartResult,
     renderStatusCall,
     renderStopCall,
     renderWaitCall,
@@ -75,8 +77,6 @@ function describeOutput(result: CommandOutput): string {
     return text;
 }
 
-const RESULT_MESSAGE_TYPE = "pi-background.result";
-
 type ActiveSession = {
     readonly owner: symbol;
     readonly commands: BackgroundCommands;
@@ -113,6 +113,7 @@ export default function backgroundExtension(pi: ExtensionAPI): void {
         const disposed = previous?.commands.dispose();
 
         active = undefined;
+        jobOutcomes.clear();
         await Promise.all([disposed, previous?.viewer?.whenIdle()]);
     };
 
@@ -122,6 +123,8 @@ export default function backgroundExtension(pi: ExtensionAPI): void {
 
         if (revision !== generation) return;
 
+        jobOutcomes.restore(ctx.sessionManager.getEntries());
+
         const owner = Symbol("background-session");
         let ui: ExtensionContext["ui"] | undefined;
         if (ctx.hasUI) ui = ctx.ui;
@@ -130,9 +133,10 @@ export default function backgroundExtension(pi: ExtensionAPI): void {
         const commands = new BackgroundCommands({
             operations: createLocalBashOperations(),
             directory: join(getAgentDir(), "background", ctx.sessionManager.getSessionId()),
-            onChange: () => {
+            onChange: (job) => {
                 if (active?.owner !== owner) return;
 
+                if (job.state !== "running") jobOutcomes.record(active.commands.peek(job.id));
                 refresh();
             },
             onUncollectedResult: (result) => {
@@ -299,7 +303,7 @@ export default function backgroundExtension(pi: ExtensionAPI): void {
                 parameters: startArgsSchema,
                 outputSchema: commandSchema,
                 renderCall: renderStartCall,
-                renderResult: renderJobResult,
+                renderResult: renderStartResult,
                 async execute(_toolCallId, input, signal, _onUpdate, ctx) {
                     const parsed = startValidator.validate(input);
                     if (!parsed.ok) throw new Error("Invalid background_start arguments.");
@@ -310,6 +314,8 @@ export default function backgroundExtension(pi: ExtensionAPI): void {
                         kind: args.kind,
                         timeout: args.timeout,
                     });
+
+                    jobOutcomes.started(job);
 
                     refresh();
 

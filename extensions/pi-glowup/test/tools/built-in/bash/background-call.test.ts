@@ -43,10 +43,11 @@ function expectWithinWidth(rows: readonly string[], width: number): void {
 
 describe("native Bash background call marker", () => {
     it.each(["sleep 5", pythonCommand])(
-        "right-aligns the marker before the duration on the top prompt row: %s",
+        "right-aligns the marker without a duration on the top prompt row: %s",
         (command) => {
             const rows = plain(render(command, 40, { durationMs: 1234 }));
-            expect(rows[0]).toMatch(/ 1\.23s $/u);
+            expect(rows[0]).toMatch(/[^ ] + $/u);
+            expect(rows.join("\n")).not.toContain("1.23s");
             expect(visibleWidth(rows[0] ?? "")).toBe(40);
             expect(rows.join("\n").match(//gu)).toHaveLength(1);
 
@@ -75,7 +76,7 @@ describe("native Bash background call marker", () => {
         },
     );
 
-    it("keeps a failed duration red and the marker muted", () => {
+    it("shows only the muted marker for a failed call", () => {
         const coloredTheme: GlowupRenderTheme = {
             ...theme,
             fg(token, text) {
@@ -95,20 +96,21 @@ describe("native Bash background call marker", () => {
             durationMs: 0,
         }).render(40);
 
-        expect(rows[0]).toContain("\u001b[90m\u001b[39m \u001b[31m0.00s\u001b[39m");
+        expect(rows[0]?.endsWith("\u001b[90m\u001b[39m ")).toBe(true);
+        expect(rows.join("\n")).not.toContain("0.00s");
         expectWithinWidth(rows, 40);
     });
 
     it.each([
         [
             "echo abcdefghijklmnopqrstuvwxyz",
-            ["$ echo            4.27s ", "    abcdefghijkl", "    mnopqrstuvwx", "    yz"],
+            ["$ echo            ", "    abcdefghijkl", "    mnopqrstuvwx", "    yz"],
         ],
-        [pythonCommand, ["$ python3 -       4.27s ", "    <<'PY'", "  print(1)"]],
+        [pythonCommand, ["$ python3 -       ", "    <<'PY'", "  print(1)"]],
     ] as const)("reserves space before wrapping a long first line: %s", (command, expected) => {
-        const rows = render(command, 25, { durationMs: 4270 });
+        const rows = render(command, 19, { durationMs: 4270 });
         expect(plain(rows)).toEqual(expected);
-        expectWithinWidth(rows, 25);
+        expectWithinWidth(rows, 19);
     });
 
     it.each([8, 10, 14, 15, 18, 22])(

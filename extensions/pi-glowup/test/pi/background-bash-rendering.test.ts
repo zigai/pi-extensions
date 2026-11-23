@@ -115,7 +115,8 @@ it("reuses the actual native Bash call renderer for declared shell tools while r
     await settleSyntaxHighlights();
     const backgroundLines = screen(background);
     const foregroundLines = screen(foreground);
-    expect(backgroundLines[0]).toMatch(/\$ python.* 1\.25s\s*$/u);
+    expect(backgroundLines[0]).toMatch(/\$ python.*\s*$/u);
+    expect(backgroundLines.join("\n")).not.toContain("1.25s");
     expect(backgroundLines.join("\n")).toContain("print('hello world')");
     expect(backgroundLines.join("\n")).not.toContain("private launch result");
     expect(backgroundLines.join("\n")).not.toContain("Owner call fallback");
@@ -144,7 +145,8 @@ it("draws a declared label before the prompt and leaves the rest of the call unc
     await settleSyntaxHighlights();
     const labeledLines = screen(labeled);
     const plainLines = screen(plain);
-    expect(labeledLines[0]).toMatch(/^Monitor \$ python.* 1\.25s\s*$/u);
+    expect(labeledLines[0]).toMatch(/^Monitor \$ python/u);
+    expect(labeledLines.join("\n")).not.toContain("1.25s");
     expect(plainLines[0]).toMatch(/^\$ python/u);
     expect(labeledLines.slice(1)).toEqual(plainLines.slice(1));
 });
@@ -157,6 +159,7 @@ it("keeps a labeled call within a narrow width", async () => {
     );
     component.setArgsComplete();
     component.updateResult({ content: [], isError: false, durationMs: 10 });
+
     for (const width of [40, 24, 12]) {
         component.render(width);
         await bash.settled();

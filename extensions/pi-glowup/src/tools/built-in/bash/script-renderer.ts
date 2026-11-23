@@ -1033,8 +1033,11 @@ function createScriptCallComponent(
         if (options.label !== undefined)
             promptPrefix = `${theme.bold(options.label)} ${promptPrefix}`;
 
-        let annotation = promptDuration(theme, state, options.durationMs);
         const background = options.background === true;
+
+        // A background call returns as soon as its job starts, so its duration says nothing.
+        let annotation: string | undefined;
+        if (!background) annotation = promptDuration(theme, state, options.durationMs);
 
         // nf-cod-debug_continue_small (U+EBE0), used for Continue in Background.
         const marker = muted(theme, "\uEBE0");

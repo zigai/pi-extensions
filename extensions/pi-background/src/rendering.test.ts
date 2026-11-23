@@ -1,8 +1,11 @@
-import { expect, it } from "vitest";
+import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+import { beforeEach, expect, it } from "vitest";
+import { jobOutcomes, RESULT_MESSAGE_TYPE } from "./job-outcomes.ts";
 import {
     parseResultDetails,
     renderResultMessage,
     renderStartCall,
+    renderStartResult,
     renderWaitCall,
     renderWaitResult,
     startRendering,
@@ -110,7 +113,7 @@ it("parses wait arguments and hides selected task IDs in both call renderers", (
     expect(glowup + fallback).not.toContain(job.id);
 });
 
-it("renders a collected batch with bounded output nodes and expandable fallback output", () => {
+it("renders a collected batch as one status line per task, with output only in expanded fallback", () => {
     const result = {
         content: [],
         details: {
@@ -127,22 +130,19 @@ it("renders a collected batch with bounded output nodes and expandable fallback 
     };
     const parsed = waitRendering.parseResult(result);
     const glowup = JSON.stringify(waitRendering.renderResult(parsed));
-    expect(glowup).toContain("npm test");
-    expect(glowup).toContain("exit 7");
-    expect(glowup).toContain("npm run build");
-    expect(glowup).toContain("done");
-    expect(glowup).toContain('"kind":"output"');
-    expect(glowup).toContain("one test failed");
-    expect(glowup).toContain("Earlier output omitted");
+    expect(glowup).toContain("✗ npm test exit 7 · 1s");
+    expect(glowup).toContain("✓ npm run build done · 1s");
+    expect(glowup).not.toContain("one test failed");
+    expect(glowup).not.toContain("build passed");
 
-    const collapsed = renderWaitResult(result, { expanded: false, isPartial: false })
+    const collapsed = renderWaitResult(result, { expanded: false, isPartial: false }, theme)
+        .render(120)
+        .map((line) => line.trimEnd())
+        .join("\n");
+    const expanded = renderWaitResult(result, { expanded: true, isPartial: false }, theme)
         .render(120)
         .join("\n");
-    const expanded = renderWaitResult(result, { expanded: true, isPartial: false })
-        .render(120)
-        .join("\n");
-    expect(collapsed).toContain("npm test");
-    expect(collapsed).toContain("npm run build");
+    expect(collapsed).toBe("✗ npm test exit 7 · 1s\n✓ npm run build done · 1s");
     expect(collapsed).not.toContain("one test failed");
     expect(collapsed).not.toContain("build passed");
     expect(expanded).toContain("one test failed");
@@ -159,7 +159,9 @@ it("gives empty waits useful wording in both renderers", () => {
     );
 
     expect(
-        renderWaitResult(result, { expanded: true, isPartial: false }).render(100).join("\n"),
+        renderWaitResult(result, { expanded: true, isPartial: false }, theme)
+            .render(100)
+            .join("\n"),
     ).toContain("No outstanding background tasks.");
 });
 
@@ -172,7 +174,7 @@ it("renders unavailable wait errors safely instead of exposing raw tool errors",
         const glowup = JSON.stringify(
             waitRendering.renderResult(waitRendering.parseResult(invalid)),
         );
-        const fallback = renderWaitResult(invalid, { expanded: true, isPartial: false })
+        const fallback = renderWaitResult(invalid, { expanded: true, isPartial: false }, theme)
             .render(100)
             .join("\n");
         expect(glowup + fallback).toContain("unavailable");
@@ -193,7 +195,108 @@ it("shows a delivered result as one status line and its output only when expande
             .map((line) => line.trim())
             .join("\n");
 
-    expect(render(result, false)).toBe("Background result task · npm test · timed out");
+    expect(render(result, false)).toBe("Background ✗ npm test timed out · 1s");
+    expect(render(result, false)).not.toContain("hung");
     expect(render(result, true)).toContain("hung");
     expect(render(parseResultDetails({}), false)).toContain("unavailable");
+});
+
+const renderOptions = { expanded: false, isPartial: false };
+
+function startRow(id: string, invalidate: () => void = () => {}) {
+    const launched = { ...job, id, state: "running" as const, exitCode: null, endedAt: null };
+
+    return renderStartResult({ content: [], details: launched }, renderOptions, theme, {
+        args: { command: job.command },
+        toolCallId: `call-${id}`,
+        invalidate,
+        lastComponent: undefined,
+        state: {},
+        cwd: "/private/project",
+        executionStarted: true,
+        argsComplete: true,
+        isPartial: false,
+        expanded: false,
+        showImages: false,
+        isError: false,
+        durationMs: undefined,
+        outputPad: 0,
+        keyText: () => "",
+        keyHint: () => "",
+    });
+}
+
+function rendered(row: ReturnType<typeof startRow>): string {
+    return row.render(120).join("\n");
+}
+
+beforeEach(() => {
+    jobOutcomes.clear();
+});
+
+it("shows a running job under its call, then its outcome once the job ends", () => {
+    let invalidated = 0;
+    jobOutcomes.started({ ...job, id: "live", state: "running", exitCode: null, endedAt: null });
+    const row = startRow("live", () => {
+        invalidated += 1;
+    });
+    expect(rendered(row)).toBe("  └ ▷ npm test running");
+
+    const lines = Array.from({ length: 7 }, (_, index) => `line ${index + 1}`);
+    jobOutcomes.record({ job: { ...job, id: "live" }, output: lines.join("\n"), truncated: false });
+
+    expect(invalidated).toBe(1);
+    expect(rendered(row).split("\n")).toEqual([
+        "  └ ✗ npm test exit 7 · 1s",
+        "    … 2 earlier lines",
+        "    line 3",
+        "    line 4",
+        "    line 5",
+        "    line 6",
+        "    line 7",
+    ]);
+});
+
+it("restores outcomes from a saved session so resumed calls still show how they ended", () => {
+    const entry = { id: "entry", parentId: null, timestamp: "2026-01-01T00:00:00.000Z" };
+
+    const entries: SessionEntry[] = [
+        {
+            ...entry,
+            type: "custom_message",
+            customType: RESULT_MESSAGE_TYPE,
+            content: "delivered",
+            display: true,
+            details: { job: { ...job, id: "delivered" }, output: "from message", truncated: false },
+        },
+        {
+            ...entry,
+            type: "message",
+            message: {
+                role: "toolResult",
+                toolCallId: "wait",
+                toolName: "background_wait",
+                content: [],
+                isError: false,
+                timestamp: 0,
+                details: {
+                    timedOut: false,
+                    jobs: [
+                        {
+                            job: { ...job, id: "waited", exitCode: 0 },
+                            output: "from wait",
+                            truncated: false,
+                        },
+                    ],
+                },
+            },
+        },
+    ];
+
+    const delivered = startRow("delivered");
+    jobOutcomes.restore(entries);
+
+    expect(rendered(delivered)).toBe("  └ ✗ npm test exit 7 · 1s\n    from message");
+    expect(rendered(startRow("waited"))).toBe("  └ ✓ npm test done · 1s\n    from wait");
+    expect(rendered(startRow("lost"))).toBe("  └ ended without a recorded result");
 });

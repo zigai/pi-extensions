@@ -10,6 +10,7 @@
     "src/log-pages.ts",
     "src/log-viewer.ts",
     "src/rendering.ts",
+    "src/job-outcomes.ts",
     "README.md"
   ],
   "type": "module",

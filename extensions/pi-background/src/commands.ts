@@ -259,6 +259,11 @@ export class BackgroundCommands {
         return result;
     }
 
+    /** Reads a job's output without collecting its result. */
+    peek(id: string): CommandOutput {
+        return this.readOutput(this.lookup(id).job, RESULT_PREVIEW);
+    }
+
     async wait(
         ids?: readonly string[],
         options: { signal?: AbortSignal | undefined; timeout?: number | undefined } = {},
