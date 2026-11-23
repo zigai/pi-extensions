@@ -9,6 +9,7 @@ import type {
 import { tokensToAnsiLines } from "./ansi.ts";
 import { configureBracketPairColoring } from "./brackets.ts";
 import { syntaxLanguageInput, type SyntaxLanguage } from "./language.ts";
+import { recolorPythonFunctionCalls, withPythonClassCalls } from "./python-class-calls.ts";
 import { compactPythonStructuralBlankRows } from "../../tools/built-in/bash/python-blank-rows.ts";
 import { renderPackedDiffHighlight, type DiffHighlightOutput } from "../diff/highlight-runs.ts";
 
@@ -57,7 +58,7 @@ const { createBundledHighlighter, bundledLanguages, bundledThemes, createOniguru
 
 // String-keyed like the main highlighter, so vendored grammars such as jq can register.
 const createHighlighter = createBundledHighlighter<string, string>({
-    langs: bundledLanguages,
+    langs: withPythonClassCalls(bundledLanguages),
     themes: bundledThemes,
     engine: async () => createOnigurumaEngine(import("shiki/wasm")),
 });
@@ -98,7 +99,10 @@ async function tokenize(request: SyntaxWorkerRequest): Promise<TokenizeResponse>
         await syntax.loadLanguage(syntaxLanguageInput(request.language));
         configureBracketPairColoring(request.brackets);
 
-        const tokens = tokenizeCode(syntax, request.code, request.language, request.theme);
+        let tokens = tokenizeCode(syntax, request.code, request.language, request.theme);
+        if (request.language === "python")
+            tokens = recolorPythonFunctionCalls(syntax, tokens, request.theme);
+
         return { id: request.id, lines: tokensToAnsiLines(tokens, request.language) };
     } catch (cause: unknown) {
         return {

@@ -11,6 +11,13 @@ import {
     normalizeSyntaxLanguage,
     syntaxLanguageInput,
 } from "../syntax/language.ts";
+import {
+    functionCallRanges,
+    pythonCallColors,
+    pythonFunctionNames,
+    sameColor,
+    type PythonCallColors,
+} from "../syntax/python-class-calls.ts";
 import { trimRangeWhitespace, type TextRange } from "./text-ranges.ts";
 
 const PIERRE_RENDER_OPTIONS = {
@@ -99,18 +106,101 @@ export async function renderPackedDiffHighlight(
         }
     }
 
-    let trees = renderLineTrees(metadata, highlighter, themeName, failures);
-    if (trees === undefined && (metadata.lang ?? "text") !== "text")
-        trees = renderLineTrees(
+    const trees = renderLineTrees(metadata, highlighter, themeName, failures);
+    if (trees === undefined) {
+        if ((metadata.lang ?? "text") === "text") return { highlight: undefined, failures };
+
+        const plain = renderLineTrees(
             setLanguageOverride(metadata, "text"),
             highlighter,
             themeName,
             failures,
         );
+        if (plain === undefined) return { highlight: undefined, failures };
 
-    if (trees === undefined) return { highlight: undefined, failures };
+        return { highlight: packHighlightedLines(plain), failures };
+    }
 
-    return { highlight: packHighlightedLines(trees), failures };
+    const highlight = packHighlightedLines(trees);
+    if (language !== "python") return { highlight, failures };
+
+    return {
+        highlight: recolorPythonFunctionCallRuns(highlight, metadata, highlighter, theme),
+        failures,
+    };
+}
+
+function recolorPythonFunctionCallRuns(
+    highlight: PackedDiffHighlight,
+    metadata: FileDiffMetadata,
+    highlighter: HighlighterGeneric<string, string>,
+    theme: ThemeRegistration,
+): PackedDiffHighlight {
+    const deletionNames = pythonFunctionNames(metadata.deletionLines);
+    const additionNames = pythonFunctionNames(metadata.additionLines);
+    if (deletionNames.size === 0 && additionNames.size === 0) return highlight;
+
+    const colors = pythonCallColors(highlighter, theme);
+    if (colors === undefined) return highlight;
+
+    const recolor = (code: PackedDiffCode): PackedDiffCode =>
+        recolorCodeRuns(code, colors, deletionNames, additionNames);
+
+    let light: PackedDiffCode | null = null;
+    if (highlight.light !== null) light = recolor(highlight.light);
+
+    return { dark: recolor(highlight.dark), light };
+}
+
+function recolorCodeRuns(
+    code: PackedDiffCode,
+    colors: PythonCallColors,
+    deletionNames: ReadonlySet<string>,
+    additionNames: ReadonlySet<string>,
+): PackedDiffCode {
+    const from = code.colors.findIndex((color) => sameColor(color, colors.classCall));
+    if (from < 0) return code;
+
+    const palette = [...code.colors];
+    let to = palette.findIndex((color) => sameColor(color, colors.functionCall));
+    if (to < 0) to = palette.push(colors.functionCall) - 1;
+
+    const recolorLine =
+        (names: ReadonlySet<string>) =>
+        (line: PackedDiffLine): PackedDiffLine => {
+            if (line === null || names.size === 0) return line;
+
+            const [text, runs] = line;
+            const recolored: number[] = [];
+            let start = 0;
+            for (let index = 0; index + 2 < runs.length; index += 3) {
+                const end = runs[index] ?? start;
+                const color = runs[index + 1] ?? -1;
+                const emphasized = runs[index + 2] ?? 0;
+                if (color === from)
+                    for (const [rangeStart, rangeEnd] of functionCallRanges(
+                        text,
+                        start,
+                        end,
+                        names,
+                    )) {
+                        if (rangeStart > start) recolored.push(rangeStart, color, emphasized);
+                        recolored.push(rangeEnd, to, emphasized);
+                        start = rangeEnd;
+                    }
+
+                if (end > start) recolored.push(end, color, emphasized);
+                start = end;
+            }
+
+            return [text, recolored];
+        };
+
+    return {
+        colors: palette,
+        deletionLines: code.deletionLines.map(recolorLine(deletionNames)),
+        additionLines: code.additionLines.map(recolorLine(additionNames)),
+    };
 }
 
 /** Compacts highlighted line trees into text and `[end, color, emphasized]` runs. */

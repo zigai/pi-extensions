@@ -33,6 +33,7 @@ import {
     type HighlightRequest,
 } from "../../diagnostics/highlight-requests.ts";
 import { configureBracketPairColoring } from "./brackets.ts";
+import { withPythonClassCalls } from "./python-class-calls.ts";
 import {
     isLoadableSyntaxLanguage,
     normalizeSyntaxLanguage,
@@ -224,7 +225,7 @@ export const createSyntaxHighlighter: SyntaxHighlighterFactory = async (options)
     // Shiki resolves bundled names and rejects missing names itself; registrations can
     // introduce arbitrary names used by synchronous tokenization (including Pierre).
     const createHighlighter = createBundledHighlighter<string, string>({
-        langs: bundledLanguages,
+        langs: withPythonClassCalls(bundledLanguages),
         themes: bundledThemes,
         engine: async () => createOnigurumaEngine(import("shiki/wasm")),
     });
